@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net5.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AutoCore.Utils\AutoCore.Utils.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="TNL.NET">
+      <HintPath>..\..\lib\$(Configuration)\TNL.NET.dll</HintPath>
+      <Aliases>TNLNET</Aliases>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Clonebase\" />
+    <Folder Include="Structures\Specifics\" />
+  </ItemGroup>
+
+
+</Project>
