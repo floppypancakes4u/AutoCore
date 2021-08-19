@@ -15,7 +15,7 @@ namespace AutoCore.Game.Prefix
         {
             ArmorFactorPercent = br.ReadSingle();
             ArmorFactorAdjust = br.ReadInt16();
-            ResistAdjust = DamageArray.Read(br);
+            //ResistAdjust = DamageArray.Read(br);
 
             br.ReadBytes(2);
         }

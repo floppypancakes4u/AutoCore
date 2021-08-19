@@ -15,17 +15,17 @@ namespace AutoCore.Game.Structures.Specifics
             {
                 DeflectionModifier = br.ReadSingle(),
                 ArmorFactor = br.ReadInt16(),
-                Resistances = DamageArray.Read(br),
+                //Resistances = DamageArray.Read(br),
                 DefenseBonus = br.ReadInt16()
             };
         }
 
-        public void WriteToPacket(Packet packet)
+        /*public void WriteToPacket(Packet packet)
         {
             packet.WriteSingle(DeflectionModifier);
             packet.WriteShort(ArmorFactor);
             Resistances.WriteToPacket(packet);
             packet.WriteShort(DefenseBonus);
-        }
+        }*/
     }
 }

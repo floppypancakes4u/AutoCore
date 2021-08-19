@@ -11,7 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AutoCore.Communicator\AutoCore.Communicator.csproj" />
-    <ProjectReference Include="..\AutoCore.DataBase\AutoCore.DataBase.csproj" />
+    <ProjectReference Include="..\AutoCore.Database\AutoCore.Database.csproj" />
     <ProjectReference Include="..\AutoCore.Utils\AutoCore.Utils.csproj" />
   </ItemGroup>
 

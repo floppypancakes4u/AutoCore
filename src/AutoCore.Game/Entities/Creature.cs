@@ -216,7 +216,7 @@ namespace AutoCore.Game.Entities
             return null;
         }
 
-        public override void WriteToCreatePacket(Packet packet, bool extended = false)
+        /*public override void WriteToCreatePacket(Packet packet, bool extended = false)
         {
             base.WriteToCreatePacket(packet, extended);
 
@@ -258,7 +258,7 @@ namespace AutoCore.Game.Entities
                 packet.WriteShort(0); // skill level
                 packet.WritePadding(2);
             }
-        }
+        }*/
 
         public override void CreateGhost()
         {

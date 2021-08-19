@@ -37,14 +37,14 @@ namespace AutoCore.Game.Social
             else
                 entry = new SocialEntry();
 
-            entry.Character = character;
+            /*entry.Character = character;
             entry.OtherCharacter = reader.GetInt64(0);
             entry.Level = reader.GetByte(3);
             entry.LastContinentId = reader.GetUInt32(4);
             entry.Class = reader.GetByte(2);
             entry.Online = false;
             entry.Name = reader.GetString(5);
-            entry.Type = (SocialType)reader.GetByte(6);
+            entry.Type = (SocialType)reader.GetByte(6);*/
 
             return entry;
         }

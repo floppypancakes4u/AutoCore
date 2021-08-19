@@ -95,7 +95,7 @@ namespace AutoCore.Game.TNL.Ghost
 
         public override float GetUpdatePriority(NetObject scopeObject, ulong updateMask, int updateSkips)
         {
-            if (Parent == null || !(scopeObject is GhostObject) || (scopeObject as GhostObject).Parent == null)
+            /*if (Parent == null || !(scopeObject is GhostObject) || (scopeObject as GhostObject).Parent == null)
                 return updateSkips * 0.02f;
 
             var otherParent = (scopeObject as GhostObject).Parent;
@@ -111,7 +111,7 @@ namespace AutoCore.Game.TNL.Ghost
                         (((1.0F -
                             (val / ((otherParent.GetMap().GetNumberOfTerrainGridsPerObjectGrid() * 100.0F) * 1.2F))) *
                             0.5F) + (updateSkips * 0.001F));
-            }
+            }*/
 
             return 1.0f;
         }

@@ -3,21 +3,19 @@
 namespace AutoCore.Game.Entities.Base
 {
     using Constant;
-    using Manager;
-    using Map;
     using Structures;
     using TNL.Ghost;
 
     public abstract partial class ClonedObjectBase
     {
-        public virtual void InitializeFromCBID(int cbid, SectorMap map)
+        /*public virtual void InitializeFromCBID(int cbid, SectorMap map)
         {
-            CloneBaseObject = AssetManager.AssetContainer.GetCloneBaseObjectForCBID(cbid);
+            //CloneBaseObject = AssetManager.AssetContainer.GetCloneBaseObjectForCBID(cbid);
 
             InitializeBaseData();
             InitializeSkillTree();
-            SetMap(map);
-        }
+            //SetMap(map);
+        }*/
 
         public virtual int GetQuantity()
         {
@@ -206,7 +204,7 @@ namespace AutoCore.Game.Entities.Base
             //AssembleFromPrefixes();
         }
 
-        public virtual ClonedObjectBase CreateClone()
+        /*public virtual ClonedObjectBase CreateClone()
         {
             var cob = AllocateNewObjectFromCBID(CloneBaseObject.CloneBaseSpecific.CloneBaseId);
             if (cob != null)
@@ -218,7 +216,7 @@ namespace AutoCore.Game.Entities.Base
 
             return cob;
         }
-
+        */
         public virtual void InitializeSkillTree()
         {
 
@@ -229,10 +227,10 @@ namespace AutoCore.Game.Entities.Base
             Scale = scale;
         }
 
-        public virtual void SetMap(SectorMap map)
+        /*public virtual void SetMap(SectorMap map)
         {
             Map = map;
-        }
+        }*/
 
         public virtual int GetBareTeamFaction()
         {

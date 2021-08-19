@@ -5,4 +5,18 @@
     <TargetFramework>net5.0</TargetFramework>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\AutoCore.Communicator\AutoCore.Communicator.csproj" />
+    <ProjectReference Include="..\AutoCore.Database\AutoCore.Database.csproj" />
+    <ProjectReference Include="..\AutoCore.Game\AutoCore.Game.csproj" />
+    <ProjectReference Include="..\AutoCore.Utils\AutoCore.Utils.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="TNL.NET">
+      <HintPath>..\..\lib\$(Configuration)\TNL.NET.dll</HintPath>
+      <Aliases>TNLNET</Aliases>
+    </Reference>
+  </ItemGroup>
+
 </Project>

@@ -154,8 +154,8 @@ namespace AutoCore.Game.Structures.Specifics
             br.ReadBytes(2);
 
             vs.HitchPoint = Vector3.Read(br);
-            vs.WheelRadius = br.Read<float>(6);
-            vs.WheelWidth = br.Read<float>(6);
+            //vs.WheelRadius = br.Read<float>(6);
+            //vs.WheelWidth = br.Read<float>(6);
             vs.SpeedLimiter = br.ReadSingle();
             vs.AbsoluteTopSpeed = br.ReadSingle();
 
@@ -165,8 +165,8 @@ namespace AutoCore.Game.Structures.Specifics
 
             vs.DrawAxles = br.ReadBytes(2);
             vs.DrawShocks = br.ReadBytes(2);
-            vs.AxleScale = br.Read<float>(2);
-            vs.ShockScale = br.Read<float>(2);
+            //vs.AxleScale = br.Read<float>(2);
+            //vs.ShockScale = br.Read<float>(2);
             vs.ShockEffectThreshold = br.ReadSingle();
             vs.EngineType = br.ReadByte();
             vs.NumberOfGears = br.ReadByte();
@@ -185,7 +185,7 @@ namespace AutoCore.Game.Structures.Specifics
             vs.TransmissionRatio = br.ReadSingle();
             vs.ClutchDelayTime = br.ReadSingle();
             vs.ReverseGearRation = br.ReadSingle();
-            vs.GearRatios = br.Read<float>(5);
+            //vs.GearRatios = br.Read<float>(5);
             vs.ArmorAdd = br.ReadInt16();
 
             br.ReadBytes(2);

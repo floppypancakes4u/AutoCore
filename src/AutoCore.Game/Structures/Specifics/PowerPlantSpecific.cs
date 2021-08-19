@@ -20,12 +20,12 @@ namespace AutoCore.Game.Structures.Specifics
             };
         }
 
-        public void WriteToPacket(Packet packet)
+        /*public void WriteToPacket(Packet packet)
         {
             packet.WriteInteger(HeatMaximum);
             packet.WriteInteger(PowerMaximum);
             packet.WriteShort(PowerRegenRate);
             packet.WriteShort(CoolRate);
-        }
+        }*/
     }
 }

@@ -12,13 +12,13 @@ namespace AutoCore.Game.Entities.Base
         {
             CVOGGraphicsBase.UnserializeCreateEffect(br, mapVersion);
             CVOGGraphicsBase.UnserializeTooltip(br, mapVersion);
-            ReadTriggerEvents(br, mapVersion);
+            //ReadTriggerEvents(br, mapVersion);
             CVOGPhysicsBase.UnSerialize(br, mapVersion);
         }
 
-        public override void WriteToCreatePacket(Packet packet, bool extended = false)
+        /*public override void WriteToCreatePacket(Packet packet, bool extended = false)
         {
             throw new NotSupportedException();
-        }
+        }*/
     }
 }

@@ -8,15 +8,15 @@ namespace AutoCore.Game.Structures
     {
         public short[] Damage;
 
-        public static DamageArray Read(BinaryReader br)
+        /*public static DamageArray Read(BinaryReader br)
         {
             return new DamageArray { Damage = br.Read<short>(6) };
-        }
+        }*/
 
-        public void WriteToPacket(Packet packet)
+        /*public void WriteToPacket(Packet packet)
         {
             for (var i = 0; i < 6; ++i)
                 packet.WriteShort(Damage[i]);
-        }
+        }*/
     }
 }

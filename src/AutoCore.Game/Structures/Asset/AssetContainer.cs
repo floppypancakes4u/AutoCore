@@ -5,7 +5,6 @@ using System.Threading;
 namespace AutoCore.Game.Structures.Asset
 {
     using Clonebase;
-    using Map;
     using Mission;
     using Prefix;
     using Skill;
@@ -20,7 +19,7 @@ namespace AutoCore.Game.Structures.Asset
 
         public IDictionary<string, FileEntry> FileEntries { get; } = new Dictionary<string, FileEntry>();
         public IDictionary<string, FileEntry> DuplicatedFileEntries { get; } = new Dictionary<string, FileEntry>();
-        public IDictionary<string, MapEntry> MapEntries { get; } = new Dictionary<string, MapEntry>();
+        //public IDictionary<string, MapEntry> MapEntries { get; } = new Dictionary<string, MapEntry>();
         public IDictionary<int, CloneBaseObject> CloneBaseObjects => _cloneBaseObjects;
         public IDictionary<uint, Mission> Missions { get; } = new Dictionary<uint, Mission>();
         public IDictionary<uint, Skill> Skills { get; } = new Dictionary<uint, Skill>();
@@ -36,7 +35,7 @@ namespace AutoCore.Game.Structures.Asset
         public ReaderWriterLockSlim AccessLock { get; } = new ReaderWriterLockSlim();
         #endregion
 
-        public void AddMapEntry(string key, MapEntry entry)
+        /*public void AddMapEntry(string key, MapEntry entry)
         {
             AccessLock.EnterWriteLock();
 
@@ -47,9 +46,9 @@ namespace AutoCore.Game.Structures.Asset
                 _mapNameLookup.Add(entry.ContinentId, key);
 
             AccessLock.ExitWriteLock();
-        }
+        }*/
 
-        public MapEntry GetMapEntryById(uint continentId)
+        /*public MapEntry GetMapEntryById(uint continentId)
         {
             AccessLock.EnterReadLock();
 
@@ -59,9 +58,9 @@ namespace AutoCore.Game.Structures.Asset
             AccessLock.ExitReadLock();
 
             return GetMapEntryByName(s);
-        }
+        }*/
 
-        public MapEntry GetMapEntryByName(string name)
+        /*public MapEntry GetMapEntryByName(string name)
         {
             AccessLock.EnterReadLock();
 
@@ -70,7 +69,7 @@ namespace AutoCore.Game.Structures.Asset
             AccessLock.ExitReadLock();
 
             return me;
-        }
+        }*/
 
         public CloneBaseObject GetCloneBaseObjectForCBID(int cbid)
         {

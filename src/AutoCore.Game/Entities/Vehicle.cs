@@ -3,10 +3,7 @@
 namespace AutoCore.Game.Entities
 {
     using Constant;
-    using Database;
-    using Database.DataStructs;
-    using Map;
-    using Misc;
+    using Packets;
     using Structures;
     using Structures.Model;
     using Structures.XML;
@@ -315,7 +312,7 @@ namespace AutoCore.Game.Entities
             return _meleeWeapon;
         }
 
-        public bool LoadFromDB(VehicleData data, long vehCoid = 0)
+        /*public bool LoadFromDB(VehicleData data, long vehCoid = 0)
         {
             if (data == null)
                 data = DataAccess.Vehicle.GetVehicle(vehCoid);
@@ -393,14 +390,14 @@ namespace AutoCore.Game.Entities
             IsInDB = true;
 
             return true;
-        }
+        }*/
 
-        public override bool LoadFromDB(long coid)
+        /*public override bool LoadFromDB(long coid)
         {
             return LoadFromDB(null, coid);
-        }
+        }*/
 
-        public override void SaveToDB()
+        /*public override void SaveToDB()
         {
             var vd = new VehicleData
             {
@@ -447,7 +444,7 @@ namespace AutoCore.Game.Entities
             _weapons[0]?.SaveToDB();
             _weapons[1]?.SaveToDB();
             _weapons[2]?.SaveToDB();
-        }
+        }*/
 
         public int CalculateMaximumHeat()
         {
@@ -503,7 +500,7 @@ namespace AutoCore.Game.Entities
             SetGhosted(true);
         }
 
-        public override void WriteToCreatePacket(Packet packet, bool extended = false)
+        /*public override void WriteToCreatePacket(BasePacket packet, bool extended = false)
         {
             base.WriteToCreatePacket(packet, extended);
 
@@ -672,9 +669,10 @@ namespace AutoCore.Game.Entities
                 packet.WriteLong(0);
 
             #endregion Create Vehicle Extended
-        }
+            
+    }*/
 
-        public void InitNewVehicle(CreateCharacterModel model, ConfigNewCharacter newCharEntry, SectorMap map, long charCoid, long vehicleCoid)
+        /*public void InitNewVehicle(CreateCharacterModel model, ConfigNewCharacter newCharEntry, SectorMap map, long charCoid, long vehicleCoid)
         {
             SetCOID(vehicleCoid);
 
@@ -738,14 +736,14 @@ namespace AutoCore.Game.Entities
 
                 AddWeapon(1, turret.GetAsWeapon());
             }
-        }
+        }*/
 
         public bool SkipCurrentOwner()
         {
             return true;
         }
 
-        public override void HandleMove(Packet packet)
+        /*public override void HandleMove(Packet packet)
         {
             base.HandleMove(packet);
 
@@ -762,6 +760,6 @@ namespace AutoCore.Game.Entities
 
             if (targetObj != null)
                 SetTargetObject(targetObj);
-        }
+        }*/
     }
 }

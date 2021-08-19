@@ -2,8 +2,6 @@
 
 namespace AutoCore.Game.Entities
 {
-    using Database;
-    using Database.DataStructs;
     using Structures.Specifics;
 
     public class PowerPlant : SimpleObject
@@ -81,7 +79,7 @@ namespace AutoCore.Game.Entities
             ApplyPowerRegenRate();
         }
 
-        public override void WriteToCreatePacket(Packet packet, bool extended = false)
+        /*public override void WriteToCreatePacket(Packet packet, bool extended = false)
         {
             base.WriteToCreatePacket(packet, extended);
 
@@ -92,19 +90,19 @@ namespace AutoCore.Game.Entities
             packet.WriteUtf8StringOn(MangledName, 100);
             packet.WriteSingle(_skillCooldownPercent);
             #endregion Create Power Plant
-        }
+        }*/
 
-        public static void WriteEmptyObjectToPacket(Packet packet)
+        /*public static void WriteEmptyObjectToPacket(Packet packet)
         {
             WriteEmptyObjectToPacket(packet, 120);
-        }
+        }*/
 
         public override PowerPlant GetAsPowerPlant()
         {
             return this;
         }
 
-        public override void SaveToDB()
+        /*public override void SaveToDB()
         {
             var id = new ItemData
             {
@@ -120,9 +118,9 @@ namespace AutoCore.Game.Entities
                 DataAccess.Item.InsertItemInto(id);
                 IsInDB = true;
             }
-        }
+        }*/
 
-        public override bool LoadFromDB(long coid)
+        /*public override bool LoadFromDB(long coid)
         {
             var id = DataAccess.Item.GetItemFrom("item_powerplant", coid);
             if (id == null)
@@ -134,6 +132,6 @@ namespace AutoCore.Game.Entities
             IsInDB = true;
 
             return true;
-        }
+        }*/
     }
 }

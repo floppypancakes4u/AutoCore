@@ -39,10 +39,10 @@ namespace AutoCore.Game.Structures.Specifics
             return new WeaponSpecific
             {
                 FirePoint = Vector3.Read(br),
-                MinMin = DamageArray.Read(br),
-                MinMax = DamageArray.Read(br),
-                MaxMin = DamageArray.Read(br),
-                MaxMax = DamageArray.Read(br),
+                //MinMin = DamageArray.Read(br),
+                //MinMax = DamageArray.Read(br),
+                //MaxMin = DamageArray.Read(br),
+                //MaxMax = DamageArray.Read(br),
                 ValidArc = br.ReadSingle(),
                 RangeMin = br.ReadSingle(),
                 RangeMax = br.ReadSingle(),
@@ -63,7 +63,7 @@ namespace AutoCore.Game.Structures.Specifics
                 Flags = br.ReadByte(),
                 SprayTargets = br.ReadByte(),
                 OffenseBonus = br.ReadInt16(),
-                HitBonusPerLevel = br.ReadPadding(2).ReadSingle(),
+                //HitBonusPerLevel = br.ReadPadding(2).ReadSingle(),
                 DamageBonusPerLevel = br.ReadSingle()
             };
         }

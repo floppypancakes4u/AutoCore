@@ -63,9 +63,9 @@ namespace AutoCore.Game.Skill
                 LocationLine = br.ReadByte(),
                 MinimumLevel = br.ReadByte(),
                 SkillType = br.ReadByte(),
-                Name = br.ReadUnicodeString(33),
-                Description = br.ReadUnicodeString(1025),
-                XMLName = br.ReadUnicodeString(65)
+                //Name = br.ReadUnicodeString(33),
+                //Description = br.ReadUnicodeString(1025),
+                //XMLName = br.ReadUnicodeString(65)
             };
 
             br.ReadBytes(2);

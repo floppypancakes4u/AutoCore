@@ -35,9 +35,9 @@ namespace AutoCore.Game.Entities.Base
 
         }
 
-        public override void WriteToCreatePacket(Packet packet, bool extended = false)
+        /*public override void WriteToCreatePacket(Packet packet, bool extended = false)
         {
             throw new NotSupportedException();
-        }
+        }*/
     }
 }

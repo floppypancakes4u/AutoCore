@@ -4,13 +4,7 @@ using System.Collections.Generic;
 namespace AutoCore.Game.Entities
 {
     using Constant;
-    using Database;
-    using Database.DataStructs;
-    using Manager;
-    using Map;
     using Structures;
-    using Structures.Model;
-    using Structures.XML;
     using TNL;
     using TNL.Ghost;
 
@@ -160,7 +154,7 @@ namespace AutoCore.Game.Entities
         // ReSharper restore FieldCanBeMadeReadOnly.Local
         #endregion Declaration
 
-        public Character()
+        /*public Character()
         {
             _hasLocker = true;
             _spectating = false;
@@ -315,22 +309,22 @@ namespace AutoCore.Game.Entities
 
             CreateInventory();
             CreateTradeInventory();
-        }
+        }*/
 
-        private void CreateInventory()
+        /*private void CreateInventory()
         {
             _inventory = new Inventory(34, 6, 4);
             _inventory.SetInventoryType(InventoryType.Locker);
             _inventory.SetMap(GetMap());
             _inventory.SetOwner(this);
-        }
+        }*/
 
-        private void CreateTradeInventory()
+        /*private void CreateTradeInventory()
         {
             _tradeInventory = new Inventory(4, 6, 1);
             _tradeInventory.SetInventoryType(InventoryType.TradeYou);
             _tradeInventory.SetMap(GetMap());
-        }
+        }*/
 
         private void ResetPossibleRewards(bool cleanupItems, int missionId)
         {
@@ -364,7 +358,7 @@ namespace AutoCore.Game.Entities
             Connection = connection;
         }
 
-        public override void SaveToDB()
+        /*public override void SaveToDB()
         {
             var cdata = new CharacterData
             {
@@ -420,7 +414,7 @@ namespace AutoCore.Game.Entities
 
             if (GetVehicle() != null)
                 GetVehicle().SaveToDB();
-        }
+        }*/
 
         public Vehicle GetVehicle()
         {
@@ -477,7 +471,7 @@ namespace AutoCore.Game.Entities
             return Position.Z;
         }
 
-        public bool LoadFromDB(CharacterData data, long charCoid = 0)
+        /*public bool LoadFromDB(CharacterData data, long charCoid = 0)
         {
             if (data == null)
                 data = DataAccess.Character.GetCharacter(charCoid);
@@ -546,7 +540,7 @@ namespace AutoCore.Game.Entities
             SetVehicle(vehicle);
 
             return vehicle.GetAsVehicle() != null;
-        }
+        }*/
 
         public void SetVehicle(Vehicle vehicle)
         {
@@ -558,10 +552,10 @@ namespace AutoCore.Game.Entities
             return GetVehicle() != null;
         }
 
-        public override bool LoadFromDB(long coid)
+        /*public override bool LoadFromDB(long coid)
         {
             return LoadFromDB(null, coid);
-        }
+        }*/
 
         public uint GetCustomColor(CustomCharacterColor color)
         {
@@ -573,17 +567,17 @@ namespace AutoCore.Game.Entities
             _characterColors[(int) color] = value;
         }
 
-        public override void InitializeFromCBID(int cbid, SectorMap map)
+        /*public override void InitializeFromCBID(int cbid, SectorMap map)
         {
             base.InitializeFromCBID(cbid, map);
-        }
+        }*/
 
         public override Character GetAsCharacter()
         {
             return this;
         }
 
-        public override void WriteToCreatePacket(Packet packet, bool extended = false)
+        /*public override void WriteToCreatePacket(Packet packet, bool extended = false)
         {
             base.WriteToCreatePacket(packet, extended);
 
@@ -708,9 +702,9 @@ namespace AutoCore.Game.Entities
 
             packet.WritePadding(28);
             #endregion Create Character Extended
-        }
+        }*/
 
-        public void InitNewCharacter(CreateCharacterModel model, ConfigNewCharacter newCharEntry, SectorMap map, long charCoid, long vehicleCoid)
+        /*public void InitNewCharacter(CreateCharacterModel model, ConfigNewCharacter newCharEntry, SectorMap map, long charCoid, long vehicleCoid)
         {
             _accountId = Connection.AccountId;
 
@@ -746,9 +740,9 @@ namespace AutoCore.Game.Entities
             CurrentVehicleId = vehicleCoid;
 
             SetMap(map);
-        }
+        }*/
 
-        public override void SetMap(SectorMap map)
+        /*public override void SetMap(SectorMap map)
         {
             base.SetMap(map);
             
@@ -757,9 +751,9 @@ namespace AutoCore.Game.Entities
 
             if (_vehicle != null)
                 _vehicle.SetMap(map);
-        }
+        }*/
 
-        public void EnterMap(bool createGhost = true)
+        /*public void EnterMap(bool createGhost = true)
         {
             GetMap().AddObjectToMap(this);
 
@@ -773,9 +767,9 @@ namespace AutoCore.Game.Entities
                 if (createGhost)
                     _vehicle.CreateGhost();
             }
-        }
+        }*/
 
-        public void LeaveMap()
+        /*public void LeaveMap()
         {
             GetMap().RemoveFromMap(GetTFID());
 
@@ -783,8 +777,8 @@ namespace AutoCore.Game.Entities
                 GetMap().RemoveFromMap(_vehicle.GetTFID());
 
             (Connection.GetInterface() as TNLInterface).RemoveGhost(Connection);
-        }
-
+        }*/
+        
         public override void CreateGhost()
         {
             SetGhosted(false);

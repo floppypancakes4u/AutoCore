@@ -6,6 +6,6 @@ namespace AutoCore.Game.Entities.Base
     {
         public abstract void Unserialize(BinaryReader br, uint mapVersion);
 
-        public abstract void WriteToCreatePacket(Packet packet, bool extended = false);
+        //public abstract void WriteToCreatePacket(Packet packet, bool extended = false);
     }
 }

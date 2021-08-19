@@ -5,9 +5,6 @@ using System.Xml.Linq;
 
 namespace AutoCore.Game.Mission
 {
-    using Manager;
-    using Utils.Extensions;
-
     public class Mission
     {
         #region Template Data
@@ -59,7 +56,7 @@ namespace AutoCore.Game.Mission
         public bool CoreMission;
         #endregion
 
-        public static Mission Read(BinaryReader br)
+        /*public static Mission Read(BinaryReader br)
         {
             var mi = new Mission
             {
@@ -145,6 +142,6 @@ namespace AutoCore.Game.Mission
             }
 
             return mi;
-        }
+        }*/
     }
 }

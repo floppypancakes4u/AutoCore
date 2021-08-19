@@ -2,7 +2,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace AutoCore.DataBase.Auth.Models
+namespace AutoCore.Database.Auth.Models
 {
     public class Account
     {

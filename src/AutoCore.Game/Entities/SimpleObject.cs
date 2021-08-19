@@ -1,14 +1,10 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
-using AutoCore.Game.Database;
 
 namespace AutoCore.Game.Entities
 {
     using Base;
-    using Constant;
-    using Database.DataStructs;
-    using Structures;
 
     public class SimpleObject : ClonedObjectBase
     {
@@ -64,7 +60,7 @@ namespace AutoCore.Game.Entities
         {
         }
 
-        public override void WriteToCreatePacket(Packet packet, bool extended = false)
+        /*public override void WriteToCreatePacket(Packet packet, bool extended = false)
         {
             packet.WriteInteger(CBID);
             packet.WriteLong(-1L); // coid Store
@@ -134,7 +130,7 @@ namespace AutoCore.Game.Entities
             packet.WriteInteger(ItemTemplateId);
 
             packet.WritePadding(4);
-        }
+        }*/
 
         public override void SetCurrentHP(uint hp)
         {
@@ -161,7 +157,7 @@ namespace AutoCore.Game.Entities
             return this;
         }
 
-        public virtual void SaveToDB()
+        /*public virtual void SaveToDB()
         {
             var id = new ItemData
             {
@@ -177,9 +173,9 @@ namespace AutoCore.Game.Entities
                 DataAccess.Item.InsertItemInto(id);
                 IsInDB = true;
             }
-        }
+        }*/
 
-        public virtual bool LoadFromDB(long coid)
+        /*public virtual bool LoadFromDB(long coid)
         {
             var id = DataAccess.Item.GetItemFrom("item_simple", coid);
             if (id == null)
@@ -191,22 +187,22 @@ namespace AutoCore.Game.Entities
             IsInDB = true;
 
             return true;
-        }
+        }*/
 
-        public static void WriteEmptyObjectToPacket(Packet packet, int extraSkip = 0)
+        /*public static void WriteEmptyObjectToPacket(Packet packet, int extraSkip = 0)
         {
             packet.WriteInteger(-1); // CBID
             packet.WritePadding(208 + extraSkip);
 
             // TODO: fill actual empty data maybe?
-        }
+        }*/
 
         public virtual uint GetMapId()
         {
             return 0;
         }
 
-        public virtual void HandleMove(Packet packet)
+        /*public virtual void HandleMove(Packet packet)
         {
             var fidObject = packet.ReadPadding(4).ReadTFID();
             Debug.Assert(fidObject == GetTFID(), "A TFID nem egyezik?");
@@ -226,6 +222,6 @@ namespace AutoCore.Game.Entities
 
             //if (GhostObject != null)
             //GhostObject.SetMaskBits(2UL);
-        }
+        }*/
     }
 }

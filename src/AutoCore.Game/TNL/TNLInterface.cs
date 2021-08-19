@@ -74,8 +74,10 @@ namespace AutoCore.Game.TNL
         protected override void RemoveConnection(NetConnection conn)
         {
             if (conn is TNLConnection tConn)
+            {
                 lock (_lock)
                     MapConnections.Remove(tConn.GetPlayerCOID());
+            }
 
             base.RemoveConnection(conn);
         }

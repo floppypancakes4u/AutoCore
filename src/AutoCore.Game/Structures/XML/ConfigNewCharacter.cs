@@ -3,8 +3,6 @@ using System.Xml.Serialization;
 
 namespace AutoCore.Game.Structures.XML
 {
-    using Manager;
-
     public class ConfigNewCharacter
     {
         [XmlElement("IDRace")]
@@ -43,14 +41,14 @@ namespace AutoCore.Game.Structures.XML
 
         public void OnDeserialization()
         {
-            AssetManager.AssetContainer.AccessLock.EnterWriteLock();
+            /*AssetManager.AssetContainer.AccessLock.EnterWriteLock();
 
             if (!AssetManager.AssetContainer.ConfigNewCharacters.ContainsKey(Race))
                 AssetManager.AssetContainer.ConfigNewCharacters.Add(Race, new List<ConfigNewCharacter>());
 
             AssetManager.AssetContainer.ConfigNewCharacters[Race].Add(this);
 
-            AssetManager.AssetContainer.AccessLock.ExitWriteLock();
+            AssetManager.AssetContainer.AccessLock.ExitWriteLock();*/
         }
     }
 }

@@ -2,7 +2,7 @@
 
 using Microsoft.EntityFrameworkCore;
 
-namespace AutoCore.DataBase.Auth
+namespace AutoCore.Database.Auth
 {
     using Models;
 

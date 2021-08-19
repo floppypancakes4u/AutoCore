@@ -81,7 +81,7 @@ namespace AutoCore.Game.Structures.Specifics
             //Debugger.Break();
 
             var introLen = br.ReadInt32();
-            c.NPCIntro = br.ReadUnicodeString(introLen);
+            //c.NPCIntro = br.ReadUnicodeString(introLen);
 
             var aiCount = br.ReadInt32();
             for (var i = 0; i < aiCount; ++i)

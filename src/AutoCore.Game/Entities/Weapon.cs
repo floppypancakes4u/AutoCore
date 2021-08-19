@@ -1,8 +1,6 @@
 ﻿namespace AutoCore.Game.Entities
 {
     using Clonebase;
-    using Database;
-    using Database.DataStructs;
     using Structures;
 
     public class Weapon : SimpleObject
@@ -109,7 +107,7 @@
             _firePoint = cbw.WeaponSpecific.FirePoint;
         }
 
-        public override void WriteToCreatePacket(Packet packet, bool extended = false)
+        /*public override void WriteToCreatePacket(Packet packet, bool extended = false)
         {
             base.WriteToCreatePacket(packet, extended);
 
@@ -140,19 +138,19 @@
 
             packet.WritePadding(4);
             #endregion Create Weapon
-        }
+        }*/
 
-        public static void WriteEmptyObjectToPacket(Packet packet)
+        /*public static void WriteEmptyObjectToPacket(Packet packet)
         {
             WriteEmptyObjectToPacket(packet, 176);
-        }
+        }*/
 
         public override Weapon GetAsWeapon()
         {
             return this;
         }
 
-        public override void SaveToDB()
+        /*public override void SaveToDB()
         {
             var id = new ItemData
             {
@@ -168,9 +166,9 @@
                 DataAccess.Item.InsertItemInto(id);
                 IsInDB = true;
             }
-        }
+        }*/
 
-        public override bool LoadFromDB(long coid)
+        /*public override bool LoadFromDB(long coid)
         {
             var id = DataAccess.Item.GetItemFrom("item_weapon", coid);
             if (id == null)
@@ -182,7 +180,7 @@
             IsInDB = true;
 
             return true;
-        }
+        }*/
 
         public bool IsHeatOk()
         {

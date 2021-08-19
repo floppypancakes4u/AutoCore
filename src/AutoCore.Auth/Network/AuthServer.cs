@@ -10,8 +10,8 @@ namespace AutoCore.Auth.Network
     using Communicator.Packets;
     using Config;
     using Data;
-    using DataBase.Auth;
-    using DataBase.Auth.Models;
+    using Database.Auth;
+    using Database.Auth.Models;
     using Packets.Server;
     using Utils;
     using Utils.Config;

@@ -34,7 +34,7 @@ namespace AutoCore.Game.Structures
                 ObjectiveCount = br.ReadInt32()
             };
 
-            wp.Objectives = new List<uint>(br.Read<uint>(wp.ObjectiveCount));
+            //wp.Objectives = new List<uint>(br.Read<uint>(wp.ObjectiveCount));
 
             return wp;
         }

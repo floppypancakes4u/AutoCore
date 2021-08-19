@@ -26,9 +26,9 @@ namespace AutoCore.Game.Entities
                 MapPathPoints.Add(MapPathPoint.Read(br));
         }
 
-        public override void WriteToCreatePacket(Packet packet, bool extended = false)
+        /*public override void WriteToCreatePacket(Packet packet, bool extended = false)
         {
             throw new NotSupportedException();
-        }
+        }*/
     }
 }

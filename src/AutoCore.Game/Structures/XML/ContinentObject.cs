@@ -2,8 +2,6 @@
 
 namespace AutoCore.Game.Structures.XML
 {
-    using Manager;
-
     public struct ContinentObject
     {
         [XmlElement("intContestedMission")]
@@ -81,11 +79,11 @@ namespace AutoCore.Game.Structures.XML
 
         public void OnDeserialization()
         {
-            AssetManager.AssetContainer.AccessLock.EnterWriteLock();
+            //AssetManager.AssetContainer.AccessLock.EnterWriteLock();
 
-            AssetManager.AssetContainer.ContinentObjects.Add(ContinentObjectId, this);
+            //AssetManager.AssetContainer.ContinentObjects.Add(ContinentObjectId, this);
 
-            AssetManager.AssetContainer.AccessLock.ExitWriteLock();
+            //AssetManager.AssetContainer.AccessLock.ExitWriteLock();
         }
     }
 }

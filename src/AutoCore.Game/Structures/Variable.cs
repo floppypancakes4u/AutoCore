@@ -23,7 +23,7 @@ namespace AutoCore.Game.Structures
                 Value = br.ReadSingle(),
                 InitialValue = br.ReadSingle(),
                 UniqueForImport = mapVersion >= 46 && br.ReadBoolean(),
-                Triggers = new List<ulong>(br.Read<ulong>(8))
+                //Triggers = new List<ulong>(br.Read<ulong>(8))
             };
         }
     }

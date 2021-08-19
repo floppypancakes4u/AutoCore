@@ -1,8 +1,6 @@
 ﻿namespace AutoCore.Game.Entities
 {
     using Clonebase;
-    using Database;
-    using Database.DataStructs;
 
     public class WheelSet : SimpleObject
     {
@@ -41,7 +39,7 @@
             _numAxles = (CloneBaseObject as CloneBaseWheelSet).WheelSetSpecific.NumWheelsAxle[0] + (CloneBaseObject as CloneBaseWheelSet).WheelSetSpecific.NumWheelsAxle[1];
         }
 
-        public override void WriteToCreatePacket(Packet packet, bool extended = false)
+        /*public override void WriteToCreatePacket(Packet packet, bool extended = false)
         {
             base.WriteToCreatePacket(packet, extended);
 
@@ -56,14 +54,14 @@
             packet.WriteUtf8StringOn(MangledName, 100); // name
             packet.WritePadding(3);
             #endregion Create Wheel Set
-        }
+        }*/
 
         public override WheelSet GetAsWheelSet()
         {
             return this;
         }
 
-        public override void SaveToDB()
+        /*public override void SaveToDB()
         {
             var id = new ItemData
             {
@@ -79,9 +77,9 @@
                 DataAccess.Item.InsertItemInto(id);
                 IsInDB = true;
             }
-        }
+        }*/
 
-        public override bool LoadFromDB(long coid)
+        /*public override bool LoadFromDB(long coid)
         {
             var id = DataAccess.Item.GetItemFrom("item_wheelset", coid);
             if (id == null)
@@ -93,6 +91,6 @@
             IsInDB = true;
 
             return true;
-        }
+        }*/
     }
 }

@@ -51,8 +51,8 @@ namespace AutoCore.Game.Mission
 
             br.ReadBytes(1);
 
-            mo.ObjectiveName = br.ReadUnicodeString(65);
-            mo.MapName = br.ReadUnicodeString(65);
+            //mo.ObjectiveName = br.ReadUnicodeString(65);
+            //mo.MapName = br.ReadUnicodeString(65);
 
             br.ReadBytes(2);
 

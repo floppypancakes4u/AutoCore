@@ -1,14 +1,11 @@
 ﻿using System;
-using System.IO;
 
 namespace AutoCore.Game.Entities.Base
 {
     using Clonebase;
     using Constant;
-    using Map;
     using Structures;
     using TNL.Ghost;
-    using Utils.Extensions;
 
     public abstract partial class ClonedObjectBase
     {
@@ -36,7 +33,7 @@ namespace AutoCore.Game.Entities.Base
         public Vector4 Rotation { get; set; }
         public Vector3 Velocity { get; set; }
         public Vector3 AngularVelocity { get; set; }
-        protected SectorMap Map;
+        //protected SectorMap Map;
         public CloneBaseObject CloneBaseObject;
         public ClonedObjectBase Owner { get; private set; }
         protected uint StatusBitField;
@@ -130,10 +127,10 @@ namespace AutoCore.Game.Entities.Base
             GhostObject = ghost;
         }
 
-        public void ReadTriggerEvents(BinaryReader br, uint mapVersion)
+        /*public void ReadTriggerEvents(BinaryReader br, uint mapVersion)
         {
             TriggerEvents = br.Read<long>(3);
-        }
+        }*/
 
         public void SetCOID(long coid, bool global = true)
         {
@@ -391,9 +388,9 @@ namespace AutoCore.Game.Entities.Base
             return (int)val;
         }
 
-        public SectorMap GetMap()
+        /*public SectorMap GetMap()
         {
             return Map;
-        }
+        }*/
     }
 }

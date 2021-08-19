@@ -9,8 +9,8 @@ namespace AutoCore.Auth.Network
     using Communicator;
     using Crypto;
     using Data;
-    using DataBase.Auth;
-    using DataBase.Auth.Models;
+    using Database.Auth;
+    using Database.Auth.Models;
     using Utils;
     using Utils.Extensions;
     using Utils.Networking;

@@ -22,9 +22,9 @@ namespace AutoCore.Game.Structures
                 VehicleId = br.ReadInt32(),
                 ExclusiveGroup = br.ReadByte(),
                 GroupId = br.ReadByte(),
-                FileName = br.ReadUnicodeString(65),
-                Description = br.ReadUnicodeString(33),
-                GroupDescription = br.ReadUnicodeString(33)
+                //FileName = br.ReadUnicodeString(65),
+                //Description = br.ReadUnicodeString(33),
+                //GroupDescription = br.ReadUnicodeString(33)
             };
         }
 

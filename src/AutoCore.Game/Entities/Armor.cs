@@ -3,8 +3,6 @@
 namespace AutoCore.Game.Entities
 {
     using Clonebase;
-    using Database;
-    using Database.DataStructs;
     using Structures;
     using Structures.Specifics;
 
@@ -38,7 +36,7 @@ namespace AutoCore.Game.Entities
                 ArmorSpecific = (CloneBaseObject as CloneBaseArmor).ArmorSpecific;
         }
 
-        public override void WriteToCreatePacket(Packet packet, bool extended = false)
+        /*public override void WriteToCreatePacket(Packet packet, bool extended = false)
         {
             base.WriteToCreatePacket(packet, extended);
 
@@ -51,12 +49,12 @@ namespace AutoCore.Game.Entities
 
             packet.WritePadding(2);
             #endregion Create Armor
-        }
+        }*/
 
-        public static void WriteEmptyObjectToPacket(Packet packet)
+        /*public static void WriteEmptyObjectToPacket(Packet packet)
         {
             WriteEmptyObjectToPacket(packet, 128);
-        }
+        }*/
 
         public void ApplyResistanceModification(DamageArray dmg, bool reverse)
         {
@@ -111,7 +109,7 @@ namespace AutoCore.Game.Entities
             return this;
         }
 
-        public override void SaveToDB()
+        /*public override void SaveToDB()
         {
             var id = new ItemData
             {
@@ -127,9 +125,9 @@ namespace AutoCore.Game.Entities
                 DataAccess.Item.InsertItemInto(id);
                 IsInDB = true;
             }
-        }
+        }*/
 
-        public override bool LoadFromDB(long coid)
+        /*public override bool LoadFromDB(long coid)
         {
             var id = DataAccess.Item.GetItemFrom("item_armor", coid);
             if (id == null)
@@ -141,6 +139,6 @@ namespace AutoCore.Game.Entities
             IsInDB = true;
 
             return true;
-        }
+        }*/
     }
 }

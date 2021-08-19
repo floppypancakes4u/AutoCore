@@ -30,7 +30,7 @@ namespace AutoCore.Game.Entities
 
         public override void Unserialize(BinaryReader br, uint mapVersion)
         {
-            ReadTriggerEvents(br, mapVersion);
+            //ReadTriggerEvents(br, mapVersion);
 
             Location = Vector4.Read(br);
             Quaternion = Vector4.Read(br);

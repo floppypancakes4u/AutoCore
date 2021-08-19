@@ -2,7 +2,6 @@
 {
     using Base;
     using Constant;
-    using Map;
 
     public class Inventory
     {
@@ -17,11 +16,11 @@
         private int _maxItems;
         private int _colsPerPage;
         private int _rowsPerPage;
-        private SectorMap _map;
+        //private SectorMap _map;
 
         public Inventory(int x, int y, int numPages)
         {
-            _map = null;
+            //_map = null;
             _gridSpace = null;
             _inventoryType = InventoryType.None;
             _owner = null;
@@ -66,10 +65,10 @@
             // TODO: foreach item in inevntory: setowner(owner)
         }
 
-        public void SetMap(SectorMap map)
+        /*public void SetMap(SectorMap map)
         {
             _map = map;
-        }
+        }*/
 
         public static bool FitsInTempInventoryAtPosition(byte sizeX, byte sizeY, byte posX, byte posY, long[] tempInventory, int totalX, int totalY, int rowsPerPage)
         {

@@ -4,7 +4,6 @@ using System.Diagnostics;
 namespace AutoCore.Game.Entities.Base
 {
     using Constant;
-    using Manager;
 
     public abstract partial class ClonedObjectBase
     {
@@ -28,7 +27,7 @@ namespace AutoCore.Game.Entities.Base
         public static readonly int[] DisciplinesPerDifficulty = { 4, 2, 1 };
         public static readonly int[] DisciplineDifficultyLevel = { 0, 0, 0 };
 
-        public static ClonedObjectBase AllocateNewObjectFromCBID(int cbid)
+        /*public static ClonedObjectBase AllocateNewObjectFromCBID(int cbid)
         {
             var clonebaseobj = AssetManager.AssetContainer.GetCloneBaseObjectForCBID(cbid);
             if (clonebaseobj == null)
@@ -97,7 +96,7 @@ namespace AutoCore.Game.Entities.Base
             }
 
             return null;
-        }
+        }*/
 
         public static int GetMoneyCBIDFromCredits(long credits)
         {

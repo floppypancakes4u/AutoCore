@@ -27,7 +27,7 @@
         public float ScaleOffset { get; set; }
         public int CBidWheelset { get; set; }
 
-        public static CreateCharacterModel Read(Packet packet)
+        /*public static CreateCharacterModel Read(Packet packet)
         {
             return new CreateCharacterModel
             {
@@ -56,6 +56,6 @@
                 CBidWheelset = packet.ReadInteger(),
                 VehicleName = packet.ReadUtf8StringOn(33),
             };
-        }
+        }*/
     }
 }

@@ -67,12 +67,12 @@ namespace AutoCore.Game.TNL
         {
             DeleteLocalGhosts();
 
-            CharacterManager.LogoutCharacter(this);
+            //CharacterManager.LogoutCharacter(this);
 
             Logger.WriteLog(LogType.Network, "Client ({0} | {1}) disconnected", AccountId, AccountName);
         }
 
-        public void SendPacket(Packet p, RPCGuaranteeType type)
+        /*public void SendPacket(Packet p, RPCGuaranteeType type)
         {
             var opcode = (uint) p.Opcode;
             Logger.WriteLog(LogType.Network, "Outgoing Packet: {0}", p.Opcode);
@@ -83,7 +83,7 @@ namespace AutoCore.Game.TNL
             {
                 sw.WriteLine(BitConverter.ToString(arr));
                 sw.WriteLine();
-            }*/
+            }* /
 
             var arrLength = (uint) arr.Length;
             if (arrLength > 1400U)
@@ -141,11 +141,11 @@ namespace AutoCore.Game.TNL
                         break;
                 }
             }
-        }
+        }*/
 
         #region Handler
 
-        private void HandlePacket(ByteBuffer buffer)
+        /*private void HandlePacket(ByteBuffer buffer)
         {
             var packet = new Packet(buffer.GetBuffer());
 
@@ -259,11 +259,11 @@ namespace AutoCore.Game.TNL
                 Logger.WriteLog(LogType.Error, "Caught exception while handling packets!");
                 Logger.WriteLog(LogType.Error, "Exception: {0}", e);
             }
-        }
+        }*/
 
         #endregion
 
-        public void UpdateFirstTimeFlags(uint f1, uint f2, uint f3, uint f4)
+        /*public void UpdateFirstTimeFlags(uint f1, uint f2, uint f3, uint f4)
         {
             FirstTimeFlags[0] = f1;
             FirstTimeFlags[1] = f2;
@@ -271,9 +271,9 @@ namespace AutoCore.Game.TNL
             FirstTimeFlags[2] = f4;
 
             DataAccess.Account.UpdateFirstTimeFlags(AccountId, FirstTimeFlags);
-        }
+        }*/
 
-        public bool LoginAccount(uint oneTimeKey, string user = null, string password = null)
+        /*public bool LoginAccount(uint oneTimeKey, string user = null, string password = null)
         {
             var data = DataAccess.Account.LoginAccount(oneTimeKey);
             if (data == null)
@@ -290,7 +290,7 @@ namespace AutoCore.Game.TNL
             Array.Copy(data.FirstTimeFlags, FirstTimeFlags, 4);
 
             return true;
-        }
+        }*/
 
         #region RPC Calls
 
@@ -306,7 +306,7 @@ namespace AutoCore.Game.TNL
         private void rpcMsgGuaranteed_remote(uint type, ByteBuffer data)
         #endregion
         {
-            HandlePacket(data);
+            //HandlePacket(data);
         }
 
         public void rpcMsgGuaranteedOrdered(uint type, ByteBuffer data)
@@ -321,7 +321,7 @@ namespace AutoCore.Game.TNL
         private void rpcMsgGuaranteedOrdered_remote(uint type, ByteBuffer data)
         #endregion
         {
-            HandlePacket(data);
+            //HandlePacket(data);
         }
 
         public void rpcMsgNonGuaranteed(uint type, ByteBuffer data)
@@ -336,7 +336,7 @@ namespace AutoCore.Game.TNL
         private void rpcMsgNonGuaranteed_remote(uint type, ByteBuffer data)
         #endregion
         {
-            HandlePacket(data);
+            //HandlePacket(data);
         }
 
         public void rpcMsgGuaranteedFragmented(uint type, ushort fragment, ushort fragmentId, ushort fragmentCount, ByteBuffer data)
@@ -547,7 +547,7 @@ namespace AutoCore.Game.TNL
                 sFragment.TotalSize = 0;
                 sFragment.MapFragments.Clear();
 
-                HandlePacket(combined);
+                //HandlePacket(combined);
             }
         }
 

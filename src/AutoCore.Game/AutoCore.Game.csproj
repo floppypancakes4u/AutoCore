@@ -5,6 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\AutoCore.Database\AutoCore.Database.csproj" />
     <ProjectReference Include="..\AutoCore.Utils\AutoCore.Utils.csproj" />
   </ItemGroup>
 
@@ -17,6 +18,9 @@
 
   <ItemGroup>
     <Folder Include="Clonebase\" />
+    <Folder Include="Packets\Login\" />
+    <Folder Include="Packets\Arena\" />
+    <Folder Include="Packets\Sector\" />
     <Folder Include="Structures\Specifics\" />
   </ItemGroup>
 

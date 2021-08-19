@@ -32,7 +32,7 @@ namespace AutoCore.Game.Prefix
 
         public PrefixBase(BinaryReader br)
         {
-            Id = br.ReadUInt32();
+            /*Id = br.ReadUInt32();
             ObjectType = br.ReadInt32();
             ValuePercent = br.ReadSingle();
             IsComponent = br.ReadInt32();
@@ -65,7 +65,7 @@ namespace AutoCore.Game.Prefix
             IsPrefix = br.ReadInt32();
             PrefixName = br.ReadUnicodeString(33);
 
-            br.ReadBytes(2);
+            br.ReadBytes(2);*/
         }
     }
 }

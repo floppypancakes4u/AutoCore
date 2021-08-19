@@ -1,6 +1,6 @@
 ﻿namespace AutoCore.Game.Constant
 {
-    public enum Opcode : uint
+    public enum GameOpcode : uint
     {
         #region Login
         LoginRequest = 0x1000,

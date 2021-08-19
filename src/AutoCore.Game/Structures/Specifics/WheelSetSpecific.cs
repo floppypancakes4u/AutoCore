@@ -16,11 +16,11 @@ namespace AutoCore.Game.Structures.Specifics
         {
             return new WheelSetSpecific
             {
-                Friction = br.Read<short>(6),
+                //Friction = br.Read<short>(6),
                 NumWheelsAxle = br.ReadBytes(2),
                 WheelSetType = br.ReadByte(),
-                Wheel0Name = br.ReadPadding(1).ReadUnicodeString(65),
-                Wheel1Name = br.ReadUnicodeString(65)
+                //Wheel0Name = br.ReadPadding(1).ReadUnicodeString(65),
+                //Wheel1Name = br.ReadUnicodeString(65)
             };
         }
     }
