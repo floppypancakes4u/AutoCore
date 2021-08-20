@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace AuthCore.Sector
+namespace AutoCore.Sector
 {
     class Program
     {

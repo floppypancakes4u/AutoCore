@@ -43,20 +43,26 @@ namespace AutoCore.Communicator
 
         public CommunicatorType Type { get; }
         public LengthedSocket Socket { get; private set; }
-        public List<Communicator> Children { get; }
+        public List<Communicator> AuthenticatingChildren { get; }
+        public Dictionary<byte, Communicator> Clients { get; }
+        public List<byte> ToRemoveClients { get; }
         public DateTime LastRequestTime { get; private set; }
-        public ServerData ServerData { get; set; }
+        public ServerData ServerData { get; private set; }
+        public ServerInfo ServerInfo { get; private set; }
+        public bool Connected => Socket?.Connected ?? false;
+
+        private Communicator Server { get; }
 
         public Action OnError { get; set; }
         public Action<ServerData> OnConnect { get; set; }
-        public Func<ServerData, bool> OnLoginRequest { get; set; }
+        public Func<Communicator, LoginRequestPacket, bool> OnLoginRequest { get; set; }
         public Action<CommunicatorActionResult> OnLoginResponse { get; set; }
         public Func<RedirectRequest, bool> OnRedirectRequest { get; set; }
-        public Action<CommunicatorActionResult, uint> OnRedirectResponse { get; set; }
+        public Action<Communicator, RedirectResponsePacket> OnRedirectResponse { get; set; }
         public Action<ServerInfo> OnServerInfoRequest { get; set; }
-        public Action<ServerInfo> OnServerInfoResponse { get; set; }
+        public Action OnServerInfoResponse { get; set; }
 
-        public Communicator(CommunicatorType type, IPAddress address, int port, int backlog = 0)
+        public Communicator(CommunicatorType type)
         {
             if (type == CommunicatorType.ServerClient)
                 throw new ArgumentOutOfRangeException(nameof(type));
@@ -69,32 +75,75 @@ namespace AutoCore.Communicator
             switch (Type)
             {
                 case CommunicatorType.Server:
-                    Children = new();
+                    AuthenticatingChildren = new();
+                    Clients = new();
+                    ToRemoveClients = new();
 
                     Socket.OnAccept += OnSocketAccept;
+                    break;
 
+                case CommunicatorType.Client:
+                    Socket.OnReceive += OnSocketReceive;
+                    Socket.OnConnect += OnSocketConnect;
+                    break;
+            }
+        }
+
+        public Communicator(LengthedSocket socket, Communicator server)
+        {
+            Type = CommunicatorType.ServerClient;
+            Server = server;
+
+            Socket = socket;
+            Socket.OnReceive += OnSocketReceive;
+
+            Socket.ReceiveAsync();
+        }
+
+        public void Start(IPAddress address, int port, int backlog = 0)
+        {
+            switch (Type)
+            {
+                case CommunicatorType.Server:
                     Socket.Bind(new IPEndPoint(address, port));
                     Socket.Listen(backlog);
                     Socket.AcceptAsync();
                     break;
 
                 case CommunicatorType.Client:
-                    Socket.OnReceive += OnSocketReceive;
-                    Socket.OnConnect += OnSocketConnect;
-
                     Socket.ConnectAsync(new IPEndPoint(address, port));
                     break;
             }
         }
 
-        public Communicator(LengthedSocket socket)
+        public void Update()
         {
-            Type = CommunicatorType.ServerClient;
+            lock (ToRemoveClients)
+            {
+                foreach (var id in ToRemoveClients)
+                {
+                    if (Clients.TryGetValue(id, out var comm))
+                    {
+                        comm.Close();
 
-            Socket = socket;
-            Socket.OnReceive += OnSocketReceive;
+                        Clients.Remove(id);
+                    }
+                }
 
-            Socket.ReceiveAsync();
+                ToRemoveClients.Clear();
+            }
+        }
+        
+        private void ClientAucthenticated(Communicator client)
+        {
+            if (Type != CommunicatorType.Server)
+            {
+                Logger.WriteLog(LogType.Error, $"Communicator(Type = {Type}) can't have clients!");
+                return;
+            }
+
+            Clients.Add(client.ServerData.Id, client);
+            AuthenticatingChildren.Remove(client);
         }
 
         #region Socketing
@@ -104,14 +153,12 @@ namespace AutoCore.Communicator
 
             OnError?.Invoke();
 
-            Logger.WriteLog(LogType.Communicator, $"Communicator(Type = {Type}) has encountered an error!");
+            Logger.WriteLog(LogType.Error, $"Communicator(Type = {Type}) has encountered an error!");
         }
 
         private void OnSocketAccept(LengthedSocket socket)
         {
-            Children.Add(new Communicator(socket));
-
-            Logger.WriteLog(LogType.Communicator, $"New Communicator(Type = {Type}) client has connected! Remote: {socket.RemoteAddress}");
+            AuthenticatingChildren.Add(new Communicator(socket, this));
 
             Socket.AcceptAsync();
         }
@@ -162,6 +209,8 @@ namespace AutoCore.Communicator
                     MsgServerInfoResponse(packet as ServerInfoResponsePacket);
                     break;
             }
+
+            Socket.ReceiveAsync();
         }
 
         private void OnSocketConnect(SocketAsyncEventArgs args)
@@ -171,8 +220,6 @@ namespace AutoCore.Communicator
                 OnSocketError(args);
                 return;
             }
-
-            Logger.WriteLog(LogType.Communicator, $"Communicator(Type = {Type}) has connected to the Communicator Server!");
 
             if (OnConnect == null)
             {
@@ -184,10 +231,10 @@ namespace AutoCore.Communicator
             OnConnect(info);
 
             SendPacket(new LoginRequestPacket(info));
+
             Socket.ReceiveAsync();
         }
-        #endregion
-
+        
         private void SendPacket(IOpcodedPacket<CommunicatorOpcode> packet)
         {
             var buffer = ArrayPool<byte>.Shared.Rent(SendBufferSize);
@@ -200,15 +247,34 @@ namespace AutoCore.Communicator
             ArrayPool<byte>.Shared.Return(buffer);
         }
 
+        public void Close()
+        {
+            if (Type == CommunicatorType.Server)
+            {
+                foreach (var child in AuthenticatingChildren)
+                    child.Close();
+
+                foreach (var client in Clients)
+                    client.Value.Close();
+
+                AuthenticatingChildren.Clear();
+                Clients.Clear();
+            }
+
+            Socket.Close();
+            Socket = null;
+        }
+        #endregion
+
         #region Requests
         public void RequestServerInfo()
         {
             if (Type == CommunicatorType.Server)
             {
-                foreach (var client in Children)
+                foreach (var client in Clients)
                 {
-                    if ((DateTime.Now - client.LastRequestTime).TotalMilliseconds > ServerInfoUpdateIntervalMs)
-                        client.RequestServerInfo();
+                    if ((DateTime.Now - client.Value.LastRequestTime).TotalMilliseconds > ServerInfoUpdateIntervalMs)
+                        client.Value.RequestServerInfo();
                 }
             }
             else if (Type == CommunicatorType.ServerClient)
@@ -219,15 +285,29 @@ namespace AutoCore.Communicator
             }
         }
 
-        public void RequestRedirection(RedirectRequest request)
+        public void RequestRedirection(byte serverId, RedirectRequest request)
         {
-            if (Type != CommunicatorType.ServerClient)
+            if (Type == CommunicatorType.ServerClient)
             {
-                Logger.WriteLog(LogType.Error, $"Communicator(Type = {Type}) can not request redirection!");
+                SendPacket(new RedirectRequestPacket(request));
+
                 return;
             }
 
-            SendPacket(new RedirectRequestPacket(request));
+            if (Type == CommunicatorType.Server)
+            {
+                if (Clients.TryGetValue(serverId, out var client))
+                {
+                    client.RequestRedirection(serverId, request);
+                    return;
+                }
+
+                Logger.WriteLog(LogType.Error, $"Communicator(Type = {Type}) was requested for redirection for an unknown server!");
+                return;
+            }
+
+            Logger.WriteLog(LogType.Error, $"Communicator(Type = {Type}) can not request redirection!");
+            return;
         }
         #endregion
 
@@ -240,13 +320,13 @@ namespace AutoCore.Communicator
                 return;
             }
 
-            if (OnLoginRequest == null)
+            if (Server.OnLoginRequest == null)
             {
                 Logger.WriteLog(LogType.Error, $"Communicator(Type = {Type}) has no OnLoginRequest callback!");
                 return;
             }
 
-            var result = OnLoginRequest(packet.Data);
+            var result = Server.OnLoginRequest(this, packet);
 
             SendPacket(new LoginResponsePacket
             {
@@ -254,9 +334,16 @@ namespace AutoCore.Communicator
             });
 
             if (!result)
+            {
+                lock (ToRemoveClients)
+                    ToRemoveClients.Add(ServerData.Id);
+
                 return;
+            }
 
             ServerData = packet.Data;
+
+            Server.ClientAucthenticated(this);
 
             RequestServerInfo();
         }
@@ -269,15 +356,12 @@ namespace AutoCore.Communicator
                 return;
             }
 
-            if (packet.Result == CommunicatorActionResult.Success)
+            if (packet.Result == CommunicatorActionResult.Failure)
             {
-                Logger.WriteLog(LogType.Communicator, $"Communicator(Type = {Type}) successfully authenticated with the Communicator server!");
-            }
-            else
-            {
-                Socket?.Close();
+                Close();
 
                 Logger.WriteLog(LogType.Error, $"Communicator(Type = {Type}) could not authenticate with the Communicator server!");
+                return;
             }
 
             OnLoginResponse?.Invoke(packet.Result);
@@ -314,13 +398,13 @@ namespace AutoCore.Communicator
                 return;
             }
 
-            if (OnRedirectResponse == null)
+            if (Server.OnRedirectResponse == null)
             {
                 Logger.WriteLog(LogType.Error, $"Communicator(Type = {Type}) has no OnRedirectResponse callback!");
                 return;
             }
 
-            OnRedirectResponse(packet.Result, packet.AccountId);
+            Server.OnRedirectResponse(this, packet);
         }
 
 #pragma warning disable IDE0060 // Remove unused parameter
@@ -354,13 +438,15 @@ namespace AutoCore.Communicator
                 return;
             }
 
-            if (OnServerInfoResponse == null)
+            if (Server.OnServerInfoResponse == null)
             {
                 Logger.WriteLog(LogType.Error, $"Communicator(Type = {Type}) has no OnServerInfoResponse callback!");
                 return;
             }
 
-            OnServerInfoResponse(packet.Info);
+            ServerInfo = packet.Info;
+
+            Server.OnServerInfoResponse();
         }
         #endregion
     }

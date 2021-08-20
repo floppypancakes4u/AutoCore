@@ -31,7 +31,8 @@ namespace AutoCore.Global.Network
 
         public Config Config { get; private set; }
         public IPAddress PublicAddress { get; }
-        public LengthedSocket AuthCommunicator { get; private set; }
+        //public LengthedSocket AuthCommunicator { get; private set; }
+        public Communicator AuthCommunicator { get; private set; }
         //public Dictionary<uint, LoginAccountEntry> IncomingClients { get; } = new();
         public MainLoop Loop { get; }
         public Timer Timer { get; } = new();
@@ -41,11 +42,11 @@ namespace AutoCore.Global.Network
 
         public GlobalServer()
         {
-            Logger.WriteLog(LogType.Initialize, "+++ Initializing Server for Global");
-
             Configuration.OnLoad += ConfigLoaded;
             Configuration.OnReLoad += ConfigReLoaded;
             Configuration.Load();
+
+            Logger.WriteLog(LogType.Initialize, "Initializing the Global server...");
 
             TNLInterface.RegisterNetClassReps();
 
@@ -63,6 +64,8 @@ namespace AutoCore.Global.Network
 
             CommandProcessor.RegisterCommand("exit", ProcessExitCommand);
             CommandProcessor.RegisterCommand("reload", ProcessReloadCommand);
+
+            Logger.WriteLog(LogType.Initialize, "The Global server has been initialized!");
         }
 
         ~GlobalServer()
@@ -161,15 +164,20 @@ namespace AutoCore.Global.Network
         public void ConnectCommunicator()
         {
             if (AuthCommunicator?.Connected ?? false)
+            {
                 AuthCommunicator?.Close();
+                AuthCommunicator = null;
+            }
 
             try
             {
-                AuthCommunicator = new LengthedSocket(SizeType.Word);
+                AuthCommunicator = new Communicator(CommunicatorType.Client);
                 AuthCommunicator.OnConnect += OnCommunicatorConnect;
                 AuthCommunicator.OnError += OnCommunicatorError;
-                AuthCommunicator.OnReceive += OnCommunicatorReceive;
-                AuthCommunicator.ConnectAsync(new IPEndPoint(IPAddress.Parse(Config.CommunicatorAddress), Config.CommunicatorPort));
+                AuthCommunicator.OnLoginResponse += OnCommunicatorLoginResponse;
+                AuthCommunicator.OnRedirectRequest += OnCommunicatorRedirectRequest;
+                AuthCommunicator.OnServerInfoRequest += OnCommunicatorServerInfoRequest;
+                AuthCommunicator.Start(IPAddress.Parse(Config.CommunicatorAddress), Config.CommunicatorPort);
             }
             catch (Exception e)
             {
@@ -177,10 +185,10 @@ namespace AutoCore.Global.Network
                 Logger.WriteLog(LogType.Error, e);
             }
 
-            Logger.WriteLog(LogType.Network, $"*** Connecting to auth server! Address: {Config.CommunicatorAddress}:{Config.CommunicatorPort}");
+            Logger.WriteLog(LogType.Communicator, $"Connecting to auth server! Address: {Config.CommunicatorAddress}:{Config.CommunicatorPort}");
         }
 
-        private void OnCommunicatorError(SocketAsyncEventArgs args)
+        private void OnCommunicatorError()
         {
             Timer.Add("CommReconnect", 10000, false, () =>
             {
@@ -191,79 +199,19 @@ namespace AutoCore.Global.Network
             Logger.WriteLog(LogType.Error, "Could not connect to the Auth server! Trying again in a few seconds...");
         }
 
-        private void OnCommunicatorConnect(SocketAsyncEventArgs args)
+        private void OnCommunicatorConnect(ServerData info)
         {
-            if (args.SocketError != SocketError.Success)
-            {
-                OnCommunicatorError(args);
+            Logger.WriteLog(LogType.Communicator, "Logging in to the auth server...");
+
+            info.Id = Config.ServerInfoConfig.Id;
+            info.Address = PublicAddress;
+            info.Password = Config.ServerInfoConfig.Password;
+        }
+
+        private void OnCommunicatorLoginResponse(CommunicatorActionResult result)
+        {
+            if (result == CommunicatorActionResult.Success)
                 return;
-            }
-
-            Logger.WriteLog(LogType.Network, "*** Connected to the Auth Server!");
-
-            SendAuthCommunicatorPacket(new LoginRequestPacket(new()
-            {
-                Id = Config.ServerInfoConfig.Id,
-                Password = Config.ServerInfoConfig.Password,
-                Address = PublicAddress
-            }));
-
-            AuthCommunicator.ReceiveAsync();
-        }
-
-        private void OnCommunicatorReceive(byte[] data, int length)
-        {
-            var reader = new BinaryReader(new MemoryStream(data, 0, length, false));
-            var opcode = (CommunicatorOpcode)reader.ReadByte();
-
-            IOpcodedPacket<CommunicatorOpcode> packet;
-
-            switch (opcode)
-            {
-                case CommunicatorOpcode.LoginResponse:
-                    packet = new LoginResponsePacket();
-                    packet.Read(reader);
-
-                    MsgLoginResponse(packet as LoginResponsePacket);
-                    break;
-
-                case CommunicatorOpcode.ServerInfoRequest:
-                    packet = new ServerInfoRequestPacket();
-                    packet.Read(reader);
-
-                    MsgGameInfoRequest(packet as ServerInfoRequestPacket);
-                    break;
-
-                case CommunicatorOpcode.RedirectRequest:
-                    packet = new RedirectRequestPacket();
-                    packet.Read(reader);
-
-                    MsgRedirectRequest(packet as RedirectRequestPacket);
-                    break;
-            }
-
-            AuthCommunicator.ReceiveAsync();
-        }
-
-        private void SendAuthCommunicatorPacket(IOpcodedPacket<CommunicatorOpcode> packet)
-        {
-            var buffer = ArrayPool<byte>.Shared.Rent(SendBufferSize);
-            var writer = new BinaryWriter(new MemoryStream(buffer, true));
-
-            packet.Write(writer);
-
-            AuthCommunicator.Send(buffer, 0, (int)writer.BaseStream.Position);
-
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-
-        private void MsgLoginResponse(LoginResponsePacket packet)
-        {
-            if (packet.Result == CommunicatorActionResult.Success)
-            {
-                Logger.WriteLog(LogType.Network, "Successfully authenticated with the Auth server!");
-                return;
-            }
 
             AuthCommunicator?.Close();
             AuthCommunicator = null;
@@ -271,19 +219,7 @@ namespace AutoCore.Global.Network
             Logger.WriteLog(LogType.Error, "Could not authenticate with the Auth server! Shutting down internal communication!");
         }
 
-        private void MsgGameInfoRequest(ServerInfoRequestPacket packet)
-        {
-            SendAuthCommunicatorPacket(new ServerInfoResponsePacket(new()
-            {
-                AgeLimit = Config.ServerInfoConfig.AgeLimit,
-                PKFlag = Config.ServerInfoConfig.PKFlag,
-                CurrentPlayers = 0,
-                Port = Config.GameConfig.Port,
-                MaxPlayers = (ushort)Config.SocketAsyncConfig.MaxClients
-            }));
-        }
-
-        private void MsgRedirectRequest(RedirectRequestPacket packet)
+        private bool OnCommunicatorRedirectRequest(RedirectRequest request)
         {
             /*lock (IncomingClients)
             {
@@ -293,11 +229,16 @@ namespace AutoCore.Global.Network
                 IncomingClients.Add(packet.Request.AccountId, new LoginAccountEntry(packet));
             }*/
 
-            SendAuthCommunicatorPacket(new RedirectResponsePacket
-            {
-                AccountId = packet.Request.AccountId,
-                Result = CommunicatorActionResult.Success
-            });
+            return true;
+        }
+
+        private void OnCommunicatorServerInfoRequest(ServerInfo info)
+        {
+            info.AgeLimit = Config.ServerInfoConfig.AgeLimit;
+            info.PKFlag = Config.ServerInfoConfig.PKFlag;
+            info.CurrentPlayers = 0;
+            info.Port = Config.GameConfig.Port;
+            info.MaxPlayers = (ushort)Config.SocketAsyncConfig.MaxClients;
         }
         #endregion
 

@@ -1,12 +1,45 @@
 ﻿using System;
+using System.Diagnostics;
 
-namespace AuthCore.Global
+namespace AutoCore.Global
 {
-    class Program
+    using Network;
+    using Utils;
+
+    public class Program : ExitableProgram
     {
-        static void Main(string[] args)
+        private static GlobalServer Server { get; set; }
+
+        public static void Main()
         {
-            Console.WriteLine("Hello World!");
+            Initialize(ExitHandlerProc);
+
+            Server = new GlobalServer();
+            if (!Server.Start())
+            {
+                Logger.WriteLog(LogType.Error, "Unable to start the server!");
+
+                return;
+            }
+
+            Server.ProcessCommands();
+
+            GC.Collect();
+
+            Process.GetCurrentProcess().WaitForExit();
+        }
+
+        private static bool ExitHandlerProc(byte sig)
+        {
+            Logger.WriteLog(LogType.Error, "Shutting down the server...");
+
+            Server?.Shutdown();
+
+            Logger.WriteLog(LogType.Error, "Server shutdown completed!");
+
+            Logger.WriteLog(LogType.Error, "Press any key to exit...");
+
+            return false;
         }
     }
 }

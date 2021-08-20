@@ -262,17 +262,25 @@ namespace AutoCore.Auth.Network
             Logger.WriteLog(LogType.Network, "*** Client logged in from {0}", Socket.RemoteAddress);
         }
 
-#pragma warning disable IDE0060 // Remove unused parameter
         private void MsgLogout(LogoutPacket packet)
-#pragma warning restore IDE0060 // Remove unused parameter
         {
+            if (SessionId1 != packet.SessionId1 || SessionId2 != packet.SessionId2)
+            {
+                Logger.WriteLog(LogType.Security, $"Account ({Account.Username}, {Account.Id}) has sent an LogoutPacket with invalid session data!");
+                return;
+            }
+
             Close();
         }
 
-#pragma warning disable IDE0060 // Remove unused parameter
         private void MsgServerListExt(ServerListExtPacket packet)
-#pragma warning restore IDE0060 // Remove unused parameter
         {
+            if (SessionId1 != packet.SessionId1 || SessionId2 != packet.SessionId2)
+            {
+                Logger.WriteLog(LogType.Security, $"Account ({Account.Username}, {Account.Id}) has sent an ServerListExtPacket with invalid session data!");
+                return;
+            }
+
             State = ClientState.ServerList;
 
             SendPacket(new SendServerListExtPacket(Server.ServerList, Account.LastServerId));
@@ -282,7 +290,7 @@ namespace AutoCore.Auth.Network
         {
             if (SessionId1 != packet.SessionId1 || SessionId2 != packet.SessionId2)
             {
-                Logger.WriteLog(LogType.Security, $"Account ({Account.Username}, {Account.Id}) has sent an AboutToPlay packet with invalid session data!");
+                Logger.WriteLog(LogType.Security, $"Account ({Account.Username}, {Account.Id}) has sent an AboutToPlayPacket with invalid session data!");
                 return;
             }
 

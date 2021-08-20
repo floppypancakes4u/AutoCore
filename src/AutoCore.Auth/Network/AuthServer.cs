@@ -29,24 +29,22 @@ namespace AutoCore.Auth.Network
 
         public Config Config { get; private set; }
         public Communicator Communicator { get; private set; }
-        public LengthedSocket AuthCommunicator { get; private set; }
         public LengthedSocket ListenerSocket { get; private set; }
         public List<AuthClient> Clients { get; } = new();
-       
         public List<ServerInfo> ServerList { get; } = new();
         public MainLoop Loop { get; }
         public Timer Timer { get; }
         public override bool IsRunning => Loop != null && Loop.Running;
 
         private readonly List<AuthClient> _clientsToRemove = new();
-        private List<CommunicatorClient> GameServerQueue { get; } = new();
-        private Dictionary<byte, CommunicatorClient> GameServers { get; } = new();
 
         public AuthServer()
         {
             Configuration.OnLoad += ConfigLoaded;
             Configuration.OnReLoad += ConfigReLoaded;
             Configuration.Load();
+
+            Logger.WriteLog(LogType.Initialize, "Initializing the Auth server...");
 
             Loop = new MainLoop(this, MainLoopTime);
             Timer = new Timer();
@@ -58,6 +56,8 @@ namespace AutoCore.Auth.Network
             AuthContext.InitializeConnectionString(Config.AuthDatabaseConnectionString);
 
             RegisterConsoleCommands();
+
+            Logger.WriteLog(LogType.Initialize, "The Auth server has been initialized!");
         }
 
         ~AuthServer()
@@ -164,7 +164,13 @@ namespace AutoCore.Auth.Network
             }
 
             // Set up communicator
-            Communicator = new Communicator(CommunicatorType.Server, IPAddress.Parse(Config.CommunicatorConfig.Address), Config.CommunicatorConfig.Port, Config.CommunicatorConfig.Backlog);
+            Communicator = new Communicator(CommunicatorType.Server);
+            Communicator.OnLoginRequest += AuthenticateGameServer;
+            Communicator.OnRedirectResponse += RedirectResponse;
+            Communicator.OnServerInfoResponse += UpdateServerInfo;
+            Communicator.Start(IPAddress.Parse(Config.CommunicatorConfig.Address), Config.CommunicatorConfig.Port, Config.CommunicatorConfig.Backlog);
+
+            Logger.WriteLog(LogType.Network, "*** Listening for gameservers on port {0}", Config.CommunicatorConfig.Port);
 
             // Add the repeating server info request timed event
             Timer.Add("ServerInfoUpdate", 1000, true, () =>
@@ -200,49 +206,37 @@ namespace AutoCore.Auth.Network
         #endregion
 
         #region Communicator
-        public bool AuthenticateGameServer(LoginRequestPacket packet, CommunicatorClient client)
+        public bool AuthenticateGameServer(Communicator client, LoginRequestPacket packet)
         {
-            lock (GameServers)
+            if (Communicator.Clients.ContainsKey(packet.Data.Id))
             {
-                if (GameServers.ContainsKey(packet.Data.Id))
-                {
-                    DisconnectCommunicator(client);
-                    Logger.WriteLog(LogType.Debug, $"A server tried to connect to an already in use server slot! Remote Address: {client.Socket.RemoteAddress}");
-                    return false;
-                }
-
-                if (!Config.Servers.ContainsKey(packet.Data.Id.ToString()))
-                {
-                    DisconnectCommunicator(client);
-                    Logger.WriteLog(LogType.Debug, $"A server tried to connect to a non-defined server slot! Remote Address: {client.Socket.RemoteAddress}");
-                    return false;
-                }
-
-                if (Config.Servers[packet.Data.Id.ToString()] != packet.Data.Password)
-                {
-                    DisconnectCommunicator(client);
-                    Logger.WriteLog(LogType.Error, $"A server tried to log in with an invalid password! Remote Address: {client.Socket.RemoteAddress}");
-                    return false;
-                }
-
-                GameServerQueue.Remove(client);
-                GameServers.Add(packet.Data.Id, client);
-
-                Logger.WriteLog(LogType.Network, $"The Game server (Id: {packet.Data.Id}, Address: {client.Socket.RemoteAddress}, Public Address: {packet.Data.Address}) has authenticated! Requesting info...");
-
-                return true;
+                Logger.WriteLog(LogType.Debug, $"A server tried to connect to an already in use server slot! Remote Address: {client.Socket.RemoteAddress}");
+                return false;
             }
+
+            if (!Config.Servers.ContainsKey(packet.Data.Id.ToString()))
+            {
+                Logger.WriteLog(LogType.Debug, $"A server tried to connect to a non-defined server slot! Remote Address: {client.Socket.RemoteAddress}");
+                return false;
+            }
+
+            if (Config.Servers[packet.Data.Id.ToString()] != packet.Data.Password)
+            {
+                Logger.WriteLog(LogType.Error, $"A server tried to log in with an invalid password! Remote Address: {client.Socket.RemoteAddress}");
+                return false;
+            }
+
+            Logger.WriteLog(LogType.Communicator, $"The Game server (Id: {packet.Data.Id}, Address: {client.Socket.RemoteAddress}, Public Address: {packet.Data.Address}) has authenticated!");
+            return true;
         }
 
-#pragma warning disable IDE0060 // Remove unused parameter
-        public void UpdateServerInfo(CommunicatorClient client, ServerInfoResponsePacket packet)
-#pragma warning restore IDE0060 // Remove unused parameter
+        public void UpdateServerInfo()
         {
             GenerateServerList();
             BroadcastServerList();
         }
 
-        public void RedirectResponse(CommunicatorClient client, RedirectResponsePacket packet)
+        public void RedirectResponse(Communicator client, RedirectResponsePacket packet)
         {
             AuthClient authClient;
             lock (Clients)
@@ -250,7 +244,7 @@ namespace AutoCore.Auth.Network
 
             ServerInfo info;
             lock (ServerList)
-                info = ServerList.FirstOrDefault(i => i.ServerId == client.ServerId);
+                info = ServerList.FirstOrDefault(i => i.ServerId == client.ServerData.Id);
 
             if (authClient != null && info != null)
                 authClient.RedirectionResult(packet.Result, info);
@@ -258,33 +252,15 @@ namespace AutoCore.Auth.Network
 
         public void RequestRedirection(AuthClient client, byte serverId)
         {
-            lock (GameServers)
-                if (GameServers.ContainsKey(serverId))
-                    GameServers[serverId].RequestRedirection(client);
-        }
-
-        public void DisconnectCommunicator(CommunicatorClient client)
-        {
-            if (client == null)
-                return;
-
-            lock (GameServers)
+            Communicator.RequestRedirection(serverId, new()
             {
-                GameServerQueue.Remove(client);
-
-                if (client.ServerId != 0)
-                    GameServers.Remove(client.ServerId);
-
-                GenerateServerList();
-            }
-
-            Timer.Add($"Disconnect-comm-{DateTime.Now.Ticks}", 1000, false, () =>
-            {
-                client.Socket?.Close();
+                AccountId = client.Account.Id,
+                Email = client.Account.Email,
+                OneTimeKey = client.OneTimeKey,
+                Username = client.Account.Username
             });
-
-            Logger.WriteLog(LogType.Network, $"The game server (Id: {client.ServerId}, Address: {client.Socket.RemoteAddress}) has disconnected!");
         }
+        #endregion
 
         private void GenerateServerList()
         {
@@ -292,23 +268,22 @@ namespace AutoCore.Auth.Network
             {
                 ServerList.Clear();
 
-                foreach (var server in GameServers)
+                foreach (var client in Communicator.Clients)
                 {
                     ServerList.Add(new ServerInfo
                     {
-                        AgeLimit = server.Value.AgeLimit,
-                        PKFlag = server.Value.PKFlag,
-                        CurrentPlayers = server.Value.CurrentPlayers,
-                        MaxPlayers = server.Value.MaxPlayers,
-                        Port = server.Value.Port,
-                        Ip = server.Value.PublicAddress,
-                        ServerId = server.Key,
+                        AgeLimit = client.Value.ServerInfo.AgeLimit,
+                        PKFlag = client.Value.ServerInfo.PKFlag,
+                        CurrentPlayers = client.Value.ServerInfo.CurrentPlayers,
+                        MaxPlayers = client.Value.ServerInfo.MaxPlayers,
+                        Port = client.Value.ServerInfo.Port,
+                        Ip = client.Value.ServerData.Address,
+                        ServerId = client.Key,
                         Status = 1
                     });
                 }
             }
         }
-        #endregion
 
         public void Shutdown()
         {
@@ -320,6 +295,7 @@ namespace AutoCore.Auth.Network
 
         public void MainLoop(long delta)
         {
+            Communicator.Update();
             Timer.Update(delta);
 
             if (Clients.Count == 0)
@@ -346,9 +322,13 @@ namespace AutoCore.Auth.Network
         public void BroadcastServerList()
         {
             lock (Clients)
+            {
                 foreach (var c in Clients)
+                {
                     if (c.State == ClientState.ServerList)
                         c.SendPacket(new SendServerListExtPacket(ServerList, c.Account.LastServerId));
+                }
+            }
         }
 
         #region Commands
