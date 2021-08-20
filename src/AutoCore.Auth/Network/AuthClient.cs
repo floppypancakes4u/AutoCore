@@ -174,7 +174,7 @@ namespace AutoCore.Auth.Network
                         context.SaveChanges();
                     }
 
-                    Logger.WriteLog(LogType.Network, $"Account ({Account.Username}, {Account.Id}) was redirected to the queue of the server: {info.ServerId}!");
+                    Logger.WriteLog(LogType.Network, $"Account ({Account.Username}, {Account.Id}) was redirected to the server: {info.ServerId}!");
                     break;
 
                 default:

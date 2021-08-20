@@ -69,8 +69,7 @@ namespace AutoCore.Auth.Packets.Server
                 var addrLen = (byte)(s.Ip.AddressFamily == AddressFamily.InterNetwork ? 4 : 16);
 
                 writer.Write(s.ServerId);
-                writer.Write(addrLen);
-                writer.Write(s.Ip.GetAddressBytes(), 0, addrLen);
+                writer.Write(s.Ip.GetAddressBytes());
                 writer.Write(s.Port);
                 writer.Write(s.AgeLimit);
                 writer.Write(s.PKFlag);
