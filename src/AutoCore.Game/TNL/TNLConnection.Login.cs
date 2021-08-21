@@ -22,23 +22,7 @@ namespace AutoCore.Game.TNL
 
             Logger.WriteLog(LogType.Network, "Client ({3} -> {1} | {2}) authenticated from {0}", GetNetAddressString(), Account.Id, Account.Name, _playerCOID);
 
-            /*var list = DataAccess.Character.GetCharacters(AccountId);
-
-            foreach (var character in from charData in list let character = new Character() where character.LoadFromDB(charData.Value, charData.Key) select character)
-            {
-                character.SetOwner(this);
-
-                var pack = new Packet(Opcode.CreateCharacter);
-                character.WriteToCreatePacket(pack);
-
-                var vpack = new Packet(Opcode.CreateVehicle);
-                character.GetVehicle().WriteToCreatePacket(vpack);
-
-                SendPacket(pack, RPCGuaranteeType.RPCGuaranteedOrdered);
-                SendPacket(vpack, RPCGuaranteeType.RPCGuaranteedOrdered);
-            }*/
-
-            // CharacterSelectionManager.SendCharacterList(this);
+            CharacterSelectionManager.Instance.SendCharacterList(this);
 
             SendGamePacket(new LoginResponsePacket(0x1000000));
         }

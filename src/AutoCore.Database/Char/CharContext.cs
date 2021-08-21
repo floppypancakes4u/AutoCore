@@ -11,7 +11,10 @@ namespace AutoCore.Database.Char
         public static string ConnectionString { get; private set; }
 
         public DbSet<Account> Accounts { get; set; }
+        public DbSet<Character> Characters { get; set; }
+        public DbSet<CharacterExploration> CharacterExplorations { get; set; }
         public DbSet<CharacterSocial> CharacterSocials { get; set; }
+        public DbSet<CharacterVehicle> CharacterVehicles { get; set; }
 
         public CharContext()
         {
@@ -35,6 +38,7 @@ namespace AutoCore.Database.Char
         {
             base.OnModelCreating(modelBuilder);
 
+            modelBuilder.Entity<CharacterExploration>().HasKey(ce => new { ce.CharacterCoid, ce.ContinentId });
             modelBuilder.Entity<CharacterSocial>().HasKey(cs => new { cs.CharacterCoid, cs.TargetCoid });
         }
     }
