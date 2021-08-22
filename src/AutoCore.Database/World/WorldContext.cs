@@ -11,6 +11,7 @@ namespace AutoCore.Database.World
         public static string ConnectionString { get; private set; }
 
         public DbSet<ExperienceLevel> ExperienceLevels { get; set; }
+        public DbSet<ConfigNewCharacter> ConfigNewCharacters { get; set; }
 
         public WorldContext()
         {
@@ -29,5 +30,12 @@ namespace AutoCore.Database.World
         }
 
         protected override void OnConfiguring(DbContextOptionsBuilder options) => options.UseMySql(ConnectionString, ServerVersion.AutoDetect(ConnectionString));
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+
+            modelBuilder.Entity<ConfigNewCharacter>().HasKey(cnc => new { cnc.Race, cnc.Class });
+        }
     }
 }

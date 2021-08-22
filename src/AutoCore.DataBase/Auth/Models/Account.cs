@@ -1,4 +1,5 @@
 ﻿using System;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Security.Cryptography;
 using System.Text;
@@ -8,6 +9,8 @@ namespace AutoCore.Database.Auth.Models
     [Table("account")]
     public class Account
     {
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public uint Id { get; set; }
         public string Email { get; set; }
         public string Username { get; set; }

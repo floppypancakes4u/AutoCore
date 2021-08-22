@@ -8,7 +8,7 @@ namespace AutoCore.Game.TNL
 
     public partial class TNLConnection
     {
-        private void HandleLoginRequest(BinaryReader reader)
+        private void HandleLoginRequestPacket(BinaryReader reader)
         {
             var packet = new LoginRequestPacket();
             packet.Read(reader);
@@ -25,6 +25,16 @@ namespace AutoCore.Game.TNL
             CharacterSelectionManager.Instance.SendCharacterList(this);
 
             SendGamePacket(new LoginResponsePacket(0x1000000));
+        }
+
+        private void HandleNewCharacterPacket(BinaryReader reader)
+        {
+            var packet = new NewCharacterPacket();
+            packet.Read(reader);
+
+            var (result, coid) = CharacterSelectionManager.Instance.CreateNewCharacter(this, packet);
+
+            SendGamePacket(new NewCharacterResponsePacket(result ? 0x80000000 : 0x1, coid));
         }
     }
 }

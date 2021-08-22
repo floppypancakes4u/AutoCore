@@ -168,15 +168,15 @@ namespace AutoCore.Game.TNL
                 {
                     // Global
                     case GameOpcode.LoginRequest:
-                        HandleLoginRequest(reader);
+                        HandleLoginRequestPacket(reader);
                         break;
 
                     case GameOpcode.LoginNewCharacter:
-                        //HandleLoginNewCharacter(packet);
+                        HandleNewCharacterPacket(reader);
                         break;
 
                     case GameOpcode.LoginDeleteCharacter:
-                        //HandleLoginDeleteCharacter(packet);
+                        //HandleDeleteCharacter(reader);
                         break;
 
                     case GameOpcode.News:
@@ -184,15 +184,15 @@ namespace AutoCore.Game.TNL
                         break;
 
                     case GameOpcode.Login:
-                        //HandleGlobalLogin(packet);
+                        //HandleGlobalLogin(reader);
                         break;
 
                     case GameOpcode.Disconnect:
-                        //HandleDisconnect(packet);
+                        //HandleDisconnect(reader);
                         break;
 
                     case GameOpcode.Chat:
-                        //ChatManager.HandleChat(this, packet);
+                        //ChatManager.HandleChat(this, reader);
                         break;
 
                     case GameOpcode.GetFriends:
@@ -208,27 +208,27 @@ namespace AutoCore.Game.TNL
                         break;
 
                     case GameOpcode.AddFriend:
-                        //SocialManager.AddEntry(this, packet, SocialType.Friend);
+                        //SocialManager.AddEntry(this, reader, SocialType.Friend);
                         break;
 
                     case GameOpcode.AddEnemy:
-                        //SocialManager.AddEntry(this, packet, SocialType.Enemy);
+                        //SocialManager.AddEntry(this, reader, SocialType.Enemy);
                         break;
 
                     case GameOpcode.AddIgnore:
-                        //SocialManager.AddEntry(this, packet, SocialType.Ignore);
+                        //SocialManager.AddEntry(this, reader, SocialType.Ignore);
                         break;
 
                     case GameOpcode.RemoveFriend:
-                        //SocialManager.RemoveEntry(this, packet.ReadPadding(4).ReadLong(), SocialType.Friend);
+                        //SocialManager.RemoveEntry(this, reader.ReadPadding(4).ReadLong(), SocialType.Friend);
                         break;
 
                     case GameOpcode.RemoveEnemy:
-                        //SocialManager.RemoveEntry(this, packet.ReadPadding(4).ReadLong(), SocialType.Enemy);
+                        //SocialManager.RemoveEntry(this, reader.ReadPadding(4).ReadLong(), SocialType.Enemy);
                         break;
 
                     case GameOpcode.RemoveIgnore:
-                        //SocialManager.RemoveEntry(this, packet.ReadPadding(4).ReadLong(), SocialType.Ignore);
+                        //SocialManager.RemoveEntry(this, reader.ReadPadding(4).ReadLong(), SocialType.Ignore);
                         break;
 
                     case GameOpcode.RequestClanInfo:
@@ -241,23 +241,23 @@ namespace AutoCore.Game.TNL
 
                     // Sector
                     case GameOpcode.TransferFromGlobal:
-                        //HandleTransferFromGlobal(packet);
+                        //HandleTransferFromGlobal(reader);
                         break;
 
                     case GameOpcode.TransferFromGlobalStage2:
-                        //HandleTransferFromGlobalStage2(packet);
+                        //HandleTransferFromGlobalStage2(reader);
                         break;
 
                     case GameOpcode.TransferFromGlobalStage3:
-                        //HandleTransferFromGlobalStage3(packet);
+                        //HandleTransferFromGlobalStage3(reader);
                         break;
 
                     case GameOpcode.UpdateFirstTimeFlagsRequest:
-                        //HandleUpdateFirstTimeFlagsRequest(packet);
+                        //HandleUpdateFirstTimeFlagsRequest(reader);
                         break;
 
                     case GameOpcode.Broadcast:
-                        //ChatManager.HandleBroadcast(this, packet);
+                        //ChatManager.HandleBroadcast(this, reader);
                         break;
 
                     default:
