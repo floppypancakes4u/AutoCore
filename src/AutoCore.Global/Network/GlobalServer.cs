@@ -44,18 +44,23 @@ namespace AutoCore.Global.Network
 
             TNLInterface.RegisterNetClassReps();
 
-            lock (_interfaceLock)
-                Interface = new TNLInterface(Config.GameConfig.Port, true, 175, false);
+            Logger.WriteLog(LogType.Initialize, "Initializing the TNL interface...");
+            Interface = new TNLInterface(Config.GameConfig.Port, true, 175, false);
 
             Loop = new MainLoop(this, MainLoopTime);
 
-            PublicAddress = IPAddress.Parse(Config.GameConfig.PublicAddress);
+            Logger.WriteLog(LogType.Initialize, "Initializing the database connections...");
 
             CharContext.InitializeConnectionString(Config.CharDatabaseConnectionString);
             WorldContext.InitializeConnectionString(Config.WorldDatabaseConnectionString);
 
-            AssetManager.Instance.Initialize(Config.GamePath);
+            if (!AssetManager.Instance.Initialize(Config.GamePath))
+            {
+                throw new Exception("Unable to load assets!");
+            }
 
+            Logger.WriteLog(LogType.Initialize, "Initializing the network...");
+            PublicAddress = IPAddress.Parse(Config.GameConfig.PublicAddress);
             LengthedSocket.InitializeEventArgsPool(Config.SocketAsyncConfig.MaxClients * Config.SocketAsyncConfig.ConcurrentOperationsByClient);
 
             CommandProcessor.RegisterCommand("exit", ProcessExitCommand);
@@ -108,6 +113,8 @@ namespace AutoCore.Global.Network
 
         public bool Start()
         {
+            Logger.WriteLog(LogType.Initialize, "Starting the Global server...");
+
             // If no config file has been found, these values are 0 by default
             if (Config.GameConfig.Port == 0 || Config.GameConfig.Backlog == 0)
             {
@@ -127,6 +134,7 @@ namespace AutoCore.Global.Network
 
             ConnectCommunicator();
 
+            Logger.WriteLog(LogType.Initialize, "The Global server has been started!");
             Logger.WriteLog(LogType.Network, "*** Listening for clients on port {0}", Config.GameConfig.Port);
 
             return true;
@@ -191,8 +199,6 @@ namespace AutoCore.Global.Network
 
         private void OnCommunicatorConnect(ServerData info)
         {
-            Logger.WriteLog(LogType.Communicator, "Logging in to the auth server...");
-
             info.Id = Config.ServerInfoConfig.Id;
             info.Address = PublicAddress;
             info.Password = Config.ServerInfoConfig.Password;
@@ -201,7 +207,10 @@ namespace AutoCore.Global.Network
         private void OnCommunicatorLoginResponse(CommunicatorActionResult result)
         {
             if (result == CommunicatorActionResult.Success)
+            {
+                Logger.WriteLog(LogType.Communicator, "Successfully logged in to the Auth server!");
                 return;
+            }
 
             AuthCommunicator?.Close();
             AuthCommunicator = null;

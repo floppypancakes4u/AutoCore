@@ -9,23 +9,30 @@ namespace AutoCore.Game.Managers
 {
     using Asset;
     using CloneBases;
-    using CloneBases.Prefixes;
-    using Structures;
     using Utils;
     using Utils.Memory;
 
     public class AssetManager : Singleton<AssetManager>
     {
         private bool DataLoaded { get; set; }
-        private WADLoader WADLoader { get; set; }
+        private WADLoader WADLoader { get; } = new();
+        private GLMLoader GLMLoader { get; } = new();
 
         public string GamePath { get; private set; }
 
-        public void Initialize(string gamePath)
+        public bool Initialize(string gamePath)
         {
             Logger.WriteLog(LogType.Initialize, "Initializing Asset Manager...");
 
             GamePath = gamePath;
+
+            if (!Directory.Exists(GamePath) || !File.Exists(Path.Combine(GamePath, "exe", "autoassault.exe")))
+            {
+                Logger.WriteLog(LogType.Error, "Invalid GamePath is set in the config!");
+                return false;
+            }
+
+            return true;
         }
 
         public bool LoadAllData()
@@ -33,21 +40,15 @@ namespace AutoCore.Game.Managers
             if (DataLoaded)
                 return false;
 
-            if (!LoadWADData())
+            if (!WADLoader.Load(Path.Combine(GamePath, "clonebase.wad")))
+                return false;
+
+            if (!GLMLoader.Load(GamePath))
                 return false;
 
             DataLoaded = true;
 
             Logger.WriteLog(LogType.Initialize, "Asset Manager has loaded all data!");
-            return true;
-        }
-
-        private bool LoadWADData()
-        {
-            var WADLoader = new WADLoader();
-            if (!WADLoader.LoadCloneBases(Path.Combine(GamePath, "clonebase.wad")))
-                return false;
-
             return true;
         }
 

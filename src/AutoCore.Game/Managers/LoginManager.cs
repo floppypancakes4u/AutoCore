@@ -6,7 +6,6 @@ namespace AutoCore.Game.Managers
 {
     using Database.Char;
     using Database.Char.Models;
-    using Login;
     using Packets.Login;
     using TNL;
     using Utils.Memory;
@@ -90,6 +89,13 @@ namespace AutoCore.Game.Managers
             }
 
             return true;
+        }
+
+        private class GlobalLoginEntry
+        {
+            public DateTime ExpireTime { get; set; }
+            public string Username { get; set; }
+            public uint AuthKey { get; set; }
         }
     }
 }
