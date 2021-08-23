@@ -66,7 +66,7 @@ namespace AutoCore.Game.Structures
                 Objectives = new Dictionary<byte, MissionObjective>()
             };
 
-            reader.ReadByte();
+            reader.BaseStream.Position += 1;
 
             mi.NPC = reader.ReadInt32();
             mi.Priority = reader.ReadInt32();
@@ -77,7 +77,7 @@ namespace AutoCore.Game.Structures
             mi.ReqMissionId = reader.ReadConstArray(4, reader.ReadInt32);
             mi.IsRepeatable = reader.ReadInt16();
 
-            reader.ReadBytes(2);
+            reader.BaseStream.Position += 2;
 
             mi.Item = reader.ReadConstArray(4, reader.ReadInt32);
             mi.ItemTemplate = reader.ReadConstArray(4, reader.ReadInt32);
@@ -96,7 +96,7 @@ namespace AutoCore.Game.Structures
             mi.RequirementEventId = reader.ReadInt32();
             mi.TargetLevel = reader.ReadInt16();
 
-            reader.ReadBytes(2);
+            reader.BaseStream.Position += 2;
 
             mi.RequirementsOred = reader.ReadInt32();
             mi.RequirementsNegative = reader.ReadInt32();
@@ -104,7 +104,7 @@ namespace AutoCore.Game.Structures
             mi.Pocket = reader.ReadInt32();
             mi.NumberOfObjectives = reader.ReadByte();
 
-            reader.ReadBytes(7);
+            reader.BaseStream.Position += 7;
 
             /*XElement element = null;
 

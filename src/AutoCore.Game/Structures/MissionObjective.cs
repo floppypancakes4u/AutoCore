@@ -45,18 +45,18 @@ namespace AutoCore.Game.Structures
                 //Requirements = new List<ObjectiveRequirement>(),
             };
 
-            reader.ReadBytes(1);
+            reader.BaseStream.Position += 1;
 
             mo.ObjectiveName = reader.ReadUnicodeString(65);
             mo.MapName = reader.ReadUnicodeString(65);
 
-            reader.ReadBytes(2);
+            reader.BaseStream.Position += 2;
 
             mo.WorldPosition = reader.ReadInt32();
             mo.ContinentObject = reader.ReadInt32();
             mo.LayerIndex = reader.ReadByte();
 
-            reader.ReadBytes(3);
+            reader.BaseStream.Position += 3;
 
             mo.XP = reader.ReadInt32();
             mo.Credits = reader.ReadInt32();
