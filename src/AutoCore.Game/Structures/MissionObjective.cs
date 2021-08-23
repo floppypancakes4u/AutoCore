@@ -71,7 +71,8 @@ namespace AutoCore.Game.Structures
             mo.XPBalanceScaler = reader.ReadSingle();
             mo.CreditScaler = reader.ReadSingle();
 
-            /*var obj = elem?.Elements("Objective").SingleOrDefault(e => (uint)e.Attribute("sequence") == mo.Sequence);
+            /*Do we need this?
+            var obj = elem?.Elements("Objective").SingleOrDefault(e => (uint)e.Attribute("sequence") == mo.Sequence);
             if (obj == null)
                 return mo;
 

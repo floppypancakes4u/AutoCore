@@ -106,7 +106,8 @@ namespace AutoCore.Game.Structures
 
             reader.BaseStream.Position += 7;
 
-            /*XElement element = null;
+            /*Do we need this?
+            XElement element = null;
 
             var stream = AssetManager.GetStreamByName($"{mi.Name}.xml", "missions.glm") ??
                          AssetManager.GetStreamByName($"{mi.Name}.xml", "misc.glm");
