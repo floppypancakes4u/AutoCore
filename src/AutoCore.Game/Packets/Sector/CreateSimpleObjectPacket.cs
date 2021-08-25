@@ -33,7 +33,7 @@ namespace AutoCore.Game.Packets.Sector
         public byte InventoryPositionX { get; set; }
         public byte InventoryPositionY { get; set; }
         public bool IsCorpse { get; set; }
-        public TFID Object { get; set; }
+        public TFID ObjectId { get; set; }
         public bool WillEquip { get; set; }
         public bool IsItemLink { get; set; }
         public bool IsInInventory { get; set; }
@@ -57,8 +57,6 @@ namespace AutoCore.Game.Packets.Sector
         public short RequiredTech { get; set; }
         public short RequiredTheory { get; set; }
         public int ItemTemplateId { get; set; }
-
-        // TODO: constructor(s) to fill the data easily
 
         public override void Read(BinaryReader reader)
         {
@@ -106,7 +104,7 @@ namespace AutoCore.Game.Packets.Sector
 
             writer.BaseStream.Position += 5;
 
-            writer.WriteTFID(Object);
+            writer.WriteTFID(ObjectId);
             writer.Write(WillEquip);
             writer.Write(IsItemLink);
             writer.Write(IsInInventory);
