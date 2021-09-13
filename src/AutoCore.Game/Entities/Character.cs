@@ -58,10 +58,31 @@ namespace AutoCore.Game.Entities
 
             if (packet is CreateCharacterPacket charPacket)
             {
-                charPacket.CurrentVehicleCoid = -1;
-                charPacket.CurrentTrailerCoid = -1;
-                charPacket.HeadId = HeadId;
-                // TODO
+                charPacket.CurrentVehicleCoid = -1; // TODO
+                charPacket.CurrentTrailerCoid = -1; // TODO
+                charPacket.HeadId = CharacterDBData.HeadId;
+                charPacket.BodyId = CharacterDBData.BodyId;
+                charPacket.AccessoryId1 = CharacterDBData.HeadDetail1;
+                charPacket.AccessoryId2 = CharacterDBData.HeadDetail2;
+                charPacket.HairId = CharacterDBData.HairId;
+                charPacket.MouthId = CharacterDBData.MouthId;
+                charPacket.EyesId = CharacterDBData.EyesId;
+                charPacket.HelmetId = CharacterDBData.HelmetId;
+                charPacket.PrimaryColor = CharacterDBData.PrimaryColor;
+                charPacket.SecondaryColor = CharacterDBData.SecondaryColor;
+                charPacket.EyesColor = CharacterDBData.EyesColor;
+                charPacket.HairColor = CharacterDBData.HairColor;
+                charPacket.SkinColor = CharacterDBData.SkinColor;
+                charPacket.SpecialityColor = CharacterDBData.SpecialityColor;
+                charPacket.LastTownId = 0; // TODO
+                charPacket.LastStationMapId = 0; // TODO
+                charPacket.Level = CharacterDBData.Level; // TODO
+                charPacket.Bf297 = 0; // TODO
+                charPacket.GMLevel = GMLevel;
+                charPacket.ServerTime = 0; // TODO
+                charPacket.Name = Name;
+                charPacket.ClanName = ClanMemberDBData?.Clan?.Name ?? "";
+                charPacket.CharacterScaleOffset = CharacterDBData.ScaleOffset;
             }
 
             if (packet is CreateCharacterExtendedPacket extendedCharPacket)
