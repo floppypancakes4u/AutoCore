@@ -80,6 +80,8 @@ namespace AutoCore.Game.TNL
 
             using (var writer = new BinaryWriter(new MemoryStream(dest)))
             {
+                writer.Write(packet.Opcode);
+
                 packet.Write(writer);
 
                 packetLength = (int)writer.BaseStream.Position;

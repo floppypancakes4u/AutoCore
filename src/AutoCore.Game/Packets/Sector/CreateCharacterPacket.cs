@@ -11,8 +11,6 @@ namespace AutoCore.Game.Packets.Sector
     {
         public override GameOpcode Opcode => GameOpcode.CreateCharacter;
 
-        public override bool WriteOpcode { get; protected set; } = false;
-
         public long CurrentVehicleCoid { get; set; }
         public long CurrentTrailerCoid { get; set; }
         public int HeadId { get; set; }
@@ -100,13 +98,6 @@ namespace AutoCore.Game.Packets.Sector
 
         public override void Write(BinaryWriter writer)
         {
-            if (WriteOpcode)
-            {
-                writer.Write(Opcode);
-
-                WriteOpcode = false;
-            }
-
             base.Write(writer);
 
             writer.Write(CurrentVehicleCoid);

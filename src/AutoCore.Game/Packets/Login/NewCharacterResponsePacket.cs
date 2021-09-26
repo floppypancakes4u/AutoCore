@@ -26,7 +26,6 @@ namespace AutoCore.Game.Packets.Login
 
         public override void Write(BinaryWriter writer)
         {
-            writer.Write(Opcode);
             writer.Write(Result);
             writer.Write(NewCharCoid);
         }

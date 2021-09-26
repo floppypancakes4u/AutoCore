@@ -12,8 +12,6 @@ namespace AutoCore.Game.Packets.Sector
     {
         public override GameOpcode Opcode => GameOpcode.CreateSimpleObject;
 
-        public virtual bool WriteOpcode { get; protected set; } = false;
-
         public int CBID { get; set; }
         public long CoidStore { get; set; } = -1;
         public int CurrentHealth { get; set; }
@@ -65,9 +63,6 @@ namespace AutoCore.Game.Packets.Sector
 
         public override void Write(BinaryWriter writer)
         {
-            if (WriteOpcode)
-                writer.Write(Opcode);
-
             writer.Write(CBID);
             writer.Write(CoidStore); // coid Store
             writer.Write(CurrentHealth);

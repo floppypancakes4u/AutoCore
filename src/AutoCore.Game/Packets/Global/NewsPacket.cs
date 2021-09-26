@@ -24,7 +24,6 @@ namespace AutoCore.Game.Packets.Global
 
         public override void Write(BinaryWriter writer)
         {
-            writer.Write(Opcode);
             writer.Write(Language);
             writer.Write(News.Length + 1);
             writer.WriteUtf8NullString(News);

@@ -53,8 +53,6 @@ namespace AutoCore.Game.Packets.Sector
 
         public override void Write(BinaryWriter writer)
         {
-            writer.Write(Opcode);
-
             base.Write(writer);
 
             writer.Write(NumCompletedQuests);
