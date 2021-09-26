@@ -129,8 +129,8 @@ namespace AutoCore.Game.Managers
             var character = new Character(client);
             character.LoadFromDB(context, coid);
 
-            var vehicle = new CharacterVehicle();
-            vehicle.LoadFromDB(context, 0);
+            var vehicle = new Vehicle();
+            vehicle.LoadFromDB(context, character.CharacterDBData.ActiveVehicleId);
 
             var createCharPacket = new CreateCharacterPacket();
             character.WriteToPacket(createCharPacket);
