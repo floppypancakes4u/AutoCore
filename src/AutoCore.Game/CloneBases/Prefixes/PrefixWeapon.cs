@@ -8,8 +8,8 @@ namespace AutoCore.Game.CloneBases.Prefixes
     public class PrefixWeapon : PrefixBase
     {
         public float AccucaryBonusPercent { get; set; }
-        public DamageArray DamageAdjustMaximum { get; set; }
-        public DamageArray DamageAdjustMinimum { get; set; }
+        public DamageSpecific DamageAdjustMaximum { get; set; }
+        public DamageSpecific DamageAdjustMinimum { get; set; }
         public float DamagePercentAll { get; set; }
         public float[] DamagePercentMaximum { get; set; }
         public float[] DamagePercentMinimum { get; set; }
@@ -35,8 +35,8 @@ namespace AutoCore.Game.CloneBases.Prefixes
             DamagePercentAll = reader.ReadSingle();
             DamagePercentMinimum = reader.ReadConstArray(6, reader.ReadSingle);
             DamagePercentMaximum = reader.ReadConstArray(6, reader.ReadSingle);
-            DamageAdjustMinimum = DamageArray.ReadNew(reader);
-            DamageAdjustMaximum = DamageArray.ReadNew(reader);
+            DamageAdjustMinimum = DamageSpecific.ReadNew(reader);
+            DamageAdjustMaximum = DamageSpecific.ReadNew(reader);
             OffenseBonus = reader.ReadInt16();
 
             reader.BaseStream.Position += 2;

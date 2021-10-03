@@ -4,7 +4,7 @@ namespace AutoCore.Game.Structures
 {
     using Utils.Extensions;
 
-    public struct DamageArray
+    public class DamageSpecific
     {
         public short[] Damage { get; set; }
 
@@ -18,9 +18,9 @@ namespace AutoCore.Game.Structures
             writer.WriteConstArray(Damage, 6, writer.Write);
         }
 
-        public static DamageArray ReadNew(BinaryReader reader)
+        public static DamageSpecific ReadNew(BinaryReader reader)
         {
-            return new DamageArray { Damage = reader.ReadConstArray(6, reader.ReadInt16) };
+            return new DamageSpecific { Damage = reader.ReadConstArray(6, reader.ReadInt16) };
         }
     }
 }

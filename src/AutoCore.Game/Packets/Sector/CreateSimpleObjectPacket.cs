@@ -135,6 +135,7 @@ namespace AutoCore.Game.Packets.Sector
 
         public static void WriteEmptySimpleObjectPacket(BinaryWriter writer)
         {
+            // CBID -1 signals that it is an empty packet
             writer.Write(-1);
 
             writer.BaseStream.Position += 208;

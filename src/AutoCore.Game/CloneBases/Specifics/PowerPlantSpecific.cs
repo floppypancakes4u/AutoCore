@@ -2,7 +2,7 @@
 
 namespace AutoCore.Game.CloneBases.Specifics
 {
-    public struct PowerPlantSpecific
+    public class PowerPlantSpecific
     {
         public short CoolRate;
         public int HeatMaximum;

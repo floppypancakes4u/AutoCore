@@ -4,20 +4,20 @@ namespace AutoCore.Game.CloneBases.Specifics
 {
     using Structures;
 
-    public struct ArmorSpecific
+    public class ArmorSpecific
     {
         public short ArmorFactor;
         public short DefenseBonus;
         public float DeflectionModifier;
-        public DamageArray Resistances;
+        public DamageSpecific Resistances;
 
         public static ArmorSpecific ReadNew(BinaryReader reader)
         {
             return new ArmorSpecific
             {
-                DeflectionModifier = reader.ReadSingle(),
+                DeflectionModifier = reader.ReadSingle(), // TODO: in the structs it's INT, not FLOAT
                 ArmorFactor = reader.ReadInt16(),
-                Resistances = DamageArray.ReadNew(reader),
+                Resistances = DamageSpecific.ReadNew(reader),
                 DefenseBonus = reader.ReadInt16()
             };
         }

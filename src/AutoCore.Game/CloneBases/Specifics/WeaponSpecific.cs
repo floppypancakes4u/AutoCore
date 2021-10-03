@@ -20,10 +20,10 @@ namespace AutoCore.Game.CloneBases.Specifics
         public byte Flags;
         public short Heat;
         public float HitBonusPerLevel;
-        public DamageArray MaxMax;
-        public DamageArray MaxMin;
-        public DamageArray MinMax;
-        public DamageArray MinMin;
+        public DamageSpecific MaxMax;
+        public DamageSpecific MaxMin;
+        public DamageSpecific MinMax;
+        public DamageSpecific MinMin;
         public short OffenseBonus;
         public short PenetrationModifier;
         public float RangeMax;
@@ -39,10 +39,10 @@ namespace AutoCore.Game.CloneBases.Specifics
             var ws = new WeaponSpecific
             {
                 FirePoint = Vector3.ReadNew(reader),
-                MinMin = DamageArray.ReadNew(reader),
-                MinMax = DamageArray.ReadNew(reader),
-                MaxMin = DamageArray.ReadNew(reader),
-                MaxMax = DamageArray.ReadNew(reader),
+                MinMin = DamageSpecific.ReadNew(reader),
+                MinMax = DamageSpecific.ReadNew(reader),
+                MaxMin = DamageSpecific.ReadNew(reader),
+                MaxMax = DamageSpecific.ReadNew(reader),
                 ValidArc = reader.ReadSingle(),
                 RangeMin = reader.ReadSingle(),
                 RangeMax = reader.ReadSingle(),

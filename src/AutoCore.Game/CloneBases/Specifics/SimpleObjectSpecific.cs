@@ -10,7 +10,7 @@ namespace AutoCore.Game.CloneBases.Specifics
         public float Alpha { get; set; }
         public int Armor { get; set; }
         public int CustomColor { get; set; }
-        public DamageArray DamageArmor { get; set; }
+        public DamageSpecific DamageArmor { get; set; }
         public int DisciplineRanks { get; set; }
         public int DisciplineRequirement { get; set; }
         public bool DropBrokenOnly { get; set; }
@@ -83,7 +83,7 @@ namespace AutoCore.Game.CloneBases.Specifics
                 RenderType = reader.ReadByte(),
                 MaximumEnhancements = reader.ReadByte(),
                 PhysicsName = reader.ReadUnicodeString(65),
-                DamageArmor = DamageArray.ReadNew(reader),
+                DamageArmor = DamageSpecific.ReadNew(reader),
                 Ingredients = reader.ReadConstArray(5, reader.ReadInt32),
                 DisciplineRequirement = reader.ReadInt32(),
                 DisciplineRanks = reader.ReadInt32(),
