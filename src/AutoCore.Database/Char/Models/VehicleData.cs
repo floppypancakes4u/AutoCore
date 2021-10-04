@@ -3,8 +3,8 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace AutoCore.Database.Char.Models
 {
-    [Table("character_vehicle")]
-    public class CharacterVehicle
+    [Table("vehicle")]
+    public class VehicleData
     {
         [Key]
         public long Coid { get; set; }

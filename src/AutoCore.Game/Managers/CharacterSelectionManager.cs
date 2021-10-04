@@ -26,7 +26,7 @@ namespace AutoCore.Game.Managers
             if (existingCharacter != null)
                 return (false, -1);
 
-            var existingVehicle = context.CharacterVehicles.FirstOrDefault(v => v.Name == packet.VehicleName);
+            var existingVehicle = context.Vehicles.FirstOrDefault(v => v.Name == packet.VehicleName);
             if (existingVehicle != null)
                 return (false, -1);
 
@@ -83,7 +83,7 @@ namespace AutoCore.Game.Managers
             };
             context.Characters.Add(character);
 
-            var vehicle = new CharacterVehicle
+            var vehicle = new VehicleData
             {
                 Coid = vehObj.Coid,
                 CharacterCoid = charObj.Coid,
@@ -99,7 +99,7 @@ namespace AutoCore.Game.Managers
                 SecondaryColor = packet.VehicleSecondaryColor,
                 Trim = packet.VehicleTrim
             };
-            context.CharacterVehicles.Add(vehicle);
+            context.Vehicles.Add(vehicle);
             context.SaveChanges();
 
             return (true, charObj.Coid);

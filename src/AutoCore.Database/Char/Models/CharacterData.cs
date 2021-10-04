@@ -33,13 +33,13 @@ namespace AutoCore.Database.Char.Models
         public SimpleObjectData SimpleObjectBase { get; set; }
 
         [ForeignKey("ActiveVehicleId")]
-        public CharacterVehicle ActiveVehicle { get; set; }
+        public VehicleData ActiveVehicle { get; set; }
 
         [InverseProperty("Character")]
         public List<CharacterSocial> Socials { get; set; }
 
         [InverseProperty("Character")]
-        public List<CharacterVehicle> Vehicles { get; set; }
+        public List<VehicleData> Vehicles { get; set; }
 
         public CharacterData()
         {

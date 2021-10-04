@@ -14,7 +14,7 @@ namespace AutoCore.Database.Char
         public DbSet<CharacterData> Characters { get; set; }
         public DbSet<CharacterExploration> CharacterExplorations { get; set; }
         public DbSet<CharacterSocial> CharacterSocials { get; set; }
-        public DbSet<CharacterVehicle> CharacterVehicles { get; set; }
+        public DbSet<VehicleData> Vehicles { get; set; }
         public DbSet<Clan> Clans { get; set; }
         public DbSet<ClanMember> ClanMembers { get; set; }
         public DbSet<SimpleObjectData> SimpleObjects { get; set; }
