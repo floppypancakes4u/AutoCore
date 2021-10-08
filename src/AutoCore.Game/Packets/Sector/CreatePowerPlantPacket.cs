@@ -29,5 +29,12 @@ namespace AutoCore.Game.Packets.Sector
             writer.WriteUtf8StringOn(Name, 100);
             writer.Write(SkillCooldown);
         }
+
+        public new static void WriteEmptyPacket(BinaryWriter writer)
+        {
+            CreateSimpleObjectPacket.WriteEmptyPacket(writer);
+
+            writer.BaseStream.Position += 120;
+        }
     }
 }

@@ -64,7 +64,7 @@ namespace AutoCore.Game.Packets.Sector
         public override void Write(BinaryWriter writer)
         {
             writer.Write(CBID);
-            writer.Write(CoidStore); // coid Store
+            writer.Write(CoidStore);
             writer.Write(CurrentHealth);
             writer.Write(MaximumHealth);
             writer.Write(Value);
@@ -133,7 +133,7 @@ namespace AutoCore.Game.Packets.Sector
             writer.BaseStream.Position += 4;
         }
 
-        public static void WriteEmptySimpleObjectPacket(BinaryWriter writer)
+        public static void WriteEmptyPacket(BinaryWriter writer)
         {
             // CBID -1 signals that it is an empty packet
             writer.Write(-1);

@@ -1,14 +1,11 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace AutoCore.Game.Packets.Sector
 {
     using Constants;
     using Extensions;
+    using Utils.Extensions;
 
     public class CreateVehiclePacket : CreateSimpleObjectPacket
     {
@@ -41,13 +38,13 @@ namespace AutoCore.Game.Packets.Sector
         public bool IsInventory { get; set; }
         public bool IsActive { get; set; }
         public byte Trim { get; set; }
-        public CreateSimpleObjectPacket CreateOrnamentPacket { get; set; }
-        public CreateSimpleObjectPacket CreateRaceItemPacket { get; set; }
-        public CreatePowerPlantPacket CreatePowerPlantPacket { get; set; }
-        public CreateWheelSetPacket CreateWheelSetPacket { get; set; }
-        public CreateArmorPacket CreateArmorPacket { get; set; }
-        public CreateWeaponPacket CreateWeaponMeleePacket { get; set; }
-        public CreateWeaponPacket[] CreateWeaponPackets { get; set; } = new CreateWeaponPacket[3];
+        public CreateSimpleObjectPacket CreateOrnament { get; set; }
+        public CreateSimpleObjectPacket CreateRaceItem { get; set; }
+        public CreatePowerPlantPacket CreatePowerPlant { get; set; }
+        public CreateWheelSetPacket CreateWheelSet { get; set; }
+        public CreateArmorPacket CreateArmor { get; set; }
+        public CreateWeaponPacket CreateWeaponMelee { get; set; }
+        public CreateWeaponPacket[] CreateWeapons { get; set; } = new CreateWeaponPacket[3];
         public int CurrentPathId { get; set; }
         public int ExtraPathId { get; set; }
         public float PatrolDistance { get; set; }
@@ -106,26 +103,103 @@ namespace AutoCore.Game.Packets.Sector
             // Ornament
             writer.Write(GameOpcode.CreateSimpleObject);
 
-            if (CreateOrnamentPacket != null)
+            if (CreateOrnament != null)
             {
-                CreateOrnamentPacket.Write(writer);
+                CreateOrnament.Write(writer);
             }
             else
             {
-                WriteEmptySimpleObjectPacket(writer);
+                WriteEmptyPacket(writer);
             }
 
-            // Race Item
+            // RaceItem
             writer.Write(GameOpcode.CreateSimpleObject);
 
-            if (CreateRaceItemPacket != null)
+            if (CreateRaceItem != null)
             {
-                CreateRaceItemPacket.Write(writer);
+                CreateRaceItem.Write(writer);
             }
             else
             {
-                WriteEmptySimpleObjectPacket(writer);
+                WriteEmptyPacket(writer);
             }
+
+            // PowerPlant
+            writer.Write(GameOpcode.CreatePowerPlant);
+
+            if (CreatePowerPlant != null)
+            {
+                CreatePowerPlant.Write(writer);
+            }
+            else
+            {
+                CreatePowerPlantPacket.WriteEmptyPacket(writer);
+            }
+
+            // WheelSet
+            writer.Write(GameOpcode.CreateWheelSet);
+
+            CreateWheelSet.Write(writer);
+
+            // Armor
+            writer.Write(GameOpcode.CreateArmor);
+
+            if (CreateArmor != null)
+            {
+                CreateArmor.Write(writer);
+            }
+            else
+            {
+                CreateArmorPacket.WriteEmptyPacket(writer);
+            }
+
+            // MeleeWeapon
+            writer.Write(GameOpcode.CreateWeapon);
+
+            if (CreateWeaponMelee != null)
+            {
+                CreateWeaponMelee.Write(writer);
+            }
+            else
+            {
+                CreateWeaponPacket.WriteEmptyPacket(writer);
+            }
+
+            // Front, Turret and Rear weapons
+            for (var i = 0; i < 3; ++i)
+            {
+                writer.Write(GameOpcode.CreateWeapon);
+
+                if (CreateWeapons[i] != null)
+                {
+                    CreateWeapons[i].Write(writer);
+                }
+                else
+                {
+                    CreateWeaponPacket.WriteEmptyPacket(writer);
+                }
+            }
+
+            writer.Write(CurrentPathId);
+            writer.Write(ExtraPathId);
+            writer.Write(PatrolDistance);
+            writer.Write(PathReversing);
+            writer.Write(PathIsRoad);
+
+            writer.BaseStream.Position += 2;
+
+            writer.Write(TemplateId);
+
+            writer.BaseStream.Position += 4;
+
+            writer.Write(MurdererCoid);
+
+            for (var i = 0; i < 3; ++i)
+                writer.Write(CreateWeapons[i]?.CBID ?? -1);
+
+            writer.WriteUtf8StringOn(Name, 33);
+
+            writer.BaseStream.Position += 3;
         }
     }
 }

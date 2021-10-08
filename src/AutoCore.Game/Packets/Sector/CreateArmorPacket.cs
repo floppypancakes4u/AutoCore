@@ -31,5 +31,12 @@ namespace AutoCore.Game.Packets.Sector
 
             writer.BaseStream.Position += 2;
         }
+
+        public new static void WriteEmptyPacket(BinaryWriter writer)
+        {
+            CreateSimpleObjectPacket.WriteEmptyPacket(writer);
+
+            writer.BaseStream.Position += 128;
+        }
     }
 }

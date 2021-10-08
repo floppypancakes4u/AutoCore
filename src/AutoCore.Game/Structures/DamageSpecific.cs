@@ -8,6 +8,11 @@ namespace AutoCore.Game.Structures
     {
         public short[] Damage { get; set; }
 
+        public DamageSpecific()
+        {
+            Damage = new short[6];
+        }
+
         public void Read(BinaryReader reader)
         {
             Damage = reader.ReadConstArray(6, reader.ReadInt16);
