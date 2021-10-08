@@ -17,8 +17,8 @@ namespace AutoCore.Game.Packets.Sector
         public long CoidCurrentOwner { get; set; }
         public int CoidSpawnOwner { get; set; }
         public int[] Tricks { get; } = new int[8];
-        public int PrimaryColor { get; set; }
-        public int SecondaryColor { get; set; }
+        public uint PrimaryColor { get; set; }
+        public uint SecondaryColor { get; set; }
         public short ArmorAdd { get; set; }
         public int PowerMaxAdd { get; set; }
         public int HeatMaxAdd { get; set; }
