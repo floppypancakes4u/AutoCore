@@ -4,6 +4,7 @@ namespace AutoCore.Game.TNL
 {
     using Managers;
     using Packets.Login;
+    using Packets.Global;
     using Utils;
 
     public partial class TNLConnection
@@ -40,6 +41,21 @@ namespace AutoCore.Game.TNL
             {
                 CharacterSelectionManager.ExtendCharacterList(this, coid);
             }
+        }
+
+        private void HandleGlobalLogin(BinaryReader reader)
+        {
+            var packet = new LoginPacket();
+            packet.Read(reader);
+
+            // TODO: check character
+
+            var response = new LoginAckPacket
+            {
+                Success = true
+            };
+
+            SendGamePacket(response);
         }
     }
 }

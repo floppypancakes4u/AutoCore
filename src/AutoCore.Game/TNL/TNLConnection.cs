@@ -186,7 +186,7 @@ namespace AutoCore.Game.TNL
                         break;
 
                     case GameOpcode.Login:
-                        //HandleGlobalLogin(reader);
+                        HandleGlobalLogin(reader);
                         break;
 
                     case GameOpcode.Disconnect:
