@@ -10,6 +10,7 @@ namespace AutoCore.Game.Entities
     using Database.Char;
     using Database.Char.Models;
     using Packets.Sector;
+    using Structures;
 
     public class Weapon : SimpleObject
     {
@@ -56,8 +57,8 @@ namespace AutoCore.Game.Entities
                 weaponPacket.RangeMinimum = CloneBaseWeapon.WeaponSpecific.RangeMin;
                 weaponPacket.RangeMaximum = CloneBaseWeapon.WeaponSpecific.RangeMax;
                 weaponPacket.ValidArc = CloneBaseWeapon.WeaponSpecific.ValidArc;
-                weaponPacket.MinimumDamage = new();
-                weaponPacket.MaximumDamage = new();
+                weaponPacket.MinimumDamage = DamageSpecific.CreateEmpty();
+                weaponPacket.MaximumDamage = DamageSpecific.CreateEmpty();
                 weaponPacket.Name = "";
             }
         }

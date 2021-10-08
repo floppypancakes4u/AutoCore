@@ -8,11 +8,6 @@ namespace AutoCore.Game.Structures
     {
         public short[] Damage { get; set; }
 
-        public DamageSpecific()
-        {
-            Damage = new short[6];
-        }
-
         public void Read(BinaryReader reader)
         {
             Damage = reader.ReadConstArray(6, reader.ReadInt16);
@@ -21,6 +16,11 @@ namespace AutoCore.Game.Structures
         public void Write(BinaryWriter writer)
         {
             writer.WriteConstArray(Damage, 6, writer.Write);
+        }
+
+        public static DamageSpecific CreateEmpty()
+        {
+            return new DamageSpecific { Damage = new short[6] };
         }
 
         public static DamageSpecific ReadNew(BinaryReader reader)
