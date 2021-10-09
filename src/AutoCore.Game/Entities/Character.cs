@@ -69,19 +69,14 @@ namespace AutoCore.Game.Entities
             return true;
         }
 
-        public void SetActiveVehicle(Vehicle vehicle)
-        {
-            CurrentVehicle = vehicle;
-        }
-
         public override void WriteToPacket(CreateSimpleObjectPacket packet)
         {
             base.WriteToPacket(packet);
 
             if (packet is CreateCharacterPacket charPacket)
             {
-                charPacket.CurrentVehicleCoid = CurrentVehicle?.ObjectId.Coid ?? -1;
-                charPacket.CurrentTrailerCoid = -1; // TODO
+                charPacket.CurrentVehicleCoid = DBData.ActiveVehicleCoid;
+                charPacket.CurrentTrailerCoid = -1L; // TODO
                 charPacket.HeadId = HeadId;
                 charPacket.BodyId = BodyId;
                 charPacket.AccessoryId1 = DBData.HeadDetail1;
@@ -96,14 +91,14 @@ namespace AutoCore.Game.Entities
                 charPacket.HairColor = DBData.HairColor;
                 charPacket.SkinColor = DBData.SkinColor;
                 charPacket.SpecialityColor = DBData.SpecialityColor;
-                charPacket.LastTownId = 0; // TODO
-                charPacket.LastStationMapId = 0; // TODO
+                charPacket.LastTownId = -1; // TODO
+                charPacket.LastStationMapId = -1; // TODO
                 charPacket.Level = DBData.Level;
                 charPacket.UsingVehicle = false; // TODO
                 charPacket.UsingTrailer = false;
                 charPacket.IsPosessingCreature = false;
                 charPacket.GMLevel = GMLevel;
-                charPacket.ServerTime = 0; // TODO
+                charPacket.ServerTime = DateTime.Now.Ticks; // TODO
                 charPacket.Name = Name;
                 charPacket.ClanName = ClanMemberDBData?.Clan?.Name ?? "";
                 charPacket.CharacterScaleOffset = DBData.ScaleOffset;

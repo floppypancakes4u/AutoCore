@@ -137,10 +137,10 @@ namespace AutoCore.Game.Entities
             if (packet is CreateVehiclePacket vehiclePacket)
             {
                 vehiclePacket.CoidCurrentOwner = DBData.CharacterCoid;
-                vehiclePacket.CoidSpawnOwner = 0;
+                vehiclePacket.CoidSpawnOwner = -1;
 
                 for (var i = 0; i < 8; ++i)
-                    vehiclePacket.Tricks[i] = 0;
+                    vehiclePacket.Tricks[i] = -1;
 
                 vehiclePacket.PrimaryColor = DBData.PrimaryColor;
                 vehiclePacket.SecondaryColor = DBData.SecondaryColor;
@@ -154,27 +154,26 @@ namespace AutoCore.Game.Entities
                 vehiclePacket.MaxWeightWeaponRear = 0.0f;
                 vehiclePacket.MaxWeightArmor = 0.0f;
                 vehiclePacket.MaxWeightPowerPlant = 0.0f;
-                vehiclePacket.SpeedAdd = 0.0f;
-                vehiclePacket.BrakesMaxTorqueFrontMultiplier = 0.0f;
-                vehiclePacket.BrakesMaxTorqueRearAdjustMultiplier = 0.0f;
-                vehiclePacket.SteeringMaxAngleMultiplier = 0.0f;
-                vehiclePacket.SteeringFullSpeedLimitMultiplier = 0.0f;
-                vehiclePacket.AVDNormalSpinDampeningMultiplier = 0.0f;
-                vehiclePacket.AVDCollisionSpinDampeningMultiplier = 0.0f;
+                vehiclePacket.SpeedAdd = 1.0f;
+                vehiclePacket.BrakesMaxTorqueFrontMultiplier = 1.0f;
+                vehiclePacket.BrakesMaxTorqueRearAdjustMultiplier = 1.0f;
+                vehiclePacket.SteeringMaxAngleMultiplier = 1.0f;
+                vehiclePacket.SteeringFullSpeedLimitMultiplier = 1.0f;
+                vehiclePacket.AVDNormalSpinDampeningMultiplier = 1.0f;
+                vehiclePacket.AVDCollisionSpinDampeningMultiplier = 1.0f;
                 vehiclePacket.KMTravelled = 0.0f;
                 vehiclePacket.IsTrailer = false;
                 vehiclePacket.IsInventory = false;
                 vehiclePacket.IsActive = true;
                 vehiclePacket.Trim = DBData.Trim;
 
-                // TODO: sub-packets
                 if (Ornament != null)
                 {
                     vehiclePacket.CreateOrnament = new CreateSimpleObjectPacket();
                     Ornament.WriteToPacket(vehiclePacket.CreateOrnament);
                 }
 
-                if (RaceItem != null)
+                if (RaceItem != null && !IsInCharacterSelection)
                 {
                     vehiclePacket.CreateRaceItem = new CreateSimpleObjectPacket();
                     RaceItem.WriteToPacket(vehiclePacket.CreateRaceItem);
@@ -219,16 +218,16 @@ namespace AutoCore.Game.Entities
                     WeaponRear.WriteToPacket(vehiclePacket.CreateWeapons[2]);
                 }
 
-                vehiclePacket.CurrentPathId = 0;
+                vehiclePacket.CurrentPathId = -1;
                 vehiclePacket.ExtraPathId = 0;
                 vehiclePacket.PatrolDistance = 0.0f;
                 vehiclePacket.PathReversing = false;
                 vehiclePacket.PathIsRoad = false;
-                vehiclePacket.TemplateId = 0;
-                vehiclePacket.MurdererCoid = 0;
-                vehiclePacket.WeaponsCBID[0] = 0;
-                vehiclePacket.WeaponsCBID[1] = 0;
-                vehiclePacket.WeaponsCBID[2] = 0;
+                vehiclePacket.TemplateId = -1;
+                vehiclePacket.MurdererCoid = -1L;
+                vehiclePacket.WeaponsCBID[0] = WeaponFront?.CBID ?? -1;
+                vehiclePacket.WeaponsCBID[1] = WeaponTurret?.CBID ?? -1;
+                vehiclePacket.WeaponsCBID[2] = WeaponRear?.CBID ?? -1;
                 vehiclePacket.Name = DBData.Name;
             }
 

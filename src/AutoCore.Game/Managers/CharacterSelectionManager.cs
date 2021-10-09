@@ -127,7 +127,7 @@ namespace AutoCore.Game.Managers
                     Rotation1 = 0.0f,
                     Rotation2 = 0.0f,
                     Rotation3 = 0.0f,
-                    Rotation4 = 0.0f,
+                    Rotation4 = 1.0f,
                     PrimaryColor = packet.VehiclePrimaryColor,
                     SecondaryColor = packet.VehicleSecondaryColor,
                     Trim = packet.VehicleTrim,
@@ -190,8 +190,6 @@ namespace AutoCore.Game.Managers
             {
                 return;
             }
-
-            character.SetActiveVehicle(vehicle);
 
             var createCharPacket = new CreateCharacterPacket();
             character.WriteToPacket(createCharPacket);

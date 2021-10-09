@@ -50,7 +50,7 @@ namespace AutoCore.Game.Entities
                 wheelSetPacket.FrictionPaved = CloneBaseWheelSet.WheelSetSpecific.Friction[3];
                 wheelSetPacket.FrictionPlains = CloneBaseWheelSet.WheelSetSpecific.Friction[4];
                 wheelSetPacket.FrictionSand = CloneBaseWheelSet.WheelSetSpecific.Friction[5];
-                wheelSetPacket.IsDefault = true;
+                wheelSetPacket.IsDefault = false;
                 wheelSetPacket.Name = "";
             }
         }

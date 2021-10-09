@@ -35,6 +35,8 @@ namespace AutoCore.Game.Entities
                 Coid = -1L,
                 Global = false
             };
+            Position = new Vector3(0.0f, 0.0f, 0.0f);
+            Rotation = new Quaternion(0.0f, 0.0f, 0.0f, 1.0f);
         }
 
         protected void LoadCloneBase(int cbid)
@@ -56,7 +58,7 @@ namespace AutoCore.Game.Entities
             packet.CoidStore = -1;
             packet.CurrentHealth = 100;
             packet.MaximumHealth = 100;
-            packet.Value = 0;
+            packet.Value = CloneBaseObject.CloneBaseSpecific.BaseValue;
             packet.Faction = Faction;
             packet.CustomValue = CustomValue;
 
@@ -83,15 +85,15 @@ namespace AutoCore.Game.Entities
             packet.IsKit = false;
             packet.IsInfinite = false;
             packet.IsBound = false;
-            packet.UsesLeft = 0;
+            packet.UsesLeft = CloneBaseObject.SimpleObjectSpecific.MaxUses;
             packet.CustomizedName = "";
             packet.MadeFromMemory = false;
             packet.IsMail = false;
-            packet.RequiredLevel = -1;
-            packet.RequiredCombat = 0;
-            packet.RequiredPerception = 0;
-            packet.RequiredTech = 0;
-            packet.RequiredTheory = 0;
+            packet.RequiredLevel = CloneBaseObject.SimpleObjectSpecific.RequiredLevel;
+            packet.RequiredCombat = CloneBaseObject.SimpleObjectSpecific.RequiredCombat;
+            packet.RequiredPerception = CloneBaseObject.SimpleObjectSpecific.RequiredPerception;
+            packet.RequiredTech = CloneBaseObject.SimpleObjectSpecific.RequiredTech;
+            packet.RequiredTheory = CloneBaseObject.SimpleObjectSpecific.RequiredTheory;
         }
     }
 }
