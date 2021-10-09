@@ -1,6 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using System.Linq;
 
 namespace AutoCore.Game.Managers
 {
@@ -111,8 +109,7 @@ namespace AutoCore.Game.Managers
                     HairColor = packet.HairColor,
                     SkinColor = packet.SkinColor,
                     SpecialityColor = packet.SpecialityColor,
-                    ScaleOffset = packet.ScaleOffset,
-                    Level = 1
+                    ScaleOffset = packet.ScaleOffset
                 };
                 context.Characters.Add(character);
 
@@ -199,20 +196,20 @@ namespace AutoCore.Game.Managers
                 return;
             }
 
-            //var vehicle = new Vehicle(isInCharacterSelection: true);
-            //if (!vehicle.LoadFromDB(context, character.ActiveVehicleCoid))
-            //{
-            //    return;
-            //}
+            var vehicle = new Vehicle(isInCharacterSelection: true);
+            if (!vehicle.LoadFromDB(context, character.ActiveVehicleCoid))
+            {
+                return;
+            }
 
             var createCharPacket = new CreateCharacterPacket();
             character.WriteToPacket(createCharPacket);
 
-            //var createVehiclePacket = new CreateVehiclePacket();
-            //vehicle.WriteToPacket(createVehiclePacket);
+            var createVehiclePacket = new CreateVehiclePacket();
+            vehicle.WriteToPacket(createVehiclePacket);
 
             client.SendGamePacket(createCharPacket);
-            //client.SendGamePacket(createVehiclePacket);
+            client.SendGamePacket(createVehiclePacket);
         }
     }
 }
