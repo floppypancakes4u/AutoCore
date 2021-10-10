@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Net;
 
 namespace AutoCore.Global.Network
@@ -17,6 +16,8 @@ namespace AutoCore.Global.Network
     using Utils.Server;
     using Utils.Threading;
     using Utils.Timer;
+
+    using EnumServerType = Game.Constants.ServerType;
 
     public class GlobalServer : BaseServer, ILoopable
     {
@@ -54,7 +55,7 @@ namespace AutoCore.Global.Network
             CharContext.InitializeConnectionString(Config.CharDatabaseConnectionString);
             WorldContext.InitializeConnectionString(Config.WorldDatabaseConnectionString);
 
-            if (!AssetManager.Instance.Initialize(Config.GamePath))
+            if (!AssetManager.Instance.Initialize(Config.GamePath, EnumServerType.Global))
                 throw new Exception("Unable to load assets!");
 
             if (!MapManager.Instance.Initialize())

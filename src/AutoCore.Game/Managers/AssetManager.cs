@@ -9,6 +9,7 @@ namespace AutoCore.Game.Managers
 {
     using Asset;
     using CloneBases;
+    using Constants;
     using Utils;
     using Utils.Memory;
 
@@ -20,12 +21,15 @@ namespace AutoCore.Game.Managers
         private MapDataLoader MapDataLoader { get; } = new();
 
         public string GamePath { get; private set; }
+        public ServerType ServerType { get; private set; }
 
-        public bool Initialize(string gamePath)
+        #region Initialize
+        public bool Initialize(string gamePath, ServerType serverType)
         {
-            Logger.WriteLog(LogType.Initialize, "Initializing Asset Manager...");
+            Logger.WriteLog(LogType.Initialize, $"Initializing Asset Manager for {serverType}...");
 
             GamePath = gamePath;
+            ServerType = serverType;
 
             if (!Directory.Exists(GamePath) || !File.Exists(Path.Combine(GamePath, "exe", "autoassault.exe")))
             {
@@ -56,7 +60,9 @@ namespace AutoCore.Game.Managers
 
             return true;
         }
+        #endregion
 
+        #region WAD
         public CloneBase GetCloneBase(int CBID)
         {
             if (WADLoader.CloneBases.TryGetValue(CBID, out CloneBase value))
@@ -69,5 +75,9 @@ namespace AutoCore.Game.Managers
         {
             return GetCloneBase(CBID) as T;
         }
+        #endregion
+
+        #region GLM
+        #endregion
     }
 }
