@@ -23,8 +23,8 @@ namespace AutoCore.Game.CloneBases.Specifics
 
             reader.BaseStream.Position += 1;
 
-            wss.Wheel0Name = reader.ReadUnicodeString(65);
-            wss.Wheel1Name = reader.ReadUnicodeString(65);
+            wss.Wheel0Name = reader.ReadUTF16StringOn(65);
+            wss.Wheel1Name = reader.ReadUTF16StringOn(65);
 
             return wss;
         }

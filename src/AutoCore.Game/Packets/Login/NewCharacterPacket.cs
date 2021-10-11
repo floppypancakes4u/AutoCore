@@ -38,8 +38,8 @@ namespace AutoCore.Game.Packets.Login
         public override void Read(BinaryReader reader)
         {
             CBID = reader.ReadInt32();
-            PlayerName = reader.ReadUtf8StringOn(33);
-            CharacterName = reader.ReadUtf8StringOn(51);
+            PlayerName = reader.ReadUTF8StringOn(33);
+            CharacterName = reader.ReadUTF8StringOn(51);
             HeadId = reader.ReadInt32();
             BodyId = reader.ReadInt32();
             HeadDetail1 = reader.ReadInt32();
@@ -63,7 +63,7 @@ namespace AutoCore.Game.Packets.Login
 
             ScaleOffset = reader.ReadSingle();
             WheelsetCBID = reader.ReadInt32();
-            VehicleName = reader.ReadUtf8StringOn(33);
+            VehicleName = reader.ReadUTF8StringOn(33);
         }
 
         public override void Write(BinaryWriter writer)

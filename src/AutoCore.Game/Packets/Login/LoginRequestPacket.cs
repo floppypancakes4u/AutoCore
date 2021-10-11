@@ -16,8 +16,8 @@ namespace AutoCore.Game.Packets.Login
 
         public override void Read(BinaryReader reader)
         {
-            Username = reader.ReadUtf8StringOn(33);
-            Password = reader.ReadUtf8StringOn(33);
+            Username = reader.ReadUTF8StringOn(33);
+            Password = reader.ReadUTF8StringOn(33);
 
             reader.BaseStream.Position += 2;
 

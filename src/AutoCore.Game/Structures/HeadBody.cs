@@ -21,7 +21,7 @@ namespace AutoCore.Game.Structures
                 CloneBase = rename.ReadInt32(),
                 IsHead = rename.ReadInt32(),
                 IsBody = rename.ReadInt32(),
-                FileName = rename.ReadUnicodeString(65)
+                FileName = rename.ReadUTF16StringOn(65)
             };
 
             rename.ReadBytes(2);

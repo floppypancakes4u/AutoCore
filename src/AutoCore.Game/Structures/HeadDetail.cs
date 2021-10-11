@@ -21,7 +21,7 @@ namespace AutoCore.Game.Structures
                 Id = reader.ReadInt32(),
                 HeadBody = reader.ReadInt32(),
                 CloneBase = reader.ReadInt32(),
-                FileName = reader.ReadUnicodeString(65),
+                FileName = reader.ReadUTF16StringOn(65),
                 Type = reader.ReadByte()
             };
 

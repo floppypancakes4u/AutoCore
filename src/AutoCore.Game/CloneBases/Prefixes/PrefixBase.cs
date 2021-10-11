@@ -39,7 +39,7 @@ namespace AutoCore.Game.CloneBases.Prefixes
             Rarity = reader.ReadSingle();
             Race = reader.ReadInt32();
             Class = reader.ReadInt32();
-            Name = reader.ReadUnicodeString(51);
+            Name = reader.ReadUTF16StringOn(51);
 
             reader.BaseStream.Position += 2;
 
@@ -63,7 +63,7 @@ namespace AutoCore.Game.CloneBases.Prefixes
 
             Complexity = reader.ReadInt32();
             IsPrefix = reader.ReadInt32();
-            PrefixName = reader.ReadUnicodeString(33);
+            PrefixName = reader.ReadUTF16StringOn(33);
 
             reader.BaseStream.Position += 2;
         }

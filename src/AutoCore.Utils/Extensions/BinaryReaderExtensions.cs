@@ -12,7 +12,7 @@ namespace AutoCore.Utils.Extensions
             return len == 0 ? "" : Encoding.UTF8.GetString(reader.ReadBytes(len));
         }
 
-        public static string ReadUtf8StringOn(this BinaryReader reader, int length)
+        public static string ReadUTF8StringOn(this BinaryReader reader, int length)
         {
             var bytes = reader.ReadBytes(length);
 
@@ -23,7 +23,7 @@ namespace AutoCore.Utils.Extensions
             return index == 0 ? "" : Encoding.UTF8.GetString(bytes, 0, index);
         }
 
-        public static string ReadUnicodeString(this BinaryReader br, int size)
+        public static string ReadUTF16StringOn(this BinaryReader br, int size)
         {
             if (size > 0)
             {

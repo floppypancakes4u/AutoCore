@@ -82,7 +82,7 @@ namespace AutoCore.Game.CloneBases.Specifics
                 InvSizeY = reader.ReadByte(),
                 RenderType = reader.ReadByte(),
                 MaximumEnhancements = reader.ReadByte(),
-                PhysicsName = reader.ReadUnicodeString(65),
+                PhysicsName = reader.ReadUTF16StringOn(65),
                 DamageArmor = DamageSpecific.ReadNew(reader),
                 Ingredients = reader.ReadConstArray(5, reader.ReadInt32),
                 DisciplineRequirement = reader.ReadInt32(),

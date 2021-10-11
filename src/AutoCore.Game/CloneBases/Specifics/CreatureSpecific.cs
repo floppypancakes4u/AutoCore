@@ -80,7 +80,7 @@ namespace AutoCore.Game.CloneBases.Specifics
             var asd = reader.ReadInt32();
 
             var introLen = reader.ReadInt32();
-            c.NPCIntro = reader.ReadUnicodeString(introLen);
+            c.NPCIntro = reader.ReadUTF16StringOn(introLen);
 
             var aiCount = reader.ReadInt32();
             for (var i = 0; i < aiCount; ++i)

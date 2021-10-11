@@ -63,9 +63,9 @@ namespace AutoCore.Game.Structures
                 LocationLine = reader.ReadByte(),
                 MinimumLevel = reader.ReadByte(),
                 SkillType = reader.ReadByte(),
-                Name = reader.ReadUnicodeString(33),
-                Description = reader.ReadUnicodeString(1025),
-                XMLName = reader.ReadUnicodeString(65)
+                Name = reader.ReadUTF16StringOn(33),
+                Description = reader.ReadUTF16StringOn(1025),
+                XMLName = reader.ReadUTF16StringOn(65)
             };
 
             reader.ReadBytes(2);
