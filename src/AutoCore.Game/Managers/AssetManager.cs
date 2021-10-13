@@ -115,9 +115,9 @@ namespace AutoCore.Game.Managers
             return null;
         }
 
-        public IEnumerable<int> GetContinetObjectIds()
+        public IEnumerable<ContinentObject> GetContinentObjects()
         {
-            return WorldDBLoader.ContinentObjects.Select(co => co.Key);
+            return WorldDBLoader.ContinentObjects.Values;
         }
 
         public MapData GetMapData(int mapId)
@@ -129,7 +129,7 @@ namespace AutoCore.Game.Managers
         }
 
         #region Global only
-        public ConfigNewCharacter Get(byte characterRace, byte characterClass)
+        public ConfigNewCharacter GetConfigNewCharacterFor(byte characterRace, byte characterClass)
         {
             if (ServerType != ServerType.Global)
                 throw new Exception("Invalid server type!");

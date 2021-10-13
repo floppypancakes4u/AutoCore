@@ -1,9 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace AutoCore.Game.Map
 {
@@ -32,6 +29,7 @@ namespace AutoCore.Game.Map
         public int NumOfImports { get; private set; }
         #endregion
 
+        #region Common data
         public Vector4 EntryPoint { get; private set; }
         public int NumModulePlacements { get; private set; }
         public int NumOfVOGOs { get; private set; }
@@ -48,6 +46,7 @@ namespace AutoCore.Game.Map
         public Dictionary<int, VisualWaypoint> VisualWaypoints { get; } = new();
         public Dictionary<int, Variable> Variables { get; } = new();
         public Dictionary<byte, WeatherContainer> WeatherInfos { get; } = new();
+        #endregion
         #endregion
 
         public MapData(ContinentObject continentObject)
@@ -148,6 +147,8 @@ namespace AutoCore.Game.Map
                 ReadSeaPlaneData(reader);
             }
             #endregion
+
+            // TODO: read the whole map data
         }
 
         private void ReadMissionStrings(BinaryReader reader)

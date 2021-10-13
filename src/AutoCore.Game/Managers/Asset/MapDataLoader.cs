@@ -1,13 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Collections.Generic;
 
 namespace AutoCore.Game.Managers.Asset
 {
     using Map;
-    using Utils;
 
     public class MapDataLoader
     {
@@ -15,13 +10,11 @@ namespace AutoCore.Game.Managers.Asset
 
         public bool Load()
         {
-            foreach (var id in AssetManager.Instance.GetContinetObjectIds())
+            foreach (var continentObject in AssetManager.Instance.GetContinentObjects())
             {
-                var continentObject = AssetManager.Instance.GetContinentObject(id);
-                if (continentObject == null)
-                    return false;
-
                 var reader = AssetManager.Instance.GetFileReader($"{continentObject.MapFileName}.fam");
+                if (reader == null)
+                    continue;
 
                 var mapData = new MapData(continentObject);
                 mapData.Read(reader);

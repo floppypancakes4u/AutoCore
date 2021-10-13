@@ -28,8 +28,12 @@ namespace AutoCore.Game.Managers
             if (cloneBaseCharacter == null)
                 return (false, -1);
 
-            var configNewCharacter = AssetManager.Instance.Get(cloneBaseCharacter.CharacterSpecific.Race, cloneBaseCharacter.CharacterSpecific.Class);
+            var configNewCharacter = AssetManager.Instance.GetConfigNewCharacterFor(cloneBaseCharacter.CharacterSpecific.Race, cloneBaseCharacter.CharacterSpecific.Class);
             if (configNewCharacter == null)
+                return (false, -1);
+
+            var starterMapData = AssetManager.Instance.GetMapData(configNewCharacter.StartTown);
+            if (starterMapData == null)
                 return (false, -1);
 
             var characterSimpleObject = new SimpleObjectData
