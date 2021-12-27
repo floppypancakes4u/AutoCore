@@ -122,12 +122,43 @@ namespace AutoCore.Game.TNL.Ghost
 
         public void PackCommon(BitStream stream)
         {
+            var faction = 0;
+            var teamFaction = 0;
 
+            stream.WriteBits(64, BitConverter.GetBytes(Guid.Coid));
+            stream.WriteFlag(Guid.Global);
+            stream.WriteInt(0, 20); // clone base id of parent
+            stream.WriteInt(0, 18); // max hp
+            stream.WriteBits(16, BitConverter.GetBytes(faction));
+
+            if (faction == teamFaction)
+            {
+                faction = 0;
+            }
+
+            stream.WriteBits(16, BitConverter.GetBytes(faction));
         }
 
         public void UnpackCommon(BitStream stream, object msgCreate)
         {
+            var arr = new byte[8];
 
+            stream.ReadBits(64, arr);
+            stream.Read(out bool global);
+
+            Guid.Coid = BitConverter.ToInt64(arr, 0);
+            Guid.Global = global;
+
+            var cbid = stream.ReadInt(20);
+            var maxHp = stream.ReadInt(18);
+
+            stream.ReadBits(16, arr);
+
+            var faction = BitConverter.ToInt16(arr, 0);
+
+            stream.ReadBits(16, arr);
+
+            var teamFaction = BitConverter.ToInt16(arr, 0);
         }
 
         public void PackSingleSkill(BitStream stream, object skill, int size, int skillTargetType)
