@@ -1,17 +1,14 @@
-﻿using System.IO;
+﻿namespace AutoCore.Game.CloneBases;
 
-namespace AutoCore.Game.CloneBases
+using AutoCore.Game.CloneBases.Specifics;
+
+public class CloneBasePowerPlant : CloneBaseObject
 {
-    using Specifics;
+    public PowerPlantSpecific PowerPlantSpecific;
 
-    public class CloneBasePowerPlant : CloneBaseObject
+    public CloneBasePowerPlant(BinaryReader reader)
+        : base(reader)
     {
-        public PowerPlantSpecific PowerPlantSpecific;
-
-        public CloneBasePowerPlant(BinaryReader reader)
-            : base(reader)
-        {
-            PowerPlantSpecific = PowerPlantSpecific.ReadNew(reader);
-        }
+        PowerPlantSpecific = PowerPlantSpecific.ReadNew(reader);
     }
 }

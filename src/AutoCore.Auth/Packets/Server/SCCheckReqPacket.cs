@@ -1,34 +1,30 @@
-﻿
-using System.IO;
+﻿namespace AutoCore.Auth.Packets.Server;
 
-namespace AutoCore.Auth.Packets.Server
+using AutoCore.Auth.Data;
+using AutoCore.Utils.Packets;
+
+public class SCCheckReqPacket : IOpcodedPacket<ServerOpcode>
 {
-    using Data;
-    using Utils.Packets;
+    public uint UserId { get; set; }
+    public byte CardKey { get; set; }
 
-    public class SCCheckReqPacket : IOpcodedPacket<ServerOpcode>
+    public ServerOpcode Opcode { get; } = ServerOpcode.SCCheckReq;
+
+    public void Read(BinaryReader reader)
     {
-        public uint UserId { get; set; }
-        public byte CardKey { get; set; }
+        UserId = reader.ReadUInt32();
+        CardKey = reader.ReadByte();
+    }
 
-        public ServerOpcode Opcode { get; } = ServerOpcode.SCCheckReq;
+    public void Write(BinaryWriter writer)
+    {
+        writer.Write((byte) Opcode);
+        writer.Write(UserId);
+        writer.Write(CardKey);
+    }
 
-        public void Read(BinaryReader reader)
-        {
-            UserId = reader.ReadUInt32();
-            CardKey = reader.ReadByte();
-        }
-
-        public void Write(BinaryWriter writer)
-        {
-            writer.Write((byte) Opcode);
-            writer.Write(UserId);
-            writer.Write(CardKey);
-        }
-
-        public override string ToString()
-        {
-            return $"SCCheckReqPacket({UserId}, {CardKey})";
-        }
+    public override string ToString()
+    {
+        return $"SCCheckReqPacket({UserId}, {CardKey})";
     }
 }

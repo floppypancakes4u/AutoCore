@@ -1,17 +1,14 @@
-﻿using System.IO;
+﻿namespace AutoCore.Game.CloneBases;
 
-namespace AutoCore.Game.CloneBases
+using AutoCore.Game.CloneBases.Specifics;
+
+public class CloneBaseWheelSet : CloneBaseObject
 {
-    using Specifics;
+    public WheelSetSpecific WheelSetSpecific;
 
-    public class CloneBaseWheelSet : CloneBaseObject
+    public CloneBaseWheelSet(BinaryReader reader)
+        : base(reader)
     {
-        public WheelSetSpecific WheelSetSpecific;
-
-        public CloneBaseWheelSet(BinaryReader reader)
-            : base(reader)
-        {
-            WheelSetSpecific = WheelSetSpecific.ReadNew(reader);
-        }
+        WheelSetSpecific = WheelSetSpecific.ReadNew(reader);
     }
 }

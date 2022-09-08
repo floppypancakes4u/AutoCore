@@ -1,45 +1,43 @@
-﻿using System;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 
-namespace AutoCore.Global
+namespace AutoCore.Global;
+
+using AutoCore.Global.Network;
+using AutoCore.Utils;
+
+public class Program : ExitableProgram
 {
-    using Network;
-    using Utils;
+    private static GlobalServer Server { get; set; }
 
-    public class Program : ExitableProgram
+    public static void Main()
     {
-        private static GlobalServer Server { get; set; }
+        Initialize(ExitHandlerProc);
 
-        public static void Main()
+        Server = new GlobalServer();
+        if (!Server.Start())
         {
-            Initialize(ExitHandlerProc);
+            Logger.WriteLog(LogType.Error, "Unable to start the server!");
 
-            Server = new GlobalServer();
-            if (!Server.Start())
-            {
-                Logger.WriteLog(LogType.Error, "Unable to start the server!");
-
-                return;
-            }
-
-            Server.ProcessCommands();
-
-            GC.Collect();
-
-            Process.GetCurrentProcess().WaitForExit();
+            return;
         }
 
-        private static bool ExitHandlerProc(byte sig)
-        {
-            Logger.WriteLog(LogType.Error, "Shutting down the server...");
+        Server.ProcessCommands();
 
-            Server?.Shutdown();
+        GC.Collect();
 
-            Logger.WriteLog(LogType.Error, "Server shutdown completed!");
+        Process.GetCurrentProcess().WaitForExit();
+    }
 
-            Logger.WriteLog(LogType.Error, "Press any key to exit...");
+    private static bool ExitHandlerProc(byte sig)
+    {
+        Logger.WriteLog(LogType.Error, "Shutting down the server...");
 
-            return false;
-        }
+        Server?.Shutdown();
+
+        Logger.WriteLog(LogType.Error, "Server shutdown completed!");
+
+        Logger.WriteLog(LogType.Error, "Press any key to exit...");
+
+        return false;
     }
 }

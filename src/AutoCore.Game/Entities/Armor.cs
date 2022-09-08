@@ -1,54 +1,47 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿namespace AutoCore.Game.Entities;
 
-namespace AutoCore.Game.Entities
+using AutoCore.Game.CloneBases;
+using AutoCore.Database.Char;
+using AutoCore.Database.Char.Models;
+using AutoCore.Game.Packets.Sector;
+
+public class Armor : SimpleObject
 {
-    using CloneBases;
-    using Database.Char;
-    using Database.Char.Models;
-    using Packets.Sector;
+    #region Properties
+    #region Database Armor properties
+    private SimpleObjectData DBData { get; set; }
+    #endregion
 
-    public class Armor : SimpleObject
+    public CloneBaseArmor CloneBaseArmor => CloneBaseObject as CloneBaseArmor;
+    #endregion
+
+    public Armor()
     {
-        #region Properties
-        #region Database Armor properties
-        private SimpleObjectData DBData { get; set; }
-        #endregion
+    }
 
-        public CloneBaseArmor CloneBaseArmor => CloneBaseObject as CloneBaseArmor;
-        #endregion
+    public override bool LoadFromDB(CharContext context, long coid)
+    {
+        SetCoid(coid, true);
 
-        public Armor()
+        DBData = context.SimpleObjects.FirstOrDefault(so => so.Coid == coid);
+        if (DBData == null)
+            return false;
+
+        LoadCloneBase(DBData.CBID);
+
+        return true;
+    }
+
+    public override void WriteToPacket(CreateSimpleObjectPacket packet)
+    {
+        base.WriteToPacket(packet);
+
+        if (packet is CreateArmorPacket armorPacket)
         {
-        }
-
-        public override bool LoadFromDB(CharContext context, long coid)
-        {
-            SetCoid(coid, true);
-
-            DBData = context.SimpleObjects.FirstOrDefault(so => so.Coid == coid);
-            if (DBData == null)
-                return false;
-
-            LoadCloneBase(DBData.CBID);
-
-            return true;
-        }
-
-        public override void WriteToPacket(CreateSimpleObjectPacket packet)
-        {
-            base.WriteToPacket(packet);
-
-            if (packet is CreateArmorPacket armorPacket)
-            {
-                armorPacket.ArmorSpecific = CloneBaseArmor.ArmorSpecific;
-                armorPacket.Mass = CloneBaseArmor.SimpleObjectSpecific.Mass;
-                armorPacket.Name = "";
-                armorPacket.VarianceDefensiveBonus = 0;
-            }
+            armorPacket.ArmorSpecific = CloneBaseArmor.ArmorSpecific;
+            armorPacket.Mass = CloneBaseArmor.SimpleObjectSpecific.Mass;
+            armorPacket.Name = "";
+            armorPacket.VarianceDefensiveBonus = 0;
         }
     }
 }

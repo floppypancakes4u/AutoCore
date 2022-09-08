@@ -1,20 +1,14 @@
-﻿using AutoCore.Game.Packets.Sector;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿namespace AutoCore.Game.Entities;
 
-namespace AutoCore.Game.Entities
+using AutoCore.Game.Packets.Sector;
+
+public class Creature : SimpleObject
 {
-    public class Creature : SimpleObject
+    public override void WriteToPacket(CreateSimpleObjectPacket packet)
     {
-        public override void WriteToPacket(CreateSimpleObjectPacket packet)
-        {
-            base.WriteToPacket(packet);
+        base.WriteToPacket(packet);
 
-            if (packet is CreateCharacterPacket)
-                return;
-        }
+        if (packet is CreateCharacterPacket)
+            return;
     }
 }

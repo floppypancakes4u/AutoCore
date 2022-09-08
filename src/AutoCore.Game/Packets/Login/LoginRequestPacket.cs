@@ -1,33 +1,29 @@
-﻿using System;
-using System.IO;
+﻿namespace AutoCore.Game.Packets.Login;
 
-namespace AutoCore.Game.Packets.Login
+using AutoCore.Game.Constants;
+using AutoCore.Utils.Extensions;
+
+public class LoginRequestPacket : BasePacket
 {
-    using Constants;
-    using Utils.Extensions;
+    public override GameOpcode Opcode => GameOpcode.LoginRequest;
+    public string Username { get; set; }
+    public string Password { get; set; }
+    public uint UserId { get; set; }
+    public uint AuthKey { get; set; }
 
-    public class LoginRequestPacket : BasePacket
+    public override void Read(BinaryReader reader)
     {
-        public override GameOpcode Opcode => GameOpcode.LoginRequest;
-        public string Username { get; set; }
-        public string Password { get; set; }
-        public uint UserId { get; set; }
-        public uint AuthKey { get; set; }
+        Username = reader.ReadUTF8StringOn(33);
+        Password = reader.ReadUTF8StringOn(33);
 
-        public override void Read(BinaryReader reader)
-        {
-            Username = reader.ReadUTF8StringOn(33);
-            Password = reader.ReadUTF8StringOn(33);
+        reader.BaseStream.Position += 2;
 
-            reader.BaseStream.Position += 2;
+        UserId = reader.ReadUInt32();
+        AuthKey = reader.ReadUInt32();
+    }
 
-            UserId = reader.ReadUInt32();
-            AuthKey = reader.ReadUInt32();
-        }
-
-        public override void Write(BinaryWriter writer)
-        {
-            throw new NotImplementedException();
-        }
+    public override void Write(BinaryWriter writer)
+    {
+        throw new NotImplementedException();
     }
 }

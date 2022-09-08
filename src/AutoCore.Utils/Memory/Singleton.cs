@@ -1,17 +1,14 @@
-﻿using System;
+﻿namespace AutoCore.Utils.Memory;
 
-namespace AutoCore.Utils.Memory
+public abstract class Singleton<T> where T : class, new()
 {
-    public abstract class Singleton<T> where T : class, new()
-    {
-        private static readonly Lazy<T> sInstance = new();
+    private static readonly Lazy<T> sInstance = new();
 
-        public static T Instance
+    public static T Instance
+    {
+        get
         {
-            get
-            {
-                return sInstance.Value;
-            }
+            return sInstance.Value;
         }
     }
 }

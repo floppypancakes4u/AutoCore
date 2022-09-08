@@ -1,10 +1,9 @@
-﻿namespace AutoCore.Utils.Packets
+﻿namespace AutoCore.Utils.Packets;
+
+public interface IPacketQueue
 {
-    public interface IPacketQueue
-    {
-        void EnqueueIncoming(IBasePacket data);
-        void EnqueueOutgoing(IBasePacket data);
-        IBasePacket PopIncoming();
-        IBasePacket PopOutgoing();
-    }
+    void EnqueueIncoming(IBasePacket data);
+    void EnqueueOutgoing(IBasePacket data);
+    IBasePacket PopIncoming();
+    IBasePacket PopOutgoing();
 }

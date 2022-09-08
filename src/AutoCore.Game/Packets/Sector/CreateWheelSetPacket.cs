@@ -1,43 +1,39 @@
-﻿using System;
-using System.IO;
+﻿namespace AutoCore.Game.Packets.Sector;
 
-namespace AutoCore.Game.Packets.Sector
+using AutoCore.Game.Constants;
+using AutoCore.Utils.Extensions;
+
+public class CreateWheelSetPacket : CreateSimpleObjectPacket
 {
-    using Constants;
-    using Utils.Extensions;
+    public override GameOpcode Opcode => GameOpcode.CreateWheelSet;
 
-    public class CreateWheelSetPacket : CreateSimpleObjectPacket
+    public float FrictionGravel { get; set; }
+    public float FrictionIce { get; set; }
+    public float FrictionMud { get; set; }
+    public float FrictionPaved { get; set; }
+    public float FrictionPlains { get; set; }
+    public float FrictionSand { get; set; }
+    public bool IsDefault { get; set; }
+    public string Name { get; set; }
+
+    public override void Read(BinaryReader reader)
     {
-        public override GameOpcode Opcode => GameOpcode.CreateWheelSet;
+        throw new NotImplementedException();
+    }
 
-        public float FrictionGravel { get; set; }
-        public float FrictionIce { get; set; }
-        public float FrictionMud { get; set; }
-        public float FrictionPaved { get; set; }
-        public float FrictionPlains { get; set; }
-        public float FrictionSand { get; set; }
-        public bool IsDefault { get; set; }
-        public string Name { get; set; }
+    public override void Write(BinaryWriter writer)
+    {
+        base.Write(writer);
 
-        public override void Read(BinaryReader reader)
-        {
-            throw new NotImplementedException();
-        }
+        writer.Write(FrictionGravel);
+        writer.Write(FrictionIce);
+        writer.Write(FrictionMud);
+        writer.Write(FrictionPaved);
+        writer.Write(FrictionPlains);
+        writer.Write(FrictionSand);
+        writer.Write(IsDefault);
+        writer.WriteUtf8StringOn(Name, 100);
 
-        public override void Write(BinaryWriter writer)
-        {
-            base.Write(writer);
-
-            writer.Write(FrictionGravel);
-            writer.Write(FrictionIce);
-            writer.Write(FrictionMud);
-            writer.Write(FrictionPaved);
-            writer.Write(FrictionPlains);
-            writer.Write(FrictionSand);
-            writer.Write(IsDefault);
-            writer.WriteUtf8StringOn(Name, 100);
-
-            writer.BaseStream.Position += 3;
-        }
+        writer.BaseStream.Position += 3;
     }
 }

@@ -1,36 +1,33 @@
-﻿using System.IO;
+﻿namespace AutoCore.Auth.Packets.Client;
 
-namespace AutoCore.Auth.Packets.Client
+using AutoCore.Auth.Data;
+using AutoCore.Utils.Packets;
+
+public class AboutToPlayPacket : IOpcodedPacket<ClientOpcode>
 {
-    using Data;
-    using Utils.Packets;
+    public uint SessionId1 { get; set; }
+    public uint SessionId2 { get; set; }
+    public byte ServerId { get; set; }
 
-    public class AboutToPlayPacket : IOpcodedPacket<ClientOpcode>
+    public ClientOpcode Opcode { get; } = ClientOpcode.AboutToPlay;
+
+    public void Read(BinaryReader reader)
     {
-        public uint SessionId1 { get; set; }
-        public uint SessionId2 { get; set; }
-        public byte ServerId { get; set; }
+        SessionId1 = reader.ReadUInt32();
+        SessionId2 = reader.ReadUInt32();
+        ServerId = reader.ReadByte();
+    }
 
-        public ClientOpcode Opcode { get; } = ClientOpcode.AboutToPlay;
+    public void Write(BinaryWriter writer)
+    {
+        writer.Write((byte) Opcode);
+        writer.Write(SessionId1);
+        writer.Write(SessionId2);
+        writer.Write(ServerId);
+    }
 
-        public void Read(BinaryReader reader)
-        {
-            SessionId1 = reader.ReadUInt32();
-            SessionId2 = reader.ReadUInt32();
-            ServerId = reader.ReadByte();
-        }
-
-        public void Write(BinaryWriter writer)
-        {
-            writer.Write((byte) Opcode);
-            writer.Write(SessionId1);
-            writer.Write(SessionId2);
-            writer.Write(ServerId);
-        }
-
-        public override string ToString()
-        {
-            return $"AboutToPlayPacket({SessionId1}, {SessionId2}, {ServerId})";
-        }
+    public override string ToString()
+    {
+        return $"AboutToPlayPacket({SessionId1}, {SessionId2}, {ServerId})";
     }
 }

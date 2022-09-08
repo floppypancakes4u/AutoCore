@@ -1,24 +1,21 @@
-﻿using System.IO;
+﻿namespace AutoCore.Game.CloneBases.Specifics;
 
-namespace AutoCore.Game.CloneBases.Specifics
+public struct TinkeringKitSpecific
 {
-    public struct TinkeringKitSpecific
+    public short MaxSlotLevel;
+    public uint ObjectTypeRestriction;
+
+    public static TinkeringKitSpecific ReadNew(BinaryReader reader)
     {
-        public short MaxSlotLevel;
-        public uint ObjectTypeRestriction;
-
-        public static TinkeringKitSpecific ReadNew(BinaryReader reader)
+        var tks = new TinkeringKitSpecific
         {
-            var tks = new TinkeringKitSpecific
-            {
-                MaxSlotLevel = reader.ReadInt16()
-            };
+            MaxSlotLevel = reader.ReadInt16()
+        };
 
-            reader.ReadInt16();
+        reader.ReadInt16();
 
-            tks.ObjectTypeRestriction = reader.ReadUInt32();
+        tks.ObjectTypeRestriction = reader.ReadUInt32();
 
-            return tks;
-        }
+        return tks;
     }
 }

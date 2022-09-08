@@ -1,38 +1,30 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿namespace AutoCore.Game.Packets.Sector;
 
-namespace AutoCore.Game.Packets.Sector
+using AutoCore.Game.Constants;
+
+public class CreateVehicleExtendedPacket : CreateVehiclePacket
 {
-    using Constants;
+    public override GameOpcode Opcode => GameOpcode.CreateVehicleExtended;
 
-    public class CreateVehicleExtendedPacket : CreateVehiclePacket
+    public short NumInventorySlots { get; set; }
+    public ushort InventorySize { get; set; }
+    public long[] InventoryCoids { get; } = new long[512];
+
+    public override void Read(BinaryReader reader)
     {
-        public override GameOpcode Opcode => GameOpcode.CreateVehicleExtended;
+        throw new NotImplementedException();
+    }
 
-        public short NumInventorySlots { get; set; }
-        public ushort InventorySize { get; set; }
-        public long[] InventoryCoids { get; } = new long[512];
+    public override void Write(BinaryWriter writer)
+    {
+        base.Write(writer);
 
-        public override void Read(BinaryReader reader)
+        writer.Write(NumInventorySlots);
+        writer.Write(InventorySize);
+        
+        for (var i = 0; i < 512; ++i)
         {
-            throw new NotImplementedException();
-        }
-
-        public override void Write(BinaryWriter writer)
-        {
-            base.Write(writer);
-
-            writer.Write(NumInventorySlots);
-            writer.Write(InventorySize);
-            
-            for (var i = 0; i < 512; ++i)
-            {
-                writer.Write(InventoryCoids[i]);
-            }
+            writer.Write(InventoryCoids[i]);
         }
     }
 }

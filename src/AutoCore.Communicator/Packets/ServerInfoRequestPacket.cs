@@ -1,21 +1,17 @@
-﻿using System;
-using System.IO;
+﻿namespace AutoCore.Communicator.Packets;
 
-namespace AutoCore.Communicator.Packets
+using AutoCore.Utils.Packets;
+
+public class ServerInfoRequestPacket : IOpcodedPacket<CommunicatorOpcode>
 {
-    using Utils.Packets;
+    public CommunicatorOpcode Opcode { get; } = CommunicatorOpcode.ServerInfoRequest;
 
-    public class ServerInfoRequestPacket : IOpcodedPacket<CommunicatorOpcode>
+    public void Read(BinaryReader br)
     {
-        public CommunicatorOpcode Opcode { get; } = CommunicatorOpcode.ServerInfoRequest;
+    }
 
-        public void Read(BinaryReader br)
-        {
-        }
-
-        public void Write(BinaryWriter bw)
-        {
-            bw.Write((byte)Opcode);
-        }
+    public void Write(BinaryWriter bw)
+    {
+        bw.Write((byte)Opcode);
     }
 }

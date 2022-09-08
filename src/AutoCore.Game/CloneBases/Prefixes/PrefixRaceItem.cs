@@ -1,27 +1,24 @@
-﻿using System.IO;
+﻿namespace AutoCore.Game.CloneBases.Prefixes;
 
-namespace AutoCore.Game.CloneBases.Prefixes
+public class PrefixRaceItem : PrefixBase
 {
-    public class PrefixRaceItem : PrefixBase
+    public short HazardCountBonus { get; set; }
+    public float HazardCountBonusf { get; set; }
+    public short HazardSecondsBonus { get; set; }
+    public float HazardSecondsBonusf { get; set; }
+
+    public PrefixRaceItem(BinaryReader reader)
+        : base(reader)
     {
-        public short HazardCountBonus { get; set; }
-        public float HazardCountBonusf { get; set; }
-        public short HazardSecondsBonus { get; set; }
-        public float HazardSecondsBonusf { get; set; }
+        HazardCountBonus = reader.ReadInt16();
 
-        public PrefixRaceItem(BinaryReader reader)
-            : base(reader)
-        {
-            HazardCountBonus = reader.ReadInt16();
+        reader.BaseStream.Position += 2;
 
-            reader.BaseStream.Position += 2;
+        HazardCountBonusf = reader.ReadSingle();
+        HazardSecondsBonus = reader.ReadInt16();
 
-            HazardCountBonusf = reader.ReadSingle();
-            HazardSecondsBonus = reader.ReadInt16();
+        reader.BaseStream.Position += 2;
 
-            reader.BaseStream.Position += 2;
-
-            HazardSecondsBonusf = reader.ReadSingle();
-        }
+        HazardSecondsBonusf = reader.ReadSingle();
     }
 }

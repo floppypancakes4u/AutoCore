@@ -1,43 +1,40 @@
-﻿using System;
+﻿using Microsoft.EntityFrameworkCore;
 
-using Microsoft.EntityFrameworkCore;
+namespace AutoCore.Database.World;
 
-namespace AutoCore.Database.World
+using AutoCore.Database.World.Models;
+
+public class WorldContext : DbContext
 {
-    using Models;
+    public static string ConnectionString { get; private set; }
 
-    public class WorldContext : DbContext
+    public DbSet<ConfigNewCharacter> ConfigNewCharacters { get; set; }
+    public DbSet<ContinentArea> ContinentAreas { get; set; }
+    public DbSet<ContinentObject> ContinentObjects { get; set; }
+    public DbSet<ExperienceLevel> ExperienceLevels { get; set; }
+
+    public WorldContext()
     {
-        public static string ConnectionString { get; private set; }
+    }
 
-        public DbSet<ConfigNewCharacter> ConfigNewCharacters { get; set; }
-        public DbSet<ContinentArea> ContinentAreas { get; set; }
-        public DbSet<ContinentObject> ContinentObjects { get; set; }
-        public DbSet<ExperienceLevel> ExperienceLevels { get; set; }
+    public static void InitializeConnectionString(string connectionString)
+    {
+        if (string.IsNullOrEmpty(connectionString))
+            throw new ArgumentNullException(nameof(connectionString));
 
-        public WorldContext()
-        {
-        }
+        if (!string.IsNullOrEmpty(ConnectionString))
+            throw new ArgumentException("The data source is already set up for the WorldContext!", nameof(connectionString));
 
-        public static void InitializeConnectionString(string connectionString)
-        {
-            if (string.IsNullOrEmpty(connectionString))
-                throw new ArgumentNullException(nameof(connectionString));
+        ConnectionString = connectionString;
+    }
 
-            if (!string.IsNullOrEmpty(ConnectionString))
-                throw new ArgumentException("The data source is already set up for the WorldContext!", nameof(connectionString));
+    protected override void OnConfiguring(DbContextOptionsBuilder options) => options.UseMySql(ConnectionString, ServerVersion.AutoDetect(ConnectionString));
 
-            ConnectionString = connectionString;
-        }
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
 
-        protected override void OnConfiguring(DbContextOptionsBuilder options) => options.UseMySql(ConnectionString, ServerVersion.AutoDetect(ConnectionString));
-
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
-        {
-            base.OnModelCreating(modelBuilder);
-
-            modelBuilder.Entity<ConfigNewCharacter>().HasKey(cnc => new { cnc.Race, cnc.Class });
-            modelBuilder.Entity<ContinentArea>().HasKey(ca => new { ca.ContinentObjectId, ca.Area });
-        }
+        modelBuilder.Entity<ConfigNewCharacter>().HasKey(cnc => new { cnc.Race, cnc.Class });
+        modelBuilder.Entity<ContinentArea>().HasKey(ca => new { ca.ContinentObjectId, ca.Area });
     }
 }

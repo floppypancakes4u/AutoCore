@@ -1,35 +1,32 @@
-﻿using System.IO;
+﻿namespace AutoCore.Auth.Packets.Server;
 
-namespace AutoCore.Auth.Packets.Server
+using AutoCore.Auth.Data;
+using AutoCore.Utils.Packets;
+
+public class LoginFailPacket : IOpcodedPacket<ServerOpcode>
 {
-    using Data;
-    using Utils.Packets;
+    public FailReason ResultCode { get; set; }
 
-    public class LoginFailPacket : IOpcodedPacket<ServerOpcode>
+    public ServerOpcode Opcode { get; } = ServerOpcode.LoginFail;
+
+    public LoginFailPacket(FailReason resultCode)
     {
-        public FailReason ResultCode { get; set; }
+        ResultCode = resultCode;
+    }
 
-        public ServerOpcode Opcode { get; } = ServerOpcode.LoginFail;
+    public void Read(BinaryReader reader)
+    {
+        ResultCode = (FailReason) reader.ReadByte();
+    }
 
-        public LoginFailPacket(FailReason resultCode)
-        {
-            ResultCode = resultCode;
-        }
+    public void Write(BinaryWriter writer)
+    {
+        writer.Write((byte) Opcode);
+        writer.Write((byte) ResultCode);
+    }
 
-        public void Read(BinaryReader reader)
-        {
-            ResultCode = (FailReason) reader.ReadByte();
-        }
-
-        public void Write(BinaryWriter writer)
-        {
-            writer.Write((byte) Opcode);
-            writer.Write((byte) ResultCode);
-        }
-
-        public override string ToString()
-        {
-            return $"LoginFailPacket({ResultCode})";
-        }
+    public override string ToString()
+    {
+        return $"LoginFailPacket({ResultCode})";
     }
 }

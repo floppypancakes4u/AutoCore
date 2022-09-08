@@ -1,19 +1,16 @@
-﻿using System.IO;
+﻿namespace AutoCore.Game.Structures;
 
-namespace AutoCore.Game.Structures
+public struct FrontRear
 {
-    public struct FrontRear
-    {
-        public float Front;
-        public float Rear;
+    public float Front;
+    public float Rear;
 
-        public static FrontRear ReadNew(BinaryReader reader)
+    public static FrontRear ReadNew(BinaryReader reader)
+    {
+        return new FrontRear
         {
-            return new FrontRear
-            {
-                Front = reader.ReadSingle(),
-                Rear = reader.ReadSingle()
-            };
-        }
+            Front = reader.ReadSingle(),
+            Rear = reader.ReadSingle()
+        };
     }
 }

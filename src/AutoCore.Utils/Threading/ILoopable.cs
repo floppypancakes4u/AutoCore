@@ -1,7 +1,6 @@
-﻿namespace AutoCore.Utils.Threading
+﻿namespace AutoCore.Utils.Threading;
+
+public interface ILoopable
 {
-    public interface ILoopable
-    {
-        void MainLoop(long delta);
-    }
+    void MainLoop(long delta);
 }

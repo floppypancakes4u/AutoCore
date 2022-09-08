@@ -1,17 +1,14 @@
-﻿using System.IO;
+﻿namespace AutoCore.Game.CloneBases;
 
-namespace AutoCore.Game.CloneBases
+using AutoCore.Game.CloneBases.Specifics;
+
+public class CloneBaseCreature : CloneBaseObject
 {
-    using Specifics;
+    public CreatureSpecific CreatureSpecific;
 
-    public class CloneBaseCreature : CloneBaseObject
+    public CloneBaseCreature(BinaryReader reader)
+        : base(reader)
     {
-        public CreatureSpecific CreatureSpecific;
-
-        public CloneBaseCreature(BinaryReader reader)
-            : base(reader)
-        {
-            CreatureSpecific = CreatureSpecific.ReadNew(reader);
-        }
+        CreatureSpecific = CreatureSpecific.ReadNew(reader);
     }
 }

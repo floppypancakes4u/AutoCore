@@ -1,166 +1,160 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Text;
 
-namespace AutoCore.Game.Managers.Asset
+namespace AutoCore.Game.Managers.Asset;
+
+using AutoCore.Utils;
+using AutoCore.Utils.Memory;
+
+public class GLMLoader
 {
-    using Utils;
-    using Utils.Memory;
+    private Dictionary<string, GLMEntry> GLMEntries { get; } = new();
 
-    public class GLMLoader
+    public bool Load(string directoryPath)
     {
-        private Dictionary<string, GLMEntry> GLMEntries { get; } = new();
-
-        public bool Load(string directoryPath)
+        try
         {
-            try
-            {
-                Directory.GetFiles(directoryPath, "*.glm", SearchOption.TopDirectoryOnly).ToList().ForEach(ReadGLMFile);
+            Directory.GetFiles(directoryPath, "*.glm", SearchOption.TopDirectoryOnly).ToList().ForEach(ReadGLMFile);
 
-                Logger.WriteLog(LogType.Initialize, $"Loaded {GLMEntries.Count} GLM files with {GLMEntries.Sum(f => f.Value.FileEntries.Count)} file entries!");
+            Logger.WriteLog(LogType.Initialize, $"Loaded {GLMEntries.Count} GLM files with {GLMEntries.Sum(f => f.Value.FileEntries.Count)} file entries!");
 
-                return true;
-            }
-            catch (Exception e)
-            {
-                Logger.WriteLog(LogType.Error, $"Encountered exception while loading GLM files: {e}");
-            }
-
-            return false;
+            return true;
+        }
+        catch (Exception e)
+        {
+            Logger.WriteLog(LogType.Error, $"Encountered exception while loading GLM files: {e}");
         }
 
-        public BinaryReader GetReader(string fileName)
+        return false;
+    }
+
+    public BinaryReader GetReader(string fileName)
+    {
+        foreach (var glmEntry in GLMEntries)
         {
-            foreach (var glmEntry in GLMEntries)
+            if (glmEntry.Value.FileEntries.TryGetValue(fileName, out var fileEntry))
             {
-                if (glmEntry.Value.FileEntries.TryGetValue(fileName, out var fileEntry))
-                {
-                    var dataStream = new ArrayPoolMemoryStream(fileEntry.Size);
+                var dataStream = new ArrayPoolMemoryStream(fileEntry.Size);
 
-                    glmEntry.Value.FileStream.Seek(fileEntry.Offset, SeekOrigin.Begin);
-                    glmEntry.Value.FileStream.Read(dataStream.Data, 0, fileEntry.Size);
+                glmEntry.Value.FileStream.Seek(fileEntry.Offset, SeekOrigin.Begin);
+                glmEntry.Value.FileStream.Read(dataStream.Data, 0, fileEntry.Size);
 
-                    return new BinaryReader(dataStream, Encoding.UTF8, false);
-                }    
-            }
-
-            return null;
+                return new BinaryReader(dataStream, Encoding.UTF8, false);
+            }    
         }
 
-        private void ReadGLMFile(string filePath)
+        return null;
+    }
+
+    private void ReadGLMFile(string filePath)
+    {
+        var glmEntry = new GLMEntry
         {
-            var glmEntry = new GLMEntry
-            {
-                Name = Path.GetFileName(filePath),
-                FileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read)
-            };
+            Name = Path.GetFileName(filePath),
+            FileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read)
+        };
 
-            using var reader = new BinaryReader(glmEntry.FileStream, Encoding.UTF8, true);
+        using var reader = new BinaryReader(glmEntry.FileStream, Encoding.UTF8, true);
 
-            reader.BaseStream.Seek(reader.BaseStream.Length - 4, SeekOrigin.Begin);
+        reader.BaseStream.Seek(reader.BaseStream.Length - 4, SeekOrigin.Begin);
 
-            var headerOff = reader.ReadInt32();
-            reader.BaseStream.Seek(headerOff, SeekOrigin.Begin);
+        var headerOff = reader.ReadInt32();
+        reader.BaseStream.Seek(headerOff, SeekOrigin.Begin);
 
-            var strHeader = Encoding.UTF8.GetString(reader.ReadBytes(4));
-            if (strHeader != "CHNK")
-                throw new Exception("Invalid header found!");
+        var strHeader = Encoding.UTF8.GetString(reader.ReadBytes(4));
+        if (strHeader != "CHNK")
+            throw new Exception("Invalid header found!");
 
-            var opts = reader.ReadBytes(4);
-            if (opts[0] != 66)
-                throw new Exception("No support for GLM text reading!");
+        var opts = reader.ReadBytes(4);
+        if (opts[0] != 66)
+            throw new Exception("No support for GLM text reading!");
 
-            if (opts[1] != 76)
-                throw new Exception("Only Little Endian is supported!");
+        if (opts[1] != 76)
+            throw new Exception("Only Little Endian is supported!");
 
-            var strTableOff = reader.ReadInt32();
-            var strTableSize = reader.ReadInt32();
-            var entryCount = reader.ReadInt32();
+        var strTableOff = reader.ReadInt32();
+        var strTableSize = reader.ReadInt32();
+        var entryCount = reader.ReadInt32();
 
-            var currPos = reader.BaseStream.Position;
+        var currPos = reader.BaseStream.Position;
 
-            reader.BaseStream.Seek(strTableOff, SeekOrigin.Begin);
+        reader.BaseStream.Seek(strTableOff, SeekOrigin.Begin);
 
-            var stringTable = reader.ReadBytes(strTableSize);
-            var fileEntries = CreateEntriesByStringTable(stringTable);
+        var stringTable = reader.ReadBytes(strTableSize);
+        var fileEntries = CreateEntriesByStringTable(stringTable);
 
-            if (fileEntries.Count != entryCount)
-                throw new Exception("The entry count doesn't match!");
+        if (fileEntries.Count != entryCount)
+            throw new Exception("The entry count doesn't match!");
 
-            reader.BaseStream.Position = currPos;
+        reader.BaseStream.Position = currPos;
 
-            foreach (var entry in fileEntries)
-            {
-                entry.Read(reader, glmEntry);
+        foreach (var entry in fileEntries)
+        {
+            entry.Read(reader, glmEntry);
 
-                glmEntry.FileEntries.Add(entry.Name, entry);
-            }
-
-            GLMEntries.Add(glmEntry.Name, glmEntry);
+            glmEntry.FileEntries.Add(entry.Name, entry);
         }
 
-        private static List<FileEntry> CreateEntriesByStringTable(IEnumerable<byte> data)
+        GLMEntries.Add(glmEntry.Name, glmEntry);
+    }
+
+    private static List<FileEntry> CreateEntriesByStringTable(IEnumerable<byte> data)
+    {
+        var sList = new List<FileEntry>();
+
+        var sb = new StringBuilder();
+
+        foreach (var t in data)
         {
-            var sList = new List<FileEntry>();
-
-            var sb = new StringBuilder();
-
-            foreach (var t in data)
+            if (t != 0)
             {
-                if (t != 0)
-                {
-                    sb.Append((char)t);
-                }
-                else
-                {
-                    sList.Add(new FileEntry { Name = sb.ToString() });
-                    sb.Clear();
-                }
+                sb.Append((char)t);
             }
-            return sList;
-        }
-
-        private class GLMEntry
-        {
-            public string Name { get; init; }
-            public Dictionary<string, FileEntry> FileEntries { get; } = new();
-            public FileStream FileStream { get; init; }
-
-            public override string ToString()
+            else
             {
-                return $"GLMEntry(Name: {Name} | FileCount: {FileEntries.Count})";
+                sList.Add(new FileEntry { Name = sb.ToString() });
+                sb.Clear();
             }
         }
+        return sList;
+    }
 
-        private class FileEntry
+    private class GLMEntry
+    {
+        public string Name { get; init; }
+        public Dictionary<string, FileEntry> FileEntries { get; } = new();
+        public FileStream FileStream { get; init; }
+
+        public override string ToString()
         {
-            public string Name { get; init; }
-            public int Offset { get; private set; }
-            public int Size { get; private set; }
-            public int RealSize { get; private set; }
-            public int ModifiedTime { get; private set; }
-            public short Scheme { get; private set; }
-            public GLMEntry Parent { get; private set; }
+            return $"GLMEntry(Name: {Name} | FileCount: {FileEntries.Count})";
+        }
+    }
 
-            public void Read(BinaryReader reader, GLMEntry parent)
-            {
-                Parent = parent;
+    private class FileEntry
+    {
+        public string Name { get; init; }
+        public int Offset { get; private set; }
+        public int Size { get; private set; }
+        public int RealSize { get; private set; }
+        public int ModifiedTime { get; private set; }
+        public short Scheme { get; private set; }
+        public GLMEntry Parent { get; private set; }
 
-                Offset = reader.ReadInt32();
-                Size = reader.ReadInt32();
-                RealSize = reader.ReadInt32();
-                ModifiedTime = reader.ReadInt32();
-                Scheme = reader.ReadInt16();
-                _ = reader.ReadInt32();
-            }
+        public void Read(BinaryReader reader, GLMEntry parent)
+        {
+            Parent = parent;
 
-            public override string ToString()
-            {
-                return $"FileEntry(Name: {Name} | Offset: {Offset} | Size: {Size} | Parent: {Parent})";
-            }
+            Offset = reader.ReadInt32();
+            Size = reader.ReadInt32();
+            RealSize = reader.ReadInt32();
+            ModifiedTime = reader.ReadInt32();
+            Scheme = reader.ReadInt16();
+            _ = reader.ReadInt32();
+        }
+
+        public override string ToString()
+        {
+            return $"FileEntry(Name: {Name} | Offset: {Offset} | Size: {Size} | Parent: {Parent})";
         }
     }
 }

@@ -1,17 +1,14 @@
-﻿using System.IO;
+﻿namespace AutoCore.Game.CloneBases;
 
-namespace AutoCore.Game.CloneBases
+using AutoCore.Game.CloneBases.Specifics;
+
+public class CloneBaseCommodity : CloneBaseObject
 {
-    using Specifics;
+    public CommoditySpecific CommoditySpecific;
 
-    public class CloneBaseCommodity : CloneBaseObject
+    public CloneBaseCommodity(BinaryReader reader)
+        : base(reader)
     {
-        public CommoditySpecific CommoditySpecific;
-
-        public CloneBaseCommodity(BinaryReader reader)
-            : base(reader)
-        {
-            CommoditySpecific = CommoditySpecific.ReadNew(reader);
-        }
+        CommoditySpecific = CommoditySpecific.ReadNew(reader);
     }
 }

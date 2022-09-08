@@ -1,28 +1,25 @@
-﻿using System.IO;
+﻿namespace AutoCore.Game.Extensions;
 
-namespace AutoCore.Game.Extensions
+using AutoCore.Game.Constants;
+using AutoCore.Game.Structures;
+
+public static class BinaryReaderExtensions
 {
-    using Constants;
-    using Structures;
-
-    public static class BinaryReaderExtensions
+    public static TFID ReadTFID(this BinaryReader reader)
     {
-        public static TFID ReadTFID(this BinaryReader reader)
+        var id = new TFID
         {
-            var id = new TFID
-            {
-                Coid = reader.ReadInt64(),
-                Global = reader.ReadBoolean()
-            };
+            Coid = reader.ReadInt64(),
+            Global = reader.ReadBoolean()
+        };
 
-            reader.BaseStream.Position += 7;
+        reader.BaseStream.Position += 7;
 
-            return id;
-        }
+        return id;
+    }
 
-        public static GameOpcode ReadGameOpcode(this BinaryReader reader)
-        {
-            return (GameOpcode)reader.ReadUInt32();
-        }
+    public static GameOpcode ReadGameOpcode(this BinaryReader reader)
+    {
+        return (GameOpcode)reader.ReadUInt32();
     }
 }

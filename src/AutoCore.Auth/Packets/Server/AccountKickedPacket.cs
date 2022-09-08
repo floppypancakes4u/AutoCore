@@ -1,35 +1,32 @@
-﻿using System.IO;
+﻿namespace AutoCore.Auth.Packets.Server;
 
-namespace AutoCore.Auth.Packets.Server
+using AutoCore.Auth.Data;
+using AutoCore.Utils.Packets;
+
+public class AccountKickedPacket : IOpcodedPacket<ServerOpcode>
 {
-    using Data;
-    using Utils.Packets;
+    public byte ReasonCode { get; set; }
 
-    public class AccountKickedPacket : IOpcodedPacket<ServerOpcode>
+    public ServerOpcode Opcode { get; } = ServerOpcode.AccountKicked;
+
+    public AccountKickedPacket(byte reasonCode)
     {
-        public byte ReasonCode { get; set; }
+        ReasonCode = reasonCode;
+    }
 
-        public ServerOpcode Opcode { get; } = ServerOpcode.AccountKicked;
+    public void Read(BinaryReader reader)
+    {
+        ReasonCode = reader.ReadByte();
+    }
 
-        public AccountKickedPacket(byte reasonCode)
-        {
-            ReasonCode = reasonCode;
-        }
+    public void Write(BinaryWriter writer)
+    {
+        writer.Write((byte) Opcode);
+        writer.Write(ReasonCode);
+    }
 
-        public void Read(BinaryReader reader)
-        {
-            ReasonCode = reader.ReadByte();
-        }
-
-        public void Write(BinaryWriter writer)
-        {
-            writer.Write((byte) Opcode);
-            writer.Write(ReasonCode);
-        }
-
-        public override string ToString()
-        {
-            return $"AccountKickedPacket({ReasonCode})";
-        }
+    public override string ToString()
+    {
+        return $"AccountKickedPacket({ReasonCode})";
     }
 }

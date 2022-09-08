@@ -1,22 +1,19 @@
-﻿using System.IO;
+﻿namespace AutoCore.Game.CloneBases;
 
-namespace AutoCore.Game.CloneBases
+using AutoCore.Game.CloneBases.Specifics;
+using AutoCore.Game.Structures;
+
+public class CloneBaseVehicle : CloneBaseObject
 {
-    using Structures;
-    using Specifics;
+    public VehicleSpecific VehicleSpecific;
 
-    public class CloneBaseVehicle : CloneBaseObject
+    public CloneBaseVehicle(BinaryReader reader)
+        : base(reader)
     {
-        public VehicleSpecific VehicleSpecific;
+        VehicleSpecific = VehicleSpecific.ReadNew(reader);
 
-        public CloneBaseVehicle(BinaryReader reader)
-            : base(reader)
-        {
-            VehicleSpecific = VehicleSpecific.ReadNew(reader);
-
-            VehicleSpecific.Tricks = new VehicleTrick[VehicleSpecific.NumberOfTricks];
-            for (var i = 0; i < VehicleSpecific.NumberOfTricks; ++i)
-                VehicleSpecific.Tricks[i] = VehicleTrick.ReadNew(reader);
-        }
+        VehicleSpecific.Tricks = new VehicleTrick[VehicleSpecific.NumberOfTricks];
+        for (var i = 0; i < VehicleSpecific.NumberOfTricks; ++i)
+            VehicleSpecific.Tricks[i] = VehicleTrick.ReadNew(reader);
     }
 }

@@ -1,44 +1,40 @@
-﻿using System;
-using System.IO;
+﻿namespace AutoCore.Game.Packets.Sector;
 
-namespace AutoCore.Game.Packets.Sector
+using AutoCore.Game.CloneBases.Specifics;
+using AutoCore.Game.Constants;
+using AutoCore.Utils.Extensions;
+
+public class CreateArmorPacket : CreateSimpleObjectPacket
 {
-    using CloneBases.Specifics;
-    using Constants;
-    using Utils.Extensions;
+    public override GameOpcode Opcode => GameOpcode.CreateArmor;
 
-    public class CreateArmorPacket : CreateSimpleObjectPacket
+    public ArmorSpecific ArmorSpecific { get; set; }
+    public float Mass { get; set; }
+    public string Name { get; set; }
+    public short VarianceDefensiveBonus { get; set; }
+
+    public override void Read(BinaryReader reader)
     {
-        public override GameOpcode Opcode => GameOpcode.CreateArmor;
+        throw new NotImplementedException();
+    }
 
-        public ArmorSpecific ArmorSpecific { get; set; }
-        public float Mass { get; set; }
-        public string Name { get; set; }
-        public short VarianceDefensiveBonus { get; set; }
+    public override void Write(BinaryWriter writer)
+    {
+        base.Write(writer);
 
-        public override void Read(BinaryReader reader)
-        {
-            throw new NotImplementedException();
-        }
+        ArmorSpecific.Write(writer);
 
-        public override void Write(BinaryWriter writer)
-        {
-            base.Write(writer);
+        writer.Write(Mass);
+        writer.WriteUtf8StringOn(Name, 100);
+        writer.Write(VarianceDefensiveBonus);
 
-            ArmorSpecific.Write(writer);
+        writer.BaseStream.Position += 2;
+    }
 
-            writer.Write(Mass);
-            writer.WriteUtf8StringOn(Name, 100);
-            writer.Write(VarianceDefensiveBonus);
+    public new static void WriteEmptyPacket(BinaryWriter writer)
+    {
+        CreateSimpleObjectPacket.WriteEmptyPacket(writer);
 
-            writer.BaseStream.Position += 2;
-        }
-
-        public new static void WriteEmptyPacket(BinaryWriter writer)
-        {
-            CreateSimpleObjectPacket.WriteEmptyPacket(writer);
-
-            writer.BaseStream.Position += 128;
-        }
+        writer.BaseStream.Position += 128;
     }
 }

@@ -1,28 +1,24 @@
-﻿using System;
-using System.IO;
+﻿namespace AutoCore.Game.Packets.Global;
 
-namespace AutoCore.Game.Packets.Global
+using AutoCore.Game.Constants;
+
+public class LoginPacket : BasePacket
 {
-    using Constants;
+    public override GameOpcode Opcode => GameOpcode.Login;
 
-    public class LoginPacket : BasePacket
+    public long CharacterCoid { get; set; }
+    public int StartSectorOverride { get; set; }
+
+    public override void Read(BinaryReader reader)
     {
-        public override GameOpcode Opcode => GameOpcode.Login;
+        reader.BaseStream.Position += 4;
 
-        public long CharacterCoid { get; set; }
-        public int StartSectorOverride { get; set; }
+        CharacterCoid = reader.ReadInt64();
+        StartSectorOverride = reader.ReadInt32();
+    }
 
-        public override void Read(BinaryReader reader)
-        {
-            reader.BaseStream.Position += 4;
-
-            CharacterCoid = reader.ReadInt64();
-            StartSectorOverride = reader.ReadInt32();
-        }
-
-        public override void Write(BinaryWriter writer)
-        {
-            throw new NotImplementedException();
-        }
+    public override void Write(BinaryWriter writer)
+    {
+        throw new NotImplementedException();
     }
 }

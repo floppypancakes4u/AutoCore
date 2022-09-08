@@ -1,26 +1,22 @@
-﻿using System;
-using System.IO;
+﻿namespace AutoCore.Game.Packets.Global;
 
-namespace AutoCore.Game.Packets.Global
+using AutoCore.Game.Constants;
+
+public class LoginAckPacket : BasePacket
 {
-    using Constants;
+    public override GameOpcode Opcode => GameOpcode.LoginAck;
 
-    public class LoginAckPacket : BasePacket
+    public bool Success { get; set; }
+
+    public override void Read(BinaryReader reader)
     {
-        public override GameOpcode Opcode => GameOpcode.LoginAck;
+        throw new NotImplementedException();
+    }
 
-        public bool Success { get; set; }
+    public override void Write(BinaryWriter writer)
+    {
+        writer.Write(Success);
 
-        public override void Read(BinaryReader reader)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override void Write(BinaryWriter writer)
-        {
-            writer.Write(Success);
-
-            writer.BaseStream.Position += 3;
-        }
+        writer.BaseStream.Position += 3;
     }
 }

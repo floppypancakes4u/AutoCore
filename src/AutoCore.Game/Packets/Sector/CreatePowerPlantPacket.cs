@@ -1,42 +1,38 @@
-﻿using System;
-using System.IO;
+﻿namespace AutoCore.Game.Packets.Sector;
 
-namespace AutoCore.Game.Packets.Sector
+using AutoCore.Game.CloneBases.Specifics;
+using AutoCore.Game.Constants;
+using AutoCore.Utils.Extensions;
+
+public class CreatePowerPlantPacket : CreateSimpleObjectPacket
 {
-    using CloneBases.Specifics;
-    using Constants;
-    using Utils.Extensions;
+    public override GameOpcode Opcode => GameOpcode.CreatePowerPlant;
 
-    public class CreatePowerPlantPacket : CreateSimpleObjectPacket
+    public PowerPlantSpecific PowerPlantSpecific { get; set; }
+    public float Mass { get; set; }
+    public float SkillCooldown { get; set; }
+    public string Name { get; set; }
+
+    public override void Read(BinaryReader reader)
     {
-        public override GameOpcode Opcode => GameOpcode.CreatePowerPlant;
+        throw new NotImplementedException();
+    }
 
-        public PowerPlantSpecific PowerPlantSpecific { get; set; }
-        public float Mass { get; set; }
-        public float SkillCooldown { get; set; }
-        public string Name { get; set; }
+    public override void Write(BinaryWriter writer)
+    {
+        base.Write(writer);
 
-        public override void Read(BinaryReader reader)
-        {
-            throw new NotImplementedException();
-        }
+        PowerPlantSpecific.Write(writer);
 
-        public override void Write(BinaryWriter writer)
-        {
-            base.Write(writer);
+        writer.Write(Mass);
+        writer.WriteUtf8StringOn(Name, 100);
+        writer.Write(SkillCooldown);
+    }
 
-            PowerPlantSpecific.Write(writer);
+    public new static void WriteEmptyPacket(BinaryWriter writer)
+    {
+        CreateSimpleObjectPacket.WriteEmptyPacket(writer);
 
-            writer.Write(Mass);
-            writer.WriteUtf8StringOn(Name, 100);
-            writer.Write(SkillCooldown);
-        }
-
-        public new static void WriteEmptyPacket(BinaryWriter writer)
-        {
-            CreateSimpleObjectPacket.WriteEmptyPacket(writer);
-
-            writer.BaseStream.Position += 120;
-        }
+        writer.BaseStream.Position += 120;
     }
 }

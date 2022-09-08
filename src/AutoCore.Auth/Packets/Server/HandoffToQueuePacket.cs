@@ -1,36 +1,33 @@
-﻿using System.IO;
+﻿namespace AutoCore.Auth.Packets.Server;
 
-namespace AutoCore.Auth.Packets.Server
+using AutoCore.Auth.Data;
+using AutoCore.Utils.Packets;
+
+public class HandoffToQueuePacket : IOpcodedPacket<ServerOpcode>
 {
-    using Data;
-    using Utils.Packets;
+    public uint OneTimeKey { get; set; }
+    public uint AccountId { get; set; }
+    public byte ServerId { get; set; }
 
-    public class HandoffToQueuePacket : IOpcodedPacket<ServerOpcode>
+    public ServerOpcode Opcode { get; } = ServerOpcode.HandOffToQueue;
+
+    public void Read(BinaryReader reader)
     {
-        public uint OneTimeKey { get; set; }
-        public uint AccountId { get; set; }
-        public byte ServerId { get; set; }
+        OneTimeKey = reader.ReadUInt32();
+        AccountId = reader.ReadUInt32();
+        ServerId = reader.ReadByte();
+    }
 
-        public ServerOpcode Opcode { get; } = ServerOpcode.HandOffToQueue;
+    public void Write(BinaryWriter writer)
+    {
+        writer.Write((byte) Opcode);
+        writer.Write(OneTimeKey);
+        writer.Write(AccountId);
+        writer.Write(ServerId);
+    }
 
-        public void Read(BinaryReader reader)
-        {
-            OneTimeKey = reader.ReadUInt32();
-            AccountId = reader.ReadUInt32();
-            ServerId = reader.ReadByte();
-        }
-
-        public void Write(BinaryWriter writer)
-        {
-            writer.Write((byte) Opcode);
-            writer.Write(OneTimeKey);
-            writer.Write(AccountId);
-            writer.Write(ServerId);
-        }
-
-        public override string ToString()
-        {
-            return $"HandoffToQueuePacket({OneTimeKey}, {AccountId}, {ServerId})";
-        }
+    public override string ToString()
+    {
+        return $"HandoffToQueuePacket({OneTimeKey}, {AccountId}, {ServerId})";
     }
 }

@@ -1,37 +1,34 @@
-﻿using System.IO;
+﻿namespace AutoCore.Game.Packets.Global;
 
-namespace AutoCore.Game.Packets.Global
+using AutoCore.Game.Constants;
+using AutoCore.Utils.Extensions;
+
+public class NewsPacket : BasePacket
 {
-    using Constants;
-    using Utils.Extensions;
+    public override GameOpcode Opcode => GameOpcode.News;
+    public string News { get; }
+    public uint Language { get; private set; }
 
-    public class NewsPacket : BasePacket
+    public NewsPacket()
     {
-        public override GameOpcode Opcode => GameOpcode.News;
-        public string News { get; }
-        public uint Language { get; private set; }
+    }
 
-        public NewsPacket()
-        {
-        }
+    public NewsPacket(string news, uint language)
+    {
+        News = news;
+        Language = language;
+    }
 
-        public NewsPacket(string news, uint language)
-        {
-            News = news;
-            Language = language;
-        }
+    public override void Write(BinaryWriter writer)
+    {
+        writer.Write(Language);
+        writer.Write(News.Length + 1);
+        writer.WriteUtf8NullString(News);
+    }
 
-        public override void Write(BinaryWriter writer)
-        {
-            writer.Write(Language);
-            writer.Write(News.Length + 1);
-            writer.WriteUtf8NullString(News);
-        }
-
-        public override void Read(BinaryReader reader)
-        {
-            Language = reader.ReadUInt32();
-            _ = reader.ReadUInt32();
-        }
+    public override void Read(BinaryReader reader)
+    {
+        Language = reader.ReadUInt32();
+        _ = reader.ReadUInt32();
     }
 }

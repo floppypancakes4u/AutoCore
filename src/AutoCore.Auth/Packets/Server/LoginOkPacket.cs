@@ -1,54 +1,51 @@
-﻿using System.IO;
+﻿namespace AutoCore.Auth.Packets.Server;
 
-namespace AutoCore.Auth.Packets.Server
+using AutoCore.Auth.Data;
+using AutoCore.Utils.Packets;
+
+public class LoginOkPacket : IOpcodedPacket<ServerOpcode>
 {
-    using Data;
-    using Utils.Packets;
+    public uint SessionId1 { get; set; }
+    public uint SessionId2 { get; set; }
+    public uint UpdateKey1 { get; set; }
+    public uint UpdateKey2 { get; set; }
+    public uint PayStat { get; set; }
+    public uint RemainingTime { get; set; }
+    public uint QuotaTime { get; set; }
+    public uint WarnFlag { get; set; }
+    public uint LoginFlag { get; set; }
 
-    public class LoginOkPacket : IOpcodedPacket<ServerOpcode>
+    public ServerOpcode Opcode { get; } = ServerOpcode.LoginOk;
+
+    public void Read(BinaryReader reader)
     {
-        public uint SessionId1 { get; set; }
-        public uint SessionId2 { get; set; }
-        public uint UpdateKey1 { get; set; }
-        public uint UpdateKey2 { get; set; }
-        public uint PayStat { get; set; }
-        public uint RemainingTime { get; set; }
-        public uint QuotaTime { get; set; }
-        public uint WarnFlag { get; set; }
-        public uint LoginFlag { get; set; }
+        SessionId1 = reader.ReadUInt32();
+        SessionId2 = reader.ReadUInt32();
+        UpdateKey1 = reader.ReadUInt32();
+        UpdateKey2 = reader.ReadUInt32();
+        PayStat = reader.ReadUInt32();
+        RemainingTime = reader.ReadUInt32();
+        QuotaTime = reader.ReadUInt32();
+        WarnFlag = reader.ReadUInt32();
+        LoginFlag = reader.ReadUInt32();
+    }
 
-        public ServerOpcode Opcode { get; } = ServerOpcode.LoginOk;
+    public void Write(BinaryWriter writer)
+    {
+        writer.Write((byte) Opcode);
+        writer.Write(SessionId1);
+        writer.Write(SessionId2);
+        writer.Write(UpdateKey1);
+        writer.Write(UpdateKey2);
+        writer.Write(PayStat);
+        writer.Write(RemainingTime);
+        writer.Write(QuotaTime);
+        writer.Write(WarnFlag);
+        writer.Write(LoginFlag);
+    }
 
-        public void Read(BinaryReader reader)
-        {
-            SessionId1 = reader.ReadUInt32();
-            SessionId2 = reader.ReadUInt32();
-            UpdateKey1 = reader.ReadUInt32();
-            UpdateKey2 = reader.ReadUInt32();
-            PayStat = reader.ReadUInt32();
-            RemainingTime = reader.ReadUInt32();
-            QuotaTime = reader.ReadUInt32();
-            WarnFlag = reader.ReadUInt32();
-            LoginFlag = reader.ReadUInt32();
-        }
-
-        public void Write(BinaryWriter writer)
-        {
-            writer.Write((byte) Opcode);
-            writer.Write(SessionId1);
-            writer.Write(SessionId2);
-            writer.Write(UpdateKey1);
-            writer.Write(UpdateKey2);
-            writer.Write(PayStat);
-            writer.Write(RemainingTime);
-            writer.Write(QuotaTime);
-            writer.Write(WarnFlag);
-            writer.Write(LoginFlag);
-        }
-
-        public override string ToString()
-        {
-            return $"LoginOkPacket({SessionId1}, {SessionId2}, {UpdateKey1}, {UpdateKey2}, {PayStat}, {RemainingTime}, {QuotaTime}, {WarnFlag}, {LoginFlag})";
-        }
+    public override string ToString()
+    {
+        return $"LoginOkPacket({SessionId1}, {SessionId2}, {UpdateKey1}, {UpdateKey2}, {PayStat}, {RemainingTime}, {QuotaTime}, {WarnFlag}, {LoginFlag})";
     }
 }

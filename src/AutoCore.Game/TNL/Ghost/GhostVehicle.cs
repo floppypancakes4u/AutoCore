@@ -2,71 +2,70 @@
 using TNL.Types;
 using TNL.Utils;
 
-namespace AutoCore.Game.TNL.Ghost
+namespace AutoCore.Game.TNL.Ghost;
+
+using AutoCore.Game.Structures;
+
+public class GhostVehicle : GhostObject
 {
-    using Structures;
+    private static NetClassRepInstance<GhostVehicle> _dynClassRep;
 
-    public class GhostVehicle : GhostObject
+    private byte ArmorFlags;
+    private int MaxShields;
+    private int CbidPet;
+    private int MaxHp;
+    private int CurrHp;
+    private int Combat;
+    private int Perception;
+    private int Tech;
+    private int Theory;
+    private string VehicleName;
+    private string ClanName;
+    private int ClanId;
+    private int ClanRank;
+
+    public override NetClassRep GetClassRep()
     {
-        private static NetClassRepInstance<GhostVehicle> _dynClassRep;
+        return _dynClassRep;
+    }
 
-        private byte ArmorFlags;
-        private int MaxShields;
-        private int CbidPet;
-        private int MaxHp;
-        private int CurrHp;
-        private int Combat;
-        private int Perception;
-        private int Tech;
-        private int Theory;
-        private string VehicleName;
-        private string ClanName;
-        private int ClanId;
-        private int ClanRank;
+    public new static void RegisterNetClassReps()
+    {
+        ImplementNetObject(out _dynClassRep);
+    }
 
-        public override NetClassRep GetClassRep()
-        {
-            return _dynClassRep;
-        }
+    public GhostVehicle()
+    {
+        UpdatePriorityScalar = 1.0f;
+    }
 
-        public new static void RegisterNetClassReps()
-        {
-            ImplementNetObject(out _dynClassRep);
-        }
+    public override void CreatePacket()
+    {
 
-        public GhostVehicle()
-        {
-            UpdatePriorityScalar = 1.0f;
-        }
+    }
 
-        public override void CreatePacket()
-        {
+    public override void RecreateForExisting()
+    {
 
-        }
+    }
 
-        public override void RecreateForExisting()
-        {
+    public override ulong PackUpdate(GhostConnection connection, ulong updateMask, BitStream stream)
+    {
+        return 0UL;
+    }
 
-        }
+    public override void UnpackUpdate(GhostConnection connection, BitStream stream)
+    {
 
-        public override ulong PackUpdate(GhostConnection connection, ulong updateMask, BitStream stream)
-        {
-            return 0UL;
-        }
+    }
 
-        public override void UnpackUpdate(GhostConnection connection, BitStream stream)
-        {
+    public void AddEquip(object createMsg, TFID id, int packetSize)
+    {
 
-        }
+    }
 
-        public void AddEquip(object createMsg, TFID id, int packetSize)
-        {
+    public void AddEquip2(object createMsg, TFID id, int packetSize)
+    {
 
-        }
-
-        public void AddEquip2(object createMsg, TFID id, int packetSize)
-        {
-
-        }
     }
 }

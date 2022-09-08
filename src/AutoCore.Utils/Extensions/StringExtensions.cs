@@ -1,18 +1,15 @@
-﻿using System;
+﻿namespace AutoCore.Utils.Extensions;
 
-namespace AutoCore.Utils.Extensions
+public static class StringExtensions
 {
-    public static class StringExtensions
+    public static byte[] GetByteArrayFromString(this string val)
     {
-        public static byte[] GetByteArrayFromString(this string val)
-        {
-            var split = val.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            var key = new byte[split.Length];
+        var split = val.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        var key = new byte[split.Length];
 
-            for (var i = 0; i < split.Length; ++i)
-                key[i] = byte.Parse(split[i]);
+        for (var i = 0; i < split.Length; ++i)
+            key[i] = byte.Parse(split[i]);
 
-            return key;
-        }
+        return key;
     }
 }

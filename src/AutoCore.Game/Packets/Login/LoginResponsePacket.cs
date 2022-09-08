@@ -1,30 +1,25 @@
-﻿using System;
-using System.IO;
+﻿namespace AutoCore.Game.Packets.Login;
 
-namespace AutoCore.Game.Packets.Login
+using AutoCore.Game.Constants;
+
+public class LoginResponsePacket : BasePacket
 {
-    using Constants;
-    using Extensions;
+    public override GameOpcode Opcode => GameOpcode.LoginResponse;
 
-    public class LoginResponsePacket : BasePacket
+    public uint Result { get; }
+
+    public LoginResponsePacket(uint result)
     {
-        public override GameOpcode Opcode => GameOpcode.LoginResponse;
+        Result = result;
+    }
 
-        public uint Result { get; }
+    public override void Read(BinaryReader reader)
+    {
+        throw new NotImplementedException();
+    }
 
-        public LoginResponsePacket(uint result)
-        {
-            Result = result;
-        }
-
-        public override void Read(BinaryReader reader)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override void Write(BinaryWriter writer)
-        {
-            writer.Write(Result);
-        }
+    public override void Write(BinaryWriter writer)
+    {
+        writer.Write(Result);
     }
 }

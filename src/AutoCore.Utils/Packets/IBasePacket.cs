@@ -1,11 +1,8 @@
-﻿using System.IO;
+﻿namespace AutoCore.Utils.Packets;
 
-namespace AutoCore.Utils.Packets
+public interface IBasePacket
 {
-    public interface IBasePacket
-    {
-        void Read(BinaryReader reader);
+    void Read(BinaryReader reader);
 
-        void Write(BinaryWriter writer);
-    }
+    void Write(BinaryWriter writer);
 }

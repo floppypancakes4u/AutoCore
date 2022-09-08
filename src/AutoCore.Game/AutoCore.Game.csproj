@@ -6,13 +6,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\lib\TNL.NET\TNL.NET\TNL.NET.csproj" />
-    <ProjectReference Include="..\AutoCore.Database\AutoCore.Database.csproj" />
-    <ProjectReference Include="..\AutoCore.Utils\AutoCore.Utils.csproj" />
+    <Compile Remove="Packets\Arena\**" />
+    <EmbeddedResource Remove="Packets\Arena\**" />
+    <None Remove="Packets\Arena\**" />
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Packets\Arena\" />
+    <ProjectReference Include="..\..\lib\TNL.NET\TNL.NET\TNL.NET.csproj" />
+    <ProjectReference Include="..\AutoCore.Database\AutoCore.Database.csproj" />
+    <ProjectReference Include="..\AutoCore.Utils\AutoCore.Utils.csproj" />
   </ItemGroup>
 
 

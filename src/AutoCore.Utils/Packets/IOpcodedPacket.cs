@@ -1,7 +1,6 @@
-﻿namespace AutoCore.Utils.Packets
+﻿namespace AutoCore.Utils.Packets;
+
+public interface IOpcodedPacket<out T> : IBasePacket
 {
-    public interface IOpcodedPacket<out T> : IBasePacket
-    {
-        T Opcode { get; }
-    }
+    T Opcode { get; }
 }

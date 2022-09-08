@@ -1,24 +1,23 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace AutoCore.Utils
+namespace AutoCore.Utils;
+
+public delegate bool ExitEventHandler(byte sig);
+
+public abstract class ExitableProgram
 {
-    public delegate bool ExitEventHandler(byte sig);
+    protected static ExitEventHandler ExitHandler { get; set; }
 
-    public abstract class ExitableProgram
+    protected static void Initialize(ExitEventHandler handler)
     {
-        protected static ExitEventHandler ExitHandler { get; set; }
+        ExitHandler += handler;
 
-        protected static void Initialize(ExitEventHandler handler)
-        {
-            ExitHandler += handler;
-
-            NativeMethods.SetConsoleCtrlHandler(ExitHandler, true);
-        }
+        NativeMethods.SetConsoleCtrlHandler(ExitHandler, true);
     }
+}
 
-    internal class NativeMethods
-    {
-        [DllImport("Kernel32")]
-        public static extern bool SetConsoleCtrlHandler(ExitEventHandler handler, bool add);
-    }
+internal class NativeMethods
+{
+    [DllImport("Kernel32")]
+    public static extern bool SetConsoleCtrlHandler(ExitEventHandler handler, bool add);
 }

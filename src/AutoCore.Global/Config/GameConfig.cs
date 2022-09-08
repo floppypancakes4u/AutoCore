@@ -1,9 +1,8 @@
-﻿namespace AutoCore.Global.Config
+﻿namespace AutoCore.Global.Config;
+
+public class GameConfig
 {
-    public class GameConfig
-    {
-        public string PublicAddress { get; set; }
-        public int Port { get; set; }
-        public int Backlog { get; set; }
-    }
+    public string PublicAddress { get; set; }
+    public int Port { get; set; }
+    public int Backlog { get; set; }
 }

@@ -1,19 +1,16 @@
-﻿using System.IO;
+﻿namespace AutoCore.Game.CloneBases.Specifics;
 
-namespace AutoCore.Game.CloneBases.Specifics
+public struct GadgetSpecific
 {
-    public struct GadgetSpecific
-    {
-        public uint ObjectType;
-        public int Prefix;
+    public uint ObjectType;
+    public int Prefix;
 
-        public static GadgetSpecific ReadNew(BinaryReader reader)
+    public static GadgetSpecific ReadNew(BinaryReader reader)
+    {
+        return new GadgetSpecific
         {
-            return new GadgetSpecific
-            {
-                Prefix = reader.ReadInt32(),
-                ObjectType = reader.ReadUInt32()
-            };
-        }
+            Prefix = reader.ReadInt32(),
+            ObjectType = reader.ReadUInt32()
+        };
     }
 }

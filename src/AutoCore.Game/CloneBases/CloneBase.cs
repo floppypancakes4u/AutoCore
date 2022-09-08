@@ -1,19 +1,16 @@
-﻿using System.IO;
+﻿namespace AutoCore.Game.CloneBases;
 
-namespace AutoCore.Game.CloneBases
+using AutoCore.Game.Constants;
+using AutoCore.Game.CloneBases.Specifics;
+
+public class CloneBase
 {
-    using Constants;
-    using Specifics;
+    public CloneBaseSpecific CloneBaseSpecific { get; set; }
 
-    public class CloneBase
+    public CloneBase(BinaryReader reader)
     {
-        public CloneBaseSpecific CloneBaseSpecific { get; set; }
-
-        public CloneBase(BinaryReader reader)
-        {
-            CloneBaseSpecific = CloneBaseSpecific.ReadNew(reader);
-        }
-
-        public CloneBaseObjectType Type => (CloneBaseObjectType)CloneBaseSpecific.Type;
+        CloneBaseSpecific = CloneBaseSpecific.ReadNew(reader);
     }
+
+    public CloneBaseObjectType Type => (CloneBaseObjectType)CloneBaseSpecific.Type;
 }

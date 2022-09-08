@@ -1,33 +1,28 @@
-﻿using System;
-using System.IO;
+﻿namespace AutoCore.Game.Packets.Login;
 
-namespace AutoCore.Game.Packets.Login
+using AutoCore.Game.Constants;
+
+public class NewCharacterResponsePacket : BasePacket
 {
-    using Constants;
-    using Extensions;
+    public override GameOpcode Opcode => GameOpcode.LoginNewCharacterResponse;
 
-    public class NewCharacterResponsePacket : BasePacket
+    public uint Result { get; set; }
+    public long NewCharCoid { get; set; }
+
+    public NewCharacterResponsePacket(uint result, long coid)
     {
-        public override GameOpcode Opcode => GameOpcode.LoginNewCharacterResponse;
+        Result = result;
+        NewCharCoid = coid;
+    }
 
-        public uint Result { get; set; }
-        public long NewCharCoid { get; set; }
+    public override void Read(BinaryReader reader)
+    {
+        throw new NotImplementedException();
+    }
 
-        public NewCharacterResponsePacket(uint result, long coid)
-        {
-            Result = result;
-            NewCharCoid = coid;
-        }
-
-        public override void Read(BinaryReader reader)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override void Write(BinaryWriter writer)
-        {
-            writer.Write(Result);
-            writer.Write(NewCharCoid);
-        }
+    public override void Write(BinaryWriter writer)
+    {
+        writer.Write(Result);
+        writer.Write(NewCharCoid);
     }
 }

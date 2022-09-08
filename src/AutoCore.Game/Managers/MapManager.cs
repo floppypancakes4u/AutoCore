@@ -1,18 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿namespace AutoCore.Game.Managers;
 
-namespace AutoCore.Game.Managers
+using AutoCore.Utils.Memory;
+
+public class MapManager : Singleton<MapManager>
 {
-    using Utils.Memory;
-
-    public class MapManager : Singleton<MapManager>
+    public bool Initialize()
     {
-        public bool Initialize()
-        {
-            return true;
-        }
+        return true;
     }
 }

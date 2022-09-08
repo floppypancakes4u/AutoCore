@@ -1,101 +1,96 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿namespace AutoCore.Game.Managers;
 
-namespace AutoCore.Game.Managers
+using AutoCore.Database.Char;
+using AutoCore.Database.Char.Models;
+using AutoCore.Game.Packets.Login;
+using AutoCore.Game.TNL;
+using AutoCore.Utils.Memory;
+using AutoCore.Utils.Timer;
+
+public class LoginManager : Singleton<LoginManager>
 {
-    using Database.Char;
-    using Database.Char.Models;
-    using Packets.Login;
-    using TNL;
-    using Utils.Memory;
-    using Utils.Timer;
+    private const int SessionTimeoutCheck = 5000;
+    private const int LoginTimoutInMs = 10000;
+    private Dictionary<uint, GlobalLoginEntry> GlobalLogins { get; } = new();
+    private Timer Timer { get; } = new();
 
-    public class LoginManager : Singleton<LoginManager>
+    public LoginManager()
     {
-        private const int SessionTimeoutCheck = 5000;
-        private const int LoginTimoutInMs = 10000;
-        private Dictionary<uint, GlobalLoginEntry> GlobalLogins { get; } = new();
-        private Timer Timer { get; } = new();
-
-        public LoginManager()
+        Timer.Add("LoginSessionExpire", SessionTimeoutCheck, true, () =>
         {
-            Timer.Add("LoginSessionExpire", SessionTimeoutCheck, true, () =>
-            {
-                var toRemove = new List<uint>();
+            var toRemove = new List<uint>();
 
-                toRemove.AddRange(GlobalLogins.Where(gl => gl.Value.ExpireTime < DateTime.Now).Select(gl => gl.Key));
-
-                lock (GlobalLogins)
-                {
-                    foreach (var rem in toRemove)
-                        GlobalLogins.Remove(rem);
-                }
-            });
-        }
-
-        public bool ExpectLoginToGlobal(uint accountId, string username, uint authKey)
-        {
-            if (GlobalLogins.ContainsKey(accountId) || string.IsNullOrEmpty(username) || authKey == 0)
-                return false;
+            toRemove.AddRange(GlobalLogins.Where(gl => gl.Value.ExpireTime < DateTime.Now).Select(gl => gl.Key));
 
             lock (GlobalLogins)
             {
-                GlobalLogins[accountId] = new GlobalLoginEntry
-                {
-                    ExpireTime = DateTime.Now + TimeSpan.FromMilliseconds(LoginTimoutInMs),
-                    Username = username,
-                    AuthKey = authKey
-                };
+                foreach (var rem in toRemove)
+                    GlobalLogins.Remove(rem);
             }
+        });
+    }
 
-            return true;
-        }
+    public bool ExpectLoginToGlobal(uint accountId, string username, uint authKey)
+    {
+        if (GlobalLogins.ContainsKey(accountId) || string.IsNullOrEmpty(username) || authKey == 0)
+            return false;
 
-        public void Update(long delta)
+        lock (GlobalLogins)
         {
-            Timer.Update(delta);
-        }
-
-        public bool LoginToGlobal(TNLConnection client, LoginRequestPacket packet)
-        {
-            if (!GlobalLogins.TryGetValue(packet.UserId, out var entry))
-                return false;
-
-            if (entry.AuthKey != packet.AuthKey || entry.Username != packet.Username)
-                return false;
-
-            using (var context = new CharContext())
+            GlobalLogins[accountId] = new GlobalLoginEntry
             {
-                var account = context.Accounts.FirstOrDefault(a => a.Id == packet.UserId);
-                if (account == null)
+                ExpireTime = DateTime.Now + TimeSpan.FromMilliseconds(LoginTimoutInMs),
+                Username = username,
+                AuthKey = authKey
+            };
+        }
+
+        return true;
+    }
+
+    public void Update(long delta)
+    {
+        Timer.Update(delta);
+    }
+
+    public bool LoginToGlobal(TNLConnection client, LoginRequestPacket packet)
+    {
+        if (!GlobalLogins.TryGetValue(packet.UserId, out var entry))
+            return false;
+
+        if (entry.AuthKey != packet.AuthKey || entry.Username != packet.Username)
+            return false;
+
+        using (var context = new CharContext())
+        {
+            var account = context.Accounts.FirstOrDefault(a => a.Id == packet.UserId);
+            if (account == null)
+            {
+                account = new Account()
                 {
-                    account = new Account()
-                    {
-                        Id = packet.UserId,
-                        Name = packet.Username,
-                        Level = 0,
-                        FirstFlags1 = 0,
-                        FirstFlags2 = 0,
-                        FirstFlags3 = 0,
-                        FirstFlags4 = 0
-                    };
+                    Id = packet.UserId,
+                    Name = packet.Username,
+                    Level = 0,
+                    FirstFlags1 = 0,
+                    FirstFlags2 = 0,
+                    FirstFlags3 = 0,
+                    FirstFlags4 = 0
+                };
 
-                    context.Accounts.Add(account);
-                    context.SaveChanges();
-                }
-
-                client.Account = account;
+                context.Accounts.Add(account);
+                context.SaveChanges();
             }
 
-            return true;
+            client.Account = account;
         }
 
-        private class GlobalLoginEntry
-        {
-            public DateTime ExpireTime { get; set; }
-            public string Username { get; set; }
-            public uint AuthKey { get; set; }
-        }
+        return true;
+    }
+
+    private class GlobalLoginEntry
+    {
+        public DateTime ExpireTime { get; set; }
+        public string Username { get; set; }
+        public uint AuthKey { get; set; }
     }
 }

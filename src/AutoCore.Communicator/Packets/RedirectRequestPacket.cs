@@ -1,41 +1,38 @@
-﻿using System.IO;
+﻿namespace AutoCore.Communicator.Packets;
 
-namespace AutoCore.Communicator.Packets
+using AutoCore.Utils.Extensions;
+using AutoCore.Utils.Packets;
+
+public class RedirectRequestPacket : IOpcodedPacket<CommunicatorOpcode>
 {
-    using Utils.Extensions;
-    using Utils.Packets;
+    public CommunicatorOpcode Opcode { get; } = CommunicatorOpcode.RedirectRequest;
 
-    public class RedirectRequestPacket : IOpcodedPacket<CommunicatorOpcode>
+    public RedirectRequest Request { get; }
+
+    public RedirectRequestPacket()
     {
-        public CommunicatorOpcode Opcode { get; } = CommunicatorOpcode.RedirectRequest;
+        Request = new();
+    }
 
-        public RedirectRequest Request { get; }
+    public RedirectRequestPacket(RedirectRequest request)
+    {
+        Request = request;
+    }
 
-        public RedirectRequestPacket()
-        {
-            Request = new();
-        }
+    public void Read(BinaryReader br)
+    {
+        Request.AccountId = br.ReadUInt32();
+        Request.Username = br.ReadLengthedString();
+        Request.Email = br.ReadLengthedString();
+        Request.OneTimeKey = br.ReadUInt32();
+    }
 
-        public RedirectRequestPacket(RedirectRequest request)
-        {
-            Request = request;
-        }
-
-        public void Read(BinaryReader br)
-        {
-            Request.AccountId = br.ReadUInt32();
-            Request.Username = br.ReadLengthedString();
-            Request.Email = br.ReadLengthedString();
-            Request.OneTimeKey = br.ReadUInt32();
-        }
-
-        public void Write(BinaryWriter bw)
-        {
-            bw.Write((byte)Opcode);
-            bw.Write(Request.AccountId);
-            bw.WriteLengthedString(Request.Username);
-            bw.WriteLengthedString(Request.Email);
-            bw.Write(Request.OneTimeKey);
-        }
+    public void Write(BinaryWriter bw)
+    {
+        bw.Write((byte)Opcode);
+        bw.Write(Request.AccountId);
+        bw.WriteLengthedString(Request.Username);
+        bw.WriteLengthedString(Request.Email);
+        bw.Write(Request.OneTimeKey);
     }
 }

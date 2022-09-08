@@ -1,23 +1,20 @@
-﻿using System.IO;
+﻿namespace AutoCore.Game.CloneBases.Prefixes;
 
-namespace AutoCore.Game.CloneBases.Prefixes
+using AutoCore.Game.Structures;
+
+public class PrefixArmor : PrefixBase
 {
-    using Structures;
+    public short ArmorFactorAdjust { get; set; }
+    public float ArmorFactorPercent { get; set; }
+    public DamageSpecific ResistAdjust { get; set; }
 
-    public class PrefixArmor : PrefixBase
+    public PrefixArmor(BinaryReader reader)
+        : base(reader)
     {
-        public short ArmorFactorAdjust { get; set; }
-        public float ArmorFactorPercent { get; set; }
-        public DamageSpecific ResistAdjust { get; set; }
+        ArmorFactorPercent = reader.ReadSingle();
+        ArmorFactorAdjust = reader.ReadInt16();
+        ResistAdjust = DamageSpecific.ReadNew(reader);
 
-        public PrefixArmor(BinaryReader reader)
-            : base(reader)
-        {
-            ArmorFactorPercent = reader.ReadSingle();
-            ArmorFactorAdjust = reader.ReadInt16();
-            ResistAdjust = DamageSpecific.ReadNew(reader);
-
-            reader.BaseStream.Position += 2;
-        }
+        reader.BaseStream.Position += 2;
     }
 }

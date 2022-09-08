@@ -1,30 +1,27 @@
-﻿using System.IO;
+﻿namespace AutoCore.Auth.Packets.Server;
 
-namespace AutoCore.Auth.Packets.Server
+using AutoCore.Auth.Data;
+using AutoCore.Utils.Packets;
+
+public class BlockedAccountPacket : IOpcodedPacket<ServerOpcode>
 {
-    using Data;
-    using Utils.Packets;
+    public uint Reason { get; set; }
 
-    public class BlockedAccountPacket : IOpcodedPacket<ServerOpcode>
+    public ServerOpcode Opcode { get; } = ServerOpcode.BlockedAccount;
+
+    public void Read(BinaryReader reader)
     {
-        public uint Reason { get; set; }
+        Reason = reader.ReadUInt32();
+    }
 
-        public ServerOpcode Opcode { get; } = ServerOpcode.BlockedAccount;
+    public void Write(BinaryWriter writer)
+    {
+        writer.Write((byte) Opcode);
+        writer.Write(Reason);
+    }
 
-        public void Read(BinaryReader reader)
-        {
-            Reason = reader.ReadUInt32();
-        }
-
-        public void Write(BinaryWriter writer)
-        {
-            writer.Write((byte) Opcode);
-            writer.Write(Reason);
-        }
-
-        public override string ToString()
-        {
-            return $"BlockedAccountPacket({Reason})";
-        }
+    public override string ToString()
+    {
+        return $"BlockedAccountPacket({Reason})";
     }
 }

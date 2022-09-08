@@ -1,26 +1,23 @@
-﻿using System.IO;
+﻿namespace AutoCore.Communicator.Packets;
 
-namespace AutoCore.Communicator.Packets
+using AutoCore.Utils.Packets;
+
+public class RedirectResponsePacket : IOpcodedPacket<CommunicatorOpcode>
 {
-    using Utils.Packets;
+    public CommunicatorOpcode Opcode { get; } = CommunicatorOpcode.RedirectResponse;
+    public CommunicatorActionResult Result { get; set; }
+    public uint AccountId { get; set; }
 
-    public class RedirectResponsePacket : IOpcodedPacket<CommunicatorOpcode>
+    public void Read(BinaryReader br)
     {
-        public CommunicatorOpcode Opcode { get; } = CommunicatorOpcode.RedirectResponse;
-        public CommunicatorActionResult Result { get; set; }
-        public uint AccountId { get; set; }
+        Result = (CommunicatorActionResult)br.ReadByte();
+        AccountId = br.ReadUInt32();
+    }
 
-        public void Read(BinaryReader br)
-        {
-            Result = (CommunicatorActionResult)br.ReadByte();
-            AccountId = br.ReadUInt32();
-        }
-
-        public void Write(BinaryWriter bw)
-        {
-            bw.Write((byte)Opcode);
-            bw.Write((byte)Result);
-            bw.Write(AccountId);
-        }
+    public void Write(BinaryWriter bw)
+    {
+        bw.Write((byte)Opcode);
+        bw.Write((byte)Result);
+        bw.Write(AccountId);
     }
 }

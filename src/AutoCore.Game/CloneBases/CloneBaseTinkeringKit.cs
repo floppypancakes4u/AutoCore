@@ -1,17 +1,14 @@
-﻿using System.IO;
+﻿namespace AutoCore.Game.CloneBases;
 
-namespace AutoCore.Game.CloneBases
+using AutoCore.Game.CloneBases.Specifics;
+
+public class CloneBaseTinkeringKit : CloneBaseObject
 {
-    using Specifics;
+    public TinkeringKitSpecific TinkeringKitSpecific;
 
-    public class CloneBaseTinkeringKit : CloneBaseObject
+    public CloneBaseTinkeringKit(BinaryReader reader)
+        : base(reader)
     {
-        public TinkeringKitSpecific TinkeringKitSpecific;
-
-        public CloneBaseTinkeringKit(BinaryReader reader)
-            : base(reader)
-        {
-            TinkeringKitSpecific = TinkeringKitSpecific.ReadNew(reader);
-        }
+        TinkeringKitSpecific = TinkeringKitSpecific.ReadNew(reader);
     }
 }

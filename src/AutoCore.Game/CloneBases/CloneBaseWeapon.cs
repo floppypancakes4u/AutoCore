@@ -1,17 +1,14 @@
-﻿using System.IO;
+﻿namespace AutoCore.Game.CloneBases;
 
-namespace AutoCore.Game.CloneBases
+using AutoCore.Game.CloneBases.Specifics;
+
+public class CloneBaseWeapon : CloneBaseObject
 {
-    using Specifics;
+    public WeaponSpecific WeaponSpecific;
 
-    public class CloneBaseWeapon : CloneBaseObject
+    public CloneBaseWeapon(BinaryReader reader)
+        : base(reader)
     {
-        public WeaponSpecific WeaponSpecific;
-
-        public CloneBaseWeapon(BinaryReader reader)
-            : base(reader)
-        {
-            WeaponSpecific = WeaponSpecific.ReadNew(reader);
-        }
+        WeaponSpecific = WeaponSpecific.ReadNew(reader);
     }
 }

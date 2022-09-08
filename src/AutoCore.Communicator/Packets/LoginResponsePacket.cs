@@ -1,23 +1,20 @@
-﻿using System.IO;
+﻿namespace AutoCore.Communicator.Packets;
 
-namespace AutoCore.Communicator.Packets
+using AutoCore.Utils.Packets;
+
+public class LoginResponsePacket : IOpcodedPacket<CommunicatorOpcode>
 {
-    using Utils.Packets;
+    public CommunicatorOpcode Opcode { get; } = CommunicatorOpcode.LoginResponse;
+    public CommunicatorActionResult Result { get; set; }
 
-    public class LoginResponsePacket : IOpcodedPacket<CommunicatorOpcode>
+    public void Read(BinaryReader br)
     {
-        public CommunicatorOpcode Opcode { get; } = CommunicatorOpcode.LoginResponse;
-        public CommunicatorActionResult Result { get; set; }
+        Result = (CommunicatorActionResult)br.ReadByte();
+    }
 
-        public void Read(BinaryReader br)
-        {
-            Result = (CommunicatorActionResult)br.ReadByte();
-        }
-
-        public void Write(BinaryWriter bw)
-        {
-            bw.Write((byte)Opcode);
-            bw.Write((byte)Result);
-        }
+    public void Write(BinaryWriter bw)
+    {
+        bw.Write((byte)Opcode);
+        bw.Write((byte)Result);
     }
 }
