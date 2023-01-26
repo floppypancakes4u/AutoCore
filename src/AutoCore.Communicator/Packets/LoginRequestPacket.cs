@@ -33,7 +33,9 @@ public class LoginRequestPacket : IOpcodedPacket<CommunicatorOpcode>
         bw.Write((byte)Opcode);
         bw.Write(Data.Id);
         bw.WriteLengthedString(Data.Password);
-        bw.Write((byte)(Data.Address.AddressFamily == AddressFamily.InterNetwork ? 4 : 16));
+        bw.Write((byte)(Data.Address!.AddressFamily == AddressFamily.InterNetwork ? 4 : 16));
         bw.Write(Data.Address.GetAddressBytes());
     }
+
+    public override string ToString() => $"LoginRequestPacket({Data.Id}, {Data.Address}, {Data.Password})";
 }

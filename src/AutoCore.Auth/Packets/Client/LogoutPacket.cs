@@ -23,8 +23,5 @@ public class LogoutPacket : IOpcodedPacket<ClientOpcode>
         writer.Write(SessionId2);
     }
 
-    public override string ToString()
-    {
-        return $"LogoutPacket({SessionId1}, {SessionId2})";
-    }
+    public override string ToString() => $"LogoutPacket({SessionId1}, {SessionId2})";
 }

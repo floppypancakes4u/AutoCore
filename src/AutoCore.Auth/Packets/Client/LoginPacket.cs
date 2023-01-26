@@ -12,8 +12,8 @@ public class LoginPacket : IOpcodedPacket<ClientOpcode>
 {
     private static readonly DesEngine Decrypter;
 
-    public string UserName { get; set; }
-    public string Password { get; set; }
+    public string? UserName { get; set; }
+    public string? Password { get; set; }
     public uint GameId { get; set; }
     public ushort CDKey { get; set; }
 
@@ -54,8 +54,5 @@ public class LoginPacket : IOpcodedPacket<ClientOpcode>
         return length;
     }
 
-    public override string ToString()
-    {
-        return $"LoginPacket(\"{UserName}\", \"{Password}\", {GameId}, {CDKey})";
-    }
+    public override string ToString() => $"LoginPacket(\"{UserName}\", \"{Password}\", {GameId}, {CDKey})";
 }

@@ -2,6 +2,7 @@
 
 public static class Blowfish
 {
+    #region Data
     private static readonly uint[] SBox0 =
     {
         0x8F9ED754, 0xDE268B45, 0x8B603DE8, 0x7E830682, 0x4D8C92C2, 0x1F1F2E2F, 0x5F1B3F35, 0xD6173E34, 0xAFE00B88, 0xA1E325E3,
@@ -127,15 +128,13 @@ public static class Blowfish
         0xAE915BC6, 0x15426B3F, 0x79ED8A9A, 0x0E1C4091, 0xFBB7286A, 0x1854506C, 0xF620245D, 0x9733B6DE, 0x6FB18C28,
         0x4C8B7C70, 0x85E2D4F6, 0xE4936A12, 0xAE6CDF53, 0x95CB3D66, 0xB43A52D3, 0xE9BDD2DE, 0xD138BDA0, 0x7B584F44
     };
+    #endregion
 
     /// <summary>
     /// Encrypts the specified byte array with no offset and full length.
     /// </summary>
     /// <param name="data">The byte array to encrypt.</param>
-    public static void Encrypt(byte[] data)
-    {
-        Encrypt(data, 0, data.Length);
-    }
+    public static void Encrypt(byte[] data) => Encrypt(data, 0, data.Length);
 
     /// <summary>
     /// Encrypts the specified byte array at a given offset for a given length.
@@ -184,10 +183,7 @@ public static class Blowfish
     /// Decrypts the specified byte array with no offset and full length.
     /// </summary>
     /// <param name="data">The byte array to encrypt.</param>
-    public static void Decrypt(byte[] data)
-    {
-        Decrypt(data, 0, data.Length);
-    }
+    public static void Decrypt(byte[] data) => Decrypt(data, 0, data.Length);
 
     /// <summary>
     /// Decrypts the specified byte array at a given offset for a given length.

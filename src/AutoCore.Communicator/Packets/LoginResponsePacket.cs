@@ -17,4 +17,6 @@ public class LoginResponsePacket : IOpcodedPacket<CommunicatorOpcode>
         bw.Write((byte)Opcode);
         bw.Write((byte)Result);
     }
+
+    public override string ToString() => $"LoginResponsePacket({Result})";
 }

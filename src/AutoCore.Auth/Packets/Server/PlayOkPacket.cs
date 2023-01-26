@@ -26,8 +26,5 @@ public class PlayOkPacket : IOpcodedPacket<ServerOpcode>
         writer.Write(ServerId);
     }
 
-    public override string ToString()
-    {
-        return $"PlayOkPacket({OneTimeKey}, {UserId}, {ServerId})";
-    }
+    public override string ToString() => $"PlayOkPacket({OneTimeKey}, {UserId}, {ServerId})";
 }

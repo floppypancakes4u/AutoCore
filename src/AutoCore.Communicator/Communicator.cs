@@ -40,24 +40,24 @@ public class Communicator
 
     public CommunicatorType Type { get; }
     public LengthedSocket Socket { get; private set; }
-    public List<Communicator> AuthenticatingChildren { get; }
-    public Dictionary<byte, Communicator> Clients { get; }
-    public List<byte> ToRemoveClients { get; }
+    public List<Communicator>? AuthenticatingChildren { get; }
+    public Dictionary<byte, Communicator>? Clients { get; }
+    public List<byte>? ToRemoveClients { get; }
     public DateTime LastRequestTime { get; private set; }
-    public ServerData ServerData { get; private set; }
-    public ServerInfo ServerInfo { get; private set; }
+    public ServerData? ServerData { get; private set; }
+    public ServerInfo? ServerInfo { get; private set; }
     public bool Connected => Socket?.Connected ?? false;
 
-    private Communicator Server { get; }
+    private Communicator? Server { get; }
 
-    public Action OnError { get; set; }
-    public Action<ServerData> OnConnect { get; set; }
-    public Func<Communicator, LoginRequestPacket, bool> OnLoginRequest { get; set; }
-    public Action<CommunicatorActionResult> OnLoginResponse { get; set; }
-    public Func<RedirectRequest, bool> OnRedirectRequest { get; set; }
-    public Action<Communicator, RedirectResponsePacket> OnRedirectResponse { get; set; }
-    public Action<ServerInfo> OnServerInfoRequest { get; set; }
-    public Action OnServerInfoResponse { get; set; }
+    public Action? OnError { get; set; }
+    public Action<ServerData>? OnConnect { get; set; }
+    public Func<Communicator, LoginRequestPacket, bool>? OnLoginRequest { get; set; }
+    public Action<CommunicatorActionResult>? OnLoginResponse { get; set; }
+    public Func<RedirectRequest, bool>? OnRedirectRequest { get; set; }
+    public Action<Communicator, RedirectResponsePacket>? OnRedirectResponse { get; set; }
+    public Action<ServerInfo>? OnServerInfoRequest { get; set; }
+    public Action? OnServerInfoResponse { get; set; }
 
     public Communicator(CommunicatorType type)
     {
@@ -115,11 +115,14 @@ public class Communicator
 
     public void Update()
     {
-        lock (ToRemoveClients)
+        if (Type != CommunicatorType.Server)
+            throw new Exception("Update can only be called on a server Communicator!");
+
+        lock (ToRemoveClients!)
         {
             foreach (var id in ToRemoveClients)
             {
-                if (Clients.TryGetValue(id, out var comm))
+                if (Clients!.TryGetValue(id, out var comm))
                 {
                     comm.Close();
 
@@ -139,8 +142,8 @@ public class Communicator
             return;
         }
 
-        Clients.Add(client.ServerData.Id, client);
-        AuthenticatingChildren.Remove(client);
+        Clients!.Add(client.ServerData!.Id, client);
+        AuthenticatingChildren!.Remove(client);
     }
 
     #region Socketing
@@ -155,7 +158,7 @@ public class Communicator
 
     private void OnSocketAccept(LengthedSocket socket)
     {
-        AuthenticatingChildren.Add(new Communicator(socket, this));
+        AuthenticatingChildren!.Add(new Communicator(socket, this));
 
         Socket.AcceptAsync();
     }
@@ -183,27 +186,27 @@ public class Communicator
         switch (opcode)
         {
             case CommunicatorOpcode.LoginRequest:
-                MsgLoginRequest(packet as LoginRequestPacket);
+                MsgLoginRequest((packet as LoginRequestPacket)!);
                 break;
 
             case CommunicatorOpcode.LoginResponse:
-                MsgLoginResponse(packet as LoginResponsePacket);
+                MsgLoginResponse((packet as LoginResponsePacket)!);
                 break;
 
             case CommunicatorOpcode.RedirectRequest:
-                MsgRedirectRequest(packet as RedirectRequestPacket);
+                MsgRedirectRequest((packet as RedirectRequestPacket)!);
                 break;
 
             case CommunicatorOpcode.RedirectResponse:
-                MsgRedirectResponse(packet as RedirectResponsePacket);
+                MsgRedirectResponse((packet as RedirectResponsePacket)!);
                 break;
 
             case CommunicatorOpcode.ServerInfoRequest:
-                MsgServerInfoRequest(packet as ServerInfoRequestPacket);
+                MsgServerInfoRequest((packet as ServerInfoRequestPacket)!);
                 break;
 
             case CommunicatorOpcode.ServerInfoResponse:
-                MsgServerInfoResponse(packet as ServerInfoResponsePacket);
+                MsgServerInfoResponse((packet as ServerInfoResponsePacket)!);
                 break;
         }
 
@@ -249,10 +252,10 @@ public class Communicator
     {
         if (Type == CommunicatorType.Server)
         {
-            foreach (var child in AuthenticatingChildren)
+            foreach (var child in AuthenticatingChildren!)
                 child.Close();
 
-            foreach (var client in Clients)
+            foreach (var client in Clients!)
                 client.Value.Close();
 
             AuthenticatingChildren.Clear();
@@ -260,7 +263,6 @@ public class Communicator
         }
 
         Socket.Close();
-        Socket = null;
     }
     #endregion
 
@@ -269,7 +271,7 @@ public class Communicator
     {
         if (Type == CommunicatorType.Server)
         {
-            foreach (var client in Clients)
+            foreach (var client in Clients!)
             {
                 if ((DateTime.Now - client.Value.LastRequestTime).TotalMilliseconds > ServerInfoUpdateIntervalMs)
                     client.Value.RequestServerInfo();
@@ -294,7 +296,7 @@ public class Communicator
 
         if (Type == CommunicatorType.Server)
         {
-            if (Clients.TryGetValue(serverId, out var client))
+            if (Clients!.TryGetValue(serverId, out var client))
             {
                 client.RequestRedirection(serverId, request);
                 return;
@@ -318,7 +320,7 @@ public class Communicator
             return;
         }
 
-        if (Server.OnLoginRequest == null)
+        if (Server!.OnLoginRequest == null)
         {
             Logger.WriteLog(LogType.Error, $"Communicator(Type = {Type}) has no OnLoginRequest callback!");
             return;
@@ -333,8 +335,8 @@ public class Communicator
 
         if (!result)
         {
-            lock (ToRemoveClients)
-                ToRemoveClients.Add(ServerData.Id);
+            lock (ToRemoveClients!)
+                ToRemoveClients.Add(ServerData!.Id);
 
             return;
         }
@@ -396,7 +398,7 @@ public class Communicator
             return;
         }
 
-        if (Server.OnRedirectResponse == null)
+        if (Server!.OnRedirectResponse == null)
         {
             Logger.WriteLog(LogType.Error, $"Communicator(Type = {Type}) has no OnRedirectResponse callback!");
             return;
@@ -436,7 +438,7 @@ public class Communicator
             return;
         }
 
-        if (Server.OnServerInfoResponse == null)
+        if (Server!.OnServerInfoResponse == null)
         {
             Logger.WriteLog(LogType.Error, $"Communicator(Type = {Type}) has no OnServerInfoResponse callback!");
             return;
@@ -452,14 +454,14 @@ public class Communicator
 public class ServerData
 {
     public byte Id { get; set; }
-    public string Password { get; set; }
-    public IPAddress Address { get; set; }
+    public string? Password { get; set; }
+    public IPAddress? Address { get; set; }
 }
 
 public class ServerInfo
 {
     public byte ServerId { get; set; }
-    public IPAddress Ip { get; set; }
+    public IPAddress? Ip { get; set; }
     public int Port { get; set; }
     public byte AgeLimit { get; set; }
     public byte PKFlag { get; set; }
@@ -471,7 +473,7 @@ public class ServerInfo
 public class RedirectRequest
 {
     public uint AccountId { get; set; }
-    public string Username { get; set; }
-    public string Email { get; set; }
+    public string? Username { get; set; }
+    public string? Email { get; set; }
     public uint OneTimeKey { get; set; }
 }

@@ -20,4 +20,6 @@ public class RedirectResponsePacket : IOpcodedPacket<CommunicatorOpcode>
         bw.Write((byte)Result);
         bw.Write(AccountId);
     }
+
+    public override string ToString() => $"RedirectResponsePacket({Result}, {AccountId})";
 }

@@ -29,8 +29,5 @@ public class ProtocolVersionPacket : IOpcodedPacket<ServerOpcode>
         writer.Write(ProtocolVersion);
     }
 
-    public override string ToString()
-    {
-        return $"ProtocolVersionPacket({ProtocolVersion}, {OneTimeKey})";
-    }
+    public override string ToString() => $"ProtocolVersionPacket({ProtocolVersion}, {OneTimeKey})";
 }

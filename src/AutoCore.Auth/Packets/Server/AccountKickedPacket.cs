@@ -25,8 +25,5 @@ public class AccountKickedPacket : IOpcodedPacket<ServerOpcode>
         writer.Write(ReasonCode);
     }
 
-    public override string ToString()
-    {
-        return $"AccountKickedPacket({ReasonCode})";
-    }
+    public override string ToString() => $"AccountKickedPacket({ReasonCode})";
 }

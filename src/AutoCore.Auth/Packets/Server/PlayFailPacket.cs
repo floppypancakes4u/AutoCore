@@ -25,8 +25,5 @@ public class PlayFailPacket : IOpcodedPacket<ServerOpcode>
         writer.Write((byte) ResultCode);
     }
 
-    public override string ToString()
-    {
-        return $"PlayFailPacket({ResultCode})";
-    }
+    public override string ToString() => $"PlayFailPacket({ResultCode})";
 }

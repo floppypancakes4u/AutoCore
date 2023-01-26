@@ -20,8 +20,5 @@ public class BlockedAccountPacket : IOpcodedPacket<ServerOpcode>
         writer.Write(Reason);
     }
 
-    public override string ToString()
-    {
-        return $"BlockedAccountPacket({Reason})";
-    }
+    public override string ToString() => $"BlockedAccountPacket({Reason})";
 }

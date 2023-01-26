@@ -26,8 +26,5 @@ public class HandoffToQueuePacket : IOpcodedPacket<ServerOpcode>
         writer.Write(ServerId);
     }
 
-    public override string ToString()
-    {
-        return $"HandoffToQueuePacket({OneTimeKey}, {AccountId}, {ServerId})";
-    }
+    public override string ToString() => $"HandoffToQueuePacket({OneTimeKey}, {AccountId}, {ServerId})";
 }

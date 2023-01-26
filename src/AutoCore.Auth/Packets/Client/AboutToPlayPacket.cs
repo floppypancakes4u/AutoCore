@@ -26,8 +26,5 @@ public class AboutToPlayPacket : IOpcodedPacket<ClientOpcode>
         writer.Write(ServerId);
     }
 
-    public override string ToString()
-    {
-        return $"AboutToPlayPacket({SessionId1}, {SessionId2}, {ServerId})";
-    }
+    public override string ToString() => $"AboutToPlayPacket({SessionId1}, {SessionId2}, {ServerId})";
 }

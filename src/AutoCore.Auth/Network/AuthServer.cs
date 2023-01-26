@@ -25,8 +25,8 @@ public class AuthServer : BaseServer, ILoopable
     public const int MainLoopTime = 100; // Milliseconds
 
     public Config Config { get; private set; }
-    public Communicator Communicator { get; private set; }
-    public LengthedSocket ListenerSocket { get; private set; }
+    public Communicator? Communicator { get; private set; }
+    public LengthedSocket? ListenerSocket { get; private set; }
     public List<AuthClient> Clients { get; } = new();
     public List<ServerInfo> ServerList { get; } = new();
     public MainLoop Loop { get; }
@@ -41,6 +41,9 @@ public class AuthServer : BaseServer, ILoopable
         Configuration.OnReLoad += ConfigReLoaded;
         Configuration.Load();
 
+        if (Config is null)
+            throw new Exception("Unable to load configuration!");
+
         Logger.WriteLog(LogType.Initialize, "Initializing the Auth server...");
 
         Loop = new MainLoop(this, MainLoopTime);
@@ -48,7 +51,7 @@ public class AuthServer : BaseServer, ILoopable
 
         SetupServerList();
 
-        LengthedSocket.InitializeEventArgsPool(Config.SocketAsyncConfig.MaxClients * Config.SocketAsyncConfig.ConcurrentOperationsByClient);
+        LengthedSocket.InitializeEventArgsPool(Config.SocketAsyncConfig!.MaxClients * Config.SocketAsyncConfig.ConcurrentOperationsByClient);
 
         AuthContext.InitializeConnectionString(Config.AuthDatabaseConnectionString);
 
@@ -104,7 +107,7 @@ public class AuthServer : BaseServer, ILoopable
         if (Config.AuthListType != AuthListType.All)
             return;
 
-        foreach (var s in Config.Servers)
+        foreach (var s in Config.Servers!)
         {
             if (!byte.TryParse(s.Key, out byte id))
                 continue;
@@ -127,14 +130,14 @@ public class AuthServer : BaseServer, ILoopable
     public bool Start()
     {
         // Check the server configuration
-        if (Config.AuthConfig.Port == 0 || Config.AuthConfig.Backlog == 0)
+        if (Config.AuthConfig!.Port == 0 || Config.AuthConfig.Backlog == 0)
         {
             Logger.WriteLog(LogType.Error, "Invalid config values!");
             return false;
         }
 
         // Check the communicator configuration
-        if (Config.CommunicatorConfig.Port == 0 || Config.CommunicatorConfig.Address == null || Config.CommunicatorConfig.Backlog == 0)
+        if (Config.CommunicatorConfig!.Port == 0 || Config.CommunicatorConfig.Address == null || Config.CommunicatorConfig.Backlog == 0)
         {
             Logger.WriteLog(LogType.Error, "Invalid Communicator config data!");
             return false;
@@ -192,7 +195,7 @@ public class AuthServer : BaseServer, ILoopable
 
     private void OnAccept(LengthedSocket newSocket)
     {
-        ListenerSocket.AcceptAsync();
+        ListenerSocket!.AcceptAsync();
 
         if (newSocket == null)
             return;
@@ -205,13 +208,13 @@ public class AuthServer : BaseServer, ILoopable
     #region Communicator
     public bool AuthenticateGameServer(Communicator client, LoginRequestPacket packet)
     {
-        if (Communicator.Clients.ContainsKey(packet.Data.Id))
+        if (Communicator!.Clients!.ContainsKey(packet.Data.Id))
         {
             Logger.WriteLog(LogType.Debug, $"A server tried to connect to an already in use server slot! Remote Address: {client.Socket.RemoteAddress}");
             return false;
         }
 
-        if (!Config.Servers.ContainsKey(packet.Data.Id.ToString()))
+        if (!Config.Servers!.ContainsKey(packet.Data.Id.ToString()))
         {
             Logger.WriteLog(LogType.Debug, $"A server tried to connect to a non-defined server slot! Remote Address: {client.Socket.RemoteAddress}");
             return false;
@@ -235,13 +238,13 @@ public class AuthServer : BaseServer, ILoopable
 
     public void RedirectResponse(Communicator client, RedirectResponsePacket packet)
     {
-        AuthClient authClient;
+        AuthClient? authClient;
         lock (Clients)
-            authClient = Clients.FirstOrDefault(c => c.Account.Id == packet.AccountId);
+            authClient = Clients.FirstOrDefault(c => c.Account!.Id == packet.AccountId);
 
-        ServerInfo info;
+        ServerInfo? info;
         lock (ServerList)
-            info = ServerList.FirstOrDefault(i => i.ServerId == client.ServerData.Id);
+            info = ServerList.FirstOrDefault(i => i.ServerId == client.ServerData!.Id);
 
         if (authClient != null && info != null)
             authClient.RedirectionResult(packet.Result, info);
@@ -249,9 +252,9 @@ public class AuthServer : BaseServer, ILoopable
 
     public void RequestRedirection(AuthClient client, byte serverId)
     {
-        Communicator.RequestRedirection(serverId, new()
+        Communicator!.RequestRedirection(serverId, new()
         {
-            AccountId = client.Account.Id,
+            AccountId = client.Account!.Id,
             Email = client.Account.Email,
             OneTimeKey = client.OneTimeKey,
             Username = client.Account.Username
@@ -265,16 +268,16 @@ public class AuthServer : BaseServer, ILoopable
         {
             ServerList.Clear();
 
-            foreach (var client in Communicator.Clients)
+            foreach (var client in Communicator!.Clients!)
             {
                 ServerList.Add(new ServerInfo
                 {
-                    AgeLimit = client.Value.ServerInfo.AgeLimit,
+                    AgeLimit = client.Value.ServerInfo!.AgeLimit,
                     PKFlag = client.Value.ServerInfo.PKFlag,
                     CurrentPlayers = client.Value.ServerInfo.CurrentPlayers,
                     MaxPlayers = client.Value.ServerInfo.MaxPlayers,
                     Port = client.Value.ServerInfo.Port,
-                    Ip = client.Value.ServerData.Address,
+                    Ip = client.Value.ServerData!.Address,
                     ServerId = client.Key,
                     Status = 1
                 });
@@ -292,7 +295,7 @@ public class AuthServer : BaseServer, ILoopable
 
     public void MainLoop(long delta)
     {
-        Communicator.Update();
+        Communicator!.Update();
         Timer.Update(delta);
 
         if (Clients.Count == 0)
@@ -321,10 +324,8 @@ public class AuthServer : BaseServer, ILoopable
         lock (Clients)
         {
             foreach (var c in Clients)
-            {
                 if (c.State == ClientState.ServerList)
-                    c.SendPacket(new SendServerListExtPacket(ServerList, c.Account.LastServerId));
-            }
+                    c.SendPacket(new SendServerListExtPacket(ServerList, c.Account!.LastServerId));
         }
     }
 
@@ -343,10 +344,7 @@ public class AuthServer : BaseServer, ILoopable
         if (parts.Length > 1)
             minutes = int.Parse(parts[1]);
 
-        Timer.Add("exit", minutes * 60000, false, () =>
-        {
-            Shutdown();
-        });
+        Timer.Add("exit", minutes * 60000, false, Shutdown);
 
         Logger.WriteLog(LogType.Command, $"Exiting the server in {minutes} minute(s).");
     }

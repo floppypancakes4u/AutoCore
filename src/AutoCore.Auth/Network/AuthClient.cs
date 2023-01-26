@@ -29,7 +29,7 @@ public class AuthClient
     public uint OneTimeKey { get; }
     public uint SessionId1 { get; }
     public uint SessionId2 { get; }
-    public Account Account { get; private set; }
+    public Account? Account { get; private set; }
     public ClientState State { get; private set; }
     public Timer Timer { get; }
 
@@ -56,7 +56,7 @@ public class AuthClient
 
         SendPacket(new ProtocolVersionPacket(OneTimeKey));
 
-        Timer.Add("timeout", Server.Config.AuthConfig.ClientTimeout * 1000, false, () =>
+        Timer.Add("timeout", Server.Config.AuthConfig!.ClientTimeout * 1000, false, () =>
         {
             Logger.WriteLog(LogType.Network, "*** Client timed out! Ip: {0}", Socket.RemoteAddress);
 
@@ -125,19 +125,19 @@ public class AuthClient
         switch (authPacket.Opcode)
         {
             case ClientOpcode.Login:
-                MsgLogin(authPacket as LoginPacket);
+                MsgLogin((authPacket as LoginPacket)!);
                 break;
 
             case ClientOpcode.Logout:
-                MsgLogout(authPacket as LogoutPacket);
+                MsgLogout((authPacket as LogoutPacket)!);
                 break;
 
             case ClientOpcode.AboutToPlay:
-                MsgAboutToPlay(authPacket as AboutToPlayPacket);
+                MsgAboutToPlay((authPacket as AboutToPlayPacket)!);
                 break;
 
             case ClientOpcode.ServerListExt:
-                MsgServerListExt(authPacket as ServerListExtPacket);
+                MsgServerListExt((authPacket as ServerListExtPacket)!);
                 break;
         }
     }
@@ -151,7 +151,7 @@ public class AuthClient
 
                 Close();
 
-                Logger.WriteLog(LogType.Error, $"Account ({Account.Username}, {Account.Id}) couldn't be redirected to server: {info.ServerId}!");
+                Logger.WriteLog(LogType.Error, $"Account ({Account!.Username}, {Account.Id}) couldn't be redirected to server: {info.ServerId}!");
                 break;
 
             case CommunicatorActionResult.Success:
@@ -159,7 +159,7 @@ public class AuthClient
                 {
                     OneTimeKey = OneTimeKey,
                     ServerId = info.ServerId,
-                    UserId = Account.Id
+                    UserId = Account!.Id
                 });
 
                 using (var context = new AuthContext())
@@ -263,7 +263,7 @@ public class AuthClient
     {
         if (SessionId1 != packet.SessionId1 || SessionId2 != packet.SessionId2)
         {
-            Logger.WriteLog(LogType.Security, $"Account ({Account.Username}, {Account.Id}) has sent an LogoutPacket with invalid session data!");
+            Logger.WriteLog(LogType.Security, $"Account ({Account!.Username}, {Account.Id}) has sent an LogoutPacket with invalid session data!");
             return;
         }
 
@@ -274,20 +274,20 @@ public class AuthClient
     {
         if (SessionId1 != packet.SessionId1 || SessionId2 != packet.SessionId2)
         {
-            Logger.WriteLog(LogType.Security, $"Account ({Account.Username}, {Account.Id}) has sent an ServerListExtPacket with invalid session data!");
+            Logger.WriteLog(LogType.Security, $"Account ({Account!.Username}, {Account.Id}) has sent an ServerListExtPacket with invalid session data!");
             return;
         }
 
         State = ClientState.ServerList;
 
-        SendPacket(new SendServerListExtPacket(Server.ServerList, Account.LastServerId));
+        SendPacket(new SendServerListExtPacket(Server.ServerList, Account!.LastServerId));
     }
 
     private void MsgAboutToPlay(AboutToPlayPacket packet)
     {
         if (SessionId1 != packet.SessionId1 || SessionId2 != packet.SessionId2)
         {
-            Logger.WriteLog(LogType.Security, $"Account ({Account.Username}, {Account.Id}) has sent an AboutToPlayPacket with invalid session data!");
+            Logger.WriteLog(LogType.Security, $"Account ({Account!.Username}, {Account.Id}) has sent an AboutToPlayPacket with invalid session data!");
             return;
         }
 

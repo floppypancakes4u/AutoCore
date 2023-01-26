@@ -79,8 +79,5 @@ public class SendServerListExtPacket : IOpcodedPacket<ServerOpcode>
         }
     }
 
-    public override string ToString()
-    {
-        return $"SendServerListExtPacket(Count: {ServerList?.Count ?? -1})";
-    }
+    public override string ToString() => $"SendServerListExtPacket(Count: {ServerList?.Count ?? -1})";
 }

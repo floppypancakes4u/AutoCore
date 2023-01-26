@@ -25,8 +25,5 @@ public class LoginFailPacket : IOpcodedPacket<ServerOpcode>
         writer.Write((byte) ResultCode);
     }
 
-    public override string ToString()
-    {
-        return $"LoginFailPacket({ResultCode})";
-    }
+    public override string ToString() => $"LoginFailPacket({ResultCode})";
 }

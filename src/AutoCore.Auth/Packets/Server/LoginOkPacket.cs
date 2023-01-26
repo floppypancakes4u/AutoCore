@@ -44,8 +44,5 @@ public class LoginOkPacket : IOpcodedPacket<ServerOpcode>
         writer.Write(LoginFlag);
     }
 
-    public override string ToString()
-    {
-        return $"LoginOkPacket({SessionId1}, {SessionId2}, {UpdateKey1}, {UpdateKey2}, {PayStat}, {RemainingTime}, {QuotaTime}, {WarnFlag}, {LoginFlag})";
-    }
+    public override string ToString() => $"LoginOkPacket({SessionId1}, {SessionId2}, {UpdateKey1}, {UpdateKey2}, {PayStat}, {RemainingTime}, {QuotaTime}, {WarnFlag}, {LoginFlag})";
 }

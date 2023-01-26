@@ -35,4 +35,6 @@ public class RedirectRequestPacket : IOpcodedPacket<CommunicatorOpcode>
         bw.WriteLengthedString(Request.Email);
         bw.Write(Request.OneTimeKey);
     }
+
+    public override string ToString() => $"RedirectRequestPacket({Request.AccountId}, {Request.Username}, {Request.Email}, {Request.OneTimeKey})";
 }

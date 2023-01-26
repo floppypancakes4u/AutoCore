@@ -14,4 +14,6 @@ public class ServerInfoRequestPacket : IOpcodedPacket<CommunicatorOpcode>
     {
         bw.Write((byte)Opcode);
     }
+
+    public override string ToString() => $"ServerInfoRequestPacket()";
 }

@@ -26,4 +26,6 @@ public class BlockedAccountWithMsgPacket : IOpcodedPacket<ServerOpcode>
 
         throw new NotImplementedException();
     }
+
+    public override string ToString() => $"BlockedAccountWithMsgPacket(TODO)";
 }

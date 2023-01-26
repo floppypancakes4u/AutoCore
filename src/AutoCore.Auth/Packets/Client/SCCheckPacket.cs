@@ -23,8 +23,5 @@ public class SCCheckPacket : IOpcodedPacket<ClientOpcode>
         writer.Write(CardValue);
     }
 
-    public override string ToString()
-    {
-        return $"SCCheckPacket({UserId}, {CardValue})";
-    }
+    public override string ToString() => $"SCCheckPacket({UserId}, {CardValue})";
 }

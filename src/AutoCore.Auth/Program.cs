@@ -7,7 +7,7 @@ using AutoCore.Utils;
 
 public class Program : ExitableProgram
 {
-    private static AuthServer Server { get; set; }
+    private static AuthServer? Server { get; set; }
 
     public static void Main()
     {

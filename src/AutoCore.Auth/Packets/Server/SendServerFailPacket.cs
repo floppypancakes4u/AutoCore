@@ -25,8 +25,5 @@ public class SendServerFailPacket : IOpcodedPacket<ServerOpcode>
         writer.Write(ReasonCode);
     }
 
-    public override string ToString()
-    {
-        return $"SendServerFailPacket({ReasonCode})";
-    }
+    public override string ToString() => $"SendServerFailPacket({ReasonCode})";
 }

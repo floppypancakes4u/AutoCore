@@ -26,8 +26,5 @@ public class ServerListExtPacket : IOpcodedPacket<ClientOpcode>
         writer.Write(ListKind);
     }
 
-    public override string ToString()
-    {
-        return $"ServerListExtPacket({SessionId1}, {SessionId2}, {ListKind})";
-    }
+    public override string ToString() => $"ServerListExtPacket({SessionId1}, {SessionId2}, {ListKind})";
 }
