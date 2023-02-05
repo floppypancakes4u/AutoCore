@@ -2,126 +2,24 @@
 
 namespace AutoCore.Utils.Memory;
 
-public class ArrayPoolBuffer
-{
-    public byte[] Buffer { get; set; }
-    public int Length { get; set; }
-
-    public ArrayPoolBuffer(byte[] buffer, int length)
-    {
-        Buffer = buffer;
-        Length = length;
-    }
-
-    public override bool Equals(object obj)
-    {
-        return obj is ArrayPoolBuffer buffer &&
-               EqualityComparer<byte[]>.Default.Equals(Buffer, buffer.Buffer) &&
-               Length == buffer.Length;
-    }
-
-    public override int GetHashCode()
-    {
-        return HashCode.Combine(Buffer, Length);
-    }
-
-    public override string ToString()
-    {
-        return $"ArrayPoolBuffer({Length})";
-    }
-}
-
 public class NonContiguousMemoryStream : Stream
 {
     private const int WriteArrayCapacity = 256;
 
-    private readonly List<ArrayPoolBuffer> _buffers = new();
-    private long _origin = 0;
+    private record ArrayPoolBuffer(byte[] Buffer, int Length);
+
+    private List<ArrayPoolBuffer> Buffers { get; } = new();
+    private long Origin { get; set; }
+
+    public long WritePosition { get; set; }
 
     public override bool CanRead => true;
     public override bool CanSeek => true;
     public override bool CanWrite => true;
-    public override long Position { get; set; } = 0;
+    public override long Position { get; set; }
+    public override long Length => Buffers.Sum(arr => (long)arr.Length) - Origin;
 
-    public override long Length
-    {
-        get
-        {
-            return _buffers.Sum(arr => (long)arr.Length) - _origin;
-        }
-    }
-
-    public NonContiguousMemoryStream()
-    {
-    }
-
-    public void AddSharedPoolArray(byte[] buffer, int length)
-    {
-        if (buffer == null)
-            throw new ArgumentNullException(nameof(buffer));
-
-        if (length <= 0)
-            throw new ArgumentOutOfRangeException(nameof(length));
-
-        _buffers.Add(new ArrayPoolBuffer(buffer, length));
-    }
-
-    public void AddArrayPoolBuffer(ArrayPoolBuffer buffer)
-    {
-        if (buffer == null)
-            throw new ArgumentNullException(nameof(buffer));
-
-        if (buffer.Length <= 0)
-            throw new ArgumentOutOfRangeException(nameof(buffer));
-
-        _buffers.Add(buffer);
-    }
-
-    public void CopyFromArray(byte[] buffer)
-    {
-        if (buffer == null)
-            throw new ArgumentNullException(nameof(buffer));
-
-        CopyFromArray(buffer, 0, buffer.Length);
-    }
-
-    public void CopyFromArray(byte[] buffer, int offset, int count)
-    {
-        if (buffer == null)
-            throw new ArgumentNullException(nameof(buffer));
-
-        if (offset < 0)
-            throw new ArgumentOutOfRangeException(nameof(offset));
-
-        if (count > buffer.Length - offset)
-            throw new ArgumentOutOfRangeException(nameof(count));
-
-        var newArr = ArrayPool<byte>.Shared.Rent(count);
-
-        Buffer.BlockCopy(buffer, offset, newArr, 0, count);
-
-        _buffers.Add(new ArrayPoolBuffer(newArr, count));
-    }
-
-    // TODO: Later move the actual byte[], if possible, to avoid renting too much, if the already rented arrays can be moved
-    public int MoveBytesTo(NonContiguousMemoryStream dest, int count)
-    {
-        if (dest == null)
-            throw new ArgumentNullException(nameof(dest));
-
-        if (count > Length)
-            throw new ArgumentOutOfRangeException(nameof(count));
-
-        var destArr = ArrayPool<byte>.Shared.Rent(count);
-
-        var readCount = Read(destArr, 0, count);
-
-        dest.AddSharedPoolArray(destArr, readCount);
-
-        RemoveBytes(readCount);
-
-        return readCount;
-    }
+    public int AvailableBytesToRead => (int)(WritePosition - Position);
 
     public void RemoveBytes(int count)
     {
@@ -133,35 +31,32 @@ public class NonContiguousMemoryStream : Stream
         if (index > 0)
         {
             for (var i = 0; i < index; ++i)
-            {
-                ArrayPool<byte>.Shared.Return(_buffers[i].Buffer);
-            }
+                ArrayPool<byte>.Shared.Return(Buffers[i].Buffer);
 
-            _buffers.RemoveRange(0, index);
+            Buffers.RemoveRange(0, index);
         }
 
-        _origin = offset;
+        Origin = offset;
 
         Position = Math.Max(0, Position - count);
+        WritePosition = Math.Max(0, WritePosition - count);
     }
 
     private (int, int) GetIndices(long offset)
     {
         int i = 0;
 
-        offset += _origin;
+        offset += Origin;
 
-        for (; i < _buffers.Count; ++i)
+        for (; i < Buffers.Count; ++i)
         {
-            if (offset < _buffers[i].Length)
-            {
+            if (offset < Buffers[i].Length)
                 break;
-            }
 
-            offset -= _buffers[i].Length;
+            offset -= Buffers[i].Length;
         }
 
-        if (i == _buffers.Count)
+        if (i == Buffers.Count)
             return (i, 0);
 
         return (i, (int)offset);
@@ -173,8 +68,7 @@ public class NonContiguousMemoryStream : Stream
 
     public override int Read(byte[] buffer, int offset, int count)
     {
-        if (buffer == null)
-            throw new ArgumentNullException(nameof(buffer));
+        ArgumentNullException.ThrowIfNull(buffer);
 
         if (offset < 0)
             throw new ArgumentOutOfRangeException(nameof(offset));
@@ -182,20 +76,23 @@ public class NonContiguousMemoryStream : Stream
         if (count > buffer.Length - offset)
             throw new ArgumentOutOfRangeException(nameof(count));
 
+        if (Position + count > WritePosition)
+            count = (int)(WritePosition - Position);
+
         var (indStart, offStart) = GetIndices(Position);
         var (indEnd, _) = GetIndices(Position + count);
 
         var currentOffset = offStart;
         var read = 0;
 
-        for (var i = indStart; i <= indEnd && i < _buffers.Count && count > 0; ++i)
+        for (var i = indStart; i <= indEnd && i < Buffers.Count && count > 0; ++i)
         {
             int currentCount = count;
 
-            if (_buffers[i].Length - currentOffset < currentCount)
-                currentCount = _buffers[i].Length - currentOffset;
+            if (Buffers[i].Length - currentOffset < currentCount)
+                currentCount = Buffers[i].Length - currentOffset;
 
-            Buffer.BlockCopy(_buffers[i].Buffer, currentOffset, buffer, offset, currentCount);
+            Buffer.BlockCopy(Buffers[i].Buffer, currentOffset, buffer, offset, currentCount);
 
             offset += currentCount;
             count -= currentCount;
@@ -230,20 +127,39 @@ public class NonContiguousMemoryStream : Stream
         return Position;
     }
 
+    public long SeekWrite(long offset, SeekOrigin origin)
+    {
+        switch (origin)
+        {
+            case SeekOrigin.Begin:
+                WritePosition = offset;
+                break;
+
+            case SeekOrigin.Current:
+                WritePosition += offset;
+                break;
+
+            case SeekOrigin.End:
+                WritePosition = Length + offset;
+                break;
+        }
+
+        return WritePosition;
+    }
+
     public override void SetLength(long value)
     {
         if (value > Length)
         {
-            int length = (int)(value - Length);
+            var newArr = ArrayPool<byte>.Shared.Rent((int)(value - Length));
 
-            _buffers.Add(new ArrayPoolBuffer(ArrayPool<byte>.Shared.Rent(length), length));
+            Buffers.Add(new ArrayPoolBuffer(newArr, newArr.Length));
         }
     }
 
     public override void Write(byte[] buffer, int offset, int count)
     {
-        if (buffer == null)
-            throw new ArgumentNullException(nameof(buffer));
+        ArgumentNullException.ThrowIfNull(buffer);
 
         if (offset < 0)
             throw new ArgumentOutOfRangeException(nameof(offset));
@@ -252,51 +168,72 @@ public class NonContiguousMemoryStream : Stream
             throw new ArgumentOutOfRangeException(nameof(count));
 
         // Expand the stream with extra space to write to
-        if (Length < Position + count)
-        {
+        if (WritePosition + count > Length)
             SetLength(Length + Math.Max(count, WriteArrayCapacity));
-        }
 
-        var (indStart, offStart) = GetIndices(Position);
-        var (indEnd, _) = GetIndices(Position + count);
+        var (indStart, offStart) = GetIndices(WritePosition);
+        var (indEnd, _) = GetIndices(WritePosition + count);
 
-        var currentOffset = offStart;
-        var written = 0;
-
-        for (var i = indStart; i <= indEnd && i < _buffers.Count && count > 0; ++i)
+        for (var i = indStart; i <= indEnd && i < Buffers.Count && count > 0; ++i)
         {
             int currentCount = count;
 
-            if (_buffers[i].Length - currentOffset < currentCount)
-                currentCount = _buffers[i].Length - currentOffset;
+            if (Buffers[i].Length - offStart < currentCount)
+                currentCount = Buffers[i].Length - offStart;
 
-            Buffer.BlockCopy(buffer, offset, _buffers[i].Buffer, currentOffset, currentCount);
+            Buffer.BlockCopy(buffer, offset, Buffers[i].Buffer, offStart, currentCount);
 
             offset += currentCount;
             count -= currentCount;
 
-            currentOffset = 0;
+            offStart = 0;
 
-            written += currentCount;
+            WritePosition += currentCount;
         }
-
-        Position += written;
     }
 
-    protected override void Dispose(bool disposing)
+    public void CopyToWithCount(Stream destination, int count)
     {
+        if (count == 0)
+            return;
+
+        var buffer = ArrayPool<byte>.Shared.Rent(WriteArrayCapacity);
+
         try
         {
-            foreach (var buffer in _buffers)
+            while (count > 0)
             {
-                ArrayPool<byte>.Shared.Return(buffer.Buffer);
-            }
+                var toReadSize = Math.Min(count, buffer.Length);
 
-            _buffers.Clear();
+                var bytesRead = Read(buffer, 0, toReadSize);
+                if (bytesRead == 0)
+                    break;
+
+                destination.Write(buffer, 0, bytesRead);
+
+                count -= bytesRead;
+            }
         }
         finally
         {
-            base.Dispose(disposing);
+            ArrayPool<byte>.Shared.Return(buffer);
         }
+    }
+
+    private void Optimize()
+    {
+        // TODO: check the buffers and if the buffer.Buffer.Length is greater than buffer.Length
+        // then grab the next buffer, move the first bytes to the end of
+        // then return every buffer that 
+    }
+
+    public override void Close()
+    {
+        foreach (var buffer in Buffers)
+            ArrayPool<byte>.Shared.Return(buffer.Buffer);
+
+        Buffers.Clear();
+
+        base.Close();
     }
 }

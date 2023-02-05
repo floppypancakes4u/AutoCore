@@ -36,5 +36,5 @@ public class ServerInfoResponsePacket : IOpcodedPacket<CommunicatorOpcode>
         bw.Write(Info.MaxPlayers);
     }
 
-    public override string ToString() => $"LoginRequestPacket({Info.Port}, {Info.AgeLimit}, {Info.PKFlag}, {Info.CurrentPlayers}, {Info.MaxPlayers})";
+    public override string ToString() => $"ServerInfoResponsePacket({Info.Port}, {Info.AgeLimit}, {Info.PKFlag}, {Info.CurrentPlayers}, {Info.MaxPlayers})";
 }

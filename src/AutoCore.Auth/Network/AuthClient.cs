@@ -1,5 +1,4 @@
 ﻿using System.Buffers;
-using System.Net.Sockets;
 
 namespace AutoCore.Auth.Network;
 
@@ -12,6 +11,7 @@ using AutoCore.Database.Auth;
 using AutoCore.Database.Auth.Models;
 using AutoCore.Utils;
 using AutoCore.Utils.Extensions;
+using AutoCore.Utils.Memory;
 using AutoCore.Utils.Networking;
 using AutoCore.Utils.Packets;
 using AutoCore.Utils.Timer;
@@ -23,7 +23,7 @@ public class AuthClient
     public const int SendBufferCryptoPadding = 8;
     public const int SendBufferChecksumPadding = 8;
 
-    public LengthedSocket Socket { get; }
+    public AsyncLengthedSocket Socket { get; }
     public AuthServer Server { get; }
 
     public uint OneTimeKey { get; }
@@ -35,7 +35,7 @@ public class AuthClient
 
     private readonly PacketQueue _packetQueue = new();
 
-    public AuthClient(LengthedSocket socket, AuthServer server)
+    public AuthClient(AsyncLengthedSocket socket, AuthServer server)
     {
         Socket = socket;
         Server = server;
@@ -45,8 +45,7 @@ public class AuthClient
 
         Socket.OnError += OnError;
         Socket.OnReceive += OnReceive;
-
-        Socket.ReceiveAsync();
+        Socket.Start();
 
         var rnd = new Random();
 
@@ -89,13 +88,13 @@ public class AuthClient
 
         Logger.WriteLog(LogType.Network, "*** Client disconnected! Ip: {0}", Socket.RemoteAddress);
 
+        Server.Disconnect(this);
+
         Timer.Remove("timeout");
 
         State = ClientState.Disconnected;
 
         Socket.Close();
-
-        Server.Disconnect(this);
     }
 
     public void SendPacket(IBasePacket packet)
@@ -179,13 +178,17 @@ public class AuthClient
         }
     }
 
-    private void OnError(SocketAsyncEventArgs args)
+    private void OnError()
     {
         Close();
     }
 
-    private void OnReceive(byte[] data, int length)
+    private void OnReceive(NonContiguousMemoryStream incomingStream, int length)
     {
+        var data = ArrayPool<byte>.Shared.Rent(length);
+
+        incomingStream.Read(data, 0, length);
+
         CryptoManager.Decrypt(data, 0, length);
 
         using var br = new BinaryReader(new MemoryStream(data, 0, length, false));
@@ -194,12 +197,12 @@ public class AuthClient
 
         packet.Read(br);
 
+        ArrayPool<byte>.Shared.Return(data);
+
         _packetQueue.EnqueueIncoming(packet);
 
         // Reset the timeout after every action
         Timer.ResetTimer("timeout");
-
-        Socket.ReceiveAsync();
     }
 
     private static IBasePacket CreatePacket(ClientOpcode opcode)

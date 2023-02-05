@@ -63,7 +63,6 @@ public class GlobalServer : BaseServer, ILoopable
 
         Logger.WriteLog(LogType.Initialize, "Initializing the network...");
         PublicAddress = IPAddress.Parse(Config.GameConfig.PublicAddress);
-        LengthedSocket.InitializeEventArgsPool(Config.SocketAsyncConfig.MaxClients * Config.SocketAsyncConfig.ConcurrentOperationsByClient);
 
         CommandProcessor.RegisterCommand("exit", ProcessExitCommand);
         CommandProcessor.RegisterCommand("reload", ProcessReloadCommand);

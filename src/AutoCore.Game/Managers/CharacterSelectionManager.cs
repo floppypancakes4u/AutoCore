@@ -147,6 +147,8 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
             context.SimpleObjects.Remove(raceItemSimpleObject);
             context.SimpleObjects.Remove(turretSimpleObject);
             context.SaveChanges();
+
+            return (false, -1);
         }
 
         return (true, characterSimpleObject.Coid);
@@ -171,9 +173,7 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
         var coids = context.Characters.Where(c => c.AccountId == client.Account.Id && c.Deleted == false).Select(c => c.Coid).ToList();
 
         foreach (var coid in coids)
-        {
             SendCharacter(client, context, coid);
-        }
     }
 
     public static void ExtendCharacterList(TNLConnection client, long coid)
@@ -187,15 +187,11 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
     {
         var character = new Character(client, isInCharacterSelection: true);
         if (!character.LoadFromDB(context, coid))
-        {
             return;
-        }
 
         var vehicle = new Vehicle(isInCharacterSelection: true);
         if (!vehicle.LoadFromDB(context, character.ActiveVehicleCoid))
-        {
             return;
-        }
 
         var createCharPacket = new CreateCharacterPacket();
         character.WriteToPacket(createCharPacket);

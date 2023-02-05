@@ -17,7 +17,7 @@ public abstract class BaseServer
         }
     }
 
-    private void InitConsole(string type)
+    public void InitConsole(string type)
     {
         Console.Title = $"AutoCore - {type} Server";
 

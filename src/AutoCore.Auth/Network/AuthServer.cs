@@ -1,5 +1,4 @@
 ﻿using System.Net;
-using System.Net.Sockets;
 
 namespace AutoCore.Auth.Network;
 
@@ -25,8 +24,8 @@ public class AuthServer : BaseServer, ILoopable
     public const int MainLoopTime = 100; // Milliseconds
 
     public Config Config { get; private set; }
-    public Communicator? Communicator { get; private set; }
-    public LengthedSocket? ListenerSocket { get; private set; }
+    public Communicator Communicator { get; } = new(CommunicatorType.Server);
+    public AsyncLengthedSocket ListenerSocket { get; }
     public List<AuthClient> Clients { get; } = new();
     public List<ServerInfo> ServerList { get; } = new();
     public MainLoop Loop { get; }
@@ -48,10 +47,9 @@ public class AuthServer : BaseServer, ILoopable
 
         Loop = new MainLoop(this, MainLoopTime);
         Timer = new Timer();
+        ListenerSocket = new AsyncLengthedSocket(AsyncLengthedSocket.HeaderSizeType.Word);
 
         SetupServerList();
-
-        LengthedSocket.InitializeEventArgsPool(Config.SocketAsyncConfig!.MaxClients * Config.SocketAsyncConfig.ConcurrentOperationsByClient);
 
         AuthContext.InitializeConnectionString(Config.AuthDatabaseConnectionString);
 
@@ -146,12 +144,9 @@ public class AuthServer : BaseServer, ILoopable
         // Set up the listener socket
         try
         {
-            ListenerSocket = new LengthedSocket(SizeType.Word);
             ListenerSocket.OnError += OnError;
             ListenerSocket.OnAccept += OnAccept;
-            ListenerSocket.Bind(new IPEndPoint(IPAddress.Any, Config.AuthConfig.Port));
-            ListenerSocket.Listen(Config.AuthConfig.Backlog);
-            ListenerSocket.AcceptAsync();
+            ListenerSocket.StartListening(new IPEndPoint(IPAddress.Any, Config.AuthConfig.Port));
 
             Logger.WriteLog(LogType.Network, "*** Listening for clients on port {0}", Config.AuthConfig.Port);
         }
@@ -164,7 +159,6 @@ public class AuthServer : BaseServer, ILoopable
         }
 
         // Set up communicator
-        Communicator = new Communicator(CommunicatorType.Server);
         Communicator.OnLoginRequest += AuthenticateGameServer;
         Communicator.OnRedirectResponse += RedirectResponse;
         Communicator.OnServerInfoResponse += UpdateServerInfo;
@@ -186,17 +180,12 @@ public class AuthServer : BaseServer, ILoopable
         return true;
     }
 
-    private static void OnError(SocketAsyncEventArgs args)
+    private static void OnError()
     {
-        if (args.LastOperation == SocketAsyncOperation.Accept && args.AcceptSocket != null &&
-            args.AcceptSocket.Connected)
-            args.AcceptSocket.Shutdown(SocketShutdown.Both);
     }
 
-    private void OnAccept(LengthedSocket newSocket)
+    private void OnAccept(AsyncLengthedSocket newSocket)
     {
-        ListenerSocket!.AcceptAsync();
-
         if (newSocket == null)
             return;
 
@@ -208,7 +197,7 @@ public class AuthServer : BaseServer, ILoopable
     #region Communicator
     public bool AuthenticateGameServer(Communicator client, LoginRequestPacket packet)
     {
-        if (Communicator!.Clients!.ContainsKey(packet.Data.Id))
+        if (Communicator.Clients!.ContainsKey(packet.Data.Id))
         {
             Logger.WriteLog(LogType.Debug, $"A server tried to connect to an already in use server slot! Remote Address: {client.Socket.RemoteAddress}");
             return false;
@@ -252,7 +241,7 @@ public class AuthServer : BaseServer, ILoopable
 
     public void RequestRedirection(AuthClient client, byte serverId)
     {
-        Communicator!.RequestRedirection(serverId, new()
+        Communicator.RequestRedirection(serverId, new()
         {
             AccountId = client.Account!.Id,
             Email = client.Account.Email,
@@ -268,7 +257,7 @@ public class AuthServer : BaseServer, ILoopable
         {
             ServerList.Clear();
 
-            foreach (var client in Communicator!.Clients!)
+            foreach (var client in Communicator.Clients!)
             {
                 ServerList.Add(new ServerInfo
                 {
@@ -287,15 +276,14 @@ public class AuthServer : BaseServer, ILoopable
 
     public void Shutdown()
     {
-        ListenerSocket?.Close();
-        ListenerSocket = null;
+        ListenerSocket.Close();
 
         Loop.Stop();
     }
 
     public void MainLoop(long delta)
     {
-        Communicator!.Update();
+        Communicator.Update();
         Timer.Update(delta);
 
         if (Clients.Count == 0)

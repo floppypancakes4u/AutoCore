@@ -1,9 +1,9 @@
-﻿using System.Text;
+﻿using System.Buffers;
+using System.Text;
 
 namespace AutoCore.Game.Managers.Asset;
 
 using AutoCore.Utils;
-using AutoCore.Utils.Memory;
 
 public class GLMLoader
 {
@@ -33,12 +33,12 @@ public class GLMLoader
         {
             if (glmEntry.Value.FileEntries.TryGetValue(fileName, out var fileEntry))
             {
-                var dataStream = new ArrayPoolMemoryStream(fileEntry.Size);
+                var data = ArrayPool<byte>.Shared.Rent(fileEntry.Size);
 
                 glmEntry.Value.FileStream.Seek(fileEntry.Offset, SeekOrigin.Begin);
-                glmEntry.Value.FileStream.Read(dataStream.Data, 0, fileEntry.Size);
+                glmEntry.Value.FileStream.Read(data, 0, fileEntry.Size);
 
-                return new BinaryReader(dataStream, Encoding.UTF8, false);
+                return new BinaryReader(new MemoryStream(data), Encoding.UTF8, false);
             }    
         }
 

@@ -8,6 +8,7 @@ using AutoCore.Utils;
 using AutoCore.Utils.Networking;
 using AutoCore.Utils.Packets;
 using AutoCore.Communicator.Packets;
+using AutoCore.Utils.Memory;
 
 public enum CommunicatorType
 {
@@ -35,11 +36,10 @@ public enum CommunicatorActionResult : byte
 public class Communicator
 {
     public const int SendBufferSize = 512;
-    public const SizeType CommunicatorHeaderLen = SizeType.Word;
     public const double ServerInfoUpdateIntervalMs = 30000.0d;
 
     public CommunicatorType Type { get; }
-    public LengthedSocket Socket { get; private set; }
+    public AsyncLengthedSocket Socket { get; private set; }
     public List<Communicator>? AuthenticatingChildren { get; }
     public Dictionary<byte, Communicator>? Clients { get; }
     public List<byte>? ToRemoveClients { get; }
@@ -66,7 +66,7 @@ public class Communicator
 
         Type = type;
 
-        Socket = new LengthedSocket(CommunicatorHeaderLen);
+        Socket = new AsyncLengthedSocket(AsyncLengthedSocket.HeaderSizeType.Word);
         Socket.OnError += OnSocketError;
 
         switch (Type)
@@ -86,7 +86,7 @@ public class Communicator
         }
     }
 
-    public Communicator(LengthedSocket socket, Communicator server)
+    public Communicator(AsyncLengthedSocket socket, Communicator server)
     {
         Type = CommunicatorType.ServerClient;
         Server = server;
@@ -94,7 +94,7 @@ public class Communicator
         Socket = socket;
         Socket.OnReceive += OnSocketReceive;
 
-        Socket.ReceiveAsync();
+        Socket.Start();
     }
 
     public void Start(IPAddress address, int port, int backlog = 0)
@@ -102,9 +102,7 @@ public class Communicator
         switch (Type)
         {
             case CommunicatorType.Server:
-                Socket.Bind(new IPEndPoint(address, port));
-                Socket.Listen(backlog);
-                Socket.AcceptAsync();
+                Socket.StartListening(new IPEndPoint(address, port));
                 break;
 
             case CommunicatorType.Client:
@@ -147,7 +145,7 @@ public class Communicator
     }
 
     #region Socketing
-    private void OnSocketError(SocketAsyncEventArgs args)
+    private void OnSocketError()
     {
         Socket.Close();
 
@@ -156,15 +154,17 @@ public class Communicator
         Logger.WriteLog(LogType.Error, $"Communicator(Type = {Type}) has encountered an error!");
     }
 
-    private void OnSocketAccept(LengthedSocket socket)
+    private void OnSocketAccept(AsyncLengthedSocket socket)
     {
         AuthenticatingChildren!.Add(new Communicator(socket, this));
-
-        Socket.AcceptAsync();
     }
 
-    private void OnSocketReceive(byte[] buffer, int length)
+    private void OnSocketReceive(NonContiguousMemoryStream incomingStream, int length)
     {
+        var buffer = ArrayPool<byte>.Shared.Rent(length);
+
+        incomingStream.Read(buffer, 0, length);
+
         using var br = new BinaryReader(new MemoryStream(buffer, 0, length, false));
 
         var opcode = (CommunicatorOpcode)br.ReadByte();
@@ -182,6 +182,8 @@ public class Communicator
         };
 
         packet.Read(br);
+
+        ArrayPool<byte>.Shared.Return(buffer);
 
         switch (opcode)
         {
@@ -209,31 +211,20 @@ public class Communicator
                 MsgServerInfoResponse((packet as ServerInfoResponsePacket)!);
                 break;
         }
-
-        if (Socket != null && Socket.Connected)
-            Socket.ReceiveAsync();
     }
 
-    private void OnSocketConnect(SocketAsyncEventArgs args)
+    private void OnSocketConnect()
     {
-        if (args.SocketError != SocketError.Success)
-        {
-            OnSocketError(args);
-            return;
-        }
-
         if (OnConnect == null)
-        {
             return;
-        }
 
         var info = new ServerData();
 
         OnConnect(info);
 
-        SendPacket(new LoginRequestPacket(info));
+        Socket.Start();
 
-        Socket.ReceiveAsync();
+        SendPacket(new LoginRequestPacket(info));
     }
     
     private void SendPacket(IOpcodedPacket<CommunicatorOpcode> packet)

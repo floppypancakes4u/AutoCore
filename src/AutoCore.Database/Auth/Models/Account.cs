@@ -31,9 +31,7 @@ public class Account
 
     public static string Hash(string password, string salt)
     {
-        using var sha = SHA256.Create();
-
-        return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes($"{salt}:{password}"))).Replace("-", "").ToLower();
+        return BitConverter.ToString(SHA256.HashData(Encoding.UTF8.GetBytes($"{salt}:{password}"))).Replace("-", "").ToLower();
     }
 
     public static string CreateSalt()

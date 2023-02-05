@@ -14,6 +14,8 @@ public class Program : ExitableProgram
         Initialize(ExitHandlerProc);
 
         Server = new AuthServer();
+        Server.InitConsole("Auth");
+
         if (!Server.Start())
         {
             Logger.WriteLog(LogType.Error, "Unable to start the server!");
