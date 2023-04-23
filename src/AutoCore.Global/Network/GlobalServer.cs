@@ -3,16 +3,12 @@
 namespace AutoCore.Global.Network;
 
 using AutoCore.Communicator;
-using AutoCore.Database.Char;
-using AutoCore.Database.World;
 using AutoCore.Global.Config;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Managers;
 using AutoCore.Game.TNL;
 using AutoCore.Utils;
-using AutoCore.Utils.Config;
 using AutoCore.Utils.Commands;
-using AutoCore.Utils.Networking;
 using AutoCore.Utils.Server;
 using AutoCore.Utils.Threading;
 using AutoCore.Utils.Timer;
@@ -24,8 +20,8 @@ public class GlobalServer : BaseServer, ILoopable
     public const int MainLoopTime = 100; // Milliseconds
     public const int SendBufferSize = 512;
 
-    public Config Config { get; private set; }
-    public IPAddress PublicAddress { get; }
+    public GlobalConfig Config { get; private set; } = new();
+    public IPAddress PublicAddress { get; private set; }
     public Communicator AuthCommunicator { get; private set; }
     public MainLoop Loop { get; }
     public Timer Timer { get; } = new();
@@ -36,23 +32,24 @@ public class GlobalServer : BaseServer, ILoopable
     public GlobalServer()
         : base("Global")
     {
-        Configuration.OnLoad += ConfigLoaded;
-        Configuration.OnReLoad += ConfigReLoaded;
-        Configuration.Load();
-
-        Logger.WriteLog(LogType.Initialize, "Initializing the Global server...");
-
         TNLInterface.RegisterNetClassReps();
-
-        Logger.WriteLog(LogType.Initialize, "Initializing the TNL interface...");
-        Interface = new TNLInterface(Config.GameConfig.Port, true, 175, false);
 
         Loop = new MainLoop(this, MainLoopTime);
 
-        Logger.WriteLog(LogType.Initialize, "Initializing the database connections...");
+        CommandProcessor.RegisterCommand("exit", ProcessExitCommand);
+    }
 
-        CharContext.InitializeConnectionString(Config.CharDatabaseConnectionString);
-        WorldContext.InitializeConnectionString(Config.WorldDatabaseConnectionString);
+    ~GlobalServer() => Shutdown();
+
+    public void Setup(GlobalConfig config)
+    {
+        Logger.WriteLog(LogType.Initialize, "Setting up the Global server...");
+
+        if (config != null)
+            Config = config;
+
+        Logger.WriteLog(LogType.Initialize, "Initializing the TNL interface...");
+        Interface = new TNLInterface(Config.GameConfig.Port, true, 175, false);
 
         if (!AssetManager.Instance.Initialize(Config.GamePath, ServerType.Global))
             throw new Exception("Unable to load assets!");
@@ -63,34 +60,8 @@ public class GlobalServer : BaseServer, ILoopable
         Logger.WriteLog(LogType.Initialize, "Initializing the network...");
         PublicAddress = IPAddress.Parse(Config.GameConfig.PublicAddress);
 
-        CommandProcessor.RegisterCommand("exit", ProcessExitCommand);
-        CommandProcessor.RegisterCommand("reload", ProcessReloadCommand);
-
-        Logger.WriteLog(LogType.Initialize, "The Global server has been initialized!");
+        Logger.WriteLog(LogType.Initialize, "The Global server has been setup!");
     }
-
-    ~GlobalServer()
-    {
-        Shutdown();
-    }
-
-    #region Configuration
-    private static void ConfigReLoaded()
-    {
-        Logger.WriteLog(LogType.Initialize, "Config file reloaded by external change!");
-
-        // Totally reload the configuration, because it's automatic reload case can only handle one reload. Our code's bug?
-        Configuration.Load();
-    }
-
-    private void ConfigLoaded()
-    {
-        Config = new Config();
-        Configuration.Bind(Config);
-
-        Logger.UpdateConfig(Config.LoggerConfig);
-    }
-    #endregion
 
     public void MainLoop(long delta)
     {
@@ -116,7 +87,7 @@ public class GlobalServer : BaseServer, ILoopable
         Logger.WriteLog(LogType.Initialize, "Starting the Global server...");
 
         // If no config file has been found, these values are 0 by default
-        if (Config.GameConfig.Port == 0 || Config.GameConfig.Backlog == 0)
+        if (Config.GameConfig.Port == 0)
         {
             Logger.WriteLog(LogType.Error, "Invalid config values!");
             return false;
@@ -229,7 +200,7 @@ public class GlobalServer : BaseServer, ILoopable
         info.PKFlag = Config.ServerInfoConfig.PKFlag;
         info.CurrentPlayers = 0;
         info.Port = Config.GameConfig.Port;
-        info.MaxPlayers = (ushort)Config.SocketAsyncConfig.MaxClients;
+        info.MaxPlayers = Config.ServerInfoConfig.MaxPlayers;
     }
     #endregion
 
@@ -247,17 +218,6 @@ public class GlobalServer : BaseServer, ILoopable
         });
 
         Logger.WriteLog(LogType.Command, $"Exiting the server in {minutes} minute(s).");
-    }
-
-    private static void ProcessReloadCommand(string[] parts)
-    {
-        if (parts.Length > 1 && parts[1] == "config")
-        {
-            Configuration.Load();
-            return;
-        }
-
-        Logger.WriteLog(LogType.Command, "Invalid reload command!");
     }
 
     /*private void ProcessRestartCommand(string[] parts)

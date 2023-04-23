@@ -3,173 +3,66 @@
 namespace AutoCore.Auth.Network;
 
 using AutoCore.Communicator;
-using AutoCore.Communicator.Packets;
 using AutoCore.Auth.Config;
 using AutoCore.Auth.Data;
 using AutoCore.Database.Auth;
-using AutoCore.Database.Auth.Models;
 using AutoCore.Auth.Packets.Server;
 using AutoCore.Utils;
-using AutoCore.Utils.Config;
-using AutoCore.Utils.Commands;
 using AutoCore.Utils.Networking;
 using AutoCore.Utils.Server;
 using AutoCore.Utils.Threading;
 using AutoCore.Utils.Timer;
 
-public class AuthServer : BaseServer, ILoopable
+public partial class AuthServer : BaseServer, ILoopable
 {
     public const int MainLoopTime = 100; // Milliseconds
 
-    public Config Config { get; private set; }
+    private List<AuthClient> ClientsToRemove { get; } = new();
+
+    public AuthConfig Config { get; private set; } = new();
     public Communicator Communicator { get; } = new(CommunicatorType.Server);
     public AsyncLengthedSocket ListenerSocket { get; }
     public List<AuthClient> Clients { get; } = new();
-    public List<ServerInfo> ServerList { get; } = new();
+    public Dictionary<byte, ServerInfo> Servers { get; } = new();
     public MainLoop Loop { get; }
     public Timer Timer { get; }
     public override bool IsRunning => Loop != null && Loop.Running;
 
-    private readonly List<AuthClient> _clientsToRemove = new();
-
     public AuthServer()
         : base("Auth")
     {
-        Configuration.OnLoad += ConfigLoaded;
-        Configuration.OnReLoad += ConfigReLoaded;
-        Configuration.Load();
-
-        if (Config is null)
-            throw new Exception("Unable to load configuration!");
-
         Logger.WriteLog(LogType.Initialize, "Initializing the Auth server...");
 
         Loop = new MainLoop(this, MainLoopTime);
         Timer = new Timer();
         ListenerSocket = new AsyncLengthedSocket(AsyncLengthedSocket.HeaderSizeType.Word);
 
-        SetupServerList();
-
-        AuthContext.InitializeConnectionString(Config.AuthDatabaseConnectionString);
-
         RegisterConsoleCommands();
 
         Logger.WriteLog(LogType.Initialize, "The Auth server has been initialized!");
     }
 
-    ~AuthServer()
+    ~AuthServer() => Shutdown();
+
+    public void Setup(AuthConfig? config)
     {
-        Shutdown();
+        if (config != null)
+            Config = config;
+
+        SetupServerList();
     }
 
-    #region Configuration
-    private static void ConfigReLoaded()
-    {
-        Logger.WriteLog(LogType.Initialize, "Config file reloaded by external change!");
-
-        // Totally reload the configuration, because it's automatic reload case can only handle one reload. Our code's bug?
-        Configuration.Load();
-    }
-
-    private void ConfigLoaded()
-    {
-        var oldConfig = Config;
-
-        Config = new Config();
-        Configuration.Bind(Config);
-
-        Logger.UpdateConfig(Config.LoggerConfig);
-
-        // Handle reloading the config and updating the list visibility
-        if (oldConfig == null || oldConfig.AuthListType == Config.AuthListType)
-            return;
-
-        lock (ServerList)
-        {
-            ServerList.Clear();
-            SetupServerList();
-            GenerateServerList();
-        }
-    }
-    #endregion
-
-    public void Disconnect(AuthClient client)
-    {
-        lock (_clientsToRemove)
-            _clientsToRemove.Add(client);
-    }
-
-    private void SetupServerList()
-    {
-        if (Config.AuthListType != AuthListType.All)
-            return;
-
-        foreach (var s in Config.Servers!)
-        {
-            if (!byte.TryParse(s.Key, out byte id))
-                continue;
-
-            ServerList.Add(new ServerInfo
-            {
-                AgeLimit = 0,
-                CurrentPlayers = 0,
-                Port = 0,
-                Ip = IPAddress.None,
-                MaxPlayers = 0,
-                PKFlag = 0,
-                ServerId = id,
-                Status = 0
-            });
-        }
-    }
-
-    #region Socketing
     public bool Start()
     {
-        // Check the server configuration
-        if (Config.AuthConfig!.Port == 0 || Config.AuthConfig.Backlog == 0)
+        // Check the configuration
+        if (Config.AuthSocketPort == 0 || Config.CommunicatorPort == 0)
         {
             Logger.WriteLog(LogType.Error, "Invalid config values!");
             return false;
         }
 
-        // Check the communicator configuration
-        if (Config.CommunicatorConfig!.Port == 0 || Config.CommunicatorConfig.Address == null || Config.CommunicatorConfig.Backlog == 0)
-        {
-            Logger.WriteLog(LogType.Error, "Invalid Communicator config data!");
-            return false;
-        }
-
-        // Set up the listener socket
-        try
-        {
-            ListenerSocket.OnError += OnError;
-            ListenerSocket.OnAccept += OnAccept;
-            ListenerSocket.StartListening(new IPEndPoint(IPAddress.Any, Config.AuthConfig.Port));
-
-            Logger.WriteLog(LogType.Network, "*** Listening for clients on port {0}", Config.AuthConfig.Port);
-        }
-        catch (Exception e)
-        {
-            Logger.WriteLog(LogType.Error, "Unable to create or start listening on the client socket! Exception:");
-            Logger.WriteLog(LogType.Error, e);
-
-            return false;
-        }
-
-        // Set up communicator
-        Communicator.OnLoginRequest += AuthenticateGameServer;
-        Communicator.OnRedirectResponse += RedirectResponse;
-        Communicator.OnServerInfoResponse += UpdateServerInfo;
-        Communicator.Start(IPAddress.Parse(Config.CommunicatorConfig.Address), Config.CommunicatorConfig.Port, Config.CommunicatorConfig.Backlog);
-
-        Logger.WriteLog(LogType.Network, "*** Listening for gameservers on port {0}", Config.CommunicatorConfig.Port);
-
-        // Add the repeating server info request timed event
-        Timer.Add("ServerInfoUpdate", 1000, true, () =>
-        {
-            Communicator.RequestServerInfo();
-        });
+        StartListening();
+        StartCommunicator();
 
         // Start the main loop
         Loop.Start();
@@ -179,95 +72,32 @@ public class AuthServer : BaseServer, ILoopable
         return true;
     }
 
-    private static void OnError()
+    public void Disconnect(AuthClient client)
     {
+        lock (ClientsToRemove)
+            ClientsToRemove.Add(client);
     }
 
-    private void OnAccept(AsyncLengthedSocket newSocket)
+    private void SetupServerList()
     {
-        if (newSocket == null)
-            return;
+        using var context = new AuthContext();
 
-        lock (Clients)
-            Clients.Add(new AuthClient(newSocket, this));
-    }
-    #endregion
+        // TODO: if new server -> add
+        // if update server -> change PW maybe? then DC communicator for it to retry connecting with new password?
+        // if remove server -> remove and DC active communicator
 
-    #region Communicator
-    public bool AuthenticateGameServer(Communicator client, LoginRequestPacket packet)
-    {
-        if (Communicator.Clients!.ContainsKey(packet.Data.Id))
+        foreach (var globalServer in context.GlobalServers.Where(s => s.Enabled))
         {
-            Logger.WriteLog(LogType.Debug, $"A server tried to connect to an already in use server slot! Remote Address: {client.Socket.RemoteAddress}");
-            return false;
-        }
-
-        if (!Config.Servers!.ContainsKey(packet.Data.Id.ToString()))
-        {
-            Logger.WriteLog(LogType.Debug, $"A server tried to connect to a non-defined server slot! Remote Address: {client.Socket.RemoteAddress}");
-            return false;
-        }
-
-        if (Config.Servers[packet.Data.Id.ToString()] != packet.Data.Password)
-        {
-            Logger.WriteLog(LogType.Error, $"A server tried to log in with an invalid password! Remote Address: {client.Socket.RemoteAddress}");
-            return false;
-        }
-
-        Logger.WriteLog(LogType.Communicator, $"The Game server (Id: {packet.Data.Id}, Address: {client.Socket.RemoteAddress}, Public Address: {packet.Data.Address}) has authenticated!");
-        return true;
-    }
-
-    public void UpdateServerInfo()
-    {
-        GenerateServerList();
-        BroadcastServerList();
-    }
-
-    public void RedirectResponse(Communicator client, RedirectResponsePacket packet)
-    {
-        AuthClient? authClient;
-        lock (Clients)
-            authClient = Clients.FirstOrDefault(c => c.Account!.Id == packet.AccountId);
-
-        ServerInfo? info;
-        lock (ServerList)
-            info = ServerList.FirstOrDefault(i => i.ServerId == client.ServerData!.Id);
-
-        if (authClient != null && info != null)
-            authClient.RedirectionResult(packet.Result, info);
-    }
-
-    public void RequestRedirection(AuthClient client, byte serverId)
-    {
-        Communicator.RequestRedirection(serverId, new()
-        {
-            AccountId = client.Account!.Id,
-            Email = client.Account.Email,
-            OneTimeKey = client.OneTimeKey,
-            Username = client.Account.Username
-        });
-    }
-    #endregion
-
-    private void GenerateServerList()
-    {
-        lock (ServerList)
-        {
-            ServerList.Clear();
-
-            foreach (var client in Communicator.Clients!)
+            if (Servers.TryGetValue(globalServer.Id, out var server))
             {
-                ServerList.Add(new ServerInfo
+                server.Password = globalServer.Password;
+            }
+            else
+            {
+                Servers.Add(globalServer.Id, new()
                 {
-                    AgeLimit = client.Value.ServerInfo!.AgeLimit,
-                    PKFlag = client.Value.ServerInfo.PKFlag,
-                    CurrentPlayers = client.Value.ServerInfo.CurrentPlayers,
-                    MaxPlayers = client.Value.ServerInfo.MaxPlayers,
-                    Port = client.Value.ServerInfo.Port,
-                    Ip = client.Value.ServerData!.Address,
-                    ServerId = client.Key,
-                    Status = 1
+                    ServerId = globalServer.Id,
+                    Password = globalServer.Password
                 });
             }
         }
@@ -293,14 +123,14 @@ public class AuthServer : BaseServer, ILoopable
             foreach (var c in Clients)
                 c.Update(delta);
 
-            if (_clientsToRemove.Count > 0)
+            if (ClientsToRemove.Count > 0)
             {
-                lock (_clientsToRemove)
+                lock (ClientsToRemove)
                 {
-                    foreach (var client in _clientsToRemove)
+                    foreach (var client in ClientsToRemove)
                         Clients.Remove(client);
 
-                    _clientsToRemove.Clear();
+                    ClientsToRemove.Clear();
                 }
             }
         }
@@ -312,87 +142,7 @@ public class AuthServer : BaseServer, ILoopable
         {
             foreach (var c in Clients)
                 if (c.State == ClientState.ServerList)
-                    c.SendPacket(new SendServerListExtPacket(ServerList, c.Account!.LastServerId));
+                    c.SendPacket(new SendServerListExtPacket(Servers.Values.Where(s => s.Ip != IPAddress.Any), c.Account!.LastServerId));
         }
     }
-
-    #region Commands
-    private void RegisterConsoleCommands()
-    {
-        CommandProcessor.RegisterCommand("exit", ProcessExitCommand);
-        CommandProcessor.RegisterCommand("reload", ProcessReloadCommand);
-        CommandProcessor.RegisterCommand("create", ProcessCreateCommand);
-    }
-
-    private void ProcessExitCommand(string[] parts)
-    {
-        var minutes = 0;
-
-        if (parts.Length > 1)
-            minutes = int.Parse(parts[1]);
-
-        Timer.Add("exit", minutes * 60000, false, Shutdown);
-
-        Logger.WriteLog(LogType.Command, $"Exiting the server in {minutes} minute(s).");
-    }
-
-    private static void ProcessReloadCommand(string[] parts)
-    {
-        if (parts.Length > 1 && parts[1] == "config")
-        {
-            Configuration.Load();
-            return;
-        }
-
-        Logger.WriteLog(LogType.Command, "Invalid reload command!");
-    }
-
-    private void ProcessCreateCommand(string[] parts)
-    {
-        if (parts.Length < 4)
-        {
-            Logger.WriteLog(LogType.Command, "Invalid create account command! Usage: create <email> <username> <password>");
-            return;
-        }
-
-        var email = parts[1];
-        var userName = parts[2];
-        var password = parts[3];
-
-        try
-        {
-            using (var context = new AuthContext())
-            {
-                var salt = Account.CreateSalt();
-
-                context.Accounts.Add(new Account
-                {
-                    Email = email,
-                    Username = userName,
-                    Password = Account.Hash(password ?? string.Empty, salt),
-                    Salt = salt
-                });
-                context.SaveChanges();
-            }
-
-            Logger.WriteLog(LogType.Command, $"Created account: {parts[2]}! (Password: {parts[3]})");
-        }
-        catch
-        {
-            Logger.WriteLog(LogType.Error, "Username or email is already taken!");
-        }
-    }
-
-    /*private void ProcessRestartCommand(string[] parts)
-    {
-        // TODO: delayed restart, with contacting globals, so they can warn players not to leave the server, or they won't be able to reconnect
-    }
-
-    private void ProcessShutdownCommand(string[] parts)
-    {
-        // TODO: delayed shutdown, with contacting globals, so they can warn players not to leave the server, or they won't be able to reconnect
-        // TODO: add timer to report the remaining time until shutdown?
-        // TODO: add timer to contact global servers to tell them periodically that we're getting shut down?
-    }*/
-    #endregion
 }

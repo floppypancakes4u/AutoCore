@@ -45,8 +45,7 @@ public class Communicator
     public Dictionary<byte, Communicator>? Clients { get; }
     public List<byte>? ToRemoveClients { get; }
     public DateTime LastRequestTime { get; private set; }
-    public ServerData? ServerData { get; private set; }
-    public ServerInfo? ServerInfo { get; private set; }
+    public ServerData Data { get; private set; } = new();
     public bool Connected => Socket?.Connected ?? false;
 
     private Communicator? Server { get; }
@@ -58,7 +57,7 @@ public class Communicator
     public Func<RedirectRequest, bool>? OnRedirectRequest { get; set; }
     public Action<Communicator, RedirectResponsePacket>? OnRedirectResponse { get; set; }
     public Action<ServerInfo>? OnServerInfoRequest { get; set; }
-    public Action? OnServerInfoResponse { get; set; }
+    public Action<Communicator, ServerInfo>? OnServerInfo { get; set; }
 
     public Communicator(CommunicatorType type)
     {
@@ -141,7 +140,7 @@ public class Communicator
             return;
         }
 
-        Clients!.Add(client.ServerData!.Id, client);
+        Clients!.Add(client.Data.Id, client);
         AuthenticatingChildren!.Remove(client);
     }
 
@@ -214,16 +213,18 @@ public class Communicator
 
     private void OnSocketConnect()
     {
-        if (OnConnect == null)
-            return;
+        if (OnConnect == null || OnServerInfoRequest == null)
+            throw new Exception($"Communicator(Type = {Type}) has no OnConenct or OnServerInfoREquest handles given!");
 
-        var info = new ServerData();
+        Data = new ServerData();
+        var info = new ServerInfo();
 
-        OnConnect(info);
+        OnConnect(Data);
+        OnServerInfoRequest(info);
 
         Socket.Start();
 
-        SendPacket(new LoginRequestPacket(info));
+        SendPacket(new LoginRequestPacket(Data, info));
     }
     
     private void SendPacket(IOpcodedPacket<CommunicatorOpcode> packet)
@@ -308,9 +309,15 @@ public class Communicator
             return;
         }
 
-        if (Server!.OnLoginRequest == null)
+        if (Server!.OnLoginRequest == null || Server!.OnServerInfo == null)
         {
-            Logger.WriteLog(LogType.Error, $"Communicator(Type = {Type}) has no OnLoginRequest callback!");
+            Logger.WriteLog(LogType.Error, $"Communicator(Type = {Server.Type}) has no OnLoginRequest or OnServerInfo callback!");
+            return;
+        }
+
+        if (Server.Clients!.ContainsKey(packet.Data.Id))
+        {
+            Logger.WriteLog(LogType.Debug, $"Communicator(Type = {Server.Type}) has a client (Id = {packet.Data.Id}) already connected!");
             return;
         }
 
@@ -323,17 +330,16 @@ public class Communicator
 
         if (!result)
         {
-            lock (ToRemoveClients!)
-                ToRemoveClients.Add(ServerData!.Id);
+            lock (Server.ToRemoveClients!)
+                Server.ToRemoveClients.Add(Data.Id);
 
             return;
         }
 
-        ServerData = packet.Data;
+        Data = packet.Data;
 
         Server.ClientAucthenticated(this);
-
-        RequestServerInfo();
+        Server.OnServerInfo(this, packet.InfoPacket.Info);
     }
 
     private void MsgLoginResponse(LoginResponsePacket packet)
@@ -369,12 +375,10 @@ public class Communicator
             return;
         }
 
-        var result = OnRedirectRequest(packet.Request);
-
         SendPacket(new RedirectResponsePacket
         {
             AccountId = packet.Request.AccountId,
-            Result = result ? CommunicatorActionResult.Success : CommunicatorActionResult.Failure
+            Success = OnRedirectRequest(packet.Request)
         });
     }
 
@@ -426,15 +430,13 @@ public class Communicator
             return;
         }
 
-        if (Server!.OnServerInfoResponse == null)
+        if (Server!.OnServerInfo == null)
         {
-            Logger.WriteLog(LogType.Error, $"Communicator(Type = {Type}) has no OnServerInfoResponse callback!");
+            Logger.WriteLog(LogType.Error, $"Communicator(Type = {Server.Type}) has no OnServerInfo callback!");
             return;
         }
 
-        ServerInfo = packet.Info;
-
-        Server.OnServerInfoResponse();
+        Server.OnServerInfo(this, packet.Info);
     }
     #endregion
 }
@@ -442,26 +444,29 @@ public class Communicator
 public class ServerData
 {
     public byte Id { get; set; }
-    public string? Password { get; set; }
-    public IPAddress? Address { get; set; }
+    public string Password { get; set; } = string.Empty;
+    public IPAddress Address { get; set; } = IPAddress.Any;
+    public int Port { get; set; }
 }
 
 public class ServerInfo
 {
     public byte ServerId { get; set; }
-    public IPAddress? Ip { get; set; }
+    public IPAddress Ip { get; set; } = IPAddress.Any;
     public int Port { get; set; }
     public byte AgeLimit { get; set; }
     public byte PKFlag { get; set; }
     public ushort CurrentPlayers { get; set; }
     public ushort MaxPlayers { get; set; }
     public byte Status { get; set; }
+
+    public string Password { get; set; } = string.Empty;
 }
 
 public class RedirectRequest
 {
     public uint AccountId { get; set; }
-    public string? Username { get; set; }
-    public string? Email { get; set; }
+    public string Username { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
     public uint OneTimeKey { get; set; }
 }

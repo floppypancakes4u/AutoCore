@@ -2,8 +2,12 @@
 
 namespace AutoCore.Global;
 
+using AutoCore.Database.Char;
+using AutoCore.Database.World;
+using AutoCore.Global.Config;
 using AutoCore.Global.Network;
 using AutoCore.Utils;
+using Microsoft.Extensions.Configuration;
 
 public class Program : ExitableProgram
 {
@@ -13,8 +17,20 @@ public class Program : ExitableProgram
     {
         Initialize(ExitHandlerProc);
 
+        var builder = new ConfigurationBuilder()
+            .AddJsonFile("appsettings.json")
+            .AddJsonFile("appsettings.env.json", true);
+
+        var config = new GlobalConfig();
+        var configRoot = builder.Build();
+        configRoot.Bind(config);
+
+        CharContext.InitializeConnectionString(config.CharDatabaseConnectionString);
+        WorldContext.InitializeConnectionString(config.WorldDatabaseConnectionString);
+
         Server = new GlobalServer();
         Server.InitConsole();
+        Server.Setup(config);
 
         if (!Server.Start())
         {

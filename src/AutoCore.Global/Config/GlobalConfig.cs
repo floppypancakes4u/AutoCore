@@ -1,11 +1,9 @@
 ﻿namespace AutoCore.Global.Config;
 
 using AutoCore.Utils;
-using AutoCore.Utils.Config;
 
-public class Config
+public class GlobalConfig
 {
-    public SocketAsyncConfig SocketAsyncConfig { get; set; }
     public GameConfig GameConfig { get; set; }
     public string CommunicatorAddress { get; set; }
     public int CommunicatorPort { get; set; }

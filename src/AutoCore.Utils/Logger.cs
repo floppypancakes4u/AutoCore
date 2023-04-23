@@ -18,7 +18,7 @@ public enum LogType
 
 public class Logger
 {
-    public static LoggerConfig Config { get; private set; }
+    public static LoggerConfig Config { get; private set; } = new();
 
     private static StreamWriter _logWriter;
 
@@ -147,8 +147,8 @@ public class Logger
 
     public class LoggerConfig
     {
-        public bool IsDebugMode { get; set; }
-        public string LogFilePath { get; set; }
-        public bool LogToFile { get; set; }
+        public bool IsDebugMode { get; set; } = true;
+        public string LogFilePath { get; set; } = "log.txt";
+        public bool LogToFile { get; set; } = true;
     }
 }

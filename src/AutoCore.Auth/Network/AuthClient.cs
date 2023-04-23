@@ -1,22 +1,17 @@
-﻿using System.Buffers;
+﻿namespace AutoCore.Auth.Network;
 
-namespace AutoCore.Auth.Network;
-
-using AutoCore.Auth.Crypto;
 using AutoCore.Auth.Data;
-using AutoCore.Auth.Packets.Client;
 using AutoCore.Auth.Packets.Server;
 using AutoCore.Communicator;
 using AutoCore.Database.Auth;
 using AutoCore.Database.Auth.Models;
 using AutoCore.Utils;
 using AutoCore.Utils.Extensions;
-using AutoCore.Utils.Memory;
 using AutoCore.Utils.Networking;
 using AutoCore.Utils.Packets;
 using AutoCore.Utils.Timer;
 
-public class AuthClient
+public partial class AuthClient
 {
     public const int LengthSize = 2;
     public const int SendBufferSize = 512;
@@ -43,19 +38,17 @@ public class AuthClient
 
         Timer = new Timer();
 
-        Socket.OnError += OnError;
+        Socket.OnError += Close;
         Socket.OnReceive += OnReceive;
         Socket.Start();
 
-        var rnd = new Random();
-
-        OneTimeKey = rnd.NextUInt();
-        SessionId1 = rnd.NextUInt();
-        SessionId2 = rnd.NextUInt();
+        OneTimeKey = Random.Shared.NextUInt();
+        SessionId1 = Random.Shared.NextUInt();
+        SessionId2 = Random.Shared.NextUInt();
 
         SendPacket(new ProtocolVersionPacket(OneTimeKey));
 
-        Timer.Add("timeout", Server.Config.AuthConfig!.ClientTimeout * 1000, false, () =>
+        Timer.Add("timeout", 300_000, false, () =>
         {
             Logger.WriteLog(LogType.Network, "*** Client timed out! Ip: {0}", Socket.RemoteAddress);
 
@@ -97,203 +90,35 @@ public class AuthClient
         Socket.Close();
     }
 
-    public void SendPacket(IBasePacket packet)
+    public void RedirectionResult(byte serverId, bool result)
     {
-        var buffer = ArrayPool<byte>.Shared.Rent(SendBufferSize + SendBufferCryptoPadding + SendBufferChecksumPadding);
-        var writer = new BinaryWriter(new MemoryStream(buffer, true));
-
-        packet.Write(writer);
-
-        var length = (int)writer.BaseStream.Position;
-
-        if (packet is not ProtocolVersionPacket)
+        if (!result)
         {
-            CryptoManager.Encrypt(buffer, 0, ref length, buffer.Length);
-        }
+            SendPacket(new PlayFailPacket(FailReason.UnexpectedError));
 
-        Socket.Send(buffer, 0, length);
+            Close();
 
-        ArrayPool<byte>.Shared.Return(buffer);
-    }
+            Logger.WriteLog(LogType.Error, $"Account ({Account!.Username}, {Account.Id}) couldn't be redirected to server: {serverId}!");
 
-    public void HandlePacket(IBasePacket packet)
-    {
-        if (packet is not IOpcodedPacket<ClientOpcode> authPacket)
             return;
-
-        switch (authPacket.Opcode)
-        {
-            case ClientOpcode.Login:
-                MsgLogin((authPacket as LoginPacket)!);
-                break;
-
-            case ClientOpcode.Logout:
-                MsgLogout((authPacket as LogoutPacket)!);
-                break;
-
-            case ClientOpcode.AboutToPlay:
-                MsgAboutToPlay((authPacket as AboutToPlayPacket)!);
-                break;
-
-            case ClientOpcode.ServerListExt:
-                MsgServerListExt((authPacket as ServerListExtPacket)!);
-                break;
-        }
-    }
-
-    public void RedirectionResult(CommunicatorActionResult result, ServerInfo info)
-    {
-        switch (result)
-        {
-            case CommunicatorActionResult.Failure:
-                SendPacket(new PlayFailPacket(FailReason.UnexpectedError));
-
-                Close();
-
-                Logger.WriteLog(LogType.Error, $"Account ({Account!.Username}, {Account.Id}) couldn't be redirected to server: {info.ServerId}!");
-                break;
-
-            case CommunicatorActionResult.Success:
-                SendPacket(new PlayOkPacket
-                {
-                    OneTimeKey = OneTimeKey,
-                    ServerId = info.ServerId,
-                    UserId = Account!.Id
-                });
-
-                using (var context = new AuthContext())
-                {
-                    var account = context.Accounts.Where(a => a.Id == Account.Id).First();
-
-                    account.LastServerId = info.ServerId;
-
-                    context.SaveChanges();
-                }
-
-                Logger.WriteLog(LogType.Network, $"Account ({Account.Username}, {Account.Id}) was redirected to the server: {info.ServerId}!");
-                break;
-
-            default:
-                throw new ArgumentOutOfRangeException(nameof(result));
-        }
-    }
-
-    private void OnError()
-    {
-        Close();
-    }
-
-    private void OnReceive(NonContiguousMemoryStream incomingStream, int length)
-    {
-        var data = ArrayPool<byte>.Shared.Rent(length);
-
-        incomingStream.Read(data, 0, length);
-
-        CryptoManager.Decrypt(data, 0, length);
-
-        using var br = new BinaryReader(new MemoryStream(data, 0, length, false));
-
-        var packet = CreatePacket((ClientOpcode)br.ReadByte());
-
-        packet.Read(br);
-
-        ArrayPool<byte>.Shared.Return(data);
-
-        _packetQueue.EnqueueIncoming(packet);
-
-        // Reset the timeout after every action
-        Timer.ResetTimer("timeout");
-    }
-
-    private static IBasePacket CreatePacket(ClientOpcode opcode)
-    {
-        return opcode switch
-        {
-            ClientOpcode.AboutToPlay   => new AboutToPlayPacket(),
-            ClientOpcode.Login         => new LoginPacket(),
-            ClientOpcode.Logout        => new LogoutPacket(),
-            ClientOpcode.ServerListExt => new ServerListExtPacket(),
-            ClientOpcode.SCCheck       => new SCCheckPacket(),
-            _ => throw new ArgumentOutOfRangeException(nameof(opcode)),
-        };
-    }
-
-    #region Handlers
-    private void MsgLogin(LoginPacket packet)
-    {
-        using (var context = new AuthContext())
-        {
-            var account = context.Accounts.FirstOrDefault(a => a.Username == packet.UserName);
-            if (account == null || !account.CheckPassword(packet.Password))
-            {
-                SendPacket(new LoginFailPacket(FailReason.UserNameOrPassword));
-
-                Close();
-
-                return;
-            }
-
-            if (account.Locked)
-            {
-                SendPacket(new BlockedAccountPacket());
-
-                Close();
-
-                return;
-            }
-
-            account.LastIP = Socket.RemoteAddress.ToString();
-            account.LastLogin = DateTime.Now;
-
-            context.SaveChanges();
-
-            Account = account;
         }
 
-        State = ClientState.LoggedIn;
-
-        SendPacket(new LoginOkPacket
+        SendPacket(new PlayOkPacket
         {
-            SessionId1 = SessionId1,
-            SessionId2 = SessionId2
+            OneTimeKey = OneTimeKey,
+            ServerId = serverId,
+            UserId = Account!.Id
         });
 
-        Logger.WriteLog(LogType.Network, "*** Client logged in from {0}", Socket.RemoteAddress);
-    }
-
-    private void MsgLogout(LogoutPacket packet)
-    {
-        if (SessionId1 != packet.SessionId1 || SessionId2 != packet.SessionId2)
+        using (var context = new AuthContext())
         {
-            Logger.WriteLog(LogType.Security, $"Account ({Account!.Username}, {Account.Id}) has sent an LogoutPacket with invalid session data!");
-            return;
+            var account = context.Accounts.Where(a => a.Id == Account.Id).First();
+
+            account.LastServerId = serverId;
+
+            context.SaveChanges();
         }
 
-        Close();
+        Logger.WriteLog(LogType.Network, $"Account ({Account.Username}, {Account.Id}) was redirected to the server: {serverId}!");
     }
-
-    private void MsgServerListExt(ServerListExtPacket packet)
-    {
-        if (SessionId1 != packet.SessionId1 || SessionId2 != packet.SessionId2)
-        {
-            Logger.WriteLog(LogType.Security, $"Account ({Account!.Username}, {Account.Id}) has sent an ServerListExtPacket with invalid session data!");
-            return;
-        }
-
-        State = ClientState.ServerList;
-
-        SendPacket(new SendServerListExtPacket(Server.ServerList, Account!.LastServerId));
-    }
-
-    private void MsgAboutToPlay(AboutToPlayPacket packet)
-    {
-        if (SessionId1 != packet.SessionId1 || SessionId2 != packet.SessionId2)
-        {
-            Logger.WriteLog(LogType.Security, $"Account ({Account!.Username}, {Account.Id}) has sent an AboutToPlayPacket with invalid session data!");
-            return;
-        }
-
-        Server.RequestRedirection(this, packet.ServerId);
-    }
-    #endregion
 }

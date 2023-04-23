@@ -10,11 +10,11 @@ using AutoCore.Utils.Packets;
 public class SendServerListExtPacket : IOpcodedPacket<ServerOpcode>
 {
     public byte LastServerId { get; set; }
-    public List<ServerInfo> ServerList { get; set; }
+    public IEnumerable<ServerInfo> ServerList { get; set; }
 
     public ServerOpcode Opcode { get; } = ServerOpcode.SendServerListExt;
 
-    public SendServerListExtPacket(List<ServerInfo> servers, byte lastServerId = 0)
+    public SendServerListExtPacket(IEnumerable<ServerInfo> servers, byte lastServerId = 0)
     {
         ServerList = servers;
         LastServerId = lastServerId;
@@ -22,7 +22,7 @@ public class SendServerListExtPacket : IOpcodedPacket<ServerOpcode>
 
     public void Read(BinaryReader reader)
     {
-        ServerList = new List<ServerInfo>();
+        var serverList = new List<ServerInfo>();
 
         var count = reader.ReadByte();
         LastServerId = reader.ReadByte();
@@ -32,7 +32,7 @@ public class SendServerListExtPacket : IOpcodedPacket<ServerOpcode>
             var serverId = reader.ReadByte();
             var addrLen = reader.ReadByte();
 
-            ServerList.Add(new ServerInfo
+            serverList.Add(new ServerInfo
             {
                 ServerId = serverId,
                 Ip = new IPAddress(reader.ReadBytes(addrLen)),
@@ -44,6 +44,8 @@ public class SendServerListExtPacket : IOpcodedPacket<ServerOpcode>
                 Status = reader.ReadByte()
             });
         }
+
+        ServerList = serverList;
     }
 
     public void Write(BinaryWriter writer)
@@ -51,7 +53,7 @@ public class SendServerListExtPacket : IOpcodedPacket<ServerOpcode>
         if (ServerList == null)
             throw new InvalidOperationException("You must specify a list of ServerInfo before you can serialize it!");
 
-        var count = ServerList.Count;
+        var count = ServerList.Count();
         if (count >= 16)
             count = 16;
 
@@ -79,5 +81,5 @@ public class SendServerListExtPacket : IOpcodedPacket<ServerOpcode>
         }
     }
 
-    public override string ToString() => $"SendServerListExtPacket(Count: {ServerList?.Count ?? -1})";
+    public override string ToString() => $"SendServerListExtPacket(Count: {ServerList?.Count() ?? -1})";
 }

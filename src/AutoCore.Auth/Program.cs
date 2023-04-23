@@ -1,8 +1,12 @@
 ﻿using System.Diagnostics;
 
+using Microsoft.Extensions.Configuration;
+
 namespace AutoCore.Auth;
 
+using AutoCore.Auth.Config;
 using AutoCore.Auth.Network;
+using AutoCore.Database.Auth;
 using AutoCore.Utils;
 
 public class Program : ExitableProgram
@@ -13,8 +17,21 @@ public class Program : ExitableProgram
     {
         Initialize(ExitHandlerProc);
 
+        var builder = new ConfigurationBuilder()
+            .AddJsonFile("appsettings.json")
+            .AddJsonFile("appsettings.env.json", true);
+
+        var config = new AuthConfig();
+        var configRoot = builder.Build();
+        configRoot.Bind(config);
+
+        AuthContext.InitializeConnectionString(config.AuthDatabaseConnectionString);
+
+        Logger.UpdateConfig(config.LoggerConfig);
+
         Server = new AuthServer();
         Server.InitConsole();
+        Server.Setup(config);
 
         if (!Server.Start())
         {

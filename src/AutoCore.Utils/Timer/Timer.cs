@@ -7,21 +7,13 @@ public class Timer
     public void Add(string name, long timer, bool repeating, Action action)
     {
         lock (_timedItems)
-        {
-            if (_timedItems.ContainsKey(name))
-                _timedItems.Remove(name);
-
-            _timedItems.Add(name, new TimedItem(name, timer, repeating, action));
-        }
+            _timedItems[name] = new TimedItem(name, timer, repeating, action);
     }
 
     public void Remove(string name)
     {
         lock (_timedItems)
-        {
-            if (_timedItems.ContainsKey(name))
-                _timedItems.Remove(name);
-        }
+            _timedItems.Remove(name);
     }
 
     public void Update(long delta)
@@ -38,8 +30,7 @@ public class Timer
 
                     if (!item.Value.Repeating)
                     {
-                        if (toRemove == null)
-                            toRemove = new();
+                        toRemove ??= new();
 
                         toRemove.Add(item.Key);
                     }
@@ -50,18 +41,23 @@ public class Timer
                 return;
 
             foreach (var key in toRemove)
-            {
                 _timedItems.Remove(key);
-            }
         }
+    }
+
+    public void Schedule(string name, long timer)
+    {
+        lock (_timedItems)
+            if (_timedItems.TryGetValue(name, out var value))
+                value.Schedule(timer);
     }
 
     public void ResetTimer(string name)
     {
         lock (_timedItems)
         {
-            if (_timedItems.ContainsKey(name))
-                _timedItems[name].ResetTimer();
+            if (_timedItems.TryGetValue(name, out var value))
+                value.ResetTimer();
         }
     }
 }

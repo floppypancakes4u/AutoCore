@@ -11,18 +11,18 @@ public class Account
     [Key]
     [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
     public uint Id { get; set; }
-    public string Email { get; set; }
-    public string Username { get; set; }
-    public string Password { get; set; }
-    public string Salt { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public string Username { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+    public string Salt { get; set; } = string.Empty;
     public byte Level { get; set; }
-    public string LastIP { get; set; }
+    public string? LastIP { get; set; }
     public byte LastServerId { get; set; }
     public DateTime? LastLogin { get; set; }
     public DateTime JoinDate { get; set; }
     public bool Locked { get; set; }
     public bool Validated { get; set; }
-    public string ValidationToken { get; set; }
+    public string? ValidationToken { get; set; }
 
     public bool CheckPassword(string password)
     {

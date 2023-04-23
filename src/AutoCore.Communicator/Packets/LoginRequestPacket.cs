@@ -10,31 +10,41 @@ public class LoginRequestPacket : IOpcodedPacket<CommunicatorOpcode>
 {
     public CommunicatorOpcode Opcode { get; } = CommunicatorOpcode.LoginRequest;
     public ServerData Data { get; set; }
+    public ServerInfoResponsePacket InfoPacket { get; set; }
 
     public LoginRequestPacket()
     {
         Data = new();
+        InfoPacket = new();
     }
 
-    public LoginRequestPacket(ServerData info)
+    public LoginRequestPacket(ServerData data, ServerInfo info)
     {
-        Data = info;
+        Data = data;
+        InfoPacket = new(info);
     }
 
-    public void Read(BinaryReader br)
+    public void Read(BinaryReader reader)
     {
-        Data.Id = br.ReadByte();
-        Data.Password = br.ReadLengthedString();
-        Data.Address = new IPAddress(br.ReadBytes(br.ReadByte()));
+        Data.Id = reader.ReadByte();
+        Data.Password = reader.ReadLengthedString();
+        Data.Address = new IPAddress(reader.ReadBytes(reader.ReadByte()));
+        Data.Port = reader.ReadInt32();
+
+        _ = reader.ReadByte(); // skip opcode of inlined packet
+        InfoPacket.Read(reader);
     }
 
-    public void Write(BinaryWriter bw)
+    public void Write(BinaryWriter writer)
     {
-        bw.Write((byte)Opcode);
-        bw.Write(Data.Id);
-        bw.WriteLengthedString(Data.Password);
-        bw.Write((byte)(Data.Address!.AddressFamily == AddressFamily.InterNetwork ? 4 : 16));
-        bw.Write(Data.Address.GetAddressBytes());
+        writer.Write((byte)Opcode);
+        writer.Write(Data.Id);
+        writer.WriteLengthedString(Data.Password);
+        writer.Write((byte)(Data.Address!.AddressFamily == AddressFamily.InterNetwork ? 4 : 16));
+        writer.Write(Data.Address.GetAddressBytes());
+        writer.Write(Data.Port);
+
+        InfoPacket.Write(writer);
     }
 
     public override string ToString() => $"LoginRequestPacket({Data.Id}, {Data.Address}, {Data.Password})";

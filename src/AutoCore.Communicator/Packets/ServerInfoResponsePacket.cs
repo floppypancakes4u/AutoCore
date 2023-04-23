@@ -7,15 +7,8 @@ public class ServerInfoResponsePacket : IOpcodedPacket<CommunicatorOpcode>
     public CommunicatorOpcode Opcode { get; } = CommunicatorOpcode.ServerInfoResponse;
     public ServerInfo Info { get; }
 
-    public ServerInfoResponsePacket()
-    {
-        Info = new();
-    }
-
-    public ServerInfoResponsePacket(ServerInfo info)
-    {
-        Info = info;
-    }
+    public ServerInfoResponsePacket() => Info = new();
+    public ServerInfoResponsePacket(ServerInfo info) => Info = info;
 
     public void Read(BinaryReader br)
     {

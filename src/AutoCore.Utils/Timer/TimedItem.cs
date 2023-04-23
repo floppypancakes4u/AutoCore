@@ -28,8 +28,6 @@ public class TimedItem
         return false;
     }
 
-    public void ResetTimer()
-    {
-        CurrentTimer = Timer;
-    }
+    public void Schedule(long timer) => CurrentTimer = timer;
+    public void ResetTimer() => CurrentTimer = Timer;
 }
