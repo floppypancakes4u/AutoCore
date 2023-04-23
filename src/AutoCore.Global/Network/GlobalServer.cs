@@ -21,8 +21,6 @@ using AutoCore.Utils.Timer;
 
 public class GlobalServer : BaseServer, ILoopable
 {
-    public override string Type { get; } = "Global";
-
     public const int MainLoopTime = 100; // Milliseconds
     public const int SendBufferSize = 512;
 
@@ -36,6 +34,7 @@ public class GlobalServer : BaseServer, ILoopable
     private readonly object _interfaceLock = new();
 
     public GlobalServer()
+        : base("Global")
     {
         Configuration.OnLoad += ConfigLoaded;
         Configuration.OnReLoad += ConfigReLoaded;

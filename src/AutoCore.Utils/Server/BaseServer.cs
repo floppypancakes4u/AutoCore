@@ -5,7 +5,9 @@ using AutoCore.Utils.Commands;
 public abstract class BaseServer
 {
     public abstract bool IsRunning { get; }
-    public abstract string Type { get; }
+    public string Type { get; }
+
+    public BaseServer(string type) => Type = type;
 
     public void ProcessCommands()
     {
@@ -17,9 +19,9 @@ public abstract class BaseServer
         }
     }
 
-    public void InitConsole(string type)
+    public void InitConsole()
     {
-        Console.Title = $"AutoCore - {type} Server";
+        Console.Title = $"AutoCore - {Type} Server";
 
         Logger.WriteLog(LogType.Initialize, @"                _         ______              ");
         Logger.WriteLog(LogType.Initialize, @"     /\        | |       / ____|              ");
@@ -27,7 +29,7 @@ public abstract class BaseServer
         Logger.WriteLog(LogType.Initialize, @"   / /\ \| | | | __/ _ \| |    / _ \| '__/ _ \");
         Logger.WriteLog(LogType.Initialize, @"  / ____ \ |_| | || (_) | |___| (_) | | |  __/");
         Logger.WriteLog(LogType.Initialize, @" /_/    \_\__,_|\__\___/ \_____\___/|_|  \___|");
-        Logger.WriteLog(LogType.Initialize, @" Auto Assault Server - {0}", type);
+        Logger.WriteLog(LogType.Initialize, @" Auto Assault Server - {0}", Type);
         Logger.WriteLog(LogType.Initialize, "");
     }
 }

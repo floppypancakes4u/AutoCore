@@ -14,7 +14,7 @@ public class Program : ExitableProgram
         Initialize(ExitHandlerProc);
 
         Server = new GlobalServer();
-        Server.InitConsole("Global");
+        Server.InitConsole();
 
         if (!Server.Start())
         {

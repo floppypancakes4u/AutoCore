@@ -19,8 +19,6 @@ using AutoCore.Utils.Timer;
 
 public class AuthServer : BaseServer, ILoopable
 {
-    public override string Type { get; } = "Authentication";
-
     public const int MainLoopTime = 100; // Milliseconds
 
     public Config Config { get; private set; }
@@ -35,6 +33,7 @@ public class AuthServer : BaseServer, ILoopable
     private readonly List<AuthClient> _clientsToRemove = new();
 
     public AuthServer()
+        : base("Auth")
     {
         Configuration.OnLoad += ConfigLoaded;
         Configuration.OnReLoad += ConfigReLoaded;

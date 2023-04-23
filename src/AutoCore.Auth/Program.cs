@@ -14,7 +14,7 @@ public class Program : ExitableProgram
         Initialize(ExitHandlerProc);
 
         Server = new AuthServer();
-        Server.InitConsole("Auth");
+        Server.InitConsole();
 
         if (!Server.Start())
         {
