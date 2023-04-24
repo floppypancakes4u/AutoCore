@@ -12,7 +12,7 @@ using AutoCore.Utils.Memory;
 
 public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
 {
-    public static (bool, long) CreateNewCharacter(TNLConnection client, NewCharacterPacket packet)
+    public static (bool, long) CreateNewCharacter(TNLConnection client, LoginNewCharacterPacket packet)
     {
         using var context = new CharContext();
 

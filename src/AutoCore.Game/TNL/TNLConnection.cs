@@ -242,15 +242,15 @@ public partial class TNLConnection : GhostConnection
 
                 // Sector
                 case GameOpcode.TransferFromGlobal:
-                    //HandleTransferFromGlobal(reader);
+                    HandleTransferFromGlobal(reader);
                     break;
 
                 case GameOpcode.TransferFromGlobalStage2:
-                    //HandleTransferFromGlobalStage2(reader);
+                    HandleTransferFromGlobalStage2(reader);
                     break;
 
                 case GameOpcode.TransferFromGlobalStage3:
-                    //HandleTransferFromGlobalStage3(reader);
+                    HandleTransferFromGlobalStage3(reader);
                     break;
 
                 case GameOpcode.UpdateFirstTimeFlagsRequest:
