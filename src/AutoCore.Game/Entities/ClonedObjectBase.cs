@@ -24,13 +24,9 @@ public abstract class ClonedObjectBase
         Faction = -1;
         Scale = 1.0f;
         CustomValue = -1;
-        ObjectId = new TFID
-        {
-            Coid = -1L,
-            Global = false
-        };
-        Position = new Vector3(0.0f, 0.0f, 0.0f);
-        Rotation = new Quaternion(0.0f, 0.0f, 0.0f, 1.0f);
+        ObjectId = new();
+        Position = new(0.0f, 0.0f, 0.0f);
+        Rotation = new(0.0f, 0.0f, 0.0f, 1.0f);
     }
 
     protected void LoadCloneBase(int cbid)

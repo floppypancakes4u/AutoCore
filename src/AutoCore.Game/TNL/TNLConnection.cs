@@ -21,17 +21,16 @@ public partial class TNLConnection : GhostConnection
     private static NetConnectionRep _connRep;
 #pragma warning restore IDE0052 // Remove unread private members
 
-    private uint _key;
-    //private uint _oneTimeKey;
-    private long _playerCOID;
-    private ushort _fragmentCounter;
+    private uint Key { get; set; }
+    private long PlayerCoid { get; set; }
+    private ushort FragmentCounter { get; set; } = 1;
 
     public Account Account { get; set; }
     //public Character CurrentCharacter { get; set; }
 
-    private readonly SFragmentData _fragmentGuaranteed;
-    private readonly SFragmentData _fragmentNonGuaranteed;
-    private readonly SFragmentData _fragmentGuaranteedOrdered;
+    private SFragmentData FragmentGuaranteed { get; } = new();
+    private SFragmentData FragmentNonGuaranteed { get; } = new();
+    private SFragmentData FragmentGuaranteedOrdered { get; } = new();
 
     public new static void RegisterNetClassReps()
     {
@@ -47,17 +46,8 @@ public partial class TNLConnection : GhostConnection
 
     public TNLConnection()
     {
-        _key = 0U;
-        //_oneTimeKey = 0U;
-        _playerCOID = 0L;
-        _fragmentCounter = 1;
-
         SetFixedRateParameters(50, 50, 40000, 40000);
         SetPingTimeouts(7000, 6);
-
-        _fragmentGuaranteed = new SFragmentData();
-        _fragmentNonGuaranteed = new SFragmentData();
-        _fragmentGuaranteedOrdered = new SFragmentData();
     }
 
     ~TNLConnection()
@@ -92,16 +82,10 @@ public partial class TNLConnection : GhostConnection
 
         ArrayPool<byte>.Shared.Return(dest);
 
-        /*using (var sw = new StreamWriter("sent.txt", true, Encoding.UTF8))
-        {
-            sw.WriteLine(BitConverter.ToString(arr));
-            sw.WriteLine();
-        }*/
-
         var arrLength = (uint)packetLength;
         if (arrLength > 1400U)
         {
-            ++_fragmentCounter;
+            ++FragmentCounter;
 
             var doneSize = 0U;
             var count = (ushort)Math.Ceiling(arrLength / 220.0);
@@ -122,15 +106,15 @@ public partial class TNLConnection : GhostConnection
                 switch (type)
                 {
                     case RPCGuaranteeType.RPCGuaranteed:
-                        rpcMsgGuaranteedFragmented((uint)packet.Opcode, _fragmentCounter, i, count, stream);
+                        rpcMsgGuaranteedFragmented((uint)packet.Opcode, FragmentCounter, i, count, stream);
                         break;
 
                     case RPCGuaranteeType.RPCGuaranteedOrdered:
-                        rpcMsgGuaranteedOrderedFragmented((uint)packet.Opcode, _fragmentCounter, i, count, stream);
+                        rpcMsgGuaranteedOrderedFragmented((uint)packet.Opcode, FragmentCounter, i, count, stream);
                         break;
 
                     case RPCGuaranteeType.RPCUnguaranteed:
-                        rpcMsgNonGuaranteedFragmented((uint)packet.Opcode, _fragmentCounter, i, count, stream);
+                        rpcMsgNonGuaranteedFragmented((uint)packet.Opcode, FragmentCounter, i, count, stream);
                         break;
                 }
             }
@@ -174,11 +158,11 @@ public partial class TNLConnection : GhostConnection
                     break;
 
                 case GameOpcode.LoginNewCharacter:
-                    HandleNewCharacterPacket(reader);
+                    HandleLoginNewCharacterPacket(reader);
                     break;
 
                 case GameOpcode.LoginDeleteCharacter:
-                    HandleDeleteCharacterPacket(reader);
+                    HandleLoginDeleteCharacterPacket(reader);
                     break;
 
                 case GameOpcode.News:
@@ -186,7 +170,7 @@ public partial class TNLConnection : GhostConnection
                     break;
 
                 case GameOpcode.Login:
-                    HandleGlobalLoginPacket(reader);
+                    HandleLoginPacket(reader);
                     break;
 
                 case GameOpcode.Disconnect:
@@ -276,7 +260,6 @@ public partial class TNLConnection : GhostConnection
     #endregion
 
     #region RPC Calls
-#pragma warning disable IDE0051 // Remove unused private members
 #pragma warning disable IDE1006 // Naming Styles
     public void rpcMsgGuaranteed(uint type, ByteBuffer data)
     #region rpcMsgGuaranteed
@@ -337,7 +320,7 @@ public partial class TNLConnection : GhostConnection
     {
         Console.WriteLine("MsgGuaranteedFragmented | Type: {0} | Fragment: {1} | FragmentId: {2} | FragmentCount: {3}", type, fragment, fragmentId, fragmentCount);
 
-        ProcessFragment(data, _fragmentGuaranteed, type, fragment, fragmentId, fragmentCount);
+        ProcessFragment(data, FragmentGuaranteed, type, fragment, fragmentId, fragmentCount);
     }
 
     public void rpcMsgGuaranteedOrderedFragmented(uint type, ushort fragment, ushort fragmentId, ushort fragmentCount, ByteBuffer data)
@@ -354,7 +337,7 @@ public partial class TNLConnection : GhostConnection
     {
         Console.WriteLine("MsgGuaranteedOrderedFragmented | Type: {0} | Fragment: {1} | FragmentId: {2} | FragmentCount: {3}", type, fragment, fragmentId, fragmentCount);
 
-        ProcessFragment(data, _fragmentGuaranteedOrdered, type, fragment, fragmentId, fragmentCount);
+        ProcessFragment(data, FragmentGuaranteedOrdered, type, fragment, fragmentId, fragmentCount);
     }
 
     public void rpcMsgNonGuaranteedFragmented(uint type, ushort fragment, ushort fragmentId, ushort fragmentCount, ByteBuffer data)
@@ -371,10 +354,9 @@ public partial class TNLConnection : GhostConnection
     {
         Console.WriteLine("MsgNonGuaranteedFragmented | Type: {0} | Fragment: {1} | FragmentId: {2} | FragmentCount: {3}", type, fragment, fragmentId, fragmentCount);
 
-        ProcessFragment(data, _fragmentNonGuaranteed, type, fragment, fragmentId, fragmentCount);
+        ProcessFragment(data, FragmentNonGuaranteed, type, fragment, fragmentId, fragmentCount);
     }
 #pragma warning restore IDE1006 // Naming Styles
-#pragma warning restore IDE0051 // Remove unused private members
     #endregion RPC Calls
 
     public override NetClassRep GetClassRep()
@@ -384,12 +366,12 @@ public partial class TNLConnection : GhostConnection
 
     public void SetPlayerCOID(long connId)
     {
-        _playerCOID = connId;
+        PlayerCoid = connId;
     }
 
     public long GetPlayerCOID()
     {
-        return _playerCOID;
+        return PlayerCoid;
     }
 
     public override NetClassGroup GetNetClassGroup()
@@ -423,8 +405,8 @@ public partial class TNLConnection : GhostConnection
             return;
 
         stream.Write(tInterface.Version);
-        stream.Write(_key);
-        stream.Write(_playerCOID);
+        stream.Write(Key);
+        stream.Write(PlayerCoid);
     }
 
     public override bool ReadConnectRequest(BitStream stream, ref string errorString)
@@ -441,17 +423,20 @@ public partial class TNLConnection : GhostConnection
             return false;
         }
 
-        if (!stream.Read(out _key))
+        if (!stream.Read(out uint key))
         {
             errorString = "Unknown Key";
             return false;
         }
 
-        if (!stream.Read(out _playerCOID))
+        if (!stream.Read(out long playerCoid))
         {
             errorString = "Unknown player ID";
             return false;
         }
+
+        Key = key;
+        PlayerCoid = playerCoid;
 
         return true;
     }
@@ -468,7 +453,7 @@ public partial class TNLConnection : GhostConnection
         SetIsAdaptive();
         SetIsConnectionToClient();
 
-        Logger.WriteLog(LogType.Network, "Client ({1}) connected from {0}", GetNetAddressString(), _playerCOID);
+        Logger.WriteLog(LogType.Network, "Client ({1}) connected from {0}", GetNetAddressString(), PlayerCoid);
     }
 
     protected override void ComputeNegotiatedRate()

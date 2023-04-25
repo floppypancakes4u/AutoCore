@@ -46,9 +46,13 @@ public class SimpleObject : ClonedObjectBase
 
     public virtual bool LoadFromDB(CharContext context, long coid)
     {
+        SetCoid(coid, true);
+
         DBData = context.SimpleObjects.FirstOrDefault(so => so.Coid == coid);
         if (DBData == null)
             return false;
+
+        LoadCloneBase(DBData.CBID);
 
         return true;
     }

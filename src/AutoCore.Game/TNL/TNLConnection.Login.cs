@@ -2,9 +2,7 @@
 
 using AutoCore.Game.Managers;
 using AutoCore.Game.Packets.Login;
-using AutoCore.Game.Packets.Global;
 using AutoCore.Utils;
-using System.Net;
 
 public partial class TNLConnection
 {
@@ -20,14 +18,14 @@ public partial class TNLConnection
             return;
         }
 
-        Logger.WriteLog(LogType.Network, "Client ({3} -> {1} | {2}) authenticated from {0}", GetNetAddressString(), Account.Id, Account.Name, _playerCOID);
+        Logger.WriteLog(LogType.Network, "Client ({3} -> {1} | {2}) authenticated from {0}", GetNetAddressString(), Account.Id, Account.Name, PlayerCoid);
 
         CharacterSelectionManager.SendCharacterList(this);
 
         SendGamePacket(new LoginResponsePacket(0x1000000));
     }
 
-    private void HandleNewCharacterPacket(BinaryReader reader)
+    private void HandleLoginNewCharacterPacket(BinaryReader reader)
     {
         var packet = new LoginNewCharacterPacket();
         packet.Read(reader);
@@ -42,31 +40,11 @@ public partial class TNLConnection
         }
     }
 
-    private void HandleDeleteCharacterPacket(BinaryReader reader)
+    private void HandleLoginDeleteCharacterPacket(BinaryReader reader)
     {
         var packet = new LoginDeleteCharacterPacket();
         packet.Read(reader);
 
         CharacterSelectionManager.DeleteCharacter(this, packet.CharacterCoid);
-    }
-
-    private void HandleGlobalLoginPacket(BinaryReader reader)
-    {
-        var packet = new LoginPacket();
-        packet.Read(reader);
-
-        // TODO: check character
-
-        SendGamePacket(new LoginAckPacket
-        {
-            Success = true
-        });
-
-        SendGamePacket(new TransferToSectorPacket()
-        {
-            IPAddress = IPAddress.Loopback,
-            Port = 27001,
-            Flags = 0
-        });
     }
 }

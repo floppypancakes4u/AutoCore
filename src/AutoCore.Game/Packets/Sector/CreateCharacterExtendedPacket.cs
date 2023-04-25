@@ -131,7 +131,7 @@ public class CreateCharacterExtendedPacket : CreateCharacterPacket
 
         if (NumSkills > 0)
         {
-            // TODO: write skills ({skillid, skilllevel, 2Bpadding}[])
+            // TODO: write skills ({skillid, skilllevel, 2B padding}[])
             writer.BaseStream.Position += 8 * NumSkills;
         }
 
@@ -149,8 +149,9 @@ public class CreateCharacterExtendedPacket : CreateCharacterPacket
 
         if (NumDisciplines > 0)
         {
-            // TODO: write disciplines (int id[])
+            // TODO: write disciplines (int id[], int unk[], int unk[])
             // unk size
+            writer.BaseStream.Position += 12 * NumDisciplines;
         }
 
         if (NumCurrentQuests > 0)

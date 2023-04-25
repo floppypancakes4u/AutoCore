@@ -66,7 +66,6 @@ public class Character : Creature
         CurrentVehicle = new();
         if (!CurrentVehicle.LoadFromDB(context, ActiveVehicleCoid))
             throw new Exception("Unable to load active vehicle!");
-
     }
 
     public override void WriteToPacket(CreateSimpleObjectPacket packet)
@@ -104,9 +103,14 @@ public class Character : Creature
             charPacket.CharacterScaleOffset = DBData.ScaleOffset;
         }
 
-        //if (packet is CreateCharacterExtendedPacket extendedCharPacket)
-        //{
-            // TODO
-        //}
+        if (packet is CreateCharacterExtendedPacket extendedCharPacket)
+        {
+            extendedCharPacket.NumCompletedQuests = 0;
+            extendedCharPacket.NumCurrentQuests = 0;
+            extendedCharPacket.NumAchievements = 0;
+            extendedCharPacket.NumDisciplines = 0;
+            extendedCharPacket.NumSkills = 0;
+
+        }
     }
 }

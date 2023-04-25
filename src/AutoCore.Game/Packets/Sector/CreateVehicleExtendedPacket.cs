@@ -21,6 +21,8 @@ public class CreateVehicleExtendedPacket : CreateVehiclePacket
 
         writer.Write(NumInventorySlots);
         writer.Write(InventorySize);
+
+        writer.BaseStream.Position += 4;
         
         for (var i = 0; i < 512; ++i)
         {

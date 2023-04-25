@@ -229,9 +229,9 @@ public class Vehicle : SimpleObject
             vehiclePacket.Name = DBData.Name;
         }
 
-        //if (packet is CreateVehicleExtendedPacket extendedPacket)
-        //{
-        //    // TODO
-        //}
+        if (packet is CreateVehicleExtendedPacket extendedPacket)
+        {
+            // TODO
+        }
     }
 }
