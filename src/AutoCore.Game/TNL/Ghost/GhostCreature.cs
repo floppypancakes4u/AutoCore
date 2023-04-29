@@ -24,16 +24,6 @@ public class GhostCreature : GhostObject
         UpdatePriorityScalar = 1.0f;
     }
 
-    public override void CreatePacket()
-    {
-
-    }
-
-    public override void RecreateForExisting()
-    {
-
-    }
-
     public override ulong PackUpdate(GhostConnection connection, ulong updateMask, BitStream stream)
     {
         if (Parent == null)
@@ -45,43 +35,43 @@ public class GhostCreature : GhostObject
         {
             PackCommon(stream);
 
-            if (stream.WriteFlag(false)) // TODO
-                stream.WriteInt(0, 20); // TODO
+            if (stream.WriteFlag(false)) // EnhancementId != -1
+                stream.WriteInt(0, 20); // EnhancementId
 
-            if (stream.WriteFlag(false)) // TODO
-                stream.WriteInt(0, 20); // TODO
+            if (stream.WriteFlag(false)) // CoidOnUseTrigger != -1
+                stream.WriteInt(0, 20); // CoidOnUseTrigger
 
-            if (stream.WriteFlag(false)) // TODO
-                stream.WriteInt(0, 20); // TODO
+            if (stream.WriteFlag(false)) // CoidOnUseReaction != -1
+                stream.WriteInt(0, 20); // CoidOnUseReaction
 
-            if (stream.WriteFlag(false)) // TODO unk tfid
+            if (stream.WriteFlag(false)) // CreatureSummoner TFID != (-1, false)
             {
-                stream.WriteInt(0, 32); // tfid coid 64 bits
+                stream.WriteInt(0, 32); // CreatureSummoner TFID Coid
                 stream.WriteInt(0, 32);
 
-                stream.WriteFlag(false); // tfid global
+                stream.WriteFlag(false); // CreatureSummoner TFID Global
             }
 
-            if (stream.WriteFlag(false)) // TODO
+            if (stream.WriteFlag(false)) // CoidSpawnOwner != -1
             {
-                stream.WriteInt(0, 32); // TODO unk 64bit value
+                stream.WriteInt(0, 32); // CoidSpawnOwner
                 stream.WriteInt(0, 32);
             }
 
-            stream.WriteFlag(false); // TODO
-            stream.WriteBits(8, BitConverter.GetBytes(0));
-            stream.WriteFlag(false); // TODO
+            stream.WriteFlag(false); // DoesntCountAsSummon
+            stream.WriteBits(8, BitConverter.GetBytes(0)); // Level
+            stream.WriteFlag(false); // IsElite
 
             PackSkills(stream, creature);
         }
 
         if (stream.WriteFlag((updateMask & 0x20) != 0))
         {
-            stream.WriteInt(0, 32); // TODO unk 64bit value
+            stream.WriteInt(0, 32); // CoidMurderer
             stream.WriteInt(0, 32);
         }
 
-        if (stream.WriteFlag((updateMask & 8) != 0))
+        if (stream.WriteFlag((updateMask & 0x8) != 0))
         {
             stream.WriteInt((uint)Math.Max(Parent.GetCurrentHP(), 0), 18);
             stream.WriteFlag(Parent.GetIsCorpse());
@@ -94,10 +84,10 @@ public class GhostCreature : GhostObject
 
         if (stream.WriteFlag((updateMask & 0x80000000) != 0))
         {
-            stream.WriteBits(8, BitConverter.GetBytes(0));
+            stream.WriteBits(8, BitConverter.GetBytes(0)); // AI State
         }
 
-        if (stream.WriteFlag((updateMask & 2) != 0))
+        if (stream.WriteFlag((updateMask & 0x2) != 0))
         {
             stream.Write(creature.Position.X);
             stream.Write(creature.Position.Y);

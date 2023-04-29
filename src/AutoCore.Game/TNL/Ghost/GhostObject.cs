@@ -51,7 +51,7 @@ public class GhostObject : NetObject
         return OwningConnection != null && OwningConnection.GetGhostIndex(ghost) != -1;
     }
 
-    public void SetParent(ClonedObjectBase parent)
+    public virtual void SetParent(ClonedObjectBase parent)
     {
         WaitingForParent = false;
         Parent = parent;
@@ -72,25 +72,6 @@ public class GhostObject : NetObject
     public TNLConnection GetOwningConnection()
     {
         return OwningConnection as TNLConnection;
-    }
-
-    public void CleanupCreate()
-    {
-        MsgCreate = null;
-        MsgCreateOwner = null;
-    }
-
-    public virtual void CreatePacket()
-    {
-        MsgCreate = new object();
-    }
-
-    public virtual void RecreateForExisting()
-    {
-        //if (MsgCreate != null && Parent != null)
-        {
-
-        }
     }
 
     public override float GetUpdatePriority(NetObject scopeObject, ulong updateMask, int updateSkips)

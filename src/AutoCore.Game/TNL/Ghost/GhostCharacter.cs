@@ -27,16 +27,6 @@ public class GhostCharacter : GhostObject
         UpdatePriorityScalar = 1.0f;
     }
 
-    public override void CreatePacket()
-    {
-
-    }
-
-    public override void RecreateForExisting()
-    {
-
-    }
-
     public override ulong PackUpdate(GhostConnection connection, ulong updateMask, BitStream stream)
     {
         return 0UL;

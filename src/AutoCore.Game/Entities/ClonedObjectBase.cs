@@ -84,6 +84,7 @@ public abstract class ClonedObjectBase
     public abstract int GetBareTeamFaction();
 
     public virtual Creature GetAsCreature() => null;
+    public virtual Vehicle GetAsVehicle() => null;
 
     public virtual Creature GetSuperCreature()
     {
