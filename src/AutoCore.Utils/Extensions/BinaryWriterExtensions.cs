@@ -12,9 +12,11 @@ public static class BinaryWriterExtensions
 
     public static void WriteUtf8StringOn(this BinaryWriter writer, string value, int len)
     {
-        writer.Write(Encoding.UTF8.GetBytes(value));
+        var bytes = Encoding.UTF8.GetBytes(value);
 
-        for (var i = 0; i < len - value.Length; ++i)
+        writer.Write(bytes, 0, Math.Min(bytes.Length, len));
+
+        for (var i = 0; i < len - bytes.Length; ++i)
             writer.Write((byte)0);
     }
 
