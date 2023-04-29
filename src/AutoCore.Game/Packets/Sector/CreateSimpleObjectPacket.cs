@@ -87,7 +87,7 @@ public class CreateSimpleObjectPacket : BasePacket
         writer.Write(Rotation.X);
         writer.Write(Rotation.Y);
         writer.Write(Rotation.Z);
-        writer.Write(Rotation.Angle);
+        writer.Write(Rotation.W);
         writer.Write(Scale);
         writer.Write(Quantity);
         writer.Write(InventoryPositionX);

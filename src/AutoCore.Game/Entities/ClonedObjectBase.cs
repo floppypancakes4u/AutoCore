@@ -3,8 +3,10 @@
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
+using AutoCore.Game.TNL.Ghost;
 
 public abstract class ClonedObjectBase
 {
@@ -13,25 +15,118 @@ public abstract class ClonedObjectBase
     public int CBID => CloneBaseObject.CloneBaseSpecific.CloneBaseId;
     
     public int Faction { get; protected set; }
-    public int CustomValue { get; protected set; }
+    public GhostObject Ghost { get; protected set; }
+    //public int LastServerUpdate { get; protected set; }
+    //public int TimeOfDeath { get; protected set; }
+    public TFID Murderer { get; protected set; }
+    //public TFID LastMurderer { get; protected set; }
+    //public float DamageByMurderer { get; protected set; }
     public Vector3 Position { get; protected set; }
     public Quaternion Rotation { get; protected set; }
+    public ClonedObjectBase Target { get; protected set; }
+    public SectorMap Map { get; protected set; }
+    public ClonedObjectBase Owner { get; protected set; }
+    //public ushort StatusBitField { get; protected set; }
     public float Scale { get; protected set; }
+    //public float TerrainOffset { get; protected set; }
+    //public float GameMass { get; protected set; }
+    public int Value { get; protected set; }
+    public int CustomValue { get; protected set; }
+    public DeathType DeathType { get; protected set; }
+    //public float HPSkillScalar { get; protected set; }
+    //public int HPSkillAdd { get; protected set; }
+    //public short RequiredLevelPrefixOffset { get; protected set; }
+    public short RequiredLevel { get; protected set; }
+    public short RequiredCombat { get; protected set; }
+    public short RequiredPerception { get; protected set; }
+    public short RequiredTech { get; protected set; }
+    public short RequiredTheory { get; protected set; }
+    //public long CoidCustomizedBy { get; protected set; }
+    //public bool MadeFromMemory { get; protected set; }
+    //public string CustomizedName { get; protected set; }
+    //public int DistanceDrawOverride { get; protected set; }
+    //public float OverheadOffset { get; protected set; }
+    //public int DamageState { get; protected set; }
+    //public string MangledName { get; protected set; }
     public TFID ObjectId { get; protected set; }
+    //public long CoidAssignedTo { get; protected set; }
+    public byte Layer { get; protected set; }
+    //public bool IsInKillQueue { get; protected set; }
+    //public bool HasBeenDeleted { get; protected set; }
+    //public bool TempItem { get; protected set; }
+    //public bool Ghosted { get; protected set; }
+    //public bool IsIdentified { get; protected set; }
+    //public bool HasPhysics { get; protected set; }
+    //public bool HasGraphics { get; protected set; }
+    //public bool Dirty { get; protected set; }
+    public bool IsCorpse { get; protected set; }
+    //public bool IsActive { get; protected set; }
+    public bool IsInvincible { get; protected set; }
+    //public bool IsChampion { get; protected set; }
+    //public bool CanRespawn { get; protected set; }
+    //public bool Enabled { get; protected set; }
+    //public bool FakeObject { get; protected set; }
+    //public bool IsInfinite { get; protected set; }
+    //public bool IsSoundInitialized { get; protected set; }
+    //public bool StateDirty { get; protected set; }
+    //public bool DistantDraw { get; protected set; }
+    //public bool IsKit { get; protected set; }
+    //public bool IsBound { get; protected set; }
+    public ushort UsesLeft { get; protected set; }
+    //public bool DrawSelectionArea { get; protected set; }
+    //public bool StatusRendered { get; protected set; }
+    //public bool DamageFXValid { get; protected set; }
+    //public bool Stealthed { get; protected set; }
+
+
+    public abstract int GetCurrentHP();
+    public abstract int GetMaximumHP();
+    public abstract int GetBareTeamFaction();
+
+    public virtual Creature GetAsCreature() => null;
+
+    public virtual Creature GetSuperCreature()
+    {
+        return Owner?.GetSuperCreature();
+    }
+
+    public virtual Character GetSuperCharacter(bool includeSummons)
+    {
+        return Owner?.GetSuperCharacter(includeSummons);
+    }
+
+    public virtual bool GetIsCorpse()
+    {
+        return IsCorpse;
+    }
 
     public ClonedObjectBase()
     {
         Faction = -1;
+        Rotation = new(0.0f, 0.0f, 0.0f, 1.0f);
         Scale = 1.0f;
         CustomValue = -1;
+        DeathType = DeathType.Silent;
+        RequiredLevel = -1;
         ObjectId = new();
+        //CoidAssignedTo = -1;
         Position = new(0.0f, 0.0f, 0.0f);
-        Rotation = new(0.0f, 0.0f, 0.0f, 1.0f);
+        Murderer = new();
     }
 
     protected void LoadCloneBase(int cbid)
     {
         CloneBaseObject = AssetManager.Instance.GetCloneBase<CloneBaseObject>(cbid);
+
+        Value = CloneBaseObject.CloneBaseSpecific.BaseValue;
+        //GameMass = CloneBaseObject.SimpleObjectSpecific.Mass;
+        IsInvincible = ((CloneBaseObject.SimpleObjectSpecific.Flags >> 12) & 1) != 0;
+        RequiredLevel = CloneBaseObject.SimpleObjectSpecific.RequiredLevel;
+        RequiredCombat = CloneBaseObject.SimpleObjectSpecific.RequiredCombat;
+        RequiredPerception = CloneBaseObject.SimpleObjectSpecific.RequiredPerception;
+        RequiredTech = CloneBaseObject.SimpleObjectSpecific.RequiredTech;
+        RequiredTheory = CloneBaseObject.SimpleObjectSpecific.RequiredTheory;
+        UsesLeft = CloneBaseObject.SimpleObjectSpecific.MaxUses;
     }
 
     protected void SetCoid(long coid, bool global)
@@ -40,49 +135,66 @@ public abstract class ClonedObjectBase
         ObjectId.Global = global;
     }
 
+    public void SetGhost(GhostObject ghost)
+    {
+        Ghost = ghost;
+        Ghost.SetParent(this);
+        //LastServerUpdate = DateTime.Now.Ticks; // TODO: linux time or what?
+    }
+
+    public void ClearGhost()
+    {
+        Ghost?.SetParent(null);
+        Ghost = null;
+        //LastServerUpdate = DateTime.Now.Ticks; // TODO: linux time or what?
+    }
+
+    public void SetMap(SectorMap map)
+    {
+        var oldMap = Map;
+
+        Map = map;
+
+        if (oldMap != map)
+        {
+            // might need to TODO later
+        }
+    }
+
+    public void SetTargetObject(ClonedObjectBase target)
+    {
+        if (Target != target)
+        {
+            Ghost?.SetMaskBits(4);
+
+            Target = target;
+        }
+    }
+
+    public void OnDeath(DeathType deathType)
+    {
+        //TimeOfDeath = DateTime.Now.Ticks; // TODO: linux time or what?
+        Ghost?.SetMaskBits(8);
+
+        IsCorpse = true;
+        // TODO: DeathType?
+    }
+
+    public int GetIDFaction()
+    {
+        var obj = this;
+
+        for (var owner = obj.Owner; owner != null; owner = owner.Owner)
+            obj = owner;
+
+        return obj.Faction;
+    }
+
+    public virtual void CreateGhost()
+    {
+    }
+
     public virtual void WriteToPacket(CreateSimpleObjectPacket packet)
     {
-        // TODO: only fill fields which are ClonedObjectBase specific!
-
-        packet.CBID = CBID;
-        packet.CoidStore = -1;
-        packet.CurrentHealth = 100;
-        packet.MaximumHealth = 100;
-        packet.Value = CloneBaseObject.CloneBaseSpecific.BaseValue;
-        packet.Faction = Faction;
-        packet.CustomValue = CustomValue;
-
-        for (var i = 0; i < 5; ++i)
-        {
-            packet.Prefixes[i] = -1;
-            packet.PrefixLevels[i] = 0;
-
-            packet.Gadgets[i] = -1;
-            packet.GadgetLevels[i] = 0;
-        }
-
-        packet.Position = Position;
-        packet.Rotation = Rotation;
-        packet.Scale = Scale;
-        packet.IsCorpse = false;
-        packet.ObjectId = ObjectId;
-        packet.WillEquip = false;
-        packet.IsItemLink = false;
-        packet.IsInInventory = false;
-        packet.IsIdentified = false;
-        packet.PossibleMissionItem = false;
-        packet.TempItem = false;
-        packet.IsKit = false;
-        packet.IsInfinite = false;
-        packet.IsBound = false;
-        packet.UsesLeft = CloneBaseObject.SimpleObjectSpecific.MaxUses;
-        packet.CustomizedName = "";
-        packet.MadeFromMemory = false;
-        packet.IsMail = false;
-        packet.RequiredLevel = CloneBaseObject.SimpleObjectSpecific.RequiredLevel;
-        packet.RequiredCombat = CloneBaseObject.SimpleObjectSpecific.RequiredCombat;
-        packet.RequiredPerception = CloneBaseObject.SimpleObjectSpecific.RequiredPerception;
-        packet.RequiredTech = CloneBaseObject.SimpleObjectSpecific.RequiredTech;
-        packet.RequiredTheory = CloneBaseObject.SimpleObjectSpecific.RequiredTheory;
     }
 }

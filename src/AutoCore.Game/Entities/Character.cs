@@ -6,6 +6,7 @@ using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.TNL;
+using AutoCore.Game.TNL.Ghost;
 
 public class Character : Creature
 {
@@ -66,6 +67,12 @@ public class Character : Creature
         CurrentVehicle = new();
         if (!CurrentVehicle.LoadFromDB(context, ActiveVehicleCoid))
             throw new Exception("Unable to load active vehicle!");
+    }
+
+    public override void CreateGhost()
+    {
+        Ghost = new GhostCharacter();
+        Ghost.SetParent(this);
     }
 
     public override void WriteToPacket(CreateSimpleObjectPacket packet)

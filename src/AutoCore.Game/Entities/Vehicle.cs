@@ -5,6 +5,7 @@ namespace AutoCore.Game.Entities;
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.TNL.Ghost;
 
 public class Vehicle : SimpleObject
 {
@@ -126,6 +127,12 @@ public class Vehicle : SimpleObject
         }
 
         return true;
+    }
+
+    public override void CreateGhost()
+    {
+        Ghost = new GhostVehicle();
+        Ghost.SetParent(this);
     }
 
     public override void WriteToPacket(CreateSimpleObjectPacket packet)

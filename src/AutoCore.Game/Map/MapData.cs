@@ -1,6 +1,7 @@
 ﻿namespace AutoCore.Game.Map;
 
 using AutoCore.Database.World.Models;
+using AutoCore.Game.Entities;
 using AutoCore.Game.Mission;
 using AutoCore.Game.Structures;
 using AutoCore.Game.Weather;
@@ -42,6 +43,10 @@ public class MapData
     public Dictionary<int, VisualWaypoint> VisualWaypoints { get; } = new();
     public Dictionary<int, Variable> Variables { get; } = new();
     public Dictionary<byte, WeatherContainer> WeatherInfos { get; } = new();
+    #endregion
+
+    #region Local objects
+    public Dictionary<long, ClonedObjectBase> LocalObjects { get; } = new();
     #endregion
     #endregion
 

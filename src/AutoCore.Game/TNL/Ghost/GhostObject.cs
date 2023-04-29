@@ -4,7 +4,9 @@ using TNL.Utils;
 
 namespace AutoCore.Game.TNL.Ghost;
 
+using AutoCore.Game.Entities;
 using AutoCore.Game.Structures;
+using AutoCore.Game.Packets.Sector;
 
 public enum GhostType
 {
@@ -18,7 +20,7 @@ public class GhostObject : NetObject
 {
     private static NetClassRepInstance<GhostObject> _dynClassRep;
 
-    //protected ClonedObjectBase Parent { get; set; }
+    protected ClonedObjectBase? Parent { get; set; }
     protected bool WaitingForParent { get; set; }
     protected float UpdatePriorityScalar { get; set; }
     protected object MsgCreate { get; set; }
@@ -49,18 +51,22 @@ public class GhostObject : NetObject
         return OwningConnection != null && OwningConnection.GetGhostIndex(ghost) != -1;
     }
 
-    /*public void SetParent(ClonedObjectBase parent)
+    public void SetParent(ClonedObjectBase parent)
     {
         WaitingForParent = false;
         Parent = parent;
-    }*/
+    }
 
     public override bool OnGhostAdd(GhostConnection theConnection)
     {
-        /*if (Parent != null)
-            Parent.SetGhost(this);*/
+        Parent?.SetGhost(this);
 
         return true;
+    }
+
+    public override void OnGhostRemove()
+    {
+        Parent?.ClearGhost();
     }
 
     public TNLConnection GetOwningConnection()
@@ -72,12 +78,6 @@ public class GhostObject : NetObject
     {
         MsgCreate = null;
         MsgCreateOwner = null;
-    }
-
-    public override void OnGhostRemove()
-    {
-        /*if (Parent != null)
-            Parent.ClearGhost(false);*/
     }
 
     public virtual void CreatePacket()
@@ -118,26 +118,25 @@ public class GhostObject : NetObject
 
     public void PackCommon(BitStream stream)
     {
-        var faction = 0;
-        var teamFaction = 0;
+        stream.WriteBits(64, BitConverter.GetBytes(Parent.ObjectId.Coid));
+        stream.WriteFlag(Parent.ObjectId.Global);
+        stream.WriteInt((uint)Parent.CBID, 20);
+        stream.WriteInt((uint)Math.Max(Parent.GetMaximumHP(), 0), 18);
 
-        stream.WriteBits(64, BitConverter.GetBytes(Guid.Coid));
-        stream.WriteFlag(Guid.Global);
-        stream.WriteInt(0, 20); // clone base id of parent
-        stream.WriteInt(0, 18); // max hp
+        var faction = Parent.GetIDFaction();
+        var bareTeamFaction = Parent.GetBareTeamFaction();
         stream.WriteBits(16, BitConverter.GetBytes(faction));
 
-        if (faction == teamFaction)
-        {
-            faction = 0;
-        }
+        if (faction == bareTeamFaction)
+            bareTeamFaction = 0;
 
-        stream.WriteBits(16, BitConverter.GetBytes(faction));
+        stream.WriteBits(16, BitConverter.GetBytes(bareTeamFaction));
     }
 
     public void UnpackCommon(BitStream stream, object msgCreate)
     {
-        var arr = new byte[8];
+        throw new NotSupportedException();
+        /*var arr = new byte[8];
 
         stream.ReadBits(64, arr);
         stream.Read(out bool global);
@@ -154,26 +153,133 @@ public class GhostObject : NetObject
 
         stream.ReadBits(16, arr);
 
-        var teamFaction = BitConverter.ToInt16(arr, 0);
+        var teamFaction = BitConverter.ToInt16(arr, 0);*/
     }
 
-    public void PackSingleSkill(BitStream stream, object skill, int size, int skillTargetType)
+    public void PackSingleSkill(BitStream stream, CreateSkillHeartbeat skill, int size, int skillTargetType)
     {
+        stream.WriteInt(skill.SkillId, 14);
+        stream.WriteInt((uint)skill.SkillLevel, 8);
+        stream.WriteInt(skill.SkillType, 8);
 
+        if (stream.WriteFlag((skillTargetType & 0x100) == 0))
+        {
+            stream.WriteBits(32, BitConverter.GetBytes(skill.LastTickCount));
+            stream.WriteBits(32, BitConverter.GetBytes(skill.DiceSeed));
+
+            if (stream.WriteFlag(Parent.ObjectId != skill.Target))
+            {
+                stream.WriteBits(64, BitConverter.GetBytes(skill.Target.Coid));
+                stream.WriteFlag(skill.Target.Global);
+            }
+
+            stream.WriteFlag(skill.ForceDeath);
+            stream.WriteInt((uint)skill.DurationCountdown, 10);
+
+            if (stream.WriteFlag(Parent.ObjectId != skill.Caster))
+            {
+                stream.WriteBits(64, BitConverter.GetBytes(skill.Caster.Coid));
+                stream.WriteFlag(skill.Caster.Global);
+            }
+        }
+
+        //TODO: write the remaining data (subclasses of CreateSkillHeartbeat) as is to the stream
     }
 
     public void UnpackSingleSkill(BitStream stream, object skill, int size)
     {
-
+        throw new NotSupportedException();
     }
 
     public override void UnpackUpdate(GhostConnection connection, BitStream stream)
     {
+        throw new NotSupportedException();
+        /*var temp = new byte[8];
 
+        if (PIsInitialUpdate)
+        {
+            Guid.Global = stream.ReadFlag();
+
+            if (Guid.Global)
+            {
+                stream.ReadBits(0x40, temp);
+
+                Guid.Coid = BitConverter.ToInt64(temp);
+            }
+            else
+            {
+                // Create packet?
+                Guid.Coid = stream.ReadInt(20);
+            }
+        }*/
     }
 
     public override ulong PackUpdate(GhostConnection connection, ulong updateMask, BitStream stream)
     {
+        if (Parent == null)
+            throw new Exception($"PackUpdate for GhostObject without parent! TFID: ({Guid.Global}, {Guid.Coid})");
+
+        if (PIsInitialUpdate)
+        {
+            stream.WriteFlag(Guid.Global);
+
+            if (Guid.Global)
+                stream.Write(Guid.Coid);
+            else
+                stream.WriteInt((uint)(Guid.Coid & 0xFFFFFFFF), 20);
+        }
+
+        if (stream.WriteFlag((updateMask & 8) != 0))
+        {
+            stream.WriteInt((uint)Parent.GetCurrentHP(), 18);
+
+            if (stream.WriteFlag(Parent.IsCorpse))
+            {
+                if (stream.WriteFlag(true)) // this is only sent if the death was recent? idk, strange stuff
+                {
+                    stream.WriteInt((uint)Parent.DeathType, 3);
+                    stream.Write(Parent.Murderer.Coid);
+                    stream.WriteFlag(Parent.Murderer.Global);
+                }
+            }
+        }
+
+        if (stream.WriteFlag((updateMask & 2) != 0))
+        {
+            stream.Write(Parent.Position.X);
+            stream.Write(Parent.Position.Y);
+            stream.Write(Parent.Position.Z);
+
+            stream.Write(Parent.Rotation.X);
+            stream.Write(Parent.Rotation.Y);
+            stream.Write(Parent.Rotation.Z);
+            stream.Write(Parent.Rotation.W);
+
+            var linearVelocityX = 0.0f;
+            var linearVelocityY = 0.0f;
+            var linearVelocityZ = 0.0f;
+            var linearVelocityValue = (linearVelocityX * linearVelocityX) + (linearVelocityY * linearVelocityY) + (linearVelocityZ * linearVelocityZ);
+
+            if (stream.WriteFlag(linearVelocityValue > 0.00000011920929f))
+            {
+                stream.Write(linearVelocityX);
+                stream.Write(linearVelocityY);
+                stream.Write(linearVelocityZ);
+            }
+
+            var angularVelocityX = 0.0f;
+            var angularVelocityY = 0.0f;
+            var angularVelocityZ = 0.0f;
+            var angularVelocityValue = (angularVelocityX * angularVelocityX) + (angularVelocityY * angularVelocityY) + (angularVelocityZ * angularVelocityZ);
+
+            if (stream.WriteFlag(angularVelocityValue > 0.00000011920929f))
+            {
+                stream.Write(angularVelocityX);
+                stream.Write(angularVelocityY);
+                stream.Write(angularVelocityZ);
+            }
+        }
+
         return 0UL;
     }
 
@@ -184,7 +290,7 @@ public class GhostObject : NetObject
 
     public void UnpackSkills(BitStream stream, bool isOwner)
     {
-
+        throw new NotSupportedException();
     }
 
     public object MallocCreatePacket(int cbidObject, out int size)
@@ -193,9 +299,17 @@ public class GhostObject : NetObject
         return null;
     }
 
-    public void PackSkills(BitStream stream, object pBase)
+    public void PackSkills(BitStream stream, ClonedObjectBase pBase)
     {
+        stream.WriteBits(8, BitConverter.GetBytes(0)); // skill count
 
+        for (var i = 0; i < 0; ++i)
+        {
+            // TODO
+            stream.WriteBits(16, BitConverter.GetBytes(0)); // size
+
+            PackSingleSkill(stream, null, 0, 0);
+        }
     }
 
     public static GhostObject CreateObject(TFID id, GhostType type)

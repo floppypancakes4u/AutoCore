@@ -3,6 +3,7 @@
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.TNL.Ghost;
 
 public class SimpleObject : ClonedObjectBase
 {
@@ -16,8 +17,8 @@ public class SimpleObject : ClonedObjectBase
     protected short MaxGadgets { get; set; }
     protected int TeamFaction { get; set; }
     protected int Quantity { get; set; }
-    protected uint HP { get; set; }
-    protected uint MaxHP { get; set; }
+    protected int HP { get; set; }
+    protected int MaxHP { get; set; }
     protected int ItemTemplateId { get; set; }
     protected byte InventoryPositionX { get; set; }
     protected byte InventoryPositionY { get; set; }
@@ -26,6 +27,10 @@ public class SimpleObject : ClonedObjectBase
     protected byte SkillLevel3 { get; set; }
     protected bool AlreadyAssembled { get; set; }
     #endregion
+
+    public override int GetCurrentHP() => HP;
+    public override int GetMaximumHP() => MaxHP;
+    public override int GetBareTeamFaction() => TeamFaction;
 
     public SimpleObject()
         : base()
@@ -54,21 +59,67 @@ public class SimpleObject : ClonedObjectBase
 
         LoadCloneBase(DBData.CBID);
 
+        HP = MaxHP = CloneBaseObject.SimpleObjectSpecific.MaxHitPoint;
+
         return true;
+    }
+
+    public override void CreateGhost()
+    {
+        Ghost = new GhostObject();
+        Ghost.SetParent(this);
     }
 
     public override void WriteToPacket(CreateSimpleObjectPacket packet)
     {
-        base.WriteToPacket(packet);
-
-        packet.MaxGadgets = MaxGadgets;
-        packet.TeamFaction = TeamFaction;
+        packet.CBID = CBID;
+        packet.ObjectId = ObjectId;
+        packet.CurrentHealth = HP;
+        packet.MaximumHealth = MaxHP;
+        packet.Quantity = Quantity;
         packet.InventoryPositionX = InventoryPositionX;
         packet.InventoryPositionY = InventoryPositionY;
-        packet.Quantity = Quantity;
-        packet.ItemTemplateId = ItemTemplateId;
+        packet.Value = CloneBaseObject.CloneBaseSpecific.BaseValue;
+        packet.Faction = Faction;
+        packet.TeamFaction = TeamFaction;
+        packet.CoidStore = -1;
+        packet.IsCorpse = false;
         packet.SkillLevel1 = SkillLevel1;
         packet.SkillLevel2 = SkillLevel2;
         packet.SkillLevel3 = SkillLevel3;
+        packet.IsIdentified = true;
+        packet.PossibleMissionItem = false;
+        packet.TempItem = false;
+        packet.WillEquip = false;
+        packet.IsInInventory = false;
+        packet.IsItemLink = false;
+        packet.IsBound = true;
+        packet.UsesLeft = CloneBaseObject.SimpleObjectSpecific.MaxUses;
+        packet.CustomizedName = string.Empty;
+        packet.MadeFromMemory = false;
+        packet.IsMail = false;
+        packet.CustomValue = CustomValue;
+        packet.IsKit = false;
+        packet.IsInfinite = false;
+
+        for (var i = 0; i < 5; ++i)
+        {
+            packet.Prefixes[i] = -1;
+            packet.PrefixLevels[i] = 0;
+
+            packet.Gadgets[i] = -1;
+            packet.GadgetLevels[i] = 0;
+        }
+
+        packet.MaxGadgets = MaxGadgets;
+        packet.ItemTemplateId = ItemTemplateId;
+        packet.RequiredLevel = CloneBaseObject.SimpleObjectSpecific.RequiredLevel;
+        packet.RequiredCombat = CloneBaseObject.SimpleObjectSpecific.RequiredCombat;
+        packet.RequiredPerception = CloneBaseObject.SimpleObjectSpecific.RequiredPerception;
+        packet.RequiredTech = CloneBaseObject.SimpleObjectSpecific.RequiredTech;
+        packet.RequiredTheory = CloneBaseObject.SimpleObjectSpecific.RequiredTheory;
+        packet.Scale = Scale;
+        packet.Position = Position;
+        packet.Rotation = Rotation;
     }
 }

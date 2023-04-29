@@ -4,12 +4,15 @@ using AutoCore.Database.World.Models;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.Structures;
+using AutoCore.Game.TNL.Ghost;
 
 public class SectorMap
 {
     public int ContinentId { get; }
     public MapData MapData { get; private set; }
     public ContinentObject ContinentObject => MapData.ContinentObject;
+    public Dictionary<TFID, GhostObject> GhostObjects { get; } = new();
 
     public SectorMap(int continentId)
     {
