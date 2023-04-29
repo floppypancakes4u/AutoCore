@@ -20,6 +20,16 @@ public class GhostObject : NetObject
 {
     private static NetClassRepInstance<GhostObject> _dynClassRep;
 
+    public const ulong InitialMask   = 0x001ul;
+    public const ulong PositionMask  = 0x002ul;
+    public const ulong TargetMask    = 0x004ul;
+    public const ulong HealthMask    = 0x008ul;
+    public const ulong StatusMask    = 0x010ul;
+    public const ulong MurdererMask  = 0x020ul;
+    public const ulong HealthMaxMask = 0x040ul;
+    public const ulong SkillsMask    = 0x080ul;
+    public const ulong TokenMask     = 0x100ul;
+
     protected ClonedObjectBase? Parent { get; set; }
     protected bool WaitingForParent { get; set; }
     protected float UpdatePriorityScalar { get; set; }

@@ -1,5 +1,4 @@
-﻿using AutoCore.Game.Entities;
-using TNL.Entities;
+﻿using TNL.Entities;
 using TNL.Types;
 using TNL.Utils;
 
@@ -8,6 +7,8 @@ namespace AutoCore.Game.TNL.Ghost;
 public class GhostCreature : GhostObject
 {
     private static NetClassRepInstance<GhostCreature> _dynClassRep;
+
+    public const ulong StateMask = 0x80000000ul;
 
     public new static void RegisterNetClassReps()
     {
@@ -65,29 +66,29 @@ public class GhostCreature : GhostObject
             PackSkills(stream, creature);
         }
 
-        if (stream.WriteFlag((updateMask & 0x20) != 0))
+        if (stream.WriteFlag((updateMask & MurdererMask) != 0))
         {
             stream.WriteInt(0, 32); // CoidMurderer
             stream.WriteInt(0, 32);
         }
 
-        if (stream.WriteFlag((updateMask & 0x8) != 0))
+        if (stream.WriteFlag((updateMask & HealthMask) != 0))
         {
             stream.WriteInt((uint)Math.Max(Parent.GetCurrentHP(), 0), 18);
             stream.WriteFlag(Parent.GetIsCorpse());
         }
 
-        if (stream.WriteFlag((updateMask & 0x40) != 0))
+        if (stream.WriteFlag((updateMask & HealthMaxMask) != 0))
         {
             stream.WriteInt((uint)Math.Max(Parent.GetMaximumHP(), 0), 18);
         }
 
-        if (stream.WriteFlag((updateMask & 0x80000000) != 0))
+        if (stream.WriteFlag((updateMask & StateMask) != 0))
         {
             stream.WriteBits(8, BitConverter.GetBytes(0)); // AI State
         }
 
-        if (stream.WriteFlag((updateMask & 0x2) != 0))
+        if (stream.WriteFlag((updateMask & PositionMask) != 0))
         {
             stream.Write(creature.Position.X);
             stream.Write(creature.Position.Y);
@@ -115,7 +116,7 @@ public class GhostCreature : GhostObject
             stream.Write(moveToTargetZ);
         }
 
-        if (stream.WriteFlag((updateMask & 4) != 0))
+        if (stream.WriteFlag((updateMask & TargetMask) != 0))
         {
             if (Parent.Target == null)
             {

@@ -83,6 +83,7 @@ public abstract class ClonedObjectBase
     public abstract int GetMaximumHP();
     public abstract int GetBareTeamFaction();
 
+    public virtual Creature GetAsCharacter() => null;
     public virtual Creature GetAsCreature() => null;
     public virtual Vehicle GetAsVehicle() => null;
 

@@ -12,6 +12,18 @@ public class GhostVehicle : GhostObject
     private static NetClassRepInstance<GhostVehicle> _dynClassRep;
     private static ulong[] WeaponBits { get; } = new ulong[3] { 0x400000000, 0x800000000, 0x1000000000 };
 
+    public const ulong AttributeMask = 0x00200000ul;
+    public const ulong ClanMask      = 0x00400000ul;
+    public const ulong HardpointMask = 0x00800000ul;
+    public const ulong PetCBIDMask   = 0x01000000ul;
+    public const ulong ShieldMaxMask = 0x02000000ul;
+    public const ulong ShieldMask    = 0x04000000ul;
+    public const ulong PowerMask     = 0x08000000ul;
+    public const ulong GMMask        = 0x10000000ul;
+    public const ulong HeatMask      = 0x20000000ul;
+    public const ulong ChangeArmor   = 0x40000000ul;
+    public const ulong StateMask     = 0x80000000ul;
+
     public byte ArmorFlags { get; set; }
     public int MaxShields { get; set; }
     public int CbidPet { get; set; } = -1;
@@ -185,7 +197,7 @@ public class GhostVehicle : GhostObject
         }
         else
         {
-            if (stream.WriteFlag((updateMask & 0x80) != 0))
+            if (stream.WriteFlag((updateMask & SkillsMask) != 0))
             {
                 if (stream.WriteFlag(false)) // Has Owner Skills
                     PackSkills(stream, null); // Owner skills
@@ -238,45 +250,45 @@ public class GhostVehicle : GhostObject
             stream.WriteBits(16, BitConverter.GetBytes(0)); // Armor[5]
         }
 
-        if (stream.WriteFlag((updateMask & 0x10000000) != 0 && false)) // TODO
+        if (stream.WriteFlag((updateMask & GMMask) != 0 && false)) // TODO
         {
             stream.WriteInt(0, 4); // GMLevel if owner is character
         }
 
-        if (stream.WriteFlag((updateMask & 0x400000) != 0 && false)) // TODO
+        if (stream.WriteFlag((updateMask & ClanMask) != 0 && false)) // TODO
         {
             stream.WriteBits(32, BitConverter.GetBytes(0)); // ClanId
             stream.WriteBits(32, BitConverter.GetBytes(0)); // ClanRank
             stream.WriteString("", 51); // ClanName
         }
 
-        if (stream.WriteFlag((updateMask & 0x1000000) != 0 && false)) // TODO
+        if (stream.WriteFlag((updateMask & PetCBIDMask) != 0 && false)) // TODO
         {
             stream.WriteBits(32, BitConverter.GetBytes(0)); // Pet CBID
         }
 
-        if (stream.WriteFlag((updateMask & 0x20) != 0)) // TODO
+        if (stream.WriteFlag((updateMask & MurdererMask) != 0)) // TODO
         {
             stream.WriteBits(64, BitConverter.GetBytes((long)0)); // Coid murderer
         }
 
-        if (stream.WriteFlag((updateMask & 0x8) != 0))
+        if (stream.WriteFlag((updateMask & HealthMask) != 0))
         {
             stream.WriteInt((uint)Math.Max(Parent.GetCurrentHP(), 0), 18);
             stream.WriteFlag(Parent.GetIsCorpse());
         }
 
-        if (stream.WriteFlag((updateMask & 0x40) != 0))
+        if (stream.WriteFlag((updateMask & HealthMaxMask) != 0))
         {
             stream.WriteInt((uint)Math.Max(Parent.GetMaximumHP(), 0), 18);
         }
 
-        if (stream.WriteFlag((updateMask & 0x80000000) != 0 && false)) // TODO
+        if (stream.WriteFlag((updateMask & StateMask) != 0 && false)) // TODO
         {
             stream.WriteBits(8, BitConverter.GetBytes(0)); // AI State if owner is creature
         }
 
-        if (stream.WriteFlag((updateMask & 0x2) != 0))
+        if (stream.WriteFlag((updateMask & PositionMask) != 0))
         {
             stream.Write(parentVehicle.Position.X);
             stream.Write(parentVehicle.Position.Y);
@@ -312,7 +324,7 @@ public class GhostVehicle : GhostObject
             stream.WriteBits(32, BitConverter.GetBytes(0)); // TODO
         }
 
-        if (stream.WriteFlag((updateMask & 0x4) != 0))
+        if (stream.WriteFlag((updateMask & TargetMask) != 0))
         {
             if (Parent.Target == null)
             {
@@ -328,7 +340,7 @@ public class GhostVehicle : GhostObject
 
         var superCharacter = Parent.GetSuperCharacter(false);
 
-        if (stream.WriteFlag(superCharacter != null && (updateMask & 0x200000) != 0))
+        if (stream.WriteFlag(superCharacter != null && (updateMask & AttributeMask) != 0))
         {
             stream.WriteBits(32, BitConverter.GetBytes(0)); // AttribCombat
             stream.WriteBits(32, BitConverter.GetBytes(0)); // AttribPerception
@@ -336,27 +348,27 @@ public class GhostVehicle : GhostObject
             stream.WriteBits(32, BitConverter.GetBytes(0)); // AttribTheory
         }
 
-        if (stream.WriteFlag((updateMask & 0x20000000) != 0))
+        if (stream.WriteFlag((updateMask & HeatMask) != 0))
         {
             stream.WriteBits(32, BitConverter.GetBytes(0)); // TODO
         }
 
-        if (stream.WriteFlag((updateMask & 0x2000000) != 0))
+        if (stream.WriteFlag((updateMask & ShieldMaxMask) != 0))
         {
             stream.WriteBits(32, BitConverter.GetBytes(0)); // MaxShield
         }
 
-        if (stream.WriteFlag((updateMask & 0x4000000) != 0))
+        if (stream.WriteFlag((updateMask & ShieldMask) != 0))
         {
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // TODO
+            stream.WriteBits(32, BitConverter.GetBytes(0)); // Shield
         }
 
-        if (stream.WriteFlag((updateMask & 0x8000000) != 0) && false) // TODO
+        if (stream.WriteFlag((updateMask & PowerMask) != 0) && false) // TODO
         {
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // TODO
+            stream.WriteBits(32, BitConverter.GetBytes(0)); // Power
         }
 
-        if (stream.WriteFlag((updateMask & 0x100) != 0))
+        if (stream.WriteFlag((updateMask & TokenMask) != 0))
         {
             stream.WriteFlag(false); // GivesToken
         }
