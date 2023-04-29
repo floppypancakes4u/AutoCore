@@ -11,6 +11,7 @@ namespace AutoCore.Game.TNL;
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Extensions;
+using AutoCore.Game.Managers;
 using AutoCore.Game.Packets;
 using AutoCore.Utils;
 
@@ -178,7 +179,7 @@ public partial class TNLConnection : GhostConnection
                     break;
 
                 case GameOpcode.Chat:
-                    //ChatManager.HandleChat(this, reader);
+                    ChatManager.Instance.HandleChat(this, reader);
                     break;
 
                 case GameOpcode.GetFriends:
@@ -243,7 +244,7 @@ public partial class TNLConnection : GhostConnection
                     break;
 
                 case GameOpcode.Broadcast:
-                    //ChatManager.HandleBroadcast(this, reader);
+                    ChatManager.Instance.HandleBroadcast(this, reader);
                     break;
 
                 default:

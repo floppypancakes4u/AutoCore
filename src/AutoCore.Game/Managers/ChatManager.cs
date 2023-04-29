@@ -9,13 +9,27 @@ public class ChatManager : Singleton<ChatManager>
 {
     public void HandleChat(TNLConnection connection, BinaryReader reader)
     {
-        // TODO: load packet then send it back to the sender
+        var chatPacket = new ChatPacket();
+        chatPacket.Read(reader);
+
+        if (chatPacket.Message.StartsWith('/'))
+            return;
+
+        connection.SendGamePacket(chatPacket);
+
         // TODO: later: handle chat commands and send the chat packet to the proper recipient(s)
     }
 
     public void HandleBroadcast(TNLConnection connection, BinaryReader reader)
     {
-        // TODO: load packet then send it back to the sender
+        var broadcastPacket = new BroadcastPacket();
+        broadcastPacket.Read(reader);
+
+        if (broadcastPacket.Message.StartsWith('/'))
+            return;
+
+        connection.SendGamePacket(broadcastPacket);
+
         // TODO: later: handle chat commands and send the chat packet to the proper recipient(s)
     }
 }
