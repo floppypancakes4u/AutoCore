@@ -10,7 +10,7 @@ public class MapDataLoader
     {
         foreach (var continentObject in AssetManager.Instance.GetContinentObjects())
         {
-            var reader = AssetManager.Instance.GetFileReader($"{continentObject.MapFileName}.fam");
+            var reader = AssetManager.Instance.GetFileReaderFromGLMs($"{continentObject.MapFileName}.fam");
             if (reader == null)
                 continue;
 

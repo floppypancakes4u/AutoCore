@@ -1,7 +1,6 @@
 ﻿namespace AutoCore.Game.Managers;
 
 using AutoCore.Game.Map;
-using AutoCore.Game.Packets.Sector;
 using AutoCore.Utils.Memory;
 
 public class MapManager : Singleton<MapManager>
@@ -11,7 +10,10 @@ public class MapManager : Singleton<MapManager>
     public bool Initialize()
     {
         foreach (var continentObject in AssetManager.Instance.GetContinentObjects()) // TODO: only load IsPersistent maps (the others are instanceable?)
+        {
+            // TODO: preload only persistent maps?
             SetupMap(continentObject.Id);
+        }
 
         return true;
     }

@@ -96,10 +96,8 @@ public class AssetManager : Singleton<AssetManager>
     #endregion
 
     #region GLM
-    public BinaryReader GetFileReader(string fileName)
-    {
-        return GLMLoader.GetReader(fileName);
-    }
+    public BinaryReader GetFileReaderFromGLMs(string fileName) => GLMLoader.GetReader(fileName);
+    public bool HasFileInGLMs(string fileName) => GLMLoader.CanGetReader(fileName);
     #endregion
 
     #region WorldDB
