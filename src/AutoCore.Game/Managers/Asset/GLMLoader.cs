@@ -7,6 +7,8 @@ using AutoCore.Utils;
 
 public class GLMLoader
 {
+    private const string MiscGLM = "misc.glm";
+
     private Dictionary<string, GLMEntry> GLMEntries { get; } = new();
 
     public bool Load(string directoryPath)
@@ -29,11 +31,24 @@ public class GLMLoader
 
     public BinaryReader GetReader(string fileName)
     {
+        if (GLMEntries.TryGetValue(MiscGLM, out var miscGlmEntry))
+        {
+            if (miscGlmEntry.FileEntries.TryGetValue(fileName, out var fileEntry))
+            {
+                var data = new byte[fileEntry.Size];
+
+                miscGlmEntry.FileStream.Seek(fileEntry.Offset, SeekOrigin.Begin);
+                miscGlmEntry.FileStream.Read(data, 0, fileEntry.Size);
+
+                return new BinaryReader(new MemoryStream(data), Encoding.UTF8, false);
+            }
+        }
+
         foreach (var glmEntry in GLMEntries)
         {
             if (glmEntry.Value.FileEntries.TryGetValue(fileName, out var fileEntry))
             {
-                var data = ArrayPool<byte>.Shared.Rent(fileEntry.Size);
+                var data = new byte[fileEntry.Size];
 
                 glmEntry.Value.FileStream.Seek(fileEntry.Offset, SeekOrigin.Begin);
                 glmEntry.Value.FileStream.Read(data, 0, fileEntry.Size);
@@ -43,6 +58,19 @@ public class GLMLoader
         }
 
         return null;
+    }
+
+    public bool CanGetReader(string fileName)
+    {
+        if (GLMEntries.TryGetValue(MiscGLM, out var miscGlmEntry))
+            if (miscGlmEntry.FileEntries.ContainsKey(fileName))
+                return true;
+
+        foreach (var glmEntry in GLMEntries)
+            if (glmEntry.Value.FileEntries.ContainsKey(fileName))
+                return true;
+
+        return false;
     }
 
     private void ReadGLMFile(string filePath)
