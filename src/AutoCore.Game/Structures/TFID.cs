@@ -57,4 +57,9 @@ public class TFID
     {
         return a is not null && b is not null && a.Coid > b.Coid;
     }
+
+    public override string ToString()
+    {
+        return $"TFID({Coid}, {Global})";
+    }
 }
