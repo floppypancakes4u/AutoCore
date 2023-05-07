@@ -1,18 +1,22 @@
-﻿namespace AutoCore.Game.Map;
+﻿using System.Diagnostics;
+
+namespace AutoCore.Game.Map;
 
 using AutoCore.Database.World.Models;
 using AutoCore.Game.Entities;
+using AutoCore.Game.EntityTemplates;
+using AutoCore.Game.Managers;
 using AutoCore.Game.Mission;
 using AutoCore.Game.Structures;
 using AutoCore.Game.Weather;
+using AutoCore.Utils;
 using AutoCore.Utils.Extensions;
 
 public class MapData
 {
-    #region Properties
     public ContinentObject ContinentObject { get; }
+    public Dictionary<long, ObjectTemplate> Templates { get; } = new();
 
-    #region Terrain Header
     public int MapVersion { get; private set; }
     public int IterationVersion { get; private set; }
     public float GridSize { get; private set; }
@@ -24,9 +28,6 @@ public class MapData
     public string SkyBoxName { get; private set; }
     public float CullingScale { get; private set; }
     public int NumOfImports { get; private set; }
-    #endregion
-
-    #region Common data
     public Vector4 EntryPoint { get; private set; }
     public int NumModulePlacements { get; private set; }
     public int NumOfVOGOs { get; private set; }
@@ -38,17 +39,14 @@ public class MapData
     public long LastTeamTrigger { get; private set; }
     public string WeatherStrEffect { get; private set; }
     public SeaPlane SeaPlane { get; private set; }
+    public int Flags { get; private set; }
 
     public Dictionary<int, MissionString> MissionStrings { get; } = new();
     public Dictionary<int, VisualWaypoint> VisualWaypoints { get; } = new();
     public Dictionary<int, Variable> Variables { get; } = new();
     public Dictionary<byte, WeatherContainer> WeatherInfos { get; } = new();
-    #endregion
-
-    #region Local objects
-    public Dictionary<long, ClonedObjectBase> LocalObjects { get; } = new();
-    #endregion
-    #endregion
+    public List<RoadNodeBase> RoadNodes { get; } = new();
+    public List<Music> MusicTriggers { get; } = new();
 
     public MapData(ContinentObject continentObject)
     {
@@ -144,12 +142,60 @@ public class MapData
         }
 
         if (MapVersion >= 38)
-        {
             ReadSeaPlaneData(reader);
-        }
         #endregion
 
-        // TODO: read the whole map data
+        Debug.Assert(NumModulePlacements == 0, "There are modules???");
+
+        for (var i = 0; i < NumOfClientVOGOs + NumOfVOGOs; ++i)
+        {
+            var layer = MapVersion > 5 ? reader.ReadByte() : (byte)0;
+
+            var cbid = reader.ReadInt32();
+            var coid = reader.ReadInt32();
+            var objectSize = reader.ReadInt32();
+
+            var objectStart = reader.BaseStream.Position;
+
+            var obj = ObjectTemplate.AllocateTemplateFromCBID(cbid);
+            if (obj == null)
+            {
+                reader.BaseStream.Position += objectSize;
+                Logger.WriteLog(LogType.Error, $"Skip reading object CBID: {cbid} COID: {coid}, because they couldn't be allocated!");
+                continue;
+            }
+
+            obj.Layer = layer;
+            obj.CBID = cbid;
+            obj.COID = coid;
+            obj.Read(reader, MapVersion);
+
+            if (objectStart + objectSize != reader.BaseStream.Position)
+                throw new Exception($"The object was over or under read! Type: {obj.GetType().Name} Start: {objectStart}, Size: {objectSize}, ReadSize: {reader.BaseStream.Position - objectStart}");
+
+            if (Templates.ContainsKey(coid))
+                throw new Exception($"An object template with coid {coid} is already in the templates!");
+
+            Templates.Add(coid, obj);
+        }
+
+        if (MapVersion >= 43)
+            Flags = reader.ReadInt32();
+
+        ReadRoadData(reader, MapVersion);
+
+        if (MapVersion < 38)
+            ReadSeaPlaneData(reader);
+
+        if (MapVersion >= 42)
+            ReadMusicRegions(reader, MapVersion);
+
+        if (MapVersion >= 30)
+        {
+            // TODO?
+        }
+
+        ReadMiniCatalog(reader);
     }
 
     private void ReadMissionStrings(BinaryReader reader)
@@ -199,6 +245,59 @@ public class MapData
                     Coords = Vector4.ReadNew(reader),
                     CoordsList = new List<Vector4>(reader.ReadConstArray(planeCount, Vector4.ReadNew)) // TODO: are thes TFIDs?
                 };
+            }
+        }
+    }
+
+    private void ReadRoadData(BinaryReader reader, int mapVersion)
+    {
+        var roadCount = reader.ReadInt32();
+        for (var i = 0; i < roadCount; ++i)
+        {
+            var roadNodeDataSize = reader.ReadInt32();
+            var type = reader.ReadByte();
+
+            var roadNodeStart = reader.BaseStream.Position;
+
+            RoadNodeBase node = type switch
+            {
+                0 => new RoadNode(),
+                1 => new RoadNodeJunction(),
+                2 => new RiverNode(),
+                _ => throw new NotSupportedException()
+            };
+
+            node.Unserialize(reader, mapVersion);
+
+            if (roadNodeStart + roadNodeDataSize != reader.BaseStream.Position)
+                throw new Exception("Over or under read RoadNode!");
+
+            RoadNodes.Add(node);
+        }
+    }
+
+    private void ReadMusicRegions(BinaryReader reader, int mapVersion)
+    {
+        var musicRegionCount = reader.ReadInt32();
+        for (var i = 0; i < musicRegionCount; ++i)
+        {
+            _ = reader.ReadInt32();
+
+            MusicTriggers.Add(Structures.Music.Read(reader, mapVersion));
+        }
+    }
+
+    private void ReadMiniCatalog(BinaryReader reader)
+    {
+        if (MapVersion >= 49)
+        {
+            if (MapVersion < 52)
+            {
+                // TODO: do we need this?
+            }
+            else
+            {
+                // load external catalog
             }
         }
     }
