@@ -17,13 +17,22 @@ public class Character : Creature
     public long ActiveVehicleCoid => DBData.ActiveVehicleCoid;
     public int BodyId => DBData.BodyId;
     public int HeadId => DBData.HeadId;
+    public int HeadDetail1 => DBData.HeadDetail1;
+    public int HeadDetail2 => DBData.HeadDetail2;
     public int HairId => DBData.HairId;
     public int HelmetId => DBData.HelmetId;
     public int AccessoryId1 => DBData.HeadDetail1;
     public int AccessoryId2 => DBData.HeadDetail2;
     public int EyesId => DBData.EyesId;
     public int MouthId => DBData.MouthId;
+    public uint PrimaryColor => DBData.PrimaryColor;
+    public uint SecondaryColor => DBData.SecondaryColor;
+    public uint EyesColor => DBData.EyesColor;
+    public uint HairColor => DBData.HairColor;
+    public uint SkinColor => DBData.SkinColor;
+    public uint SpecialityColor => DBData.SpecialityColor;
     public float ScaleOffset => DBData.ScaleOffset;
+    public byte Level => DBData.Level;
     #endregion
 
     #region Database Clan Data

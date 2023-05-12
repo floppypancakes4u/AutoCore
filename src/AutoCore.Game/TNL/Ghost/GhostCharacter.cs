@@ -50,23 +50,23 @@ public class GhostCharacter : GhostObject
         {
             PackCommon(stream);
 
-            stream.WriteString("", 17); // Name
-            stream.WriteString("", 51); // ClanName
-            stream.WriteBits(8, BitConverter.GetBytes(0)); // Level
-            stream.WriteBits(64, BitConverter.GetBytes((long)0)); // Current Vehicle
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // IDHead
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // IDBody
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // IDHeadDetail
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // IDHeadDetail
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // IDHeadDetailMouth
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // IDHeadDetailEyes
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // IDHeadDetailHelmer
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // IDHair
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // CharacterScaleOffset
-            stream.WriteInt(0, 24); // Character Color Primary
-            stream.WriteInt(0, 24); // Character Color Secondary
-            stream.WriteInt(0, 24); // Character Color Skin
-            stream.WriteInt(0, 24); // Character Color Hair
+            stream.WriteString(character.Name, 17); // Name
+            stream.WriteString(character.ClanName, 51); // ClanName
+            stream.WriteBits(8, new byte[1] { character.Level }); // Level
+            stream.WriteBits(64, BitConverter.GetBytes(character.CurrentVehicle.ObjectId.Coid)); // Current Vehicle
+            stream.WriteBits(32, BitConverter.GetBytes(character.HeadId)); // IDHead
+            stream.WriteBits(32, BitConverter.GetBytes(character.BodyId)); // IDBody
+            stream.WriteBits(32, BitConverter.GetBytes(character.HeadDetail1)); // IDHeadDetail
+            stream.WriteBits(32, BitConverter.GetBytes(character.HeadDetail2)); // IDHeadDetail
+            stream.WriteBits(32, BitConverter.GetBytes(character.MouthId)); // IDHeadDetailMouth
+            stream.WriteBits(32, BitConverter.GetBytes(character.EyesId)); // IDHeadDetailEyes
+            stream.WriteBits(32, BitConverter.GetBytes(character.HelmetId)); // IDHeadDetailHelmer
+            stream.WriteBits(32, BitConverter.GetBytes(character.HairId)); // IDHair
+            stream.WriteBits(32, BitConverter.GetBytes(character.ScaleOffset)); // CharacterScaleOffset
+            stream.WriteInt(character.PrimaryColor, 24); // Character Color Primary
+            stream.WriteInt(character.SecondaryColor, 24); // Character Color Secondary
+            stream.WriteInt(character.SkinColor, 24); // Character Color Skin
+            stream.WriteInt(character.HairColor, 24); // Character Color Hair
 
             PackSkills(stream, character);
         }
@@ -76,9 +76,9 @@ public class GhostCharacter : GhostObject
 
         if (stream.WriteFlag((updateMask & ClanMask) != 0))
         {
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // Clan id
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // Clan rank
-            stream.WriteString("", 51); // Clan name
+            stream.WriteBits(32, BitConverter.GetBytes(character.ClanId)); // Clan id
+            stream.WriteBits(32, BitConverter.GetBytes(character.ClanRank)); // Clan rank
+            stream.WriteString(character.ClanName, 51); // Clan name
         }
 
         if (stream.WriteFlag((updateMask & PetCBIDMask) != 0))
