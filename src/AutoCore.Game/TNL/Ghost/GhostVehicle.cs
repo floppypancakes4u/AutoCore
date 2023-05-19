@@ -10,19 +10,26 @@ using AutoCore.Game.Structures;
 public class GhostVehicle : GhostObject
 {
     private static NetClassRepInstance<GhostVehicle> _dynClassRep;
-    private static ulong[] WeaponBits { get; } = new ulong[3] { 0x400000000, 0x800000000, 0x1000000000 };
+    private static ulong[] WeaponBits { get; } = new ulong[3] { FrontWeaponMask, TurretWeaponMask, RearWeaponMask };
 
-    public const ulong AttributeMask = 0x00200000ul;
-    public const ulong ClanMask      = 0x00400000ul;
-    public const ulong HardpointMask = 0x00800000ul;
-    public const ulong PetCBIDMask   = 0x01000000ul;
-    public const ulong ShieldMaxMask = 0x02000000ul;
-    public const ulong ShieldMask    = 0x04000000ul;
-    public const ulong PowerMask     = 0x08000000ul;
-    public const ulong GMMask        = 0x10000000ul;
-    public const ulong HeatMask      = 0x20000000ul;
-    public const ulong ChangeArmor   = 0x40000000ul;
-    public const ulong StateMask     = 0x80000000ul;
+    public const ulong AttributeMask    = 0x0000200000ul;
+    public const ulong ClanMask         = 0x0000400000ul;
+    public const ulong HardpointMask    = 0x0000800000ul;
+    public const ulong PetCBIDMask      = 0x0001000000ul;
+    public const ulong ShieldMaxMask    = 0x0002000000ul;
+    public const ulong ShieldMask       = 0x0004000000ul;
+    public const ulong PowerMask        = 0x0008000000ul;
+    public const ulong GMMask           = 0x0010000000ul;
+    public const ulong HeatMask         = 0x0020000000ul;
+    public const ulong ChangeArmor      = 0x0040000000ul;
+    public const ulong StateMask        = 0x0080000000ul;
+    public const ulong WheelSetMask     = 0x0100000000ul;
+
+    public const ulong FrontWeaponMask  = 0x0400000000ul;
+    public const ulong TurretWeaponMask = 0x0800000000ul;
+    public const ulong RearWeaponMask   = 0x1000000000ul;
+    public const ulong MeleeWeaponMask  = 0x2000000000ul;
+    public const ulong OrnamentMask     = 0x4000000000ul;
 
     public byte ArmorFlags { get; set; }
     public int MaxShields { get; set; }
@@ -74,6 +81,8 @@ public class GhostVehicle : GhostObject
         var ret = 0ul;
 
         var parentVehicle = Parent.GetAsVehicle();
+        var superCharacter = Parent.GetSuperCharacter(false);
+        var owner = parentVehicle.Owner;
 
         if (PIsInitialUpdate)
         {
@@ -206,7 +215,7 @@ public class GhostVehicle : GhostObject
             }
         }
 
-        if (stream.WriteFlag((updateMask & 0x100000000) != 0))
+        if (stream.WriteFlag((updateMask & WheelSetMask) != 0))
         {
             stream.WriteInt(0, 20); // WheelSet CBID
             stream.Write((long)0); // WheelSet coid
@@ -223,21 +232,21 @@ public class GhostVehicle : GhostObject
             }
         }
 
-        if (stream.WriteFlag((updateMask & 0x2000000000) != 0) && stream.WriteFlag(false)) // TODO
+        if (stream.WriteFlag((updateMask & MeleeWeaponMask) != 0) && stream.WriteFlag(false)) // TODO
         {
             stream.WriteInt(0, 20); // WeaponMeelee CBID
             stream.Write((long)0); // WeaponMeelee Coid
             stream.WriteFlag(false); // WeaponMeelee Coid global
         }
 
-        if (stream.WriteFlag((updateMask & 0x4000000000) != 0) && stream.WriteFlag(false)) // TODO
+        if (stream.WriteFlag((updateMask & OrnamentMask) != 0) && stream.WriteFlag(false)) // TODO
         {
             stream.WriteInt(0, 20); // Ornament CBID
             stream.Write((long)0); // Ornament Coid
             stream.WriteFlag(false); // Ornament Coid global
         }
 
-        if (stream.WriteFlag((updateMask & 0x40000000) != 0) && stream.WriteFlag(false)) // TODO
+        if (stream.WriteFlag((updateMask & ChangeArmor) != 0) && stream.WriteFlag(false)) // TODO
         {
             stream.WriteInt(0, 20); // Armor CBID
             stream.Write((long)0); // Armor Coid
@@ -326,7 +335,7 @@ public class GhostVehicle : GhostObject
 
         if (stream.WriteFlag((updateMask & TargetMask) != 0))
         {
-            if (Parent.Target == null)
+            if (Parent.Target != null)
             {
                 stream.Write(Parent.Target.ObjectId.Coid);
                 stream.WriteFlag(Parent.Target.ObjectId.Global);
@@ -337,8 +346,6 @@ public class GhostVehicle : GhostObject
                 stream.WriteFlag(false);
             }
         }
-
-        var superCharacter = Parent.GetSuperCharacter(false);
 
         if (stream.WriteFlag(superCharacter != null && (updateMask & AttributeMask) != 0))
         {
