@@ -49,7 +49,7 @@ public class SimpleObject : GraphicsObject
         SkillLevel3 = 1;
     }
 
-    public virtual bool LoadFromDB(CharContext context, long coid)
+    public virtual bool LoadFromDB(CharContext context, long coid, bool isInCharacterSelection = false)
     {
         SetCoid(coid, true);
 

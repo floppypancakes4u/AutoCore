@@ -20,7 +20,7 @@ public class PowerPlant : SimpleObject
     {
     }
 
-    public override bool LoadFromDB(CharContext context, long coid)
+    public override bool LoadFromDB(CharContext context, long coid, bool isInCharacterSelection = false)
     {
         SetCoid(coid, true);
 

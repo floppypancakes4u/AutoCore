@@ -18,8 +18,6 @@ public class Vehicle : SimpleObject
     public byte Trim => DBData.Trim;
     #endregion
 
-    public bool IsInCharacterSelection { get; }
-
     public Armor Armor { get; private set; }
     public PowerPlant PowerPlant { get; private set; }
     public SimpleObject Ornament { get; private set; }
@@ -31,13 +29,14 @@ public class Vehicle : SimpleObject
     public WheelSet WheelSet { get; private set; }
     #endregion
 
-    public Vehicle(bool isInCharacterSelection = false)
+    public Vehicle()
         : base(GraphicsObjectType.GraphicsPhysics)
     {
-        IsInCharacterSelection = isInCharacterSelection;
     }
 
-    public override bool LoadFromDB(CharContext context, long coid)
+    public override Vehicle GetAsVehicle() => this;
+
+    public override bool LoadFromDB(CharContext context, long coid, bool isInCharacterSelection = false)
     {
         SetCoid(coid, true);
 
@@ -94,7 +93,7 @@ public class Vehicle : SimpleObject
         }
 
         // Skip loading other unnecessary stuff from the DB, if we are displaying this Vehicle in the character selection
-        if (IsInCharacterSelection)
+        if (isInCharacterSelection)
             return true;
 
         if (DBData.Armor != 0)
@@ -185,7 +184,7 @@ public class Vehicle : SimpleObject
                 Ornament.WriteToPacket(vehiclePacket.CreateOrnament);
             }
 
-            if (RaceItem != null && !IsInCharacterSelection)
+            if (RaceItem != null)
             {
                 vehiclePacket.CreateRaceItem = new CreateSimpleObjectPacket();
                 RaceItem.WriteToPacket(vehiclePacket.CreateRaceItem);

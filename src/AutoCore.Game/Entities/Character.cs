@@ -47,18 +47,23 @@ public class Character : Creature
     #endregion
 
     public byte GMLevel { get; }
-    public TNLConnection OwningConnection { get; }
+    public TNLConnection OwningConnection { get; private set; }
     public Vehicle CurrentVehicle { get; private set; }
-    public bool IsInCharacterSelection { get; }
     #endregion
 
-    public Character(TNLConnection owningConnection, bool isInCharacterSelection = false)
+    public Character()
     {
-        OwningConnection = owningConnection;
-        IsInCharacterSelection = isInCharacterSelection;
     }
 
-    public override bool LoadFromDB(CharContext context, long coid)
+    public void SetOwningConnection(TNLConnection owningConnection)
+    {
+        OwningConnection = owningConnection;
+    }
+
+    public override Character GetAsCharacter() => this;
+    public override Character GetSuperCharacter(bool includeSummons) => this;
+
+    public override bool LoadFromDB(CharContext context, long coid, bool isInCharacterSelection = false)
     {
         SetCoid(coid, true);
 
@@ -78,11 +83,11 @@ public class Character : Creature
         return true;
     }
 
-    public void LoadCurrentVehicle(CharContext context)
+    public bool LoadCurrentVehicle(CharContext context, bool isInCharacterSelection = false)
     {
         CurrentVehicle = new();
-        if (!CurrentVehicle.LoadFromDB(context, ActiveVehicleCoid))
-            throw new Exception("Unable to load active vehicle!");
+
+        return CurrentVehicle.LoadFromDB(context, ActiveVehicleCoid, isInCharacterSelection);
     }
 
     public override void CreateGhost()
