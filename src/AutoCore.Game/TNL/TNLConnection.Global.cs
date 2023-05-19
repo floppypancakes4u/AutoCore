@@ -2,6 +2,8 @@
 
 namespace AutoCore.Game.TNL;
 
+using AutoCore.Database.Char;
+using AutoCore.Game.Managers;
 using AutoCore.Game.Packets.Global;
 
 public partial class TNLConnection
@@ -21,12 +23,17 @@ public partial class TNLConnection
         var packet = new LoginPacket();
         packet.Read(reader);
 
-        // TODO: check character
+        using var context = new CharContext();
+
+        var character = ObjectManager.Instance.GetOrLoadCharacter(packet.CharacterCoid, context);
 
         SendGamePacket(new LoginAckPacket
         {
-            Success = true
+            Success = character != null
         });
+
+        if (character == null)
+            return;
 
         SendGamePacket(new TransferToSectorPacket()
         {

@@ -1,7 +1,6 @@
 ﻿namespace AutoCore.Game.TNL;
 
 using AutoCore.Database.Char;
-using AutoCore.Game.Entities;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Packets.Sector;
 
@@ -13,24 +12,21 @@ public partial class TNLConnection
         packet.Read(reader);
 
         // TODO: validate security key with info received from communicator or DB value or something...
-
         using var context = new CharContext();
 
-        var character = new Character(this);
-        if (!character.LoadFromDB(context, packet.CharacterCoid))
+        var character = ObjectManager.Instance.GetOrLoadCharacter(packet.CharacterCoid, context);
+        if (character == null)
         {
-            Disconnect("Invalid character!");
+            Disconnect("Invalid character");
+
             return;
         }
 
-        character.LoadCurrentVehicle(context);
 
-        ObjectManager.Instance.Add(character);
-        ObjectManager.Instance.Add(character.CurrentVehicle);
 
         var mapInfoPacket = new MapInfoPacket();
 
-        var map = MapManager.Instance.GetMap(708);
+        var map = MapManager.Instance.GetMap(character.LastTownId);
         map.Fill(mapInfoPacket);
 
         SendGamePacket(mapInfoPacket, skipOpcode: true);
@@ -40,6 +36,14 @@ public partial class TNLConnection
     {
         var packet = new TransferFromGlobalPacket();
         packet.Read(reader);
+
+        var character = ObjectManager.Instance.GetCharacter(packet.CharacterCoid);
+        if (character == null)
+        {
+            Disconnect("Invalid character");
+
+            return;
+        }
 
         SendGamePacket(new TransferFromGlobalStage3Packet
         {

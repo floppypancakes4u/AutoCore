@@ -192,19 +192,15 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
 
     private static void SendCharacter(TNLConnection client, CharContext context, long coid)
     {
-        var character = new Character(client, isInCharacterSelection: true);
-        if (!character.LoadFromDB(context, coid))
-            return;
-
-        var vehicle = new Vehicle(isInCharacterSelection: true);
-        if (!vehicle.LoadFromDB(context, character.ActiveVehicleCoid))
+        var character = ObjectManager.LoadCharacterForSelection(coid, context);
+        if (character == null)
             return;
 
         var createCharPacket = new CreateCharacterPacket();
-        character.WriteToPacket(createCharPacket);
-
         var createVehiclePacket = new CreateVehiclePacket();
-        vehicle.WriteToPacket(createVehiclePacket);
+
+        character.WriteToPacket(createCharPacket);
+        character.CurrentVehicle.WriteToPacket(createVehiclePacket);
 
         client.SendGamePacket(createCharPacket);
         client.SendGamePacket(createVehiclePacket);
