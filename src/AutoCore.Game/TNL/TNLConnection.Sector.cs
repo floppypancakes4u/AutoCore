@@ -22,7 +22,12 @@ public partial class TNLConnection
             return;
         }
 
+        if (!LoginManager.Instance.LoginToSector(this, character.AccountId))
+        {
+            Disconnect("Invalid Username or password!");
 
+            return;
+        }
 
         var mapInfoPacket = new MapInfoPacket();
 

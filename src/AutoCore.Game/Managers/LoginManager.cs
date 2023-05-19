@@ -61,28 +61,55 @@ public class LoginManager : Singleton<LoginManager>
         if (entry.AuthKey != packet.AuthKey || entry.Username != packet.Username)
             return false;
 
-        using (var context = new CharContext())
+        using var context = new CharContext();
+        var account = context.Accounts.FirstOrDefault(a => a.Id == packet.UserId);
+        if (account == null)
         {
-            var account = context.Accounts.FirstOrDefault(a => a.Id == packet.UserId);
-            if (account == null)
+            account = new Account()
             {
-                account = new Account()
-                {
-                    Id = packet.UserId,
-                    Name = packet.Username,
-                    Level = 0,
-                    FirstFlags1 = 0,
-                    FirstFlags2 = 0,
-                    FirstFlags3 = 0,
-                    FirstFlags4 = 0
-                };
+                Id = packet.UserId,
+                Name = packet.Username,
+                Level = 0,
+                FirstFlags1 = 0,
+                FirstFlags2 = 0,
+                FirstFlags3 = 0,
+                FirstFlags4 = 0
+            };
 
-                context.Accounts.Add(account);
-                context.SaveChanges();
-            }
-
-            client.Account = account;
+            context.Accounts.Add(account);
+            context.SaveChanges();
         }
+
+        client.Account = account;
+
+        return true;
+    }
+
+    public bool LoginToSector(TNLConnection client, uint accountId)
+    {
+        // TODO: have some communicator register logins that will be incoming
+        // and validate the current login against it
+
+        using var context = new CharContext();
+        var account = context.Accounts.FirstOrDefault(a => a.Id == accountId);
+        if (account == null)
+        {
+            account = new Account()
+            {
+                Id = accountId,
+                Name = "",
+                Level = 0,
+                FirstFlags1 = 0,
+                FirstFlags2 = 0,
+                FirstFlags3 = 0,
+                FirstFlags4 = 0
+            };
+
+            context.Accounts.Add(account);
+            context.SaveChanges();
+        }
+
+        client.Account = account;
 
         return true;
     }
