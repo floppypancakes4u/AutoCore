@@ -88,13 +88,12 @@ public class GhostVehicle : GhostObject
         {
             PackCommon(stream);
 
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // ColorPrimary
-
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // ColorSecondary
+            stream.Write(parentVehicle.PrimaryColor);
+            stream.Write(parentVehicle.SecondaryColor);
 
             stream.WriteFlag(false); // IsActive
 
-            stream.WriteBits(8, BitConverter.GetBytes(0)); // Trim
+            stream.Write(parentVehicle.Trim);
 
             if (stream.WriteFlag(false)) // SpeedAdd != 1.0f
             {
@@ -157,27 +156,29 @@ public class GhostVehicle : GhostObject
 
             stream.WriteFlag(false); // IsTrailer
 
-            if (stream.WriteFlag(false)) // CurrentOwner
+            if (stream.WriteFlag(owner != null)) // CurrentOwner
             {
-                stream.Write((long)0); // CurrentOwner coid
-                stream.WriteFlag(false); // CurrentOwner global
-                stream.WriteInt(0, 20); // CurrentOwner CBID
+                stream.Write(owner.ObjectId.Coid); // CurrentOwner coid
+                stream.WriteFlag(owner.ObjectId.Global); // CurrentOwner global
+                stream.WriteInt((uint)owner.CBID, 20); // CurrentOwner CBID
 
-                if (stream.WriteFlag(false)) // OwnerIsCharacter
+                var characterOwner = owner as Character;
+
+                if (stream.WriteFlag(characterOwner != null))
                 {
-                    stream.WriteString("", 17); // Name
-                    stream.WriteString("", 51); // ClanName
-                    stream.WriteBits(8, BitConverter.GetBytes(0)); // Level
+                    stream.WriteString(characterOwner.Name, 17);
+                    stream.WriteString(characterOwner.ClanName, 51);
+                    stream.Write(characterOwner.Level);
                     stream.WriteFlag(false); // TODO
-                    stream.WriteString("", 33); // VehicleName
-                    stream.WriteBits(16, BitConverter.GetBytes(0)); // IDHead
-                    stream.WriteBits(16, BitConverter.GetBytes(0)); // IDBody
-                    stream.WriteBits(16, BitConverter.GetBytes(0)); // IDHeadDetail
-                    stream.WriteBits(16, BitConverter.GetBytes(0)); // IDHeadDetail2
-                    stream.WriteBits(16, BitConverter.GetBytes(0)); // IDHeadDetailMouth
-                    stream.WriteBits(16, BitConverter.GetBytes(0)); // IDHeadDetailEyes
-                    stream.WriteBits(16, BitConverter.GetBytes(0)); // IDHeadDetailHelmet
-                    stream.WriteBits(16, BitConverter.GetBytes(0)); // IDHair
+                    stream.WriteString(parentVehicle.Name, 33);
+                    stream.Write(characterOwner.HeadId);
+                    stream.Write(characterOwner.BodyId);
+                    stream.Write(characterOwner.HeadDetail1);
+                    stream.Write(characterOwner.HeadDetail2);
+                    stream.Write(characterOwner.MouthId);
+                    stream.Write(characterOwner.EyesId);
+                    stream.Write(characterOwner.HelmetId);
+                    stream.Write(characterOwner.HairId);
                 }
                 else
                 {

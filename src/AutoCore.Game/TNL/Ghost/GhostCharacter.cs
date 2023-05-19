@@ -52,17 +52,17 @@ public class GhostCharacter : GhostObject
 
             stream.WriteString(character.Name, 17); // Name
             stream.WriteString(character.ClanName, 51); // ClanName
-            stream.WriteBits(8, new byte[1] { character.Level }); // Level
-            stream.WriteBits(64, BitConverter.GetBytes(character.CurrentVehicle.ObjectId.Coid)); // Current Vehicle
-            stream.WriteBits(32, BitConverter.GetBytes(character.HeadId)); // IDHead
-            stream.WriteBits(32, BitConverter.GetBytes(character.BodyId)); // IDBody
-            stream.WriteBits(32, BitConverter.GetBytes(character.HeadDetail1)); // IDHeadDetail
-            stream.WriteBits(32, BitConverter.GetBytes(character.HeadDetail2)); // IDHeadDetail
-            stream.WriteBits(32, BitConverter.GetBytes(character.MouthId)); // IDHeadDetailMouth
-            stream.WriteBits(32, BitConverter.GetBytes(character.EyesId)); // IDHeadDetailEyes
-            stream.WriteBits(32, BitConverter.GetBytes(character.HelmetId)); // IDHeadDetailHelmer
-            stream.WriteBits(32, BitConverter.GetBytes(character.HairId)); // IDHair
-            stream.WriteBits(32, BitConverter.GetBytes(character.ScaleOffset)); // CharacterScaleOffset
+            stream.Write(character.Level);
+            stream.Write(character.CurrentVehicle.ObjectId.Coid);
+            stream.Write(character.HeadId);
+            stream.Write(character.BodyId);
+            stream.Write(character.HeadDetail1);
+            stream.Write(character.HeadDetail2);
+            stream.Write(character.MouthId);
+            stream.Write(character.EyesId);
+            stream.Write(character.HelmetId);
+            stream.Write(character.HairId);
+            stream.Write(character.ScaleOffset);
             stream.WriteInt(character.PrimaryColor, 24); // Character Color Primary
             stream.WriteInt(character.SecondaryColor, 24); // Character Color Secondary
             stream.WriteInt(character.SkinColor, 24); // Character Color Skin
@@ -72,17 +72,17 @@ public class GhostCharacter : GhostObject
         }
 
         if (stream.WriteFlag((updateMask & GMMask) != 0))
-            stream.WriteInt(0, 4); // GM level
+            stream.WriteInt(character.GMLevel, 4); // GM level
 
         if (stream.WriteFlag((updateMask & ClanMask) != 0))
         {
-            stream.WriteBits(32, BitConverter.GetBytes(character.ClanId)); // Clan id
-            stream.WriteBits(32, BitConverter.GetBytes(character.ClanRank)); // Clan rank
+            stream.Write(character.ClanId);
+            stream.Write(character.ClanRank);
             stream.WriteString(character.ClanName, 51); // Clan name
         }
 
         if (stream.WriteFlag((updateMask & PetCBIDMask) != 0))
-            stream.WriteBits(16, BitConverter.GetBytes(0)); // Pet CBID
+            stream.WriteInt(0, 16);
 
         if (stream.WriteFlag((updateMask & PositionMask) != 0))
         {
