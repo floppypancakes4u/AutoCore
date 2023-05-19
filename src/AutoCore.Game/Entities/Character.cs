@@ -62,6 +62,9 @@ public class Character : Creature
         if (DBData == null)
             return false;
 
+        Position = new(DBData.PositionX, DBData.PositionY, DBData.PositionZ);
+        Rotation = new(DBData.RotationX, DBData.RotationY, DBData.RotationZ, DBData.RotationW);
+
         LoadCloneBase(DBData.SimpleObjectBase.CBID);
 
         ClanMemberDBData = context.ClanMembers.Include(cm => cm.Clan).FirstOrDefault(cm => cm.CharacterCoid == coid);
@@ -106,8 +109,8 @@ public class Character : Creature
             charPacket.HairColor = DBData.HairColor;
             charPacket.SkinColor = DBData.SkinColor;
             charPacket.SpecialityColor = DBData.SpecialityColor;
-            charPacket.LastTownId = -1; // TODO
-            charPacket.LastStationMapId = -1; // TODO
+            charPacket.LastTownId = DBData.LastTownId;
+            charPacket.LastStationMapId = DBData.LastStationMapId;
             charPacket.Level = DBData.Level;
             charPacket.UsingVehicle = false; // TODO
             charPacket.UsingTrailer = false;

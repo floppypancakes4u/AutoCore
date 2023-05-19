@@ -10,23 +10,33 @@ public class CharacterData
     public long Coid { get; set; }
     public uint AccountId { get; set; }
     public long ActiveVehicleCoid { get; set; }
-    public string Name { get; set; }
-    public int HeadId { get; set; }
-    public int BodyId { get; set; }
-    public int HeadDetail1 { get; set; }
-    public int HeadDetail2 { get; set; }
-    public int HelmetId { get; set; }
-    public int EyesId { get; set; }
-    public int MouthId { get; set; }
-    public int HairId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int HeadId { get; set; } = -1;
+    public int BodyId { get; set; } = -1;
+    public int HeadDetail1 { get; set; } = -1;
+    public int HeadDetail2 { get; set; } = -1;
+    public int HelmetId { get; set; } = -1;
+    public int EyesId { get; set; } = -1;
+    public int MouthId { get; set; } = -1;
+    public int HairId { get; set; } = -1;
     public uint PrimaryColor { get; set; }
     public uint SecondaryColor { get; set; }
     public uint EyesColor { get; set; }
     public uint HairColor { get; set; }
     public uint SkinColor { get; set; }
     public uint SpecialityColor { get; set; }
+    public int LastTownId { get; set; } = -1;
+    public int LastStationId { get; set; } = -1;
+    public int LastStationMapId { get; set; } = -1;
+    public float PositionX { get; set; }
+    public float PositionY { get; set; }
+    public float PositionZ { get; set; }
+    public float RotationX { get; set; }
+    public float RotationY { get; set; }
+    public float RotationZ { get; set; }
+    public float RotationW { get; set; }
     public float ScaleOffset { get; set; }
-    public byte Level { get; set; }
+    public byte Level { get; set; } = 1;
     public bool Deleted { get; set; }
 
     [ForeignKey("Coid")]
@@ -40,18 +50,4 @@ public class CharacterData
 
     [InverseProperty("Character")]
     public List<VehicleData> Vehicles { get; set; }
-
-    public CharacterData()
-    {
-        Name = "";
-        BodyId = -1;
-        HeadId = -1;
-        HairId = -1;
-        HelmetId = -1;
-        HeadDetail1 = -1;
-        HeadDetail2 = -1;
-        EyesId = -1;
-        MouthId = -1;
-        Level = 1;
-    }
 }

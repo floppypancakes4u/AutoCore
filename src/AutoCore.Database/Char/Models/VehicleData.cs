@@ -13,10 +13,10 @@ public class VehicleData
     public float PositionX { get; set; }
     public float PositionY { get; set; }
     public float PositionZ { get; set; }
-    public float Rotation1 { get; set; }
-    public float Rotation2 { get; set; }
-    public float Rotation3 { get; set; }
-    public float Rotation4 { get; set; }
+    public float RotationX { get; set; }
+    public float RotationY { get; set; }
+    public float RotationZ { get; set; }
+    public float RotationW { get; set; }
     public long Ornament { get; set; }
     public long RaceItem { get; set; }
     public long PowerPlant { get; set; }

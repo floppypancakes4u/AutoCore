@@ -106,7 +106,14 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
                 HairColor = packet.HairColor,
                 SkinColor = packet.SkinColor,
                 SpecialityColor = packet.SpecialityColor,
-                ScaleOffset = packet.ScaleOffset
+                ScaleOffset = packet.ScaleOffset,
+                PositionX = 0.0f,
+                PositionY = 0.0f,
+                PositionZ = 0.0f,
+                RotationX = 0.0f,
+                RotationY = 0.0f,
+                RotationZ = 0.0f,
+                RotationW = 1.0f
             };
             context.Characters.Add(character);
 
@@ -118,10 +125,10 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
                 PositionX = 0.0f,
                 PositionY = 0.0f,
                 PositionZ = 0.0f,
-                Rotation1 = 0.0f,
-                Rotation2 = 0.0f,
-                Rotation3 = 0.0f,
-                Rotation4 = 1.0f,
+                RotationX = 0.0f,
+                RotationY = 0.0f,
+                RotationZ = 0.0f,
+                RotationW = 1.0f,
                 PrimaryColor = packet.VehiclePrimaryColor,
                 SecondaryColor = packet.VehicleSecondaryColor,
                 Trim = packet.VehicleTrim,

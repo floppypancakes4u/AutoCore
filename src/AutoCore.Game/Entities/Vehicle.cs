@@ -44,6 +44,9 @@ public class Vehicle : SimpleObject
 
         LoadCloneBase(DBData.SimpleObjectBase.CBID);
 
+        Position = new(DBData.PositionX, DBData.PositionY, DBData.PositionZ);
+        Rotation = new(DBData.RotationX, DBData.RotationY, DBData.RotationZ, DBData.RotationW);
+
         WheelSet = new WheelSet();
         if (!WheelSet.LoadFromDB(context, DBData.Wheelset))
         {
