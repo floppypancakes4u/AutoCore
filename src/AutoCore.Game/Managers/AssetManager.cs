@@ -126,7 +126,7 @@ public class AssetManager : Singleton<AssetManager>
     #region Global only
     public ConfigNewCharacter GetConfigNewCharacterFor(byte characterRace, byte characterClass)
     {
-        if (ServerType != ServerType.Global || ServerType != ServerType.Both)
+        if (ServerType != ServerType.Global && ServerType != ServerType.Both)
             throw new Exception("Invalid server type!");
 
         if (WorldDBLoader.ConfigNewCharacters.TryGetValue(Tuple.Create(characterRace, characterClass), out var result))
