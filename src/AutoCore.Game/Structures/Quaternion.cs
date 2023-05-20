@@ -7,6 +7,8 @@ public struct Quaternion
     public float Z { get; set; }
     public float W { get; set; }
 
+    public static Quaternion Default { get; } = new(0.0f, 0.0f, 0.0f, 1.0f);
+
     public Quaternion(float x, float y, float z, float w)
     {
         X = x;

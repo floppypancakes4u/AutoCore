@@ -26,6 +26,11 @@ public struct Vector4
         };
     }
 
+    public Vector3 ToVector3()
+    {
+        return new Vector3(X, Y, Z);
+    }
+
     public override string ToString()
     {
         return $"Vector4(X: {X} | Y: {Y} | Z: {Z} | W: {W})";
