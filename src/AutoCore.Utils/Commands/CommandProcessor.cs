@@ -44,7 +44,8 @@ public static class CommandProcessor
                         return command;
 
                     case ConsoleKey.Backspace:
-                        command = command[0..^1];
+                        if (command.Length > 0)
+                            command = command[0..^1];
                         break;
 
                     default:
