@@ -380,13 +380,6 @@ public partial class TNLConnection : GhostConnection
         return NetClassGroup.NetClassGroupGame;
     }
 
-    public override void PrepareWritePacket()
-    {
-        
-    }
-    
-    public void DoScoping() => base.PrepareWritePacket();
-
     public void GetFixedRateParameters(out uint minPacketSendPeriod, out uint minPacketRecvPeriod, out uint maxSendBandwidth, out uint maxRecvBandwidth)
     {
         minPacketSendPeriod = LocalRate.MinPacketSendPeriod;

@@ -37,7 +37,6 @@ public class TNLInterface : NetInterface
     {
         CheckIncomingPackets();
         ProcessConnections();
-        DoScoping();
     }
 
     public TNLConnection FindConnection(long connectionId)
@@ -73,11 +72,5 @@ public class TNLInterface : NetInterface
             MapConnections.Remove(tConn.GetPlayerCOID());
 
         base.RemoveConnection(conn);
-    }
-
-    public void DoScoping()
-    {
-        foreach (var conn in MapConnections)
-            conn.Value.DoScoping();
     }
 }
