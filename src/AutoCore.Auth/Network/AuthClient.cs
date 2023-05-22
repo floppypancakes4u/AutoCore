@@ -85,8 +85,6 @@ public partial class AuthClient
         if (State == ClientState.Disconnected)
             return;
 
-        Logger.WriteLog(LogType.Network, "*** Client disconnected! Ip: {0}", Socket.RemoteAddress);
-
         Server.Disconnect(this);
 
         Timer.Remove("timeout");
@@ -95,6 +93,8 @@ public partial class AuthClient
 
         try
         {
+            Logger.WriteLog(LogType.Network, "*** Client disconnected! Ip: {0}", Socket.RemoteAddress);
+
             Socket.Close();
         }
         catch (ObjectDisposedException)
@@ -132,5 +132,7 @@ public partial class AuthClient
         }
 
         Logger.WriteLog(LogType.Network, $"Account ({Account.Username}, {Account.Id}) was redirected to the server: {serverId}!");
+
+        Close();
     }
 }
