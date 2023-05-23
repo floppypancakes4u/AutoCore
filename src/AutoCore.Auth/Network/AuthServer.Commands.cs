@@ -48,7 +48,8 @@ public partial class AuthServer
                 Email = email,
                 Username = userName,
                 Password = Account.Hash(password ?? string.Empty, salt),
-                Salt = salt
+                Salt = salt,
+                JoinDate = DateTime.Now
             });
             context.SaveChanges();
             
