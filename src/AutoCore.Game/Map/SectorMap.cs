@@ -65,5 +65,11 @@ public class SectorMap
 
         Objects.Remove(clonedObject.ObjectId);
     }
+
+    public IEnumerable<GhostObject> ObjectsInRange(GhostObject scopeObject)
+    {
+        // TODO: proper space partitioning, select entities based on distance!
+
+        return Objects.Select(p => p.Value.Ghost).Where(g => g != null);
     }
 }

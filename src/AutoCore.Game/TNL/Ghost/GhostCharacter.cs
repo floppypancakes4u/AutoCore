@@ -142,5 +142,7 @@ public class GhostCharacter : GhostObject
     public override void PerformScopeQuery(GhostConnection connection)
     {
         // TODO: get map, every entity should be in scope for now
+        foreach (var ghost in Parent.Map.ObjectsInRange(this))
+            connection.ObjectInScope(ghost);
     }
 }
