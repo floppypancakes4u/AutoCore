@@ -13,8 +13,7 @@ public class SectorMap
     public int ContinentId { get; }
     public MapData MapData { get; private set; }
     public ContinentObject ContinentObject => MapData.ContinentObject;
-    public Dictionary<TFID, ClonedObjectBase> LocalObjects { get; } = new();
-    public Dictionary<TFID, GhostObject> GhostObjects { get; } = new();
+    public Dictionary<TFID, ClonedObjectBase> Objects { get; } = new();
 
     public SectorMap(int continentId)
     {
@@ -50,11 +49,21 @@ public class SectorMap
         packet.WeatherUpdateSize = 0;
     }
 
-    public void AddLocalObject(ClonedObjectBase clonedObjectBase)
+    public void EnterMap(ClonedObjectBase clonedObject)
     {
-        if (LocalObjects.ContainsKey(clonedObjectBase.ObjectId))
-            throw new Exception($"Local object {clonedObjectBase.ObjectId} already exists!");
+        if (Objects.ContainsKey(clonedObject.ObjectId))
+            Objects.Remove(clonedObject.ObjectId); // TEMP
+        //    throw new InvalidOperationException("This object is already on the map!");
 
-        LocalObjects.Add(clonedObjectBase.ObjectId, clonedObjectBase);
+        Objects.Add(clonedObject.ObjectId, clonedObject);
+    }
+
+    public void LeaveMap(ClonedObjectBase clonedObject)
+    {
+        if (!Objects.ContainsKey(clonedObject.ObjectId))
+            throw new InvalidOperationException("This object is not on the map!");
+
+        Objects.Remove(clonedObject.ObjectId);
+    }
     }
 }

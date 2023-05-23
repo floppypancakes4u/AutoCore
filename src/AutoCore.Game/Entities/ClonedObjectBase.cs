@@ -159,7 +159,17 @@ public abstract class ClonedObjectBase
 
         if (oldMap != map)
         {
+            if (oldMap != null)
+            {
+                oldMap.LeaveMap(this);
+            }
+
             // might need to TODO later
+        }
+
+        if (Map != null)
+        {
+            Map.EnterMap(this);
         }
     }
 

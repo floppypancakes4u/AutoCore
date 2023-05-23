@@ -10,6 +10,7 @@ namespace AutoCore.Game.TNL;
 
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.Constants;
+using AutoCore.Game.Entities;
 using AutoCore.Game.Extensions;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Packets;
@@ -27,7 +28,7 @@ public partial class TNLConnection : GhostConnection
     private ushort FragmentCounter { get; set; } = 1;
 
     public Account Account { get; set; }
-    //public Character CurrentCharacter { get; set; }
+    public Character CurrentCharacter { get; set; }
 
     private SFragmentData FragmentGuaranteed { get; } = new();
     private SFragmentData FragmentNonGuaranteed { get; } = new();
@@ -440,7 +441,21 @@ public partial class TNLConnection : GhostConnection
             ActivateGhosting();
         }
 
-        Logger.WriteLog(LogType.Network, "Client ({1}) connected from {0}", GetNetAddressString(), PlayerCoid);
+        Logger.WriteLog(LogType.Network, $"Client ({PlayerCoid}) connected from {GetNetAddressString()}");
+    }
+
+    public override void OnConnectionTerminated(TerminationReason reason, string reasonString)
+    {
+        if (CurrentCharacter != null)
+        {
+            CurrentCharacter.SetMap(null);
+            CurrentCharacter.CurrentVehicle.SetMap(null);
+            CurrentCharacter.ClearGhost();
+            CurrentCharacter.CurrentVehicle.ClearGhost();
+            CurrentCharacter = null;
+        }
+
+        Logger.WriteLog(LogType.Network, $"Client ({PlayerCoid}) disconnected from {GetNetAddressString()}");
     }
 
     public NetObject GetGhost() => GetScopeObject();

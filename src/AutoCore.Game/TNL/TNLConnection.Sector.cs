@@ -14,15 +14,15 @@ public partial class TNLConnection
         // TODO: validate security key with info received from communicator or DB value or something...
         using var context = new CharContext();
 
-        var character = ObjectManager.Instance.GetOrLoadCharacter(packet.CharacterCoid, context);
-        if (character == null)
+        CurrentCharacter = ObjectManager.Instance.GetOrLoadCharacter(packet.CharacterCoid, context);
+        if (CurrentCharacter == null)
         {
             Disconnect("Invalid character");
 
             return;
         }
 
-        if (!LoginManager.Instance.LoginToSector(this, character.AccountId))
+        if (!LoginManager.Instance.LoginToSector(this, CurrentCharacter.AccountId))
         {
             Disconnect("Invalid Username or password!");
 
@@ -31,10 +31,10 @@ public partial class TNLConnection
 
         var mapInfoPacket = new MapInfoPacket();
 
-        var map = MapManager.Instance.GetMap(character.LastTownId);
+        var map = MapManager.Instance.GetMap(CurrentCharacter.LastTownId);
 
-        character.SetMap(map);
-        character.CurrentVehicle.SetMap(map);
+        CurrentCharacter.SetMap(map);
+        CurrentCharacter.CurrentVehicle.SetMap(map);
 
         map.Fill(mapInfoPacket);
 
