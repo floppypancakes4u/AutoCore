@@ -85,6 +85,7 @@ public partial class TNLConnection
         if (character.CurrentVehicle.Ghost == null)
             character.CurrentVehicle.CreateGhost();
 
+        ObjectLocalScopeAlways(character.Ghost);
         ObjectLocalScopeAlways(character.CurrentVehicle.Ghost);
 
         // TODO: check if these packets are not sent, will the objects appear?
