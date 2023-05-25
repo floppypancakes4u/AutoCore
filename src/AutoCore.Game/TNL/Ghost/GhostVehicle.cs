@@ -5,12 +5,10 @@ using TNL.Utils;
 namespace AutoCore.Game.TNL.Ghost;
 
 using AutoCore.Game.Entities;
-using AutoCore.Game.Structures;
 
 public class GhostVehicle : GhostObject
 {
     private static NetClassRepInstance<GhostVehicle> _dynClassRep;
-    private static ulong[] WeaponBits { get; } = new ulong[3] { FrontWeaponMask, TurretWeaponMask, RearWeaponMask };
 
     public const ulong AttributeMask    = 0x0000200000ul;
     public const ulong ClanMask         = 0x0000400000ul;
@@ -148,7 +146,7 @@ public class GhostVehicle : GhostObject
                 stream.WriteFlag(owner.ObjectId.Global); // CurrentOwner global
                 stream.WriteInt((uint)owner.CBID, 20); // CurrentOwner CBID
 
-                var characterOwner = owner as Character;
+                var characterOwner = owner.GetAsCharacter();
 
                 if (stream.WriteFlag(characterOwner != null))
                 {
@@ -196,7 +194,7 @@ public class GhostVehicle : GhostObject
             if (stream.WriteFlag((updateMask & SkillsMask) != 0))
             {
                 if (stream.WriteFlag(false)) // Has Owner Skills
-                    PackSkills(stream, null); // Owner skills
+                    PackSkills(stream, owner);
 
                 PackSkills(stream, parentVehicle);
             }
@@ -204,46 +202,57 @@ public class GhostVehicle : GhostObject
 
         if (stream.WriteFlag((updateMask & WheelSetMask) != 0))
         {
-            stream.WriteInt(0, 20); // WheelSet CBID
-            stream.Write((long)0); // WheelSet coid
-            stream.WriteFlag(false); // WheelSet coid global
+            stream.WriteInt((uint)parentVehicle.WheelSet.CBID, 20);
+            stream.Write(parentVehicle.WheelSet.ObjectId.Coid);
+            stream.WriteFlag(parentVehicle.WheelSet.ObjectId.Global);
         }
 
-        for (var i = 0; i < WeaponBits.Length; ++i)
+        if (stream.WriteFlag((updateMask & FrontWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponFront != null))
         {
-            if (stream.WriteFlag((updateMask & WeaponBits[i]) != 0) && stream.WriteFlag(false)) // TODO
-            {
-                stream.WriteInt(0, 20); // Weapon[i].CBID
-                stream.Write((long)0); // Weapon[i].Coid
-                stream.WriteFlag(false); // Weapon[i].CoidGlobal
-            }
+            stream.WriteInt((uint)parentVehicle.WeaponFront.CBID, 20);
+            stream.Write(parentVehicle.WeaponFront.ObjectId.Coid);
+            stream.WriteFlag(parentVehicle.WeaponFront.ObjectId.Global);
         }
 
-        if (stream.WriteFlag((updateMask & MeleeWeaponMask) != 0) && stream.WriteFlag(false)) // TODO
+        if (stream.WriteFlag((updateMask & TurretWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponTurret != null))
         {
-            stream.WriteInt(0, 20); // WeaponMeelee CBID
-            stream.Write((long)0); // WeaponMeelee Coid
-            stream.WriteFlag(false); // WeaponMeelee Coid global
+            stream.WriteInt((uint)parentVehicle.WeaponTurret.CBID, 20);
+            stream.Write(parentVehicle.WeaponTurret.ObjectId.Coid);
+            stream.WriteFlag(parentVehicle.WeaponTurret.ObjectId.Global);
         }
 
-        if (stream.WriteFlag((updateMask & OrnamentMask) != 0) && stream.WriteFlag(false)) // TODO
+        if (stream.WriteFlag((updateMask & RearWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponRear != null))
         {
-            stream.WriteInt(0, 20); // Ornament CBID
-            stream.Write((long)0); // Ornament Coid
-            stream.WriteFlag(false); // Ornament Coid global
+            stream.WriteInt((uint)parentVehicle.WeaponRear.CBID, 20);
+            stream.Write(parentVehicle.WeaponRear.ObjectId.Coid);
+            stream.WriteFlag(parentVehicle.WeaponRear.ObjectId.Global);
         }
 
-        if (stream.WriteFlag((updateMask & ChangeArmor) != 0) && stream.WriteFlag(false)) // TODO
+        if (stream.WriteFlag((updateMask & MeleeWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponRear != null))
         {
-            stream.WriteInt(0, 20); // Armor CBID
-            stream.Write((long)0); // Armor Coid
-            stream.WriteFlag(false); // Armor Coid global
-            stream.WriteBits(16, BitConverter.GetBytes(0)); // Armor[0]
-            stream.WriteBits(16, BitConverter.GetBytes(0)); // Armor[1]
-            stream.WriteBits(16, BitConverter.GetBytes(0)); // Armor[2]
-            stream.WriteBits(16, BitConverter.GetBytes(0)); // Armor[3]
-            stream.WriteBits(16, BitConverter.GetBytes(0)); // Armor[4]
-            stream.WriteBits(16, BitConverter.GetBytes(0)); // Armor[5]
+            stream.WriteInt((uint)parentVehicle.WeaponMelee.CBID, 20);
+            stream.Write(parentVehicle.WeaponMelee.ObjectId.Coid);
+            stream.WriteFlag(parentVehicle.WeaponMelee.ObjectId.Global);
+        }
+
+        if (stream.WriteFlag((updateMask & OrnamentMask) != 0) && stream.WriteFlag(parentVehicle.Ornament != null))
+        {
+            stream.WriteInt((uint)parentVehicle.Ornament.CBID, 20);
+            stream.Write(parentVehicle.Ornament.ObjectId.Coid);
+            stream.WriteFlag(parentVehicle.Ornament.ObjectId.Global);
+        }
+
+        if (stream.WriteFlag((updateMask & ChangeArmor) != 0) && stream.WriteFlag(parentVehicle.Armor != null)) // TODO
+        {
+            stream.WriteInt((uint)parentVehicle.Armor.CBID, 20);
+            stream.Write(parentVehicle.Armor.ObjectId.Coid);
+            stream.WriteFlag(parentVehicle.Armor.ObjectId.Global);
+            stream.Write(parentVehicle.Armor.CloneBaseArmor.ArmorSpecific.Resistances.Damage[0]);
+            stream.Write(parentVehicle.Armor.CloneBaseArmor.ArmorSpecific.Resistances.Damage[1]);
+            stream.Write(parentVehicle.Armor.CloneBaseArmor.ArmorSpecific.Resistances.Damage[2]);
+            stream.Write(parentVehicle.Armor.CloneBaseArmor.ArmorSpecific.Resistances.Damage[3]);
+            stream.Write(parentVehicle.Armor.CloneBaseArmor.ArmorSpecific.Resistances.Damage[4]);
+            stream.Write(parentVehicle.Armor.CloneBaseArmor.ArmorSpecific.Resistances.Damage[5]);
         }
 
         if (stream.WriteFlag((updateMask & GMMask) != 0 && false)) // TODO
