@@ -5,7 +5,6 @@ using TNL.Utils;
 namespace AutoCore.Game.TNL.Ghost;
 
 using AutoCore.Game.Entities;
-using AutoCore.Game.Structures;
 using AutoCore.Game.Packets.Sector;
 
 public enum GhostType
@@ -31,7 +30,6 @@ public class GhostObject : NetObject
     public const ulong TokenMask     = 0x100ul;
 
     protected ClonedObjectBase? Parent { get; set; }
-    protected bool WaitingForParent { get; set; }
     protected float UpdatePriorityScalar { get; set; }
     protected object MsgCreate { get; set; }
     protected object MsgCreateOwner { get; set; }
@@ -48,7 +46,6 @@ public class GhostObject : NetObject
 
     public GhostObject()
     {
-        WaitingForParent = true;
         UpdatePriorityScalar = 0.1f;
         NetFlags = new();
         NetFlags.Set((uint)NetFlag.Ghostable);
@@ -61,7 +58,6 @@ public class GhostObject : NetObject
 
     public virtual void SetParent(ClonedObjectBase parent)
     {
-        WaitingForParent = false;
         Parent = parent;
     }
 
@@ -122,29 +118,6 @@ public class GhostObject : NetObject
         stream.WriteBits(16, BitConverter.GetBytes(bareTeamFaction));
     }
 
-    public void UnpackCommon(BitStream stream, object msgCreate)
-    {
-        throw new NotSupportedException();
-        /*var arr = new byte[8];
-
-        stream.ReadBits(64, arr);
-        stream.Read(out bool global);
-
-        Guid.Coid = BitConverter.ToInt64(arr, 0);
-        Guid.Global = global;
-
-        var cbid = stream.ReadInt(20);
-        var maxHp = stream.ReadInt(18);
-
-        stream.ReadBits(16, arr);
-
-        var faction = BitConverter.ToInt16(arr, 0);
-
-        stream.ReadBits(16, arr);
-
-        var teamFaction = BitConverter.ToInt16(arr, 0);*/
-    }
-
     public void PackSingleSkill(BitStream stream, CreateSkillHeartbeat skill, int size, int skillTargetType)
     {
         stream.WriteInt(skill.SkillId, 14);
@@ -175,32 +148,9 @@ public class GhostObject : NetObject
         //TODO: write the remaining data (subclasses of CreateSkillHeartbeat) as is to the stream
     }
 
-    public void UnpackSingleSkill(BitStream stream, object skill, int size)
-    {
-        throw new NotSupportedException();
-    }
-
     public override void UnpackUpdate(GhostConnection connection, BitStream stream)
     {
         throw new NotSupportedException();
-        /*var temp = new byte[8];
-
-        if (PIsInitialUpdate)
-        {
-            Guid.Global = stream.ReadFlag();
-
-            if (Guid.Global)
-            {
-                stream.ReadBits(0x40, temp);
-
-                Guid.Coid = BitConverter.ToInt64(temp);
-            }
-            else
-            {
-                // Create packet?
-                Guid.Coid = stream.ReadInt(20);
-            }
-        }*/
     }
 
     public override ulong PackUpdate(GhostConnection connection, ulong updateMask, BitStream stream)
@@ -270,22 +220,6 @@ public class GhostObject : NetObject
         }
 
         return 0UL;
-    }
-
-    public int GetCreatePacketSize(int cbidObject)
-    {
-        return 0;
-    }
-
-    public void UnpackSkills(BitStream stream, bool isOwner)
-    {
-        throw new NotSupportedException();
-    }
-
-    public object MallocCreatePacket(int cbidObject, out int size)
-    {
-        size = 0;
-        return null;
     }
 
     public void PackSkills(BitStream stream, ClonedObjectBase pBase)

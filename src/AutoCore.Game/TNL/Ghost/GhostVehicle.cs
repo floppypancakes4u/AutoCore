@@ -31,20 +31,6 @@ public class GhostVehicle : GhostObject
     public const ulong MeleeWeaponMask  = 0x2000000000ul;
     public const ulong OrnamentMask     = 0x4000000000ul;
 
-    public byte ArmorFlags { get; set; }
-    public int MaxShields { get; set; }
-    public int CbidPet { get; set; } = -1;
-    public int MaxHp { get; set; }
-    public int CurrHp { get; set; }
-    public int Combat { get; set; }
-    public int Perception { get; set; }
-    public int Tech { get; set; }
-    public int Theory { get; set; }
-    public string VehicleName { get; set; } = string.Empty;
-    public string ClanName { get; set; } = string.Empty;
-    public int ClanId { get; set; } = -1;
-    public int ClanRank { get; set; } = -1;
-
     public override NetClassRep GetClassRep()
     {
         return _dynClassRep;
@@ -382,20 +368,5 @@ public class GhostVehicle : GhostObject
         }
 
         return ret;
-    }
-
-    public override void UnpackUpdate(GhostConnection connection, BitStream stream)
-    {
-
-    }
-
-    public void AddEquip(object createMsg, TFID id, int packetSize)
-    {
-
-    }
-
-    public void AddEquip2(object createMsg, TFID id, int packetSize)
-    {
-
     }
 }

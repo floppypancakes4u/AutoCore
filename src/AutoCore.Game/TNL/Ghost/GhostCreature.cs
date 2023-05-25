@@ -132,9 +132,4 @@ public class GhostCreature : GhostObject
 
         return 0UL;
     }
-
-    public override void UnpackUpdate(GhostConnection connection, BitStream stream)
-    {
-
-    }
 }
