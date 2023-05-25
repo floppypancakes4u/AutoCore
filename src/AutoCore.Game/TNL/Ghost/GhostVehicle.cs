@@ -295,29 +295,21 @@ public class GhostVehicle : GhostObject
             stream.Write(parentVehicle.Rotation.Z);
             stream.Write(parentVehicle.Rotation.W);
 
-            var linearVelocityX = 0.0f;
-            var linearVelocityY = 0.0f;
-            var linearVelocityZ = 0.0f;
+            stream.Write(parentVehicle.Velocity.X);
+            stream.Write(parentVehicle.Velocity.Y);
+            stream.Write(parentVehicle.Velocity.Z);
 
-            stream.Write(linearVelocityX);
-            stream.Write(linearVelocityY);
-            stream.Write(linearVelocityZ);
+            stream.Write(parentVehicle.AngularVelocity.X);
+            stream.Write(parentVehicle.AngularVelocity.Y);
+            stream.Write(parentVehicle.AngularVelocity.Z);
 
-            var angularVelocityX = 0.0f;
-            var angularVelocityY = 0.0f;
-            var angularVelocityZ = 0.0f;
+            stream.Write((byte)parentVehicle.VehicleFlags);
+            stream.Write(parentVehicle.Firing);
 
-            stream.Write(angularVelocityX);
-            stream.Write(angularVelocityY);
-            stream.Write(angularVelocityZ);
+            stream.WriteSignedFloat(parentVehicle.Acceleration, 6);
+            stream.WriteSignedFloat(parentVehicle.Steering, 6);
 
-            stream.WriteBits(8, BitConverter.GetBytes(0)); // TODO some flags, maybe firing too?
-            stream.WriteBits(8, BitConverter.GetBytes(0)); // TODO
-
-            stream.WriteSignedFloat(0.0f, 6); // TODO (parentVehicle.Acceleration, 6);
-            stream.WriteSignedFloat(0.0f, 6); // TODO (parentVehicle.Steering, 6);
-
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // TODO
+            stream.Write(parentVehicle.WantedTurretDirection);
         }
 
         if (stream.WriteFlag((updateMask & TargetMask) != 0))

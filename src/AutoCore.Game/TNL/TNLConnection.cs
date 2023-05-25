@@ -248,6 +248,14 @@ public partial class TNLConnection : GhostConnection
                     ChatManager.Instance.HandleBroadcast(this, reader);
                     break;
 
+                case GameOpcode.CreatureMoved:
+                    HandleCreatureMoved(reader);
+                    break;
+
+                case GameOpcode.VehicleMoved:
+                    HandleVehicleMoved(reader);
+                    break;
+
                 default:
                     Logger.WriteLog(LogType.Error, "Unhandled Opcode: {0}", gameOpcode);
                     break;

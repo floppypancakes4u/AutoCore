@@ -99,21 +99,13 @@ public class GhostCreature : GhostObject
             stream.Write(creature.Rotation.Z);
             stream.Write(creature.Rotation.W);
 
-            var linearVelocityX = 0.0f;
-            var linearVelocityY = 0.0f;
-            var linearVelocityZ = 0.0f;
-
-            stream.Write(linearVelocityX);
-            stream.Write(linearVelocityY);
-            stream.Write(linearVelocityZ);
+            stream.Write(creature.Velocity.X);
+            stream.Write(creature.Velocity.Y);
+            stream.Write(creature.Velocity.Z);
             
-            var moveToTargetX = 0.0f;
-            var moveToTargetY = 0.0f;
-            var moveToTargetZ = 0.0f;
-
-            stream.Write(moveToTargetX);
-            stream.Write(moveToTargetY);
-            stream.Write(moveToTargetZ);
+            stream.Write(creature.TargetPosition.X);
+            stream.Write(creature.TargetPosition.Y);
+            stream.Write(creature.TargetPosition.Z);
         }
 
         if (stream.WriteFlag((updateMask & TargetMask) != 0))

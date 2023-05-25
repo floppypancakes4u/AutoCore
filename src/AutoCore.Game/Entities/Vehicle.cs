@@ -4,6 +4,7 @@ namespace AutoCore.Game.Entities;
 
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
+using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
@@ -29,6 +30,14 @@ public class Vehicle : SimpleObject
     public Weapon WeaponTurret { get; private set; }
     public Weapon WeaponRear { get; private set; }
     public WheelSet WheelSet { get; private set; }
+    public Vector3 Velocity { get; private set; }
+    public Vector3 AngularVelocity { get; private set; }
+    public Vector3 TargetPosition { get; private set; }
+    public float Acceleration { get; set; }
+    public float Steering { get; set; }
+    public float WantedTurretDirection { get; set; }
+    public byte Firing { get; set; }
+    public VehicleMovedFlags VehicleFlags { get; set; }
     #endregion
 
     public Vehicle()
@@ -264,5 +273,51 @@ public class Vehicle : SimpleObject
         DBData.RotationY = Rotation.Y;
         DBData.RotationZ = Rotation.Z;
         DBData.RotationW = Rotation.W;
+    }
+
+    public void HandleMovement(VehicleMovedPacket packet)
+    {
+        if (Ghost == null)
+            return;
+
+        if (packet.ObjectId != ObjectId)
+            throw new Exception("WTF? Someone else moves me?");
+
+        // Update position
+        Position = packet.Location;
+        Rotation = packet.Rotation;
+        Velocity = packet.Velocity;
+        AngularVelocity = packet.AngularVelocity;
+        TargetPosition = packet.TargetPosition;
+        Acceleration = packet.Acceleration;
+        Steering = packet.Steering;
+        WantedTurretDirection = packet.TurretDirection;
+        VehicleFlags = packet.VehicleFlags;
+        Firing = packet.Firing;
+
+        Ghost.SetMaskBits(GhostObject.PositionMask);
+
+        // Update target
+        if (Target != null)
+        {
+            if (packet.Target.Coid == -1)
+            {
+                Target = null;
+
+                Ghost.SetMaskBits(GhostObject.TargetMask);
+            }
+            else if (packet.Target != Target.ObjectId)
+            {
+                Target = ObjectManager.Instance.GetObject(packet.Target);
+
+                Ghost.SetMaskBits(GhostObject.TargetMask);
+            }
+        }
+        else if (packet.Target.Coid != -1)
+        {
+            Target = ObjectManager.Instance.GetObject(packet.Target);
+
+            Ghost.SetMaskBits(GhostObject.TargetMask);
+        }
     }
 }

@@ -98,4 +98,20 @@ public partial class TNLConnection
         SendGamePacket(vehiclePacket);
         SendGamePacket(charPacket);
     }
+
+    private void HandleCreatureMoved(BinaryReader reader)
+    {
+        var packet = new CreatureMovedPacket();
+        packet.Read(reader);
+
+        CurrentCharacter.HandleMovement(packet);
+    }
+
+    private void HandleVehicleMoved(BinaryReader reader)
+    {
+        var packet = new VehicleMovedPacket();
+        packet.Read(reader);
+
+        CurrentCharacter.CurrentVehicle.HandleMovement(packet);
+    }
 }
