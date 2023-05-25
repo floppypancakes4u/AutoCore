@@ -2,6 +2,7 @@
 
 using AutoCore.Database.Char;
 using AutoCore.Game.Entities;
+using AutoCore.Game.Structures;
 using AutoCore.Utils.Memory;
 
 public class ObjectManager : Singleton<ObjectManager>
@@ -51,6 +52,16 @@ public class ObjectManager : Singleton<ObjectManager>
             return null;
 
         return character;
+    }
+
+    public ClonedObjectBase? GetObject(TFID fid) => GetObject(fid.Coid, fid.Global);
+
+    public ClonedObjectBase? GetObject(long coid, bool global)
+    {
+        if (Objects.TryGetValue(coid, out var obj))
+            return obj;
+
+        return null;
     }
 
     public Character? GetCharacter(long coid)
