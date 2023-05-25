@@ -349,7 +349,7 @@ public class GhostVehicle : GhostObject
             stream.WriteBits(32, BitConverter.GetBytes(0)); // Shield
         }
 
-        if (stream.WriteFlag((updateMask & PowerMask) != 0) && false) // TODO
+        if (stream.WriteFlag((updateMask & PowerMask) != 0)) // TODO
         {
             stream.WriteBits(32, BitConverter.GetBytes(0)); // Power
         }
