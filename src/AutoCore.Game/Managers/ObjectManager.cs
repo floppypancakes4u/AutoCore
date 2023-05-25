@@ -72,6 +72,11 @@ public class ObjectManager : Singleton<ObjectManager>
         return null;
     }
 
+    public Character? GetCharacterByName(string name)
+    {
+        return Objects.Values.Where(o => o is Character objChar && objChar.Name == name).Select(o => o as Character).FirstOrDefault();
+    }
+
     public Vehicle? GetVehicle(long coid)
     {
         if (Objects.TryGetValue(coid, out var obj) && obj is Vehicle vehicle)
