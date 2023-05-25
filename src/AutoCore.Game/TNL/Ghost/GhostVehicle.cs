@@ -77,7 +77,7 @@ public class GhostVehicle : GhostObject
             stream.Write(parentVehicle.PrimaryColor);
             stream.Write(parentVehicle.SecondaryColor);
 
-            stream.WriteFlag(false); // IsActive
+            stream.WriteFlag(!Parent.Map.MapData.ContinentObject.IsTown); // IsActive
 
             stream.Write(parentVehicle.Trim);
 
