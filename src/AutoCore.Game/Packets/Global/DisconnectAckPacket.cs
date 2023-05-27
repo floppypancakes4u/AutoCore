@@ -13,6 +13,5 @@ public class DisconnectAckPacket : BasePacket
 
     public override void Write(BinaryWriter writer)
     {
-        throw new NotSupportedException();
     }
 }
