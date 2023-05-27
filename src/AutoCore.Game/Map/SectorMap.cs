@@ -3,6 +3,7 @@
 using AutoCore.Database.World.Models;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
+using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
@@ -23,7 +24,38 @@ public class SectorMap
         MapData = AssetManager.Instance.GetMapData(ContinentId);
         LocalCoidCounter = MapData.HighestCoid + 1;
 
+        InitializeLocalObjects();
         // TODO: create local objects from MapData's templates
+    }
+
+    private void InitializeLocalObjects()
+    {
+        // TODO: some objects are only needed on Sector? Global? Both?
+
+        foreach (var template in MapData.Templates)
+        {
+            var obj = template.Value.Create();
+            if (obj == null)
+                continue;
+
+            obj.LoadCloneBase(template.Value.CBID);
+            obj.SetCoid(template.Value.COID, false);
+            obj.Faction = template.Value.Faction;
+            obj.Layer = template.Value.Layer;
+            obj.SetMap(this);
+
+            // TODO: do we need ghosts of local objects at all?
+            if (template.Value is GraphicsObjectTemplate)
+            {
+                // TODO: most likely not all object will need a ghost!
+                //obj.CreateGhost();
+            }
+
+            if (obj is SpawnPoint sp)
+            {
+                sp.Spawn();
+            }
+        }
     }
 
     public void Fill(MapInfoPacket packet)
