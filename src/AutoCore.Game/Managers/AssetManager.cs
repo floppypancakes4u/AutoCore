@@ -97,6 +97,7 @@ public class AssetManager : Singleton<AssetManager>
 
     #region GLM
     public BinaryReader GetFileReaderFromGLMs(string fileName) => GLMLoader.GetReader(fileName);
+    public MemoryStream GetFileStreamFromGLMs(string fileName) => GLMLoader.GetStream(fileName);
     public bool HasFileInGLMs(string fileName) => GLMLoader.CanGetReader(fileName);
     #endregion
 
@@ -123,7 +124,6 @@ public class AssetManager : Singleton<AssetManager>
         return null;
     }
 
-    #region Global only
     public ConfigNewCharacter GetConfigNewCharacterFor(byte characterRace, byte characterClass)
     {
         if (ServerType != ServerType.Global && ServerType != ServerType.Both)
@@ -134,9 +134,5 @@ public class AssetManager : Singleton<AssetManager>
 
         return null;
     }
-    #endregion
-
-    #region Sector only
-    #endregion
     #endregion
 }
