@@ -98,7 +98,7 @@ public class LoginManager : Singleton<LoginManager>
             {
                 Id = accountId,
                 Name = "",
-                Level = 0,
+                Level = 10,
                 FirstFlags1 = 0,
                 FirstFlags2 = 0,
                 FirstFlags3 = 0,
