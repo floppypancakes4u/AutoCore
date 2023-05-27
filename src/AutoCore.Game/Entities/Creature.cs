@@ -12,6 +12,7 @@ public class Creature : SimpleObject
     public Vector3 Velocity { get; private set; }
     public Vector3 AngularVelocity { get; private set; }
     public Vector3 TargetPosition { get; private set; }
+    public long SpawnOwner { get; set; }
 
     public Creature()
         : base(GraphicsObjectType.GraphicsPhysics)

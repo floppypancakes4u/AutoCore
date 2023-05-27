@@ -53,11 +53,8 @@ public class GhostCreature : GhostObject
                 stream.WriteFlag(false); // CreatureSummoner TFID Global
             }
 
-            if (stream.WriteFlag(false)) // CoidSpawnOwner != -1
-            {
-                stream.WriteInt(0, 32); // CoidSpawnOwner
-                stream.WriteInt(0, 32);
-            }
+            if (stream.WriteFlag(creature.SpawnOwner != -1))
+                stream.Write(creature.SpawnOwner);
 
             stream.WriteFlag(false); // DoesntCountAsSummon
             stream.WriteBits(8, BitConverter.GetBytes(0)); // Level
