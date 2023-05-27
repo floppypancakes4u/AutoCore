@@ -1,13 +1,32 @@
-﻿namespace AutoCore.Game.Mission;
+﻿using System.Diagnostics;
+using System.Xml.Linq;
 
+namespace AutoCore.Game.Mission;
+
+using AutoCore.Game.Managers;
 using AutoCore.Utils.Extensions;
+
+public enum MissionType
+{
+    NonRandom = -1,
+    Destroy = 0,
+    Defend = 1,
+    Escort = 2,
+    Race = 3,
+    Sneak = 4,
+    Spy = 5,
+    Deliver = 6,
+    Collect = 7,
+    Pickup = 8,
+    Craft = 9
+}
 
 public class Mission
 {
     #region Template Data
     public int Achievement { get; set; }
     public short ActiveObjectiveOverride { get; set; }
-    public short AutoAssing { get; set; }
+    public short AutoAssign { get; set; }
     public int Continent { get; set; }
     public int Discipline { get; set; }
     public int DisciplineValue { get; set; }
@@ -81,7 +100,7 @@ public class Mission
         mission.ItemValue = reader.ReadConstArray(4, reader.ReadSingle);
         mission.ItemIsKit = reader.ReadConstArray(4, reader.ReadInt16);
         mission.ItemQuantity = reader.ReadConstArray(4, reader.ReadInt32);
-        mission.AutoAssing = reader.ReadInt16();
+        mission.AutoAssign = reader.ReadInt16();
         mission.ActiveObjectiveOverride = reader.ReadInt16();
         mission.Continent = reader.ReadInt32();
         mission.Achievement = reader.ReadInt32();
@@ -103,12 +122,9 @@ public class Mission
 
         reader.BaseStream.Position += 7;
 
-        /*Do we need this?
         XElement element = null;
 
-        var stream = AssetManager.GetStreamByName($"{mi.Name}.xml", "missions.glm") ??
-                     AssetManager.GetStreamByName($"{mi.Name}.xml", "misc.glm");
-
+        var stream = AssetManager.Instance.GetFileStreamFromGLMs($"{mission.Name}.xml");
         if (stream != null)
         {
             using (stream)
@@ -130,12 +146,12 @@ public class Mission
                     mission.CoreMission = (string)element.Element("CoreMission") != "0";
                 }
             }
-        }*/
+        }
 
         var numOfObjective = reader.ReadInt32();
         for (var i = 0; i < numOfObjective; ++i)
         {
-            var obj = MissionObjective.ReadNew(reader, mission/*, element*/);
+            var obj = MissionObjective.ReadNew(reader, mission, element);
             mission.Objectives.Add(obj.Sequence, obj);
         }
 

@@ -1,5 +1,9 @@
-﻿namespace AutoCore.Game.Mission;
+﻿using System.Xml.Linq;
 
+namespace AutoCore.Game.Mission;
+
+using AutoCore.Game.Mission.Requirements;
+using AutoCore.Utils;
 using AutoCore.Utils.Extensions;
 
 public class MissionObjective
@@ -24,7 +28,7 @@ public class MissionObjective
     public float XPScaler { get; private set; }
 
     #region Extra Data
-    //public List<ObjectiveRequirement> Requirements { get; private set; }
+    public List<ObjectiveRequirement> Requirements { get; private set; }
     public Mission Owner { get; private set; }
     public string ExternalMapText { get; private set; }
     public string DefaultMapText { get; private set; }
@@ -32,7 +36,7 @@ public class MissionObjective
     public int CompleteCount { get; private set; }
     #endregion
 
-    public static MissionObjective ReadNew(BinaryReader reader, Mission owner/*, XElement elem*/)
+    public static MissionObjective ReadNew(BinaryReader reader, Mission owner, XElement elem)
     {
         var missionObjective = new MissionObjective
         {
@@ -40,7 +44,7 @@ public class MissionObjective
             ObjectiveId = reader.ReadInt32(),
             Sequence = reader.ReadByte(),
             Owner = owner,
-            //Requirements = new List<ObjectiveRequirement>(),
+            Requirements = new List<ObjectiveRequirement>(),
         };
 
         reader.BaseStream.Position += 1;
@@ -69,20 +73,23 @@ public class MissionObjective
         missionObjective.XPBalanceScaler = reader.ReadSingle();
         missionObjective.CreditScaler = reader.ReadSingle();
 
-        /*Do we need this?
-        var obj = elem?.Elements("Objective").SingleOrDefault(e => (uint)e.Attribute("sequence") == mo.Sequence);
+        var obj = elem?.Elements("Objective").SingleOrDefault(e => (uint)e.Attribute("sequence") == missionObjective.Sequence);
         if (obj == null)
-            return mo;
+        {
+            Logger.WriteLog(LogType.Debug, $"Mission ({owner.Id}, {owner.Name})'s objective {missionObjective.ObjectiveId} has no XML data?");
 
-        mo.ExternalMapText = (string)obj.Element("ExternalText");
-        mo.Title = (string)obj.Element("Title");
-        mo.DefaultMapText = (string)obj.Element("DefaultText");
+            return missionObjective;
+        }
+
+        missionObjective.ExternalMapText = (string)obj.Element("ExternalText");
+        missionObjective.Title = (string)obj.Element("Title");
+        missionObjective.DefaultMapText = (string)obj.Element("DefaultText");
         var cCountElem = obj.Element("CompleteCount");
-        mo.CompleteCount = (cCountElem == null || string.IsNullOrEmpty((string)cCountElem)) ? 0 : (int)cCountElem;
+        missionObjective.CompleteCount = (cCountElem == null || string.IsNullOrEmpty((string)cCountElem)) ? 0 : (int)cCountElem;
 
         var req = obj.Elements("Requirement").ToList();
         if (req.Any())
-            mo.Requirements.AddRange(req.Select(xElem => ObjectiveRequirement.Create(mo, xElem)).Where(requirement => requirement != null));*/
+            missionObjective.Requirements.AddRange(req.Select(xElem => ObjectiveRequirement.Create(missionObjective, xElem)).Where(requirement => requirement != null));
 
         return missionObjective;
     }
