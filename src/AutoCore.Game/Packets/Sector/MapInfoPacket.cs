@@ -2,7 +2,6 @@
 
 using AutoCore.Game.Constants;
 using AutoCore.Utils.Extensions;
-using System.Reflection.PortableExecutable;
 
 public class MapInfoPacket : BasePacket
 {
@@ -31,6 +30,7 @@ public class MapInfoPacket : BasePacket
     public float PositionZ { get; set; }
     public short WeatherUpdateSize { get; set; }
 
+    // NOTE: this is not the real layout of the packing, but it is manually packed!
     public override void Read(BinaryReader reader)
     {
         RegionId = reader.ReadInt32();
@@ -76,6 +76,7 @@ public class MapInfoPacket : BasePacket
         reader.BaseStream.Position += WeatherUpdateSize;
     }
 
+    // NOTE: this is not the real layout of the packing, but it is manually packed!
     public override void Write(BinaryWriter writer)
     {
         writer.Write(RegionId);
