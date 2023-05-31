@@ -10,7 +10,7 @@ public class TriggerTemplate : GraphicsObjectTemplate
     public float RetriggerDelay { get; set; }
     public float ActivateDelay { get; set; }
     public int ActivationCount { get; set; }
-    public byte TargetType { get; set; }
+    public TriggerTargetType TargetType { get; set; }
     public bool DoCollision { get; set; }
     public bool DoConditionals { get; set; }
     public bool ShowMapTransitionDecals { get; set; }
@@ -37,7 +37,7 @@ public class TriggerTemplate : GraphicsObjectTemplate
         RetriggerDelay = reader.ReadSingle();
         ActivateDelay = reader.ReadSingle();
         ActivationCount = reader.ReadInt32();
-        TargetType = reader.ReadByte();
+        TargetType = (TriggerTargetType)reader.ReadByte();
         DoCollision = reader.ReadBoolean();
         DoConditionals = reader.ReadBoolean();
 
@@ -67,5 +67,15 @@ public class TriggerTemplate : GraphicsObjectTemplate
 
         if (mapVersion >= 55)
             TriggerId = reader.ReadUInt32();
+    }
+
+    public override ClonedObjectBase Create()
+    {
+        return new Trigger(this)
+        {
+            Position = Location.ToVector3(),
+            Rotation = Rotation,
+            Scale = Scale
+        };
     }
 }

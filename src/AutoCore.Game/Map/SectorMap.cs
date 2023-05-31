@@ -8,6 +8,7 @@ using AutoCore.Game.Managers;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL.Ghost;
+using AutoCore.Utils;
 
 public class SectorMap
 {
@@ -16,6 +17,8 @@ public class SectorMap
     public MapData MapData { get; private set; }
     public ContinentObject ContinentObject => MapData.ContinentObject;
     public Dictionary<TFID, ClonedObjectBase> Objects { get; } = new();
+    public Dictionary<TFID, Trigger> Triggers { get; } = new();
+    public Dictionary<TFID, Reaction> Reactions { get; } = new();
 
     public SectorMap(int continentId)
     {
@@ -57,6 +60,14 @@ public class SectorMap
         }
     }
 
+    public ClonedObjectBase GetLocalObject(long coid)
+    {
+        if (Objects.TryGetValue(new TFID(coid, false), out var value))
+            return value;
+
+        return null;
+    }
+
     public void Fill(MapInfoPacket packet)
     {
         packet.RegionId = -1;
@@ -84,6 +95,12 @@ public class SectorMap
 
     public void EnterMap(ClonedObjectBase clonedObject)
     {
+        if (clonedObject is Trigger trigger)
+            Triggers.Add(trigger.ObjectId, trigger);
+
+        if (clonedObject is Reaction reaction)
+            Reactions.Add(reaction.ObjectId, reaction);
+
         if (Objects.ContainsKey(clonedObject.ObjectId))
             throw new InvalidOperationException("This object is already on the map!");
 
@@ -92,6 +109,12 @@ public class SectorMap
 
     public void LeaveMap(ClonedObjectBase clonedObject)
     {
+        if (clonedObject is Trigger trigger)
+            Triggers.Remove(trigger.ObjectId);
+
+        if (clonedObject is Reaction reaction)
+            Reactions.Remove(reaction.ObjectId);
+
         if (!Objects.ContainsKey(clonedObject.ObjectId))
             throw new InvalidOperationException("This object is not on the map!");
 
@@ -118,5 +141,53 @@ public class SectorMap
 
             return true;
         });
+    }
+
+    public void TriggerReactions(ClonedObjectBase activator, List<long> reactions)
+    {
+        var clientPacket = new GroupReactionCallPacket();
+        GroupReactionCallPacket broadcastPacket = null;
+        GroupReactionCallPacket convoyPacket = null;
+
+        foreach (var reactionCoid in reactions)
+        {
+            var foundObj = Objects.FirstOrDefault(o => o.Key.Coid == reactionCoid && !o.Key.Global);
+            if (foundObj.Value is not Reaction reaction)
+            {
+                Logger.WriteLog(LogType.Error, $"Map {MapData.ContinentObject.Id} tried to trigger reaction {reactionCoid}, but the Reaction object isn't found!");
+                continue;
+            }
+
+            if (reaction.TriggerIfPossible(activator))
+            {
+                var packet = new LogicStateChangePacket(reaction.ObjectId.Coid, activator.ObjectId, false);
+
+                clientPacket.AddPacket(packet);
+
+                if (reaction.Template.DoForAllPlayers)
+                {
+                    broadcastPacket ??= new GroupReactionCallPacket();
+                    broadcastPacket.AddPacket(packet);
+                }
+
+                if (reaction.Template.DoForConvoy)
+                {
+                    convoyPacket ??= new GroupReactionCallPacket();
+                    convoyPacket.AddPacket(packet);
+                }
+            }
+        }
+
+        activator.GetAsCharacter()?.OwningConnection.SendGamePacket(clientPacket);
+
+        if (broadcastPacket is not null)
+        {
+            // TODO: broadcast packet to map
+        }
+
+        if (convoyPacket is not null)
+        {
+            // TODO: broadcast packet to convoy
+        }
     }
 }

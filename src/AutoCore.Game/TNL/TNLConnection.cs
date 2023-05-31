@@ -485,6 +485,14 @@ public partial class TNLConnection : GhostConnection
         Logger.WriteLog(LogType.Network, $"Client ({PlayerCoid}) disconnected from {GetNetAddressString()}");
     }
 
+    public override void PrepareWritePacket()
+    {
+        base.PrepareWritePacket();
+
+        if (Ghosting && CurrentCharacter != null && CurrentCharacter.CurrentVehicle != null && CurrentCharacter.CurrentVehicle.Map != null)
+            TriggerManager.Instance.CheckTriggersFor(CurrentCharacter?.CurrentVehicle);
+    }
+
     public NetObject GetGhost() => GetScopeObject();
 
     public int GetTimeSinceLastMessage() => Interface.GetCurrentTime() - LastPacketRecvTime;

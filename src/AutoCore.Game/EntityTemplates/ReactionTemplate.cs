@@ -1,6 +1,7 @@
 ﻿namespace AutoCore.Game.EntityTemplates;
 
 using AutoCore.Game.Constants;
+using AutoCore.Game.Entities;
 using AutoCore.Game.Structures;
 using AutoCore.Utils.Extensions;
 
@@ -100,6 +101,11 @@ public class ReactionTemplate : ObjectTemplate
                     reader.BaseStream.Position += size;
             }
         }
+    }
+
+    public override ClonedObjectBase Create()
+    {
+        return new Reaction(this);
     }
 
     public class ReactionText

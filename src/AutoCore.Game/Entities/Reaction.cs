@@ -1,4 +1,7 @@
-﻿namespace AutoCore.Game.Constants;
+﻿namespace AutoCore.Game.Entities;
+
+using AutoCore.Game.EntityTemplates;
+using AutoCore.Utils;
 
 public enum ReactionType : byte
 {
@@ -123,4 +126,55 @@ public enum ReactionTextTargetType
     Client = 0,
     Convoy = 1,
     Global = 2
+}
+
+public class Reaction : ClonedObjectBase
+{
+    public ReactionTemplate Template { get; }
+
+    public Reaction(ReactionTemplate template)
+    {
+        Template = template;
+    }
+
+    public bool CanTrigger(ClonedObjectBase activator)
+    {
+        if (activator is null || activator.Map is null)
+            return false;
+
+        if (Template.Conditions.Count > 0)
+        {
+            foreach (var condition in Template.Conditions)
+            {
+                var conditionSatisfied = condition.Check(activator);
+                if (conditionSatisfied && !Template.AllConditionsNeeded)
+                    break;
+
+                if (!conditionSatisfied && Template.AllConditionsNeeded)
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    public bool TriggerIfPossible(ClonedObjectBase activator)
+    {
+        if (!CanTrigger(activator))
+            return false;
+
+        switch (Template.ReactionType)
+        {
+            //case ReactionType.TransferMap:
+            //    return false;
+
+            default:
+                Logger.WriteLog(LogType.Error, $"Unhandled reaction type: {Template.ReactionType} for reaction {Template.COID}!");
+                return true;
+        }
+    }
+
+    public override int GetCurrentHP() => 1; 
+    public override int GetMaximumHP() => 1;
+    public override int GetBareTeamFaction() => Faction;
 }
