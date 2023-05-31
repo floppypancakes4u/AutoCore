@@ -79,13 +79,13 @@ public partial class TNLConnection
             return;
         }
 
-        if (character.Ghost == null)
-            character.CreateGhost();
+        if (!Ghosting)
+            ActivateGhosting();
+
+        character.CreateGhost();
+        character.CurrentVehicle.CreateGhost();
 
         SetScopeObject(character.Ghost);
-
-        if (character.CurrentVehicle.Ghost == null)
-            character.CurrentVehicle.CreateGhost();
 
         ObjectLocalScopeAlways(character.Ghost);
         ObjectLocalScopeAlways(character.CurrentVehicle.Ghost);
