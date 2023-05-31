@@ -32,6 +32,9 @@ public class Creature : SimpleObject
 
     public override void CreateGhost()
     {
+        if (Ghost != null)
+            return;
+
         Ghost = new GhostCreature();
         Ghost.SetParent(this);
     }

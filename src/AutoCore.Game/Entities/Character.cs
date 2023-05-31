@@ -99,6 +99,9 @@ public class Character : Creature
 
     public override void CreateGhost()
     {
+        if (Ghost != null)
+            return;
+
         Ghost = new GhostCharacter();
         Ghost.SetParent(this);
     }

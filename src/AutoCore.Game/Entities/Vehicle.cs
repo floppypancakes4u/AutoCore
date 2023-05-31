@@ -150,6 +150,9 @@ public class Vehicle : SimpleObject
 
     public override void CreateGhost()
     {
+        if (Ghost != null)
+            return;
+
         Ghost = new GhostVehicle();
         Ghost.SetParent(this);
     }

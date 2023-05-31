@@ -71,6 +71,9 @@ public class SimpleObject : GraphicsObject
 
     public override void CreateGhost()
     {
+        if (Ghost != null)
+            return;
+
         Ghost = new GhostObject();
         Ghost.SetParent(this);
     }

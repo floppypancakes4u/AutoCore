@@ -145,7 +145,7 @@ public abstract class ClonedObjectBase
     public void SetGhost(GhostObject ghost)
     {
         Ghost = ghost;
-        Ghost.SetParent(this);
+        Ghost?.SetParent(this);
         //LastServerUpdate = Environment.TickCount; // TODO: linux time or what?
     }
 
