@@ -27,4 +27,11 @@ public struct Vector3
     {
         return $"Vector3(X: {X} | Y: {Y} | Z: {Z})";
     }
+
+    public float Dist(Vector3 other) => (float)Math.Sqrt(DistSq(other));
+
+    public float DistSq(Vector3 other)
+    {
+        return (X - other.X) * (X - other.X) + (Y - other.Y) * (Y - other.Y) + (Z - other.Z) * (Z - other.Z);
+    }
 }
