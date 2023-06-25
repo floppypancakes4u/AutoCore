@@ -7,6 +7,7 @@ using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL.Ghost;
+using AutoCore.Utils;
 
 public abstract class ClonedObjectBase
 {
@@ -209,6 +210,32 @@ public abstract class ClonedObjectBase
 
     public virtual void WriteToPacket(CreateSimpleObjectPacket packet)
     {
+    }
+
+    public static ClonedObjectBase? AllocateNewObjectFromCBID(int cbid)
+    {
+        var cloneBase = AssetManager.Instance.GetCloneBase(cbid);
+        if (cloneBase is null)
+            return null;
+
+        switch (cloneBase.Type)
+        {
+            case CloneBaseObjectType.Armor:
+                return new Armor();
+
+            case CloneBaseObjectType.PowerPlant:
+                return new PowerPlant();
+
+            case CloneBaseObjectType.WheelSet:
+                return new WheelSet();
+
+            case CloneBaseObjectType.Weapon:
+                return new Weapon();
+
+            default:
+                Logger.WriteLog(LogType.Error, $"Creating object of type {cloneBase.Type} is not yet supported! CBID: {cbid}");
+                return null;
+        }
     }
 
     public static int GetMoneyCBIDFromCredits(long credits)
