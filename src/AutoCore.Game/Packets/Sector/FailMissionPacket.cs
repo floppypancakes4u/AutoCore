@@ -9,11 +9,6 @@ public class FailMissionPacket : BasePacket
     public int MissionId { get; set; }
     public long CharacterCoid { get; set; }
 
-    public override void Read(BinaryReader reader)
-    {
-        throw new NotSupportedException();
-    }
-
     public override void Write(BinaryWriter writer)
     {
         writer.BaseStream.Position += 4;

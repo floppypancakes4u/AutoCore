@@ -3,8 +3,6 @@
 namespace AutoCore.Game.Packets.Sector;
 
 using AutoCore.Game.Constants;
-using AutoCore.Game.Extensions;
-using AutoCore.Game.Structures;
 
 public class GroupReactionCallPacket : BasePacket
 {
@@ -19,12 +17,6 @@ public class GroupReactionCallPacket : BasePacket
 
         Packets.Add(packet);
         return true;
-    }
-
-    // NOTE: this is not the real layout of the packing, but it is manually packed!
-    public override void Read(BinaryReader reader)
-    {
-        throw new NotSupportedException();
     }
 
     // NOTE: this is not the real layout of the packing, but it is manually packed!

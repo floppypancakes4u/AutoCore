@@ -41,11 +41,6 @@ public class CreateCharacterExtendedPacket : CreateCharacterPacket
     public long LastRespecTime { get; set; }
     public int FreeRespecs { get; set; }
 
-    public override void Read(BinaryReader reader)
-    {
-        throw new NotImplementedException();
-    }
-
     public override void Write(BinaryWriter writer)
     {
         base.Write(writer);

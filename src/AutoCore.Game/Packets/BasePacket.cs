@@ -7,6 +7,6 @@ public abstract class BasePacket : IOpcodedPacket<GameOpcode>
 {
     public abstract GameOpcode Opcode { get; }
 
-    public abstract void Read(BinaryReader reader);
-    public abstract void Write(BinaryWriter writer);
+    public virtual void Read(BinaryReader reader) => throw new NotSupportedException();
+    public virtual void Write(BinaryWriter writer) => throw new NotSupportedException();
 }

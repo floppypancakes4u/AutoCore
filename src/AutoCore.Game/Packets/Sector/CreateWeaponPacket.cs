@@ -24,11 +24,6 @@ public class CreateWeaponPacket : CreateSimpleObjectPacket
     public DamageSpecific MaximumDamage { get; set; }
     public string Name { get; set; }
 
-    public override void Read(BinaryReader reader)
-    {
-        throw new NotImplementedException();
-    }
-
     public override void Write(BinaryWriter writer)
     {
         base.Write(writer);

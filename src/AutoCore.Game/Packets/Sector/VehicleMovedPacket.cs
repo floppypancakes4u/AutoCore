@@ -34,9 +34,4 @@ public class VehicleMovedPacket : ObjectMovedPacket
         Firing = reader.ReadByte();
         Target = reader.ReadTFID();
     }
-
-    public override void Write(BinaryWriter writer)
-    {
-        throw new NotSupportedException();
-    }
 }

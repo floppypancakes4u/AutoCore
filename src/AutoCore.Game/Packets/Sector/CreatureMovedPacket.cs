@@ -16,9 +16,4 @@ public class CreatureMovedPacket : ObjectMovedPacket
 
         Target = reader.ReadTFID();
     }
-
-    public override void Write(BinaryWriter writer)
-    {
-        throw new NotSupportedException();
-    }
 }

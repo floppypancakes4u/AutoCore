@@ -22,9 +22,4 @@ public class TransferToSectorPacket : BasePacket
         writer.Write(Port);
         writer.Write(Flags);
     }
-
-    public override void Read(BinaryReader reader)
-    {
-        throw new NotSupportedException();
-    }
 }

@@ -21,9 +21,4 @@ public class LoginRequestPacket : BasePacket
         UserId = reader.ReadUInt32();
         AuthKey = reader.ReadUInt32();
     }
-
-    public override void Write(BinaryWriter writer)
-    {
-        throw new NotImplementedException();
-    }
 }

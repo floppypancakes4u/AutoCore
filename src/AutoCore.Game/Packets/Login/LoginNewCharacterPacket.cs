@@ -62,9 +62,4 @@ public class LoginNewCharacterPacket : BasePacket
         WheelsetCBID = reader.ReadInt32();
         VehicleName = reader.ReadUTF8StringOn(33);
     }
-
-    public override void Write(BinaryWriter writer)
-    {
-        throw new NotImplementedException();
-    }
 }

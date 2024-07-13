@@ -10,11 +10,6 @@ public class CreateVehicleExtendedPacket : CreateVehiclePacket
     public ushort InventorySize { get; set; }
     public long[] InventoryCoids { get; } = new long[512];
 
-    public override void Read(BinaryReader reader)
-    {
-        throw new NotImplementedException();
-    }
-
     public override void Write(BinaryWriter writer)
     {
         base.Write(writer);

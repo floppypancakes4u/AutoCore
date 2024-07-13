@@ -8,11 +8,6 @@ public class LoginAckPacket : BasePacket
 
     public bool Success { get; set; }
 
-    public override void Read(BinaryReader reader)
-    {
-        throw new NotImplementedException();
-    }
-
     public override void Write(BinaryWriter writer)
     {
         writer.Write(Success);

@@ -13,11 +13,6 @@ public class CreatePowerPlantPacket : CreateSimpleObjectPacket
     public float SkillCooldown { get; set; }
     public string Name { get; set; }
 
-    public override void Read(BinaryReader reader)
-    {
-        throw new NotImplementedException();
-    }
-
     public override void Write(BinaryWriter writer)
     {
         base.Write(writer);

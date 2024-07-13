@@ -21,11 +21,6 @@ public class MissionDialogPacket : BasePacket
         return true;
     }
 
-    public override void Read(BinaryReader reader)
-    {
-        throw new NotSupportedException();
-    }
-
     public override void Write(BinaryWriter writer)
     {
         writer.BaseStream.Position += 4;

@@ -14,9 +14,4 @@ public class RequestClanNamePacket : BasePacket
 
         CharacterCoid = reader.ReadInt64();
     }
-
-    public override void Write(BinaryWriter writer)
-    {
-        throw new NotSupportedException();
-    }
 }

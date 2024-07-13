@@ -52,11 +52,6 @@ public class CreateVehiclePacket : CreateSimpleObjectPacket
     public int[] WeaponsCBID { get; } = new int[3];
     public string Name { get; set; }
 
-    public override void Read(BinaryReader reader)
-    {
-        throw new NotImplementedException();
-    }
-
     public override void Write(BinaryWriter writer)
     {
         base.Write(writer);

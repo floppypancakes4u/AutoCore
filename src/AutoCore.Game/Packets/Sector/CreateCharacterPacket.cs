@@ -87,11 +87,6 @@ public class CreateCharacterPacket : CreateSimpleObjectPacket
     public string ClanName { get; set; }
     public float CharacterScaleOffset { get; set; }
 
-    public override void Read(BinaryReader reader)
-    {
-        throw new NotImplementedException();
-    }
-
     public override void Write(BinaryWriter writer)
     {
         base.Write(writer);

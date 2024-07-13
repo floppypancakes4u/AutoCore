@@ -33,9 +33,4 @@ public class ObjectMovedPacket : BasePacket
 
         reader.BaseStream.Position += 4;
     }
-
-    public override void Write(BinaryWriter writer)
-    {
-        throw new NotSupportedException();
-    }
 }

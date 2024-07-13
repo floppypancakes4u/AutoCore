@@ -53,11 +53,6 @@ public class CreateSimpleObjectPacket : BasePacket
     public short RequiredTheory { get; set; }
     public int ItemTemplateId { get; set; }
 
-    public override void Read(BinaryReader reader)
-    {
-        throw new NotImplementedException();
-    }
-
     public override void Write(BinaryWriter writer)
     {
         writer.Write(CBID);

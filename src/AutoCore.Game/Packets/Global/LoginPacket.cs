@@ -16,9 +16,4 @@ public class LoginPacket : BasePacket
         CharacterCoid = reader.ReadInt64();
         StartSectorOverride = reader.ReadInt32();
     }
-
-    public override void Write(BinaryWriter writer)
-    {
-        throw new NotImplementedException();
-    }
 }

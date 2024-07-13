@@ -14,9 +14,4 @@ public class DisconnectPacket : BasePacket
 
         reader.BaseStream.Position += 3;
     }
-
-    public override void Write(BinaryWriter writer)
-    {
-        throw new NotSupportedException();
-    }
 }

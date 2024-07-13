@@ -18,9 +18,4 @@ public class MissionDialogResponsePacket : BasePacket
         MixedVar = reader.ReadInt64();
         MissionGiver = reader.ReadTFID();
     }
-
-    public override void Write(BinaryWriter writer)
-    {
-        throw new NotSupportedException();
-    }
 }

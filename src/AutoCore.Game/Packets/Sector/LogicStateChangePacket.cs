@@ -37,11 +37,6 @@ public class LogicStateChangePacket : BasePacket
         SingleClientOnly = singleClientOnly;
     }
 
-    public override void Read(BinaryReader reader)
-    {
-        throw new NotSupportedException();
-    }
-
     public override void Write(BinaryWriter writer)
     {
         writer.Write((byte)Type);

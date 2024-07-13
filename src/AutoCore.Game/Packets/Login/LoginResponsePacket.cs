@@ -2,24 +2,11 @@
 
 using AutoCore.Game.Constants;
 
-public class LoginResponsePacket : BasePacket
+public class LoginResponsePacket(uint result) : BasePacket
 {
     public override GameOpcode Opcode => GameOpcode.LoginResponse;
 
-    public uint Result { get; }
+    public uint Result { get; } = result;
 
-    public LoginResponsePacket(uint result)
-    {
-        Result = result;
-    }
-
-    public override void Read(BinaryReader reader)
-    {
-        throw new NotImplementedException();
-    }
-
-    public override void Write(BinaryWriter writer)
-    {
-        writer.Write(Result);
-    }
+    public override void Write(BinaryWriter writer) => writer.Write(Result);
 }
