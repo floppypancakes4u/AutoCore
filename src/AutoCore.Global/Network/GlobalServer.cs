@@ -43,7 +43,11 @@ public partial class GlobalServer : BaseServer, ILoopable
             Config = config;
 
         Logger.WriteLog(LogType.Initialize, "Initializing the TNL interface...");
-        Interface = new TNLInterface(Config.GameConfig.Port, false);
+        Interface = new TNLInterface(Config.GameConfig.Port, false)
+        {
+            AllowVersionMismatch = Config.GameConfig.AllowVersionMismatch,
+            ExpectedVersion = Config.GameConfig.ExpectedVersion > 0 ? Config.GameConfig.ExpectedVersion : TNLInterface.Version
+        };
 
         Logger.WriteLog(LogType.Initialize, "Initializing the network...");
         PublicAddress = IPAddress.Parse(Config.GameConfig.PublicAddress);

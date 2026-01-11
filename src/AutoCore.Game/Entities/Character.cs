@@ -17,7 +17,7 @@ public class Character : Creature
     private CharacterData DBData { get; set; }
     public uint AccountId => DBData.AccountId;
     public string Name => DBData.Name;
-    public long ActiveVehicleCoid => DBData.ActiveVehicleCoid;
+    public long ActiveVehicleCoid => DBData.ActiveVehicleCoid ?? -1;
     public int BodyId => DBData.BodyId;
     public int HeadId => DBData.HeadId;
     public int HeadDetail1 => DBData.HeadDetail1;
@@ -73,6 +73,8 @@ public class Character : Creature
         if (DBData == null)
             return false;
 
+        AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Network, $"Character.LoadFromDB: Loaded character Coid {coid}, Name from DB: '{DBData.Name}' (Length: {DBData.Name?.Length ?? 0})");
+
         LoadCloneBase(DBData.SimpleObjectBase.CBID);
 
         ClanMemberDBData = context.ClanMembers.Include(cm => cm.Clan).FirstOrDefault(cm => cm.CharacterCoid == coid);
@@ -112,7 +114,7 @@ public class Character : Creature
 
         if (packet is CreateCharacterPacket charPacket)
         {
-            charPacket.CurrentVehicleCoid = DBData.ActiveVehicleCoid;
+            charPacket.CurrentVehicleCoid = DBData.ActiveVehicleCoid ?? -1L;
             charPacket.CurrentTrailerCoid = -1L; // TODO
             charPacket.HeadId = HeadId;
             charPacket.BodyId = BodyId;
@@ -139,6 +141,8 @@ public class Character : Creature
             charPacket.Name = Name;
             charPacket.ClanName = ClanMemberDBData?.Clan?.Name ?? "";
             charPacket.CharacterScaleOffset = DBData.ScaleOffset;
+            
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Network, $"Character.WriteToPacket: Writing Name='{charPacket.Name}' (Length: {charPacket.Name?.Length ?? 0}), Level={charPacket.Level}");
         }
 
         if (packet is CreateCharacterExtendedPacket extendedCharPacket)

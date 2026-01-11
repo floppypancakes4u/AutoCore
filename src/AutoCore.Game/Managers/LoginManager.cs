@@ -32,11 +32,20 @@ public class LoginManager : Singleton<LoginManager>
 
     public bool ExpectLoginToGlobal(uint accountId, string username, uint authKey)
     {
-        if (GlobalLogins.ContainsKey(accountId) || string.IsNullOrEmpty(username) || authKey == 0)
+        if (string.IsNullOrEmpty(username) || authKey == 0)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error, $"ExpectLoginToGlobal: Invalid parameters for account {accountId} (username: '{username}', authKey: {authKey})");
             return false;
+        }
 
         lock (GlobalLogins)
         {
+            if (GlobalLogins.ContainsKey(accountId))
+            {
+                AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error, $"ExpectLoginToGlobal: Account {accountId} already has a pending login entry");
+                return false;
+            }
+
             GlobalLogins[accountId] = new GlobalLoginEntry
             {
                 ExpireTime = DateTime.Now + TimeSpan.FromMilliseconds(LoginTimoutInMs),
@@ -45,6 +54,7 @@ public class LoginManager : Singleton<LoginManager>
             };
         }
 
+        AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Network, $"ExpectLoginToGlobal: Created login entry for account {accountId} ({username}), expires in {LoginTimoutInMs}ms");
         return true;
     }
 
@@ -55,11 +65,31 @@ public class LoginManager : Singleton<LoginManager>
 
     public bool LoginToGlobal(TNLConnection client, LoginRequestPacket packet)
     {
-        if (!GlobalLogins.TryGetValue(packet.UserId, out var entry))
-            return false;
+        lock (GlobalLogins)
+        {
+            if (!GlobalLogins.TryGetValue(packet.UserId, out var entry))
+            {
+                AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error, $"LoginToGlobal: No login entry found for account {packet.UserId} (username: '{packet.Username}')");
+                return false;
+            }
 
-        if (entry.AuthKey != packet.AuthKey || entry.Username != packet.Username)
-            return false;
+            if (entry.AuthKey != packet.AuthKey)
+            {
+                AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error, $"LoginToGlobal: AuthKey mismatch for account {packet.UserId}. Expected: {entry.AuthKey}, Got: {packet.AuthKey}");
+                GlobalLogins.Remove(packet.UserId);
+                return false;
+            }
+
+            if (entry.Username != packet.Username)
+            {
+                AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error, $"LoginToGlobal: Username mismatch for account {packet.UserId}. Expected: '{entry.Username}', Got: '{packet.Username}'");
+                GlobalLogins.Remove(packet.UserId);
+                return false;
+            }
+
+            // Remove the entry after successful validation to prevent reuse
+            GlobalLogins.Remove(packet.UserId);
+        }
 
         using var context = new CharContext();
         var account = context.Accounts.FirstOrDefault(a => a.Id == packet.UserId);
@@ -82,6 +112,7 @@ public class LoginManager : Singleton<LoginManager>
 
         client.Account = account;
 
+        AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Network, $"LoginToGlobal: Successfully authenticated account {packet.UserId} ({packet.Username})");
         return true;
     }
 

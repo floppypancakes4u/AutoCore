@@ -14,6 +14,8 @@ public class TNLInterface : NetInterface
     public ushort FragmentSize { get; private set; }
     public long ConnectionId { get; private set; }
     public Dictionary<long, TNLConnection> MapConnections { get; } = new();
+    public bool AllowVersionMismatch { get; set; } = false;
+    public int ExpectedVersion { get; set; } = Version;
 
     static TNLInterface()
     {
@@ -61,6 +63,8 @@ public class TNLInterface : NetInterface
             tConn.SetPlayerCOID(connId);
 
             MapConnections.Add(connId, tConn);
+            
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Network, $"TNLInterface: Adding connection {connId} from {conn.GetNetAddress()}");
         }
 
         base.AddConnection(conn);

@@ -16,6 +16,7 @@ using AutoCore.Global.Network;
 using AutoCore.Sector.Config;
 using AutoCore.Sector.Network;
 using AutoCore.Utils;
+using AutoCore.Utils.Commands;
 using AutoCore.Utils.Server;
 
 public class Program : ExitableProgram
@@ -26,6 +27,9 @@ public class Program : ExitableProgram
 
     public static void Main()
     {
+        // Disable scope trimming so commands remain scoped (auth.exit, global.exit, sector.exit)
+        CommandProcessor.UseScopes();
+        
         Initialize(ExitHandlerProc);
 
         var authConfig = GetAuthConfig();
@@ -36,13 +40,26 @@ public class Program : ExitableProgram
         CharContext.InitializeConnectionString(globalConfig.CharDatabaseConnectionString);
         WorldContext.InitializeConnectionString(globalConfig.WorldDatabaseConnectionString);
 
-        if (!AssetManager.Instance.Initialize(globalConfig.GamePath, ServerType.Both))
-            throw new Exception("Unable to load assets!");
+        AuthContext.EnsureCreated();
+        CharContext.EnsureCreated();
+        WorldContext.EnsureCreated();
 
-        AssetManager.Instance.LoadAllData();
+        if (!AssetManager.Instance.Initialize(globalConfig.GamePath, ServerType.Both, globalConfig.GameConfig.AllowMissingCBID))
+        {
+            Logger.WriteLog(LogType.Error, "Unable to initialize Asset Manager! Check the GamePath configuration.");
+            throw new Exception("Unable to initialize Asset Manager!");
+        }
+
+        if (!AssetManager.Instance.LoadAllData())
+        {
+            Logger.WriteLog(LogType.Error, "Critical asset loading failed! Cannot continue without WAD or GLM files.");
+            throw new Exception("Critical asset loading failed!");
+        }
 
         if (!MapManager.Instance.Initialize())
-            throw new Exception("Unable to load maps!");
+        {
+            Logger.WriteLog(LogType.Error, "MapManager initialization failed. Continuing anyway.");
+        }
 
         AuthServer.Setup(authConfig);
         if (!AuthServer.Start())

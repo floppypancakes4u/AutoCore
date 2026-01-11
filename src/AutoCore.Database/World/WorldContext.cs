@@ -28,6 +28,12 @@ public class WorldContext : DbContext
         ConnectionString = connectionString;
     }
 
+    public static void EnsureCreated()
+    {
+        using var context = new WorldContext();
+        context.Database.EnsureCreated();
+    }
+
     protected override void OnConfiguring(DbContextOptionsBuilder options) => options.UseMySql(ConnectionString, ServerVersion.AutoDetect(ConnectionString));
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

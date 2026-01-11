@@ -56,33 +56,36 @@ public partial class TNLConnection : GhostConnection
     {
         DeleteLocalGhosts();
 
-        Logger.WriteLog(LogType.Network, "Client ({0} | {1}) disconnected", Account.Id, Account.Name);
+        if (Account != null)
+            Logger.WriteLog(LogType.Network, "Client ({0} | {1}) disconnected", Account.Id, Account.Name);
+        else
+            Logger.WriteLog(LogType.Network, "Client ({0}) disconnected", PlayerCoid);
     }
 
     public void SendGamePacket(BasePacket packet, RPCGuaranteeType type = RPCGuaranteeType.RPCGuaranteedOrdered, bool skipOpcode = false)
     {
         Logger.WriteLog(LogType.Network, "Outgoing Packet: {0}", packet.Opcode);
 
-        var dest = ArrayPool<byte>.Shared.Rent(0x4000);
+        byte[] arr;
 
-        int packetLength;
-
-        using (var writer = new BinaryWriter(new MemoryStream(dest)))
+        using (var stream = new MemoryStream(0x4000))
+        using (var writer = new BinaryWriter(stream))
         {
             if (!skipOpcode)
                 writer.Write(packet.Opcode);
 
             packet.Write(writer);
 
-            packetLength = (int)writer.BaseStream.Position;
+            // Many packets intentionally "skip" reserved bytes via `writer.BaseStream.Position += N`.
+            // With a MemoryStream, advancing Position does NOT automatically extend Length unless we do it.
+            // If we don't extend Length, `ToArray()` will return fewer bytes than `Position`, and
+            // downstream fragmentation will throw (and clients will see garbage/uninitialized fields).
+            stream.SetLength(stream.Position);
+
+            arr = stream.ToArray();
         }
 
-        var arr = new byte[packetLength];
-        Buffer.BlockCopy(dest, 0, arr, 0, packetLength);
-
-        ArrayPool<byte>.Shared.Return(dest);
-
-        var arrLength = (uint)packetLength;
+        var arrLength = (uint)arr.Length;
         if (arrLength > 1400U)
         {
             ++FragmentCounter;
@@ -97,7 +100,7 @@ public partial class TNLConnection : GhostConnection
 
                 var tempBuff = new byte[buffSize];
 
-                Array.Copy(arr, i * 220, tempBuff, 0, buffSize);
+                Array.Copy(arr, (int)doneSize, tempBuff, 0, (int)buffSize);
 
                 var stream = new ByteBuffer(tempBuff, buffSize);
 
@@ -435,29 +438,56 @@ public partial class TNLConnection : GhostConnection
     public override bool ReadConnectRequest(BitStream stream, ref string errorString)
     {
         if (!base.ReadConnectRequest(stream, ref errorString))
+        {
+            Logger.WriteLog(LogType.Error, $"ReadConnectRequest: Base class validation failed: {errorString}");
             return false;
+        }
 
-        if (!stream.Read(out int version) || version != TNLInterface.Version)
+        if (!stream.Read(out int version))
         {
             errorString = "Incorrect Version";
+            Logger.WriteLog(LogType.Error, "ReadConnectRequest: Failed to read version");
             return false;
+        }
+
+        var expectedVersion = TNLInterface.Version;
+        if (Interface is TNLInterface tInterface)
+        {
+            expectedVersion = tInterface.ExpectedVersion;
+        }
+
+        if (version != expectedVersion)
+        {
+            if (Interface is TNLInterface tInterface2 && tInterface2.AllowVersionMismatch)
+            {
+                Logger.WriteLog(LogType.Network, $"ReadConnectRequest: Version mismatch allowed. Expected: {expectedVersion}, Got: {version}");
+            }
+            else
+            {
+                errorString = "Incorrect Version";
+                Logger.WriteLog(LogType.Error, $"ReadConnectRequest: Version mismatch. Expected: {expectedVersion}, Got: {version}");
+                return false;
+            }
         }
 
         if (!stream.Read(out uint key))
         {
             errorString = "Unknown Key";
+            Logger.WriteLog(LogType.Error, "ReadConnectRequest: Failed to read key");
             return false;
         }
 
         if (!stream.Read(out long playerCoid))
         {
             errorString = "Unknown player ID";
+            Logger.WriteLog(LogType.Error, "ReadConnectRequest: Failed to read playerCoid");
             return false;
         }
 
         Key = key;
         PlayerCoid = playerCoid;
 
+        Logger.WriteLog(LogType.Network, $"ReadConnectRequest: Successfully read connection request. Version: {version}, Key: {key}, PlayerCoid: {playerCoid}");
         return true;
     }
 
@@ -486,7 +516,8 @@ public partial class TNLConnection : GhostConnection
             CurrentCharacter = null;
         }
 
-        Logger.WriteLog(LogType.Network, $"Client ({PlayerCoid}) disconnected from {GetNetAddressString()}");
+        var accountInfo = Account != null ? $"Account: {Account.Id} ({Account.Name})" : "Not authenticated";
+        Logger.WriteLog(LogType.Network, $"Client ({PlayerCoid}) disconnected from {GetNetAddressString()}. Reason: {reason}, Details: {reasonString}, {accountInfo}");
     }
 
     public override void PrepareWritePacket()

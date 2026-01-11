@@ -26,6 +26,7 @@ public class Program : ExitableProgram
         configRoot.Bind(config);
 
         AuthContext.InitializeConnectionString(config.AuthDatabaseConnectionString);
+        AuthContext.EnsureCreated();
 
         Logger.UpdateConfig(config.LoggerConfig);
 

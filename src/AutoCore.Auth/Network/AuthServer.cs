@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Linq;
 
 namespace AutoCore.Auth.Network;
 
@@ -81,6 +82,22 @@ public partial class AuthServer : BaseServer, ILoopable
     private void SetupServerList()
     {
         using var context = new AuthContext();
+
+        // If no servers exist in the database, create a default server slot
+        if (!context.GlobalServers.Any())
+        {
+            Logger.WriteLog(LogType.Initialize, "No server slots found in database. Creating default server slot (ID: 1, Password: test)...");
+            
+            context.GlobalServers.Add(new()
+            {
+                Id = 1,
+                Password = "test",
+                Enabled = true
+            });
+            
+            context.SaveChanges();
+            Logger.WriteLog(LogType.Initialize, "Default server slot created successfully.");
+        }
 
         // TODO: if new server -> add
         // if update server -> change PW maybe? then DC communicator for it to retry connecting with new password?

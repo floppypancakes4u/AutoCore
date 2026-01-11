@@ -30,16 +30,28 @@ public class Program : ExitableProgram
         CharContext.InitializeConnectionString(config.CharDatabaseConnectionString);
         WorldContext.InitializeConnectionString(config.WorldDatabaseConnectionString);
 
+        CharContext.EnsureCreated();
+        WorldContext.EnsureCreated();
+
         Server.InitConsole();
         Server.Setup(config);
 
-        if (!AssetManager.Instance.Initialize(config.GamePath, ServerType.Global))
-            throw new Exception("Unable to load assets!");
+        if (!AssetManager.Instance.Initialize(config.GamePath, ServerType.Global, config.GameConfig.AllowMissingCBID))
+        {
+            Logger.WriteLog(LogType.Error, "Unable to initialize Asset Manager! Check the GamePath configuration.");
+            throw new Exception("Unable to initialize Asset Manager!");
+        }
 
-        AssetManager.Instance.LoadAllData();
+        if (!AssetManager.Instance.LoadAllData())
+        {
+            Logger.WriteLog(LogType.Error, "Critical asset loading failed! Cannot continue without WAD or GLM files.");
+            throw new Exception("Critical asset loading failed!");
+        }
 
         if (!MapManager.Instance.Initialize())
-            throw new Exception("Unable to load maps!");
+        {
+            Logger.WriteLog(LogType.Error, "MapManager initialization failed. Continuing anyway.");
+        }
 
         if (!Server.Start())
         {

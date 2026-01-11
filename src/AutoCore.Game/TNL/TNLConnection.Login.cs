@@ -29,14 +29,24 @@ public partial class TNLConnection
     {
         var packet = new LoginNewCharacterPacket();
         packet.Read(reader);
+        
+        Logger.WriteLog(LogType.Network, $"HandleLoginNewCharacterPacket: Received CharacterName='{packet.CharacterName}' (Length: {packet.CharacterName?.Length ?? 0}), VehicleName='{packet.VehicleName}' (Length: {packet.VehicleName?.Length ?? 0})");
 
         var (result, coid) = CharacterSelectionManager.CreateNewCharacter(this, packet);
+
+        Logger.WriteLog(LogType.Network, $"HandleLoginNewCharacterPacket: Character creation result = {result}, Coid = {coid}");
+        Logger.WriteLog(LogType.Network, $"HandleLoginNewCharacterPacket: Sending response with code {(result ? 0x80000000 : 0x1)}");
 
         SendGamePacket(new LoginNewCharacterResponsePacket(result ? 0x80000000 : 0x1, coid));
 
         if (result)
         {
+            Logger.WriteLog(LogType.Network, $"HandleLoginNewCharacterPacket: Character creation successful, extending character list");
             CharacterSelectionManager.ExtendCharacterList(this, coid);
+        }
+        else
+        {
+            Logger.WriteLog(LogType.Error, $"HandleLoginNewCharacterPacket: Character creation failed, not extending character list");
         }
     }
 

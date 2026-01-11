@@ -13,10 +13,39 @@ public class MapManager : Singleton<MapManager>
 
     public bool Initialize()
     {
-        foreach (var continentObject in AssetManager.Instance.GetContinentObjects()) // TODO: only load IsPersistent maps (the others are instanceable?)
+        var continentObjects = AssetManager.Instance.GetContinentObjects().ToList();
+        
+        if (continentObjects.Count == 0)
         {
-            // TODO: preload only persistent maps?
-            SetupMap(continentObject.Id);
+            Logger.WriteLog(LogType.Error, "No continent objects available to load maps. Continuing with no maps loaded.");
+            return true;
+        }
+
+        var loadedCount = 0;
+        var failedCount = 0;
+        
+        foreach (var continentObject in continentObjects) // TODO: only load IsPersistent maps (the others are instanceable?)
+        {
+            try
+            {
+                // TODO: preload only persistent maps?
+                SetupMap(continentObject.Id);
+                loadedCount++;
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLog(LogType.Error, $"Failed to setup map {continentObject.Id}: {ex.Message}");
+                failedCount++;
+            }
+        }
+
+        if (loadedCount > 0)
+        {
+            Logger.WriteLog(LogType.Initialize, $"MapManager initialized with {loadedCount} maps" + (failedCount > 0 ? $" ({failedCount} failed)" : "") + ".");
+        }
+        else if (failedCount > 0)
+        {
+            Logger.WriteLog(LogType.Error, $"MapManager failed to load any maps ({failedCount} failed). Continuing anyway.");
         }
 
         return true;

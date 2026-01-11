@@ -1,5 +1,7 @@
 ﻿namespace AutoCore.Utils.Commands;
 
+using AutoCore.Utils;
+
 public static class CommandProcessor
 {
     private static readonly Dictionary<string, Action<string[]>> Commands = new();
@@ -63,7 +65,15 @@ public static class CommandProcessor
         if (TrimScope && name.Contains('.'))
             name = name[(name.IndexOf(".") + 1)..];
 
-        Commands.Add(name, handler);
+        if (Commands.ContainsKey(name))
+        {
+            Logger.WriteLog(LogType.Error, $"Command '{name}' is already registered. Overwriting with new handler.");
+            Commands[name] = handler;
+        }
+        else
+        {
+            Commands.Add(name, handler);
+        }
     }
 
     public static void RemoveCommand(string name)

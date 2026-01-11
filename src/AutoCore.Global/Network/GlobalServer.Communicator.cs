@@ -51,6 +51,7 @@ public partial class GlobalServer
     {
         info.Id = Config.ServerInfoConfig.Id;
         info.Address = PublicAddress;
+        info.Port = Config.GameConfig.Port;
         info.Password = Config.ServerInfoConfig.Password;
     }
 

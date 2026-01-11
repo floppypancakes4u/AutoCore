@@ -9,7 +9,7 @@ public class CharacterData
     [Key]
     public long Coid { get; set; }
     public uint AccountId { get; set; }
-    public long ActiveVehicleCoid { get; set; }
+    public long? ActiveVehicleCoid { get; set; }
     public string Name { get; set; } = string.Empty;
     public int HeadId { get; set; } = -1;
     public int BodyId { get; set; } = -1;

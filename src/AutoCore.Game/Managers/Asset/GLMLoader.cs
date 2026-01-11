@@ -13,20 +13,33 @@ public class GLMLoader
 
     public bool Load(string directoryPath)
     {
-        try
+        var glmFiles = Directory.GetFiles(directoryPath, "*.glm", SearchOption.TopDirectoryOnly);
+        var successCount = 0;
+        var failCount = 0;
+
+        foreach (var filePath in glmFiles)
         {
-            Directory.GetFiles(directoryPath, "*.glm", SearchOption.TopDirectoryOnly).ToList().ForEach(ReadGLMFile);
-
-            Logger.WriteLog(LogType.Initialize, $"Loaded {GLMEntries.Count} GLM files with {GLMEntries.Sum(f => f.Value.FileEntries.Count)} file entries!");
-
-            return true;
+            try
+            {
+                ReadGLMFile(filePath);
+                successCount++;
+            }
+            catch (Exception e)
+            {
+                Logger.WriteLog(LogType.Error, $"Failed to load GLM file '{filePath}': {e.Message}");
+                failCount++;
+            }
         }
-        catch (Exception e)
+
+        if (successCount == 0)
         {
-            Logger.WriteLog(LogType.Error, $"Encountered exception while loading GLM files: {e}");
+            Logger.WriteLog(LogType.Error, "No GLM files were successfully loaded!");
+            return false;
         }
 
-        return false;
+        Logger.WriteLog(LogType.Initialize, $"Loaded {successCount} GLM files (skipped {failCount} failed files) with {GLMEntries.Sum(f => f.Value.FileEntries.Count)} file entries!");
+
+        return true;
     }
 
     public MemoryStream GetStream(string fileName)
@@ -77,54 +90,72 @@ public class GLMLoader
 
     private void ReadGLMFile(string filePath)
     {
-        var glmEntry = new GLMEntry
+        FileStream fileStream = null;
+        try
         {
-            Name = Path.GetFileName(filePath),
-            FileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read)
-        };
+            fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            
+            if (fileStream.Length < 4)
+                throw new Exception($"GLM file is too small ({fileStream.Length} bytes). Minimum size is 4 bytes.");
 
-        using var reader = new BinaryReader(glmEntry.FileStream, Encoding.UTF8, true);
+            var glmEntry = new GLMEntry
+            {
+                Name = Path.GetFileName(filePath),
+                FileStream = fileStream
+            };
 
-        reader.BaseStream.Seek(reader.BaseStream.Length - 4, SeekOrigin.Begin);
+            using var reader = new BinaryReader(glmEntry.FileStream, Encoding.UTF8, true);
 
-        var headerOff = reader.ReadInt32();
-        reader.BaseStream.Seek(headerOff, SeekOrigin.Begin);
+            reader.BaseStream.Seek(reader.BaseStream.Length - 4, SeekOrigin.Begin);
 
-        var strHeader = Encoding.UTF8.GetString(reader.ReadBytes(4));
-        if (strHeader != "CHNK")
-            throw new Exception("Invalid header found!");
+            var headerOff = reader.ReadInt32();
+            reader.BaseStream.Seek(headerOff, SeekOrigin.Begin);
 
-        var opts = reader.ReadBytes(4);
-        if (opts[0] != 66)
-            throw new Exception("No support for GLM text reading!");
+            var strHeader = Encoding.UTF8.GetString(reader.ReadBytes(4));
+            if (strHeader != "CHNK")
+                throw new Exception("Invalid header found!");
 
-        if (opts[1] != 76)
-            throw new Exception("Only Little Endian is supported!");
+            var opts = reader.ReadBytes(4);
+            if (opts[0] != 66)
+                throw new Exception("No support for GLM text reading!");
 
-        var strTableOff = reader.ReadInt32();
-        var strTableSize = reader.ReadInt32();
-        var entryCount = reader.ReadInt32();
+            if (opts[1] != 76)
+                throw new Exception("Only Little Endian is supported!");
 
-        var currPos = reader.BaseStream.Position;
+            var strTableOff = reader.ReadInt32();
+            var strTableSize = reader.ReadInt32();
+            var entryCount = reader.ReadInt32();
 
-        reader.BaseStream.Seek(strTableOff, SeekOrigin.Begin);
+            var currPos = reader.BaseStream.Position;
 
-        var stringTable = reader.ReadBytes(strTableSize);
-        var fileEntries = CreateEntriesByStringTable(stringTable);
+            reader.BaseStream.Seek(strTableOff, SeekOrigin.Begin);
 
-        if (fileEntries.Count != entryCount)
-            throw new Exception("The entry count doesn't match!");
+            var stringTable = reader.ReadBytes(strTableSize);
+            var fileEntries = CreateEntriesByStringTable(stringTable);
 
-        reader.BaseStream.Position = currPos;
+            if (fileEntries.Count != entryCount)
+                throw new Exception("The entry count doesn't match!");
 
-        foreach (var entry in fileEntries)
-        {
-            entry.Read(reader, glmEntry);
+            reader.BaseStream.Position = currPos;
 
-            glmEntry.FileEntries.Add(entry.Name, entry);
+            foreach (var entry in fileEntries)
+            {
+                entry.Read(reader, glmEntry);
+
+                glmEntry.FileEntries.Add(entry.Name, entry);
+            }
+
+            GLMEntries.Add(glmEntry.Name, glmEntry);
+            fileStream = null; // Don't dispose, it's now owned by GLMEntry
         }
-
-        GLMEntries.Add(glmEntry.Name, glmEntry);
+        finally
+        {
+            // If an exception occurred before adding to GLMEntries, dispose the stream
+            if (fileStream != null)
+            {
+                fileStream.Dispose();
+            }
+        }
     }
 
     private static List<FileEntry> CreateEntriesByStringTable(IEnumerable<byte> data)

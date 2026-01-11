@@ -18,7 +18,7 @@ public static class BinaryWriterExtensions
 
     public static void WriteUtf8StringOn(this BinaryWriter writer, string value, int len)
     {
-        var bytes = Encoding.UTF8.GetBytes(value);
+        var bytes = string.IsNullOrEmpty(value) ? Array.Empty<byte>() : Encoding.UTF8.GetBytes(value);
 
         writer.Write(bytes, 0, Math.Min(bytes.Length, len));
 
