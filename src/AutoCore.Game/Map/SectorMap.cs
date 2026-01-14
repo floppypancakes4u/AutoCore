@@ -195,7 +195,7 @@ public class SectorMap
                 continue;
             }
 
-            Logger.WriteLog(LogType.Debug, $"Processing reaction {reactionCoid} ({reaction.Template.ReactionType}), depth={depth}");
+            //Logger.WriteLog(LogType.Debug, $"Processing reaction {reactionCoid} ({reaction.Template.ReactionType}), depth={depth}");
 
             if (reaction.TriggerIfPossible(activator))
             {
