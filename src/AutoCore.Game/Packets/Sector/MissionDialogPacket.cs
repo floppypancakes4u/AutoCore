@@ -28,7 +28,7 @@ public class MissionDialogPacket : BasePacket
         writer.WriteTFID(Creature);
         writer.Write((byte)(Missions.Count & 0xFF));
 
-        writer.BaseStream.Position += 7;
+        writer.BaseStream.Position += 3;
 
         foreach (var mission in Missions)
             mission.Write(writer);

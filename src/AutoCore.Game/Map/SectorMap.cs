@@ -68,6 +68,30 @@ public class SectorMap
         return null;
     }
 
+    public ClonedObjectBase GetObject(long coid)
+    {
+        // Try local first, then global
+        if (Objects.TryGetValue(new TFID(coid, false), out var localValue))
+            return localValue;
+
+        if (Objects.TryGetValue(new TFID(coid, true), out var globalValue))
+            return globalValue;
+
+        return null;
+    }
+
+    public ClonedObjectBase GetObjectByCoid(long coid)
+    {
+        // Search by COID only, ignoring the Global flag
+        foreach (var kvp in Objects)
+        {
+            if (kvp.Key.Coid == coid)
+                return kvp.Value;
+        }
+
+        return null;
+    }
+
     public void Fill(MapInfoPacket packet)
     {
         packet.RegionId = -1;
@@ -145,9 +169,22 @@ public class SectorMap
 
     public void TriggerReactions(ClonedObjectBase activator, List<long> reactions)
     {
+        TriggerReactionsInternal(activator, reactions, 0);
+    }
+
+    private void TriggerReactionsInternal(ClonedObjectBase activator, List<long> reactions, int depth)
+    {
+        const int MaxReactionDepth = 10;
+        if (depth >= MaxReactionDepth)
+        {
+            Logger.WriteLog(LogType.Error, $"Reaction chain exceeded max depth of {MaxReactionDepth}, stopping to prevent infinite loop");
+            return;
+        }
+
         var clientPacket = new GroupReactionCallPacket();
         GroupReactionCallPacket broadcastPacket = null;
         GroupReactionCallPacket convoyPacket = null;
+        var childReactionsToTrigger = new List<List<long>>();
 
         foreach (var reactionCoid in reactions)
         {
@@ -157,6 +194,8 @@ public class SectorMap
                 Logger.WriteLog(LogType.Error, $"Map {MapData.ContinentObject.Id} tried to trigger reaction {reactionCoid}, but the Reaction object isn't found!");
                 continue;
             }
+
+            Logger.WriteLog(LogType.Debug, $"Processing reaction {reactionCoid} ({reaction.Template.ReactionType}), depth={depth}");
 
             if (reaction.TriggerIfPossible(activator))
             {
@@ -175,10 +214,23 @@ public class SectorMap
                     convoyPacket ??= new GroupReactionCallPacket();
                     convoyPacket.AddPacket(packet);
                 }
+
+                // Queue child reactions for processing after this batch
+                if (reaction.Template.Reactions.Count > 0)
+                {
+                    Logger.WriteLog(LogType.Debug, $"Reaction {reactionCoid} has {reaction.Template.Reactions.Count} child reactions to trigger");
+                    childReactionsToTrigger.Add(reaction.Template.Reactions);
+                }
             }
         }
 
         activator.GetAsCharacter()?.OwningConnection.SendGamePacket(clientPacket);
+
+        // Process child reactions after sending the parent reaction packets
+        foreach (var childReactions in childReactionsToTrigger)
+        {
+            TriggerReactionsInternal(activator, childReactions, depth + 1);
+        }
 
         if (broadcastPacket is not null)
         {

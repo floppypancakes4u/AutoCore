@@ -2,6 +2,7 @@
 
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.Constants;
+using AutoCore.Game.Structures;
 
 public class CreateCharacterExtendedPacket : CreateCharacterPacket
 {
@@ -9,6 +10,7 @@ public class CreateCharacterExtendedPacket : CreateCharacterPacket
 
     public int NumCompletedQuests { get; set; }
     public int NumCurrentQuests { get; set; }
+    public List<CharacterQuest> CurrentQuests { get; set; } = new();
     public short NumAchievements { get; set; }
     public short NumDisciplines { get; set; }
     public byte NumSkills { get; set; }
@@ -151,8 +153,11 @@ public class CreateCharacterExtendedPacket : CreateCharacterPacket
 
         if (NumCurrentQuests > 0)
         {
-            // TODO: write current quest objectives (SVOGCharacterObjective[])
-            writer.BaseStream.Position += 72 * NumCurrentQuests;
+            // Write current quest objectives (SVOGCharacterObjective[] - 72 bytes each)
+            foreach (var quest in CurrentQuests)
+            {
+                quest.Write(writer);
+            }
         }
     }
 }

@@ -423,7 +423,7 @@ public class Vehicle : SimpleObject
         if (Firing > 0 && Target != null && !Target.IsCorpse && !Target.IsInvincible)
         {
 
-            // (Reuse the existing combat implementation by re-entering HandleMovement’s block via a local call path.)
+            // (Reuse the existing combat implementation by re-entering HandleMovementï¿½s block via a local call path.)
             // NOTE: The actual combat logic remains unchanged; this method just makes it reachable from the server loop.
             // We intentionally keep all the existing logs in-place by calling the same code path.
             //

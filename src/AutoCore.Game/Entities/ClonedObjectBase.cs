@@ -12,8 +12,8 @@ using AutoCore.Utils;
 public abstract class ClonedObjectBase
 {
     public CloneBaseObject CloneBaseObject { get; private set; }
-    public CloneBaseObjectType Type => CloneBaseObject.Type;
-    public int CBID => CloneBaseObject.CloneBaseSpecific.CloneBaseId;
+    public CloneBaseObjectType Type => CloneBaseObject?.Type ?? CloneBaseObjectType.Base;
+    public int CBID => CloneBaseObject?.CloneBaseSpecific.CloneBaseId ?? -1;
     
     public int Faction { get; set; }
     public GhostObject Ghost { get; protected set; }
@@ -84,6 +84,12 @@ public abstract class ClonedObjectBase
     public abstract int GetMaximumHP();
     public abstract int GetBareTeamFaction();
 
+    public virtual int TakeDamage(int damage)
+    {
+        // Default implementation - subclasses should override
+        return 0;
+    }
+
     public virtual Character GetAsCharacter() => null;
     public virtual Creature GetAsCreature() => null;
     public virtual Vehicle GetAsVehicle() => null;
@@ -120,6 +126,12 @@ public abstract class ClonedObjectBase
     public void LoadCloneBase(int cbid)
     {
         CloneBaseObject = AssetManager.Instance.GetCloneBase<CloneBaseObject>(cbid);
+
+        if (CloneBaseObject == null)
+        {
+            Logger.WriteLog(LogType.Error, $"LoadCloneBase: Failed to load CloneBase with CBID {cbid}. The CloneBase may not exist in the loaded game data.");
+            throw new InvalidOperationException($"CloneBase with CBID {cbid} not found. Ensure the game data (clonebase.wad) is properly loaded and contains this CBID.");
+        }
 
         Value = CloneBaseObject.CloneBaseSpecific.BaseValue;
         //GameMass = CloneBaseObject.SimpleObjectSpecific.Mass;

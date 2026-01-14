@@ -1,4 +1,5 @@
-﻿using System.Buffers;
+using System.Buffers;
+using System.IO;
 
 using TNL.Data;
 using TNL.Entities;
@@ -149,6 +150,7 @@ public partial class TNLConnection : GhostConnection
         var reader = new BinaryReader(new MemoryStream(buffer.GetBuffer()));
         var gameOpcode = reader.ReadGameOpcode();
 
+
         switch (gameOpcode)
         {
             case GameOpcode.CreatureMoved:
@@ -259,7 +261,7 @@ public partial class TNLConnection : GhostConnection
                     break;
 
                 case GameOpcode.UpdateFirstTimeFlagsRequest:
-                    //HandleUpdateFirstTimeFlagsRequest(reader);
+                    HandleUpdateFirstTimeFlagsRequest(reader);
                     break;
 
                 case GameOpcode.Broadcast:
@@ -280,6 +282,14 @@ public partial class TNLConnection : GhostConnection
 
                 case GameOpcode.ChangeCombatModeRequest:
                     MapManager.Instance.HandleChangeCombatModeRequest(CurrentCharacter, reader);
+                    break;
+
+                case GameOpcode.Firing:
+                    Logger.WriteLog(LogType.Error, "Unhandled Opcode: {0}", gameOpcode);
+                    break;
+
+                case GameOpcode.Damage:
+                    Logger.WriteLog(LogType.Error, "Unhandled Opcode: {0}", gameOpcode);
                     break;
 
                 default:

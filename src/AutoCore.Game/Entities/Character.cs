@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace AutoCore.Game.Entities;
 
@@ -60,9 +61,9 @@ public class Character : Creature
 
     public Character()
     {
-        // TODO: Add the starting mission once we figure out the correct packet structure
-        // The 72-byte SVOGCharacterObjective structure needs to be reverse-engineered
-        // CurrentQuests.Add(new CharacterQuest(554, 714, 0));
+        // Add the starting mission (New Day Dawning!) by default
+        // Mission 554, with first objective (sequence 0) active
+        CurrentQuests.Add(new CharacterQuest(554, 0));
     }
 
     public void SetOwningConnection(TNLConnection owningConnection)
@@ -161,6 +162,25 @@ public class Character : Creature
             extendedCharPacket.NumAchievements = 0;
             extendedCharPacket.NumDisciplines = 0;
             extendedCharPacket.NumSkills = 0;
+
+            // Load FirstTimeFlags from Account
+            if (OwningConnection?.Account != null)
+            {
+                extendedCharPacket.FirstTimeFlags[0] = OwningConnection.Account.FirstFlags1;
+                extendedCharPacket.FirstTimeFlags[1] = OwningConnection.Account.FirstFlags2;
+                extendedCharPacket.FirstTimeFlags[2] = OwningConnection.Account.FirstFlags3;
+                extendedCharPacket.FirstTimeFlags[3] = OwningConnection.Account.FirstFlags4;
+
+                // #region agent log
+                try { var logData = new { location = "Character.cs:171", message = "Populated FirstTimeFlags from Account", data = new { accountId = OwningConnection.Account.Id, FirstFlags1 = OwningConnection.Account.FirstFlags1, FirstFlags2 = OwningConnection.Account.FirstFlags2, FirstFlags3 = OwningConnection.Account.FirstFlags3, FirstFlags4 = OwningConnection.Account.FirstFlags4 }, timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), sessionId = "debug-session", runId = "run1", hypothesisId = "F" }; File.AppendAllText(@"c:\Users\josh\Documents\GitHub\AutoCore\.cursor\debug.log", System.Text.Json.JsonSerializer.Serialize(logData) + "\n"); } catch { }
+                // #endregion
+            }
+            else
+            {
+                // #region agent log
+                try { var logData = new { location = "Character.cs:179", message = "OwningConnection or Account is null, FirstTimeFlags will be zeros", data = new { hasOwningConnection = OwningConnection != null, hasAccount = OwningConnection?.Account != null }, timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), sessionId = "debug-session", runId = "run1", hypothesisId = "F" }; File.AppendAllText(@"c:\Users\josh\Documents\GitHub\AutoCore\.cursor\debug.log", System.Text.Json.JsonSerializer.Serialize(logData) + "\n"); } catch { }
+                // #endregion
+            }
 
             AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Debug, $"Character.WriteToPacket: Sending {CurrentQuests.Count} current quests");
         }

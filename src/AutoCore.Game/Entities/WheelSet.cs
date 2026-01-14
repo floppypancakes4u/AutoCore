@@ -4,6 +4,7 @@ using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Utils;
 
 public class WheelSet : SimpleObject
 {
@@ -39,6 +40,12 @@ public class WheelSet : SimpleObject
 
         if (packet is CreateWheelSetPacket wheelSetPacket)
         {
+            if (CloneBaseWheelSet == null)
+            {
+                Logger.WriteLog(LogType.Error, $"WheelSet.WriteToPacket: CloneBaseWheelSet is null for object with COID {ObjectId.Coid}. Cannot write wheel set data.");
+                throw new InvalidOperationException($"CloneBaseWheelSet is null. WheelSet was not properly loaded.");
+            }
+
             wheelSetPacket.FrictionGravel = CloneBaseWheelSet.WheelSetSpecific.Friction[0];
             wheelSetPacket.FrictionIce = CloneBaseWheelSet.WheelSetSpecific.Friction[1];
             wheelSetPacket.FrictionMud = CloneBaseWheelSet.WheelSetSpecific.Friction[2];
