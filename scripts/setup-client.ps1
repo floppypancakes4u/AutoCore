@@ -92,3 +92,8 @@ ipconfig /flushdns | Out-Null
 Write-Host "[SUCCESS] DNS cache flushed" -ForegroundColor Green
 
 
+
+
+
+
+
