@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(dir \"C:\\\\Users\\\\josh\\\\Documents\\\\GitHub\\\\AutoCore\" /B)",
+      "Bash(dir \"C:\\\\Program Files \\(x86\\)\\\\NetDevil\\\\Auto Assault\" /B)",
+      "Bash(dir \"C:\\\\Program Files \\(x86\\)\\\\NetDevil\\\\Auto Assault\\\\exe\" /B)",
+      "Bash(findstr:*)",
+      "Bash(powershell -Command \"[System.Text.Encoding]::ASCII.GetString\\([System.IO.File]::ReadAllBytes\\(''C:\\\\Program Files \\(x86\\)\\\\NetDevil\\\\Auto Assault\\\\exe\\\\autoassault.exe''\\)\\) -match ''SVOG''\")",
+      "Bash(powershell -Command \"$bytes = [System.IO.File]::ReadAllBytes\\(''C:\\\\Program Files \\(x86\\)\\\\NetDevil\\\\Auto Assault\\\\exe\\\\autoassault.exe''\\); $text = [System.Text.Encoding]::ASCII.GetString\\($bytes\\); $matches = [regex]::Matches\\($text, ''SVOG[A-Za-z0-9_]+''\\); $matches | ForEach-Object { $_Value } | Sort-Object -Unique | Select-Object -First 30\")",
+      "Bash(powershell -Command:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(claude mcp list:*)"
+    ]
+  }
+}

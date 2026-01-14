@@ -128,9 +128,36 @@ public enum GameOpcode : uint
     WeatherUpdate = 0x2069,
     ActivateSpawnedObject = 0x206A,
     LogicStateChange = 0x206B,
+    
+    /// <summary>
+    /// GroupReactionCall / MissionDialog (server→client).
+    /// Client EMSG name: EMSG_Sector_MissionDialog (index 0x6C = opcode 0x206C).
+    /// This is the packet used to trigger reactions and mission dialogs on the client.
+    /// The client looks up the reaction coid in clonebase to determine the action.
+    /// Wire format: count(8 bits) + entries[] where each entry has type(8 bits) + type-specific data.
+    /// </summary>
     GroupReactionCall = 0x206C,
-    MissionDialog = 0x206D,
-    MissionDialogResponse = 0x206E,
+    
+    /// <summary>
+    /// MissionDialog (server→client) is opcode 0x206C and is handled via GroupReactionCall.
+    /// Kept as an alias for readability, but should not be used directly.
+    /// </summary>
+    [Obsolete("Use GroupReactionCall (0x206C). MissionDialog is an alias of the same opcode.", true)]
+    MissionDialog = 0x206C,
+    
+    /// <summary>
+    /// MissionDialog_Response (client→server).
+    /// Client EMSG name: EMSG_Sector_MissionDialog_Response (index 0x6D = opcode 0x206D).
+    /// </summary>
+    MissionDialogResponse = 0x206D,
+    
+    /// <summary>
+    /// Unknown / reserved in this emulator currently.
+    /// Previously (incorrectly) labeled as MissionDialogResponse.
+    /// </summary>
+    [Obsolete("Opcode 0x206E is not yet identified. Do not use.", true)]
+    Unknown206E = 0x206E,
+    
     ChoiceDialogResponse = 0x206F,
     CompleteDynamicObjective = 0x2070,
     ObjectiveState = 0x2071,

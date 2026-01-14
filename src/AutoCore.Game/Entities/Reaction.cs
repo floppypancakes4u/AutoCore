@@ -232,63 +232,60 @@ public class Reaction : ClonedObjectBase
                 return HandleTransferMap(activator);
 
             case ReactionType.ResetTrigger:
-                // Reset trigger state - client handles the trigger reset
-                return true;
+                return HandleResetTrigger(activator);
 
             default:
                 Logger.WriteLog(LogType.Error, $"Unhandled reaction type: {Template.ReactionType} for reaction {Template.COID}!");
-        return true;
+                return true;
+        }
     }
 
     private bool HandleGiveMissionDialog(ClonedObjectBase activator)
     {
+        // GiveMissionDialog is handled via the GroupReactionCall packet (opcode 0x206C).
+        // The client receives the reaction coid via GroupReactionCallPacket, looks up the 
+        // ReactionTemplate in clonebase, and displays the mission dialog based on that data.
+        //
+        // NOTE: A separate MissionDialogPacket (opcode 0x206D) was previously sent here, but:
+        // 1. 0x206D is the MissionDialog_Response opcode (client→server), NOT server→client
+        // 2. The client's dispatcher ignores packets with opcode > 0x206C (except 0x804D)
+        // 3. The GroupReactionCallPacket already sends the reaction coid which the client uses
+        //
+        // See MISSION_DIALOG_CLIENT_ANALYSIS.md for details on the packet structure analysis.
+        
         var character = GetCharacterFromActivator(activator);
-        if (character == null || character.OwningConnection == null)
+        if (character == null)
         {
-            Logger.WriteLog(LogType.Debug, $"GiveMissionDialog reaction {Template.COID}: Could not get character or connection from activator");
+            Logger.WriteLog(LogType.Debug, $"GiveMissionDialog reaction {Template.COID}: Could not get character from activator");
             return true;
         }
 
-        // Create the mission dialog packet
-        var packet = new MissionDialogPacket
+        // Log mission info for debugging
+        if (Template.Missions.Count > 0)
         {
-            Creature = ObjectId // The reaction's object ID (the NPC/creature giving the missions)
-        };
-
-        // Add missions from the ReactionTemplate
-        // Note: ReactionTemplate stores MissionTypes and Missions lists
-        // The packet expects MissionInfo with Id and PossibleItemCoids
-        foreach (var missionId in Template.Missions)
-        {
-            var missionInfo = new MissionDialogPacket.MissionInfo
+            Logger.WriteLog(LogType.Debug, $"GiveMissionDialog reaction {Template.COID}: Triggering dialog with {Template.Missions.Count} missions for character {character.Name}");
+            foreach (var missionId in Template.Missions)
             {
-                Id = missionId,
-                // PossibleItemCoids are typically used for random mission item generation
-                // Setting to -1 (invalid) for now - may need to be populated from mission data
-                PossibleItemCoids = new long[] { -1, -1, -1, -1 }
-            };
-
-            if (!packet.AddMission(missionInfo))
-            {
-                Logger.WriteLog(LogType.Warning, $"GiveMissionDialog reaction {Template.COID}: Could not add mission {missionId} - packet full (max 8 missions)");
-                break;
+                var mission = Managers.AssetManager.Instance.GetMission(missionId);
+                if (mission != null)
+                {
+                    Logger.WriteLog(LogType.Debug, $"  - Mission {missionId}: '{mission.Name}' (Title: {mission.Title})");
+                }
+                else
+                {
+                    Logger.WriteLog(LogType.Debug, $"  - Mission {missionId}: (not found in AssetManager)");
+                }
             }
         }
-
-        if (packet.MissionCount == 0)
+        else
         {
-            Logger.WriteLog(LogType.Debug, $"GiveMissionDialog reaction {Template.COID}: No missions to send");
-            return true;
+            Logger.WriteLog(LogType.Debug, $"GiveMissionDialog reaction {Template.COID}: No missions in template - client will use clonebase data");
         }
 
-        Logger.WriteLog(LogType.Debug, $"GiveMissionDialog reaction {Template.COID}: Sending {packet.MissionCount} missions to character {character.Name}");
-
-        // Send the packet to the client
-        character.OwningConnection.SendGamePacket(packet);
-
+        // Return true to indicate the reaction triggered successfully.
+        // The GroupReactionCallPacket with this reaction's coid will be sent by TriggerReactionsInternal.
         return true;
     }
-}
 
     private bool HandleDelete(ClonedObjectBase activator)
     {
@@ -441,19 +438,19 @@ public class Reaction : ClonedObjectBase
 
         switch (mapTransferType)
         {
-            case MapTransferType.ContinentObject:
+            case Constants.MapTransferType.ContinentObject:
                 // MapTransferData is the continent/map ID to transfer to
                 MapManager.Instance.TransferCharacterToMap(character, mapTransferData);
                 break;
 
-            case MapTransferType.Highway:
-            case MapTransferType.Random:
-            case MapTransferType.Mission:
-            case MapTransferType.GMTest:
-            case MapTransferType.RepairStation:
-            case MapTransferType.Death:
-            case MapTransferType.Warp:
-            case MapTransferType.Arean:
+            case Constants.MapTransferType.Highway:
+            case Constants.MapTransferType.Random:
+            case Constants.MapTransferType.Mission:
+            case Constants.MapTransferType.GMTest:
+            case Constants.MapTransferType.RepairStation:
+            case Constants.MapTransferType.Death:
+            case Constants.MapTransferType.Warp:
+            case Constants.MapTransferType.Arean:
                 Logger.WriteLog(LogType.Debug, $"TransferMap reaction {Template.COID}: MapTransferType {mapTransferType} not yet implemented, attempting ContinentObject transfer to map {mapTransferData}");
                 MapManager.Instance.TransferCharacterToMap(character, mapTransferData);
                 break;
@@ -463,6 +460,37 @@ public class Reaction : ClonedObjectBase
                 Logger.WriteLog(LogType.Debug, $"TransferMap reaction {Template.COID}: Unknown MapTransferType {(byte)mapTransferType}, treating as ContinentObject transfer to map {mapTransferData}");
                 MapManager.Instance.TransferCharacterToMap(character, mapTransferData);
                 break;
+        }
+
+        return true;
+    }
+
+    private bool HandleResetTrigger(ClonedObjectBase activator)
+    {
+        // ResetTrigger allows triggers to fire again for the activator
+        // The Objects list contains trigger coids to reset
+        // If ActOnActivator is true or Objects is empty, we reset based on GenericVar1 which may contain a trigger coid
+        
+        var objectCoid = activator.ObjectId.Coid;
+
+        if (Template.Objects.Count > 0)
+        {
+            // Reset specific triggers listed in Objects
+            foreach (var triggerCoid in Template.Objects)
+            {
+                Logger.WriteLog(LogType.Debug, $"ResetTrigger reaction {Template.COID}: Resetting trigger {triggerCoid} for object {objectCoid}");
+                TriggerManager.Instance.ResetTriggerFor(objectCoid, triggerCoid);
+            }
+        }
+        else if (Template.GenericVar1 != 0)
+        {
+            // Reset the trigger specified by GenericVar1
+            Logger.WriteLog(LogType.Debug, $"ResetTrigger reaction {Template.COID}: Resetting trigger {Template.GenericVar1} for object {objectCoid}");
+            TriggerManager.Instance.ResetTriggerFor(objectCoid, Template.GenericVar1);
+        }
+        else
+        {
+            Logger.WriteLog(LogType.Debug, $"ResetTrigger reaction {Template.COID}: No triggers specified to reset");
         }
 
         return true;

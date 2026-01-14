@@ -143,6 +143,9 @@ public class SectorMap
             throw new InvalidOperationException("This object is not on the map!");
 
         Objects.Remove(clonedObject.ObjectId);
+
+        // Clear any trigger states for this object when it leaves the map
+        TriggerManager.Instance.ClearTriggersFor(clonedObject.ObjectId.Coid);
     }
 
     public IEnumerable<GhostObject> ObjectsInRange(GhostObject scopeObject)

@@ -236,7 +236,7 @@ public partial class TNLConnection : GhostConnection
                     break;
 
                 case GameOpcode.ConvoyMissionsRequest:
-                    //ConvoyManager.MissionsRequest(this);
+                    HandleConvoyMissionsRequest(reader);
                     break;
 
                 case GameOpcode.RequestClanName:
@@ -278,6 +278,10 @@ public partial class TNLConnection : GhostConnection
 
                 case GameOpcode.MapTransferRequest:
                     MapManager.Instance.HandleTransferRequestPacket(CurrentCharacter, reader);
+                    break;
+                
+                case GameOpcode.MissionDialogResponse:
+                    HandleMissionDialogResponse(reader);
                     break;
 
                 case GameOpcode.ChangeCombatModeRequest:

@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "memory-editor": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "-m",
+        "memory_editor_mcp.server"
+      ],
+      "env": {
+        "MCP_TIMEOUT": "60"
+      }
+    }
+  }
+}

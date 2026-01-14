@@ -1,9 +1,12 @@
 ﻿namespace AutoCore.Game.TNL;
 
 using System.Text.Json;
+using System.Linq;
 using AutoCore.Database.Char;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Packets.Global;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.Structures;
 using AutoCore.Utils;
 
 public partial class TNLConnection
@@ -192,5 +195,44 @@ public partial class TNLConnection
             // #endregion
             Logger.WriteLog(LogType.Error, $"HandleUpdateFirstTimeFlagsRequest: Exception saving to database: {ex.Message}");
         }
+    }
+
+    private void HandleMissionDialogResponse(BinaryReader reader)
+    {
+        // Source of truth: src/MISSION_DIALOG_CLIENT_ANALYSIS.md
+        // - MissionDialog (server→client): 0x206C (handled via GroupReactionCallPacket)
+        // - MissionDialog_Response (client→server): 0x206D
+        //
+        // NOTE: The exact 0x206D payload format is not yet fully reverse engineered.
+        // This handler uses our current best-effort parser and logs values for iterative refinement.
+
+        var packet = new MissionDialogResponsePacket();
+
+        try
+        {
+            packet.Read(reader);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error, $"HandleMissionDialogResponse: Failed to parse packet: {ex}");
+            return;
+        }
+
+        Logger.WriteLog(LogType.Debug, $"HandleMissionDialogResponse: MissionId={packet.MissionId}, MixedVar={packet.MixedVar}, MissionGiver={packet.MissionGiver}");
+
+        if (CurrentCharacter == null)
+            return;
+
+        // Best-effort: treat this as a mission accept/selection and ensure the mission exists in CurrentQuests.
+        if (packet.MissionId > 0 && !CurrentCharacter.CurrentQuests.Any(q => q.MissionId == packet.MissionId))
+        {
+            CurrentCharacter.CurrentQuests.Add(new CharacterQuest(packet.MissionId, 0));
+        }
+
+        // Refresh mission list UI (client is observed to request via ConvoyMissionsRequest).
+        SendGamePacket(new ConvoyMissionsResponsePacket
+        {
+            CurrentQuests = CurrentCharacter.CurrentQuests.ToList()
+        });
     }
 }

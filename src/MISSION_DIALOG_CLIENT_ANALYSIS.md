@@ -16,13 +16,20 @@
 | Property | Value |
 |----------|-------|
 | Process Name | `autoassault.exe` |
-| PID | 87004 |
-| Base Address | `0x400000` |
+| PID | 87004 *(example prior session; varies)* |
+| Base Address | `0x400000` *(verified live; this run had no base shift)* |
 | Code Section | `0x401000` - `0x9c6000` (~5.77 MB) |
 | Read-Only Data | `0x9c6000` - `0xaef000` (~1.16 MB) |
 | Read-Write Data | `0xaef000` - `0xb00000` |
 
-**Confirmed via MCP attach**: PID `87004` and all module region boundaries above match exactly in the live process.
+**Confirmed via MCP attach (NEW)**:
+- Attached to live `autoassault.exe` with PID `123216`
+- Reported module base address: `0x400000`
+- The image regions match the boundaries above exactly.
+
+**Static vs Dynamic address note**:
+- When this binary is loaded at `0x400000`, all absolute addresses in this document are effectively **static** for that run.
+- If ASLR/rebasing occurs, treat all absolute addresses as **dynamic** and prefer **RVAs** (\( \text{RVA} = \text{VA} - \text{ImageBase} \)).
 
 ### 2. Opcode Confirmation
 ```
@@ -66,6 +73,53 @@ String pointer table located at `0x9d7880` contains pointers to these and other 
   - MissionDialog **opcode would be `0x206C`** (server → client)
   - MissionDialog_Response **opcode would be `0x206D`** (client → server)
 - This aligns with the concrete dispatcher we found, which has an explicit handler for `0x206C` (see section 5.4).
+
+### 3.1 Message-name lookup function (NEW - VERIFIED)
+We located the concrete opcode → message-name mapping used by the client for logging/debug:
+
+- **Function**: `0x59E210` *(static, inside `autoassault.exe`)*  
+- **Behavior**:
+  - For opcodes in the range **`0x2000 <= opcode < 0x20C7`**, it returns:
+    - `namePtr = *(uint32*)(0x9CF6D0 + opcode * 4)`
+  - This is a clever layout where `0x9CF6D0 + 0x2000*4 = 0x9D76D0`, i.e. the **EMSG pointer table for the 0x20xx opcodes**.
+
+**Verified mapping (live, static addresses)**:
+- `*(uint32*)(0x9CF6D0 + 0x206C*4) = 0x9D6318` → `"EMSG_Sector_MissionDialog"`
+- `*(uint32*)(0x9CF6D0 + 0x206D*4) = 0x9D62F4` → `"EMSG_Sector_MissionDialog_Response"`
+
+**Implication (now confirmed, not just hypothesis)**:
+- `MissionDialog` **is `0x206C`** (server → client)
+- `MissionDialog_Response` **is `0x206D`** (client → server)
+
+### 3.2 `0x80xx` opcode name behavior in the same lookup (NEW - VERIFIED)
+The same lookup function (`0x59E210`) has a separate branch for `0x80xx` opcodes that does **not** return a per-opcode `EMSG_*` string; it returns a fixed placeholder string.
+
+**Verified (live, static addresses)**:
+- **Code bytes at `0x59E210` (first branch)**:
+  - `3D 00 80 00 00` → `cmp eax, 0x8000`
+  - `72 0D` → `jb <skip>`
+  - `3D 58 80 00 00` → `cmp eax, 0x8058`
+  - `77 06` → `ja <skip>`
+  - `B8 D4 7A 9D 00` → `mov eax, 0x9D7AD4`
+  - `C3` → `ret`
+- **String at `0x9D7AD4`**: `"EMSG_Global_Xxxx"` (null-terminated)
+
+**Implication (verified)**:
+- For opcodes in **`0x8000..0x8058`**, the client’s *logging/debug name lookup* resolves to `"EMSG_Global_Xxxx"` rather than a specific message name.
+
+### 3.3 Missions-related debug/UI string anchors (NEW - VERIFIED)
+While searching for convoy/missions-related entry points, we found mission debug strings in `.rdata` with concrete code xrefs.
+
+**Verified (live, static addresses)**:
+- `0xA4A96C`: `"New Missions:"` (null-terminated)
+- There is a concrete code xref that pushes this literal at `0x8AE5A0` via `68 6C A9 A4 00` (`push 0xA4A96C`)
+
+### 3.4 Convoy-related IPC/message name strings (NEW - VERIFIED)
+We confirmed the presence of convoy-related `VSIPC_*` name strings in the client’s `.rdata` (exact role in opcode dispatch not yet confirmed).
+
+**Verified (live, static addresses)**:
+- `0x9D7454`: `"VSIPC_GlobalConvoyRefresh"`
+- `0x9D7508`: `"VSIPC_GlobalConvoyFullInfo"`
 
 ### 4. TNL Network Library Infrastructure
 The client uses Torque Network Library (TNL). Found RTTI type information:
@@ -149,6 +203,10 @@ We located the following debug strings in `.rdata` that appear to correspond to 
 - `push 0x9d7d9c` (`"TNLConnection::InsertMessage"`) occurs in `autoassault.exe` code at `0x5a0146`.
 - Following this function should lead directly into the real message receive/insert path, which is a promising route to the opcode dispatch.
 
+**NEW - VERIFIED DISASSEMBLY CONTEXT (static)**:
+- The function starting near `0x5A0120` logs `"TNLConnection::InsertMessage"`, then calls the opcode dispatcher at `0x637C20`.
+- It later calls `0x59E210` to translate opcodes into `"EMSG_*"` name strings for logging (`"received %d msg %d (%d bytes) [%s]"`).
+
 ### 5.4 Opcode Dispatch Reality Check (NEW - IMPORTANT)
 We identified a real opcode dispatcher that handles multiple `0x20xx` messages, and confirmed that **it does NOT dispatch `0x206D`** (it treats `> 0x206C` as a no-op except for one special case).
 
@@ -170,6 +228,11 @@ We identified a real opcode dispatcher that handles multiple `0x20xx` messages, 
 **Implication**:
 - `0x206D` exists in the binary, but it is **not handled by this `0x20xx` dispatcher**. The real MissionDialog processing likely occurs in a different layer (e.g., TNLWrapper/queue-based message decoding, or a different dispatch table that does not embed the literal `0x206D` constant).
 
+**NEW - VERIFIED**:
+- `0x637C20` is the **real receive-dispatch used by `TNLConnection::InsertMessage`** (call site observed at `0x5A019A`).
+- It **does** dispatch `opcode == 0x206C` into the handler at `0x6374F0`.
+- It **does not** dispatch `0x206D` (consistent with `0x206D` being a *client→server* response message, not a receive message in this path).
+
 **Handlers referenced by this dispatcher (all static)**:
 - `0x6374F0` (RVA `0x2374F0`): handler invoked for opcode `0x206C`
 - `0x637990` (RVA `0x237990`): handler invoked for opcode `0x2005`
@@ -189,6 +252,32 @@ We located a direct code xref to the wrapper message-queue layer via the debug s
 
 **Why this matters**:
 - This is a strong anchor into the layer that likely maps incoming wire data to `EMSG_Sector_*` names and message-specific parsers (including MissionDialog), even though `0x206D` is not dispatched by the `0x637C20` `0x20xx` opcode switch.
+
+**NEW - VERIFIED (static)**:
+- `TNLWrapper::AddMessageToQueue` is implemented starting near `0x5A05B0`.
+- It logs and guards send behavior using adjacent `.rdata` strings:
+  - `0x9D7DBC`: `"broadcast sent %d size %d."` (used to log **opcode** and **payload size**)
+  - `0x9D7DD8`: `"m_interface null when sending a message"`
+- In the send-log call site (`0x5A0652`), the wrapper reads:
+  - `opcode = *(uint32*)(msg + 0x10)`
+  - `size  = <local ebx>` (computed earlier in the wrapper)
+
+This gives us a concrete place to validate outgoing opcodes at runtime (and is a promising hook point for finishing `0x206D`’s pack format).
+
+### 5.6 Wrapper “group message” receive/logging strings (NEW - VERIFIED)
+We found additional wrapper-layer debug strings (adjacent to the existing `TNLWrapper::AddMessageToQueue` anchor) that appear to correspond to *group message* queueing and fragment reassembly.
+
+**Verified strings (live, static addresses)**:
+- `0x9D7E20`: `TNLWrapper::AddGroupMessageToQueue`
+- `0x9D7E44`: `Group %d message %d (%d bytes)`
+- Nearby (same `.rdata` block): fragment receive/reassembly/drop strings, e.g. `Received fragment %d:%d/%d (%d fragments).`
+
+**Verified code xref (live, static)**:
+- `push 0x9D7E44` occurs in `autoassault.exe` code at `0x5A113E`.
+
+**Additional verified detail (live, static)**:
+- In the same logging sequence (at/near `0x5A112F`), the wrapper loads the message opcode as:
+  - `opcode = *(uint32*)(msg + 0x10)` (observed as `8B 46 10` prior to pushing args for the `"Group %d message %d (%d bytes)"` log call)
 
 ### 6. Opcode Switch Statement Analysis
 
@@ -249,11 +338,11 @@ cbidItemTemplate1...
 
 ## What Has NOT Been Determined Yet
 
-1. **Actual packet handler function address** for opcode 0x206D
-2. **Byte-by-byte parsing sequence** in the handler
-3. **Field types and sizes** from client's perspective
-4. **Padding/alignment requirements**
-5. **How the RPC -> handler dispatch actually works**
+1. **MissionDialog_Response (`0x206D`, client → server) pack/write structure** (field order, widths, bit packing)
+2. **Semantic meaning** of `fieldA/fieldB/fieldC/flag1/flag2` in `MissionDialog` (`0x206C`) entries
+3. **End-to-end wire framing** above the `0x206C` payload (TNL/RPC layer headers, reliability channel details), if the server needs to emulate client framing precisely rather than only the opcode+payload layer
+4. Any additional validation rules the client applies after parsing (range checks, enum constraints) that could cause it to discard/ignore malformed payloads
+5. **ConvoyMissionsResponse (`0x8010`, server → client) packet structure** (field order, widths, bit packing) — *not yet located/verified*
 
 ---
 
@@ -266,6 +355,10 @@ cbidItemTemplate1...
 3. **No Obvious Handler Table**: Unlike simpler implementations, there's no direct opcode-to-function-pointer array found yet.
 
 4. **Large Code Size**: ~5.77MB of executable code makes exhaustive searching time-consuming.
+
+5. **Locating `0x8010` handler remains unverified**:
+   - A global byte-pattern search for `10 80 00 00` (little-endian `0x8010`) returns many occurrences in memory, but none have been confirmed as the **opcode field at `msg + 0x10`** for a concrete message object.
+   - No direct `cmp eax, 0x8010` / `cmp ax, 0x8010` instruction immediates were found in `autoassault.exe` code; this suggests `0x8010` dispatch is likely **table-driven** or occurs in a different layer than the obvious opcode switches.
 
 ---
 
@@ -281,9 +374,10 @@ cbidItemTemplate1...
 - Find where opcode is extracted from the buffer
 - Identify the switch/dispatch that routes to specific handlers
 
-### Phase 3: Find MissionDialog Handler
-- Once dispatch mechanism is found, locate handler for 0x206D
-- May need to search for code that references `EMSG_Sector_MissionDialog` string
+### Phase 3: Finish MissionDialog_Response (`0x206D`) write format
+- Use the `TNLWrapper::AddMessageToQueue` anchor (`0x5A05B0`) to identify the outbound message construction path
+- Find the `pack()`/writer routine that fills the bitstream for opcode `0x206D`
+- Document every `writeBits`/`writeInt`/`writeFlag` call and widths, mirroring what we did for `0x206C`
 
 ### Phase 4: Analyze Packet Parsing
 - In the handler function, document each buffer read operation:
@@ -297,20 +391,20 @@ cbidItemTemplate1...
 ## Packet Parsing (Concrete - NEW)
 
 ### MissionDialog Handler Candidate: opcode `0x206C` (static)
-**Entry point**: `autoassault.exe` `0x6374F0` (RVA `0x2374F0`) — invoked directly by the opcode dispatcher `0x637C20` when `opcode == 0x206C`.
+**Entry point**: `autoassault.exe` `0x6374F0` (RVA `0x2374F0`) — **verified** invoked directly by `0x637C20` when `opcode == 0x206C`.
 
 **Bitstream reader helpers used (static)**:
 - `0x42B3A0`: initializes a bitstream-like reader from a buffer pointer + length (observed args: `[arg+0x0C]`, `[arg+0x10]`)
 - `0x42B670`: reads a fixed number of bits into a caller-provided output buffer (used with `8`, `0x10`, `0x20`, `0x40`)
-- `0x42B8B0`: reads an integer field (used after pushing `0x13`, suggesting a **13-bit integer** read)
+- `0x42B8B0`: reads an integer field (used after pushing `0x13` hex = 19 decimal, indicating a **19-bit integer** read)
 
 ### Parsed Payload Shape (wire-level)
-The handler reads a **count**, then decodes a repeated per-entry structure from a bit-level stream (variable alignment; flags are packed as individual bits).
+The handler reads a **count**, then decodes a repeated per-entry structure from a bit-level stream (**bit-packed**, no byte-alignment between fields; flags are single bits that immediately follow the prior field).
 
-**Bit ordering / endianness (confirmed)**:
-- The reader extracts bits by shifting the source byte right by the current bit offset (`shr dl, cl`), i.e. **LSB-first within each byte**.
-- Multi-byte values are assembled in **little-endian byte order** (the earliest bits become the lowest-order bits of the first output byte).
-- The 13-bit integer read helper (`0x42B8B0`) returns an **unsigned** value masked to the requested width.
+**Bit ordering / endianness (VERIFIED via disassembly of `0x42B670` and `0x42B8B0`)**:
+- Extraction uses `shr dl, cl` where `cl = (bitIndex & 7)` → **LSB-first within each byte**.
+- `0x42B670` assembles output bytes by combining right-shifted current byte with left-shifted next byte → multi-byte fields come out **little-endian**.
+- `0x42B8B0(widthBits)` calls `0x42B670(widthBits)` then masks: `eax &= ((1<<widthBits)-1)` (for `widthBits != 32`) → **unsigned** width-limited integer.
 
 **1) Count**
 - Read **8 bits** into a byte `count` (stored at stack `+0x13`).
@@ -322,7 +416,7 @@ For each entry:
   - Read **16 bits**: `fieldA_u16`
   - Read **32 bits**: `fieldB_f32` (stored via `movss`, so IEEE-754 float)
 - **Else (`entryType != 1`)**:
-  - Read **13 bits**: `fieldA_u13` (**unsigned**, via `0x42B8B0(0x13)`)
+  - Read **19 bits**: `fieldA_u19` (**unsigned**, via `0x42B8B0(0x13)` - note: 0x13 hex = 19 decimal)
   - Read **64 bits**: `fieldC_u64` (read into two dwords; stored as 8 bytes)
 - **Read 1 bit**: `flag1` (bit extracted directly from the bit buffer, advancing bit position by +1)
 - **Read 1 bit**: `flag2` (same, advancing by +1)
@@ -331,12 +425,29 @@ For each entry:
 - The two flags are read via explicit bit-tests against a moving bit index (no byte-align), so they are *bit-packed immediately after the preceding field*.
 - The in-memory decoded entry size is `0x28` bytes and the handler allocates `count * 0x28 + 1` bytes for a contiguous block, then copies the decoded entry structs into it.
 
+### Verified per-entry decoded layout (in-memory, `0x28` bytes)
+During parsing, the handler writes each entry into a `0x28`-byte struct. The first byte is the `entryType`, and most numeric fields are stored as 32-bit values:
+
+Offset | Size | Meaning | When
+------:|-----:|---------|-----
+`0x00` | 1 | `entryType` | always
+`0x01` | 3 | padding/unknown | always
+`0x04` | 4 | `fieldA` (u16 widened to u32, or u19 as u32) | always
+`0x08` | 4 | `fieldB_f32` | only if `entryType == 1` (else set to 0)
+`0x0C` | 8 | `fieldC_u64` (little-endian, split into two dwords) | only if `entryType != 1`
+`0x14` | 1 | `flag1` (0/1) | always
+`0x15` | 7 | padding/unknown | always
+`0x1C` | 1 | `flag2` (0/1) | always
+`0x1D` | 0x0B | padding/unknown | always
+
+This layout is the **decoded/queued representation** the client builds internally after reading the wire payload.
+
 ### Working Hypothesis
 Given the tight mapping between:
 - EMSG index `0x6C` ⇄ opcode `0x206C`, and
 - the existence of a concrete handler for `0x206C`,
 
-this handler is currently our strongest candidate for the **MissionDialog** receive parser.
+this handler is **confirmed** to be the **MissionDialog** receive parser (`EMSG_Sector_MissionDialog`).
 
 ### Phase 5: Document Structure
 - Create byte-offset diagram of complete packet
@@ -396,10 +507,11 @@ The string at `0x9f161c` is `"ERROR_DS_ROOT_MUST_BE_NC"` - a Windows error code 
 | Message strings located | Complete |
 | RPC class names identified | Complete |
 | RPC registration xrefs found (code pushes RPC name strings) | **NEW - Complete** |
-| Actual handler function | **NOT FOUND** |
-| Packet structure | **NOT DETERMINED** |
+| Actual handler function (`MissionDialog` / `0x206C`) | **COMPLETE (verified)** |
+| Packet structure (wire-level payload for `0x206C`) | **COMPLETE (verified)** |
+| Packet structure (`MissionDialog_Response` / `0x206D`) | **NOT DETERMINED** |
 
-**Next Action**: Examine RPC class vtables to find the actual message processing entry point, then trace to the MissionDialog handler.
+**Next Action**: Determine the `MissionDialog_Response` (`0x206D`, client→server) writer/parser to finish the bidirectional mission-dialog protocol, and identify the semantics of `fieldA/fieldB/fieldC/flags`.
 
 ---
 

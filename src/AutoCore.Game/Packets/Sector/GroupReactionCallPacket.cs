@@ -19,7 +19,13 @@ public class GroupReactionCallPacket : BasePacket
         return true;
     }
 
-    // NOTE: this is not the real layout of the packing, but it is manually packed!
+    // VERIFIED (see src/MISSION_DIALOG_CLIENT_ANALYSIS.md):
+    // Wire payload for opcode 0x206C (EMSG_Sector_MissionDialog) is bit-packed:
+    // - count: 8 bits
+    // - entries[count]:
+    //   - entryType: 8 bits
+    //   - if entryType == 1: u16 + f32
+    //   - else: u19 + u64 + flag + flag (no byte alignment between fields)
     public override void Write(BinaryWriter writer)
     {
         var stream = new BitStream();
