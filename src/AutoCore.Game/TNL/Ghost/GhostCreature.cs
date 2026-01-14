@@ -57,7 +57,7 @@ public class GhostCreature : GhostObject
                 stream.Write(creature.SpawnOwner);
 
             stream.WriteFlag(false); // DoesntCountAsSummon
-            stream.WriteBits(8, BitConverter.GetBytes(0)); // Level
+            stream.WriteBits(8, new byte[] { creature.Level }); // Level
             stream.WriteFlag(false); // IsElite
 
             PackSkills(stream, creature);

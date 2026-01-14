@@ -1,8 +1,10 @@
-﻿namespace AutoCore.Game.Packets.Sector;
+namespace AutoCore.Game.Packets.Sector;
 
 using AutoCore.Game.Constants;
 using AutoCore.Game.Extensions;
 using AutoCore.Game.Structures;
+using System;
+using System.IO;
 
 [Flags]
 public enum VehicleMovedFlags : byte
@@ -32,6 +34,12 @@ public class VehicleMovedPacket : ObjectMovedPacket
         TurretDirection = reader.ReadSingle();
         VehicleFlags = (VehicleMovedFlags)reader.ReadByte();
         Firing = reader.ReadByte();
+
+        // It looks like there are 2 extra bytes before the TFID (the raw bytes were consistently shifted by 2).
+        // Treat them as an unknown/reserved ushort for now.
+        var unknownAfterFiring = reader.ReadUInt16();
+
         Target = reader.ReadTFID();
+
     }
 }

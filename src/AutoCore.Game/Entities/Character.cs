@@ -38,8 +38,10 @@ public class Character : Creature
     public int LastTownId => DBData.LastTownId;
     public int LastStationMapId => DBData.LastStationMapId;
     public int LastStationId => DBData.LastStationId;
-    public byte Level => DBData.Level;
+    public new byte Level => DBData.Level;
     #endregion
+
+    public override byte GetLevel() => Level;
 
     #region Database Clan Data
     private ClanMember ClanMemberDBData { get; set; }
@@ -51,10 +53,16 @@ public class Character : Creature
     public byte GMLevel { get; set; }
     public TNLConnection OwningConnection { get; private set; }
     public Vehicle CurrentVehicle { get; private set; }
+
+    // Mission tracking
+    public List<CharacterQuest> CurrentQuests { get; } = new();
     #endregion
 
     public Character()
     {
+        // TODO: Add the starting mission once we figure out the correct packet structure
+        // The 72-byte SVOGCharacterObjective structure needs to be reverse-engineered
+        // CurrentQuests.Add(new CharacterQuest(554, 714, 0));
     }
 
     public void SetOwningConnection(TNLConnection owningConnection)
@@ -148,10 +156,13 @@ public class Character : Creature
         if (packet is CreateCharacterExtendedPacket extendedCharPacket)
         {
             extendedCharPacket.NumCompletedQuests = 0;
-            extendedCharPacket.NumCurrentQuests = 0;
+            extendedCharPacket.NumCurrentQuests = CurrentQuests.Count;
+            extendedCharPacket.CurrentQuests = CurrentQuests;
             extendedCharPacket.NumAchievements = 0;
             extendedCharPacket.NumDisciplines = 0;
             extendedCharPacket.NumSkills = 0;
+
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Debug, $"Character.WriteToPacket: Sending {CurrentQuests.Count} current quests");
         }
     }
 

@@ -13,6 +13,7 @@ public class Creature : SimpleObject
     public Vector3 AngularVelocity { get; private set; }
     public Vector3 TargetPosition { get; private set; }
     public long SpawnOwner { get; set; }
+    public byte Level { get; set; } = 1;
 
     public Creature()
         : base(GraphicsObjectType.GraphicsPhysics)
@@ -21,6 +22,23 @@ public class Creature : SimpleObject
 
     public override Creature GetAsCreature() => this;
     public override Creature GetSuperCreature() => this;
+
+    public virtual byte GetLevel() => Level;
+
+    public void ScaleHealthForLevel(byte baseLevel)
+    {
+        // This is FAR from perfect or accurate, but it's based off extremely limited information that I have. - Floppy
+        // Scale health based on level - linear scaling from level 1
+        // BaseHP is the HP at level 1 (e.g., 37 HP for level 1 biomeck instructors)
+        // Formula: BaseHP + (Level - 1) * HPPerLevel
+        // Level 1: BaseHP (e.g., 37)
+        // Level 6-8: ~79 HP, so HPPerLevel = (79 - 37) / (6-1) ≈ 8.4, use 8
+        var baseHP = CloneBaseObject.SimpleObjectSpecific.MaxHitPoint;
+        var levelDiff = Level - 1; // Scale from level 1, not BaseLevel
+        const int hpPerLevel = 8; // HP increase per level above level 1
+        var scaledHP = baseHP + (levelDiff * hpPerLevel);
+        HP = MaxHP = Math.Max(1, scaledHP);
+    }
 
     public override void WriteToPacket(CreateSimpleObjectPacket packet)
     {

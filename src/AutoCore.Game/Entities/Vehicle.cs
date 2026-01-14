@@ -1,9 +1,15 @@
-ï»¿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
 
 namespace AutoCore.Game.Entities;
 
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
+using AutoCore.Game.Constants;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
@@ -38,6 +44,65 @@ public class Vehicle : SimpleObject
     public float WantedTurretDirection { get; set; }
     public byte Firing { get; set; }
     public VehicleMovedFlags VehicleFlags { get; set; }
+
+    // Server-side combat state (very lightweight)
+    private long _lastFireMsFront;
+    private long _lastFireMsTurret;
+    private long _lastFireMsRear;
+
+    // Chat-based combat feedback (this is NOT the "floating combat text"; it's the combat log/chat channel)
+    // We'll experiment with multiple ChatTypes to see what the client renders differently.
+    private static readonly Dictionary<long, long> _lastCombatMsgByAttackerMs = new();
+
+    private static void TrySendCombatMessage(Character? attacker, string message, ChatType chatType = ChatType.CombatMessage_Regular)
+    {
+        try
+        {
+            var conn = attacker?.OwningConnection;
+            if (conn == null)
+                return;
+
+            // Simple rate limit per attacker to avoid flooding client chat.
+            var now = Environment.TickCount64;
+            var key = attacker?.ObjectId.Coid ?? 0;
+            if (key != 0)
+            {
+                if (_lastCombatMsgByAttackerMs.TryGetValue(key, out var last) && now - last < 200)
+                    return;
+                _lastCombatMsgByAttackerMs[key] = now;
+            }
+
+            var msgLen = (short)(Encoding.UTF8.GetByteCount(message) + 1); // include null terminator
+            conn.SendGamePacket(new BroadcastPacket
+            {
+                ChatType = chatType,
+                SenderCoid = (ulong)(attacker?.ObjectId.Coid ?? 0),
+                IsGM = false,
+                Sender = "Combat",
+                MessageLength = msgLen,
+                Message = message
+            });
+
+        }
+        catch
+        {
+            // never let chat break combat loop
+        }
+    }
+
+    private static void TrySendCombatHitProbe(Character? attacker, int actualDamage)
+    {
+        // Send minimal strings in different chat channels so we can see which UI the client uses.
+        // (If none become "floating text", then floating text likely requires a different opcode/packet than Broadcast.)
+        TrySendCombatMessage(attacker, actualDamage.ToString(), ChatType.CombatMessage_Regular);
+        TrySendCombatMessage(attacker, actualDamage.ToString(), ChatType.CombatMessage_Health);
+    }
+
+    private static void TrySendCombatMissProbe(Character? attacker)
+    {
+        TrySendCombatMessage(attacker, "Miss", ChatType.CombatMessage_LowImportance);
+        TrySendCombatMessage(attacker, "Miss", ChatType.CombatMessage_Regular);
+    }
     #endregion
 
     public Vehicle()
@@ -298,9 +363,10 @@ public class Vehicle : SimpleObject
         VehicleFlags = packet.VehicleFlags;
         Firing = packet.Firing;
 
+
         Ghost.SetMaskBits(GhostObject.PositionMask);
 
-        // Update target
+        // Update target - check map first (for local NPCs/creatures), then ObjectManager (for global objects)
         if (Target != null)
         {
             if (packet.Target.Coid == -1)
@@ -311,16 +377,211 @@ public class Vehicle : SimpleObject
             }
             else if (packet.Target != Target.ObjectId)
             {
-                Target = ObjectManager.Instance.GetObject(packet.Target);
+                // Try map first (handles local objects like NPCs/creatures)
+                if (Map != null)
+                    Target = Map.GetObject(packet.Target.Coid);
+                
+                // Fallback to ObjectManager (for global objects like players)
+                if (Target == null)
+                    Target = ObjectManager.Instance.GetObject(packet.Target);
 
                 Ghost.SetMaskBits(GhostObject.TargetMask);
             }
         }
         else if (packet.Target.Coid != -1)
         {
-            Target = ObjectManager.Instance.GetObject(packet.Target);
+
+            // Try map first (handles local objects like NPCs/creatures)
+            // Use GetObjectByCoid which searches by COID regardless of Global flag
+            if (Map != null)
+            {
+                Target = Map.GetObjectByCoid(packet.Target.Coid);
+                
+                // If not found, try the standard GetObject method
+                if (Target == null)
+                    Target = Map.GetObject(packet.Target.Coid);
+            }
+            
+            // Fallback to ObjectManager (for global objects like players)
+            if (Target == null)
+                Target = ObjectManager.Instance.GetObject(packet.Target);
+
 
             Ghost.SetMaskBits(GhostObject.TargetMask);
+        }
+
+        ProcessCombatIfFiring();
+    }
+
+    // Called from both movement packets AND the server tick, so holding fire works even if VehicleMoved packets are sparse.
+    public void ProcessCombatIfFiring()
+    {
+        if (Ghost == null)
+            return;
+
+        // Process combat when firing (server authoritative)
+        if (Firing > 0 && Target != null && !Target.IsCorpse && !Target.IsInvincible)
+        {
+
+            // (Reuse the existing combat implementation by re-entering HandleMovement’s block via a local call path.)
+            // NOTE: The actual combat logic remains unchanged; this method just makes it reachable from the server loop.
+            // We intentionally keep all the existing logs in-place by calling the same code path.
+            //
+            // For now, simply inline-call the same logic by invoking HandleMovement's tail via a no-op pattern:
+            // the code below is identical to the previous block, kept in this file for clarity.
+            //
+            // To keep this patch small, we call into the existing logic by temporarily delegating to a private helper.
+            ProcessCombatInternal();
+        }
+    }
+
+    private void ProcessCombatInternal()
+    {
+        // Process combat when firing (server authoritative)
+        if (Firing <= 0 || Target == null || Target.IsCorpse || Target.IsInvincible)
+            return;
+
+
+
+        // Determine which weapon is firing (bit flags: 1=front, 2=turret, 4=rear)
+        Weapon firingWeapon = null;
+        ref var lastFireRef = ref _lastFireMsTurret; // default
+        if ((Firing & 1) != 0 && WeaponFront != null)
+        {
+            firingWeapon = WeaponFront;
+            lastFireRef = ref _lastFireMsFront;
+        }
+        else if ((Firing & 2) != 0 && WeaponTurret != null)
+        {
+            firingWeapon = WeaponTurret;
+            lastFireRef = ref _lastFireMsTurret;
+        }
+        else if ((Firing & 4) != 0 && WeaponRear != null)
+        {
+            firingWeapon = WeaponRear;
+            lastFireRef = ref _lastFireMsRear;
+        }
+
+
+        if (firingWeapon == null || firingWeapon.CloneBaseWeapon == null)
+        {
+            return;
+        }
+
+        var nowMs = Environment.TickCount64;
+        var weaponSpec = firingWeapon.CloneBaseWeapon.WeaponSpecific;
+
+        // Cooldown / rate-of-fire gating
+        var cooldownMs = weaponSpec.RechargeTime > 0 ? weaponSpec.RechargeTime : 500;
+        if (nowMs - lastFireRef < cooldownMs)
+            return;
+        lastFireRef = nowMs;
+
+        // Range gating
+        var dist = Position.Dist(Target.Position);
+        if ((weaponSpec.RangeMin > 0 && dist < weaponSpec.RangeMin) || (weaponSpec.RangeMax > 0 && dist > weaponSpec.RangeMax))
+        {
+            return;
+        }
+
+        // Hit chance
+        var attackerLevel = Owner?.GetAsCreature()?.GetLevel() ?? 1;
+        var attackerChar = Owner?.GetAsCharacter();
+        var attackRating = weaponSpec.OffenseBonus + (weaponSpec.HitBonusPerLevel * attackerLevel);
+        var targetDefenseBonus = 0;
+        if (Target is Vehicle targetVeh && targetVeh.Armor?.CloneBaseArmor?.ArmorSpecific != null)
+            targetDefenseBonus = targetVeh.Armor.CloneBaseArmor.ArmorSpecific.DefenseBonus;
+
+        var hitChance = 0.65f;
+        hitChance += (float)(attackRating - targetDefenseBonus) / 200.0f;
+        if (weaponSpec.AccucaryModifier > 0)
+            hitChance *= weaponSpec.AccucaryModifier;
+        hitChance = Math.Clamp(hitChance, 0.05f, 0.95f);
+
+        var rng = new Random(unchecked((int)(nowMs ^ ObjectId.Coid ^ Target.ObjectId.Coid)));
+        var roll = (float)rng.NextDouble();
+        if (roll > hitChance)
+        {
+            TrySendCombatMissProbe(attackerChar);
+            return;
+        }
+
+        // Damage roll per damage-type (6 channels)
+        var dmgByType = new int[6];
+        var totalPreMit = 0;
+        if (weaponSpec.MinMin.Damage != null && weaponSpec.MaxMax.Damage != null)
+        {
+            for (var i = 0; i < 6; i++)
+            {
+                var min = (int)weaponSpec.MinMin.Damage[i];
+                var max = (int)weaponSpec.MaxMax.Damage[i];
+                if (max < min) (min, max) = (max, min);
+                var val = max > min ? rng.Next(min, max + 1) : min;
+                dmgByType[i] = Math.Max(0, val);
+                totalPreMit += dmgByType[i];
+            }
+        }
+
+        if (totalPreMit <= 0)
+            totalPreMit = (weaponSpec.DmgMinMin + weaponSpec.DmgMaxMax) / 2;
+
+        var scalar = weaponSpec.DamageScalar > 0 ? weaponSpec.DamageScalar : 1.0f;
+        var dmgBonus = 1.0f + (weaponSpec.DamageBonusPerLevel * attackerLevel);
+        var totalScaled = (int)MathF.Round(Math.Max(0, totalPreMit) * scalar * dmgBonus);
+
+        short[] resist = null;
+        var armorFlat = 0;
+        if (Target is Vehicle tv && tv.Armor?.CloneBaseArmor?.ArmorSpecific?.Resistances?.Damage != null)
+        {
+            resist = tv.Armor.CloneBaseArmor.ArmorSpecific.Resistances.Damage;
+            armorFlat = tv.Armor.CloneBaseArmor.ArmorSpecific.ArmorFactor;
+        }
+        else if (Target.CloneBaseObject?.SimpleObjectSpecific.DamageArmor?.Damage != null)
+        {
+            resist = Target.CloneBaseObject.SimpleObjectSpecific.DamageArmor.Damage;
+            armorFlat = Target.CloneBaseObject.SimpleObjectSpecific.Armor;
+        }
+
+        var totalPostResist = totalScaled;
+        if (resist != null && resist.Length >= 6 && dmgByType.Sum() > 0)
+        {
+            totalPostResist = 0;
+            for (var i = 0; i < 6; i++)
+            {
+                var r = Math.Clamp((int)resist[i], 0, 1000);
+                var scaledType = (int)MathF.Round(dmgByType[i] * scalar * dmgBonus);
+                var after = (int)MathF.Round(scaledType * (1.0f - (r / 1000.0f)));
+                totalPostResist += Math.Max(0, after);
+            }
+        }
+
+        var damage = Math.Max(0, totalPostResist - Math.Max(0, armorFlat));
+        if (damage <= 0) damage = 1;
+
+
+        var actualDamage = Target.TakeDamage(damage);
+        TrySendCombatHitProbe(attackerChar, actualDamage);
+
+
+        try
+        {
+            attackerChar?.OwningConnection?.SendGamePacket(new DamagePacket
+            {
+                Target = Target.ObjectId,
+                Source = ObjectId,
+                Damage = actualDamage,
+                DamageType = 0,
+                Flags = 0
+            });
+        }
+        catch { }
+
+
+        if (Target.GetCurrentHP() <= 0)
+        {
+            Target.OnDeath(DeathType.Silent);
+            TrySendCombatMessage(attackerChar, $"Killed {Target.GetType().Name}#{Target.ObjectId.Coid}", ChatType.CombatMessage_HighImportance);
+
         }
     }
 }
