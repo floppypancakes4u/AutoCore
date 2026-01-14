@@ -3,6 +3,7 @@
 using AutoCore.Game.Constants;
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Packets.Sector;
 using AutoCore.Utils;
 
 public enum ReactionType : byte
@@ -192,11 +193,13 @@ public class Reaction : ClonedObjectBase
             case ReactionType.FailMission:
             case ReactionType.AddMissionString:
             case ReactionType.DelMissionString:
-            case ReactionType.GiveMissionDialog:
                 // Mission-related reactions are primarily client-side
                 // Server will need to track mission state in the future
                 Logger.WriteLog(LogType.Debug, $"Mission reaction {Template.ReactionType} triggered for reaction {Template.COID}");
                 return true;
+
+            case ReactionType.GiveMissionDialog:
+                return HandleGiveMissionDialog(activator);
 
             case ReactionType.AddWaypoint:
             case ReactionType.DelWaypoint:
@@ -234,9 +237,58 @@ public class Reaction : ClonedObjectBase
 
             default:
                 Logger.WriteLog(LogType.Error, $"Unhandled reaction type: {Template.ReactionType} for reaction {Template.COID}!");
-                return true;
-        }
+        return true;
     }
+
+    private bool HandleGiveMissionDialog(ClonedObjectBase activator)
+    {
+        var character = GetCharacterFromActivator(activator);
+        if (character == null || character.OwningConnection == null)
+        {
+            Logger.WriteLog(LogType.Debug, $"GiveMissionDialog reaction {Template.COID}: Could not get character or connection from activator");
+            return true;
+        }
+
+        // Create the mission dialog packet
+        var packet = new MissionDialogPacket
+        {
+            Creature = ObjectId // The reaction's object ID (the NPC/creature giving the missions)
+        };
+
+        // Add missions from the ReactionTemplate
+        // Note: ReactionTemplate stores MissionTypes and Missions lists
+        // The packet expects MissionInfo with Id and PossibleItemCoids
+        foreach (var missionId in Template.Missions)
+        {
+            var missionInfo = new MissionDialogPacket.MissionInfo
+            {
+                Id = missionId,
+                // PossibleItemCoids are typically used for random mission item generation
+                // Setting to -1 (invalid) for now - may need to be populated from mission data
+                PossibleItemCoids = new long[] { -1, -1, -1, -1 }
+            };
+
+            if (!packet.AddMission(missionInfo))
+            {
+                Logger.WriteLog(LogType.Warning, $"GiveMissionDialog reaction {Template.COID}: Could not add mission {missionId} - packet full (max 8 missions)");
+                break;
+            }
+        }
+
+        if (packet.MissionCount == 0)
+        {
+            Logger.WriteLog(LogType.Debug, $"GiveMissionDialog reaction {Template.COID}: No missions to send");
+            return true;
+        }
+
+        Logger.WriteLog(LogType.Debug, $"GiveMissionDialog reaction {Template.COID}: Sending {packet.MissionCount} missions to character {character.Name}");
+
+        // Send the packet to the client
+        character.OwningConnection.SendGamePacket(packet);
+
+        return true;
+    }
+}
 
     private bool HandleDelete(ClonedObjectBase activator)
     {
@@ -416,7 +468,7 @@ public class Reaction : ClonedObjectBase
         return true;
     }
 
-    public override int GetCurrentHP() => 1; 
+    public override int GetCurrentHP() => 1;
     public override int GetMaximumHP() => 1;
     public override int GetBareTeamFaction() => Faction;
 }

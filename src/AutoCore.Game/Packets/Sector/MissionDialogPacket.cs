@@ -11,6 +11,8 @@ public class MissionDialogPacket : BasePacket
     public TFID Creature { get; set; }
     private List<MissionInfo> Missions { get; } = new();
 
+    public int MissionCount => Missions.Count;
+
     public bool AddMission(MissionInfo info)
     {
         if (Missions.Count == 8)
