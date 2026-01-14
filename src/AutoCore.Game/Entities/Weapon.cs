@@ -40,20 +40,22 @@ public class Weapon : SimpleObject
 
         if (packet is CreateWeaponPacket weaponPacket)
         {
+            var weaponSpec = CloneBaseWeapon.WeaponSpecific;
+            
             weaponPacket.VarianceRange = 0.0f;
             weaponPacket.VarianceRefireRate = 0.0f;
             weaponPacket.VarianceDamageMinimum = 0.0f;
             weaponPacket.VarianceDamageMaximum = 0.0f;
             weaponPacket.VarianceOffensiveBonus = 0;
-            weaponPacket.PrefixAccuracyBonus = 0.0f;
-            weaponPacket.PrefixPenetrationBonus = 0;
-            weaponPacket.RechargeTime = 1;
+            weaponPacket.PrefixAccuracyBonus = weaponSpec.AccucaryModifier;
+            weaponPacket.PrefixPenetrationBonus = weaponSpec.PenetrationModifier;
+            weaponPacket.RechargeTime = weaponSpec.RechargeTime;
             weaponPacket.Mass = CloneBaseWeapon.SimpleObjectSpecific.Mass;
-            weaponPacket.RangeMinimum = CloneBaseWeapon.WeaponSpecific.RangeMin;
-            weaponPacket.RangeMaximum = CloneBaseWeapon.WeaponSpecific.RangeMax;
-            weaponPacket.ValidArc = CloneBaseWeapon.WeaponSpecific.ValidArc;
-            weaponPacket.MinimumDamage = DamageSpecific.CreateEmpty();
-            weaponPacket.MaximumDamage = DamageSpecific.CreateEmpty();
+            weaponPacket.RangeMinimum = weaponSpec.RangeMin;
+            weaponPacket.RangeMaximum = weaponSpec.RangeMax;
+            weaponPacket.ValidArc = weaponSpec.ValidArc;
+            weaponPacket.MinimumDamage = weaponSpec.MinMin;
+            weaponPacket.MaximumDamage = weaponSpec.MaxMax;
             weaponPacket.Name = "";
         }
     }
