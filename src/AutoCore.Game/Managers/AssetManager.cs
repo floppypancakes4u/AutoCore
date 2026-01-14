@@ -184,6 +184,36 @@ public class AssetManager : Singleton<AssetManager>
     #endregion
 
     #region WAD
+    public Mission.Mission GetMission(int missionId)
+    {
+        if (WADLoader.Missions.TryGetValue(missionId, out var mission))
+            return mission;
+        return null;
+    }
+
+    public Mission.Mission GetMissionByObjectiveId(int objectiveId)
+    {
+        foreach (var mission in WADLoader.Missions.Values)
+        {
+            foreach (var objective in mission.Objectives.Values)
+            {
+                if (objective.ObjectiveId == objectiveId)
+                    return mission;
+            }
+        }
+        return null;
+    }
+
+    public IEnumerable<Mission.Mission> GetMissionsForContinent(int continentId)
+    {
+        return WADLoader.Missions.Values.Where(m => m.Continent == continentId);
+    }
+
+    public IEnumerable<Mission.Mission> GetAutoAssignMissions()
+    {
+        return WADLoader.Missions.Values.Where(m => m.AutoAssign != 0);
+    }
+
     public CloneBase GetCloneBase(int CBID)
     {
         if (WADLoader.CloneBases.TryGetValue(CBID, out CloneBase value))
@@ -242,6 +272,29 @@ public class AssetManager : Singleton<AssetManager>
             return Enumerable.Empty<ContinentObject>();
 
         return WorldDBLoader.ContinentObjects.Values;
+    }
+
+    /// <summary>
+    /// Looks up a continent object directly from wad.xml, bypassing the filter.
+    /// Used for error messages when a map transfer fails because the map file is missing.
+    /// </summary>
+    public ContinentObject GetContinentObjectFromWad(int continentObjectId)
+    {
+        try
+        {
+            var wadXmlPath = Path.Combine(GamePath, "wad.xml");
+            if (!File.Exists(wadXmlPath))
+                return null;
+
+            var allContinents = WadXmlWorldDataLoader.LoadContinentObjects(wadXmlPath);
+            if (allContinents.TryGetValue(continentObjectId, out var result))
+                return result;
+        }
+        catch
+        {
+            // Ignore errors - this is just for diagnostics
+        }
+        return null;
     }
 
     public MapData GetMapData(int mapId)
