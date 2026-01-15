@@ -84,7 +84,7 @@ public class CreateCharacterExtendedPacket : CreateCharacterPacket
         writer.Write(CreditDebt);
         writer.Write(XP);
         writer.Write(CurrentMana);
-        writer.Write(CurrentHealth);
+        writer.Write(MaximumMana);
         writer.Write(AttributePoints);
         writer.Write(AttributeTech);
         writer.Write(AttributeCombat);

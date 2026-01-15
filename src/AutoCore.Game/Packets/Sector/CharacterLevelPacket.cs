@@ -5,7 +5,7 @@ using AutoCore.Game.Extensions;
 using AutoCore.Game.Structures;
 
 /// <summary>
-/// CharacterLevel (0x2017) - Updates character level and related stats.
+/// CharacterStats (0x2017) - Updates character stats.
 /// 
 /// Currency Format:
 ///   A single long value split into 4 display groups (like decimal comma groupings):
@@ -34,9 +34,9 @@ using AutoCore.Game.Structures;
 ///   Offset 0x44: Unknown7 (2 bytes)
 ///   Offset 0x46: ResearchPoints (2 bytes)
 /// </summary>
-public class CharacterLevelPacket : BasePacket
+public class CharacterStatsPacket : BasePacket
 {
-    public override GameOpcode Opcode => GameOpcode.CharacterLevel;
+    public override GameOpcode Opcode => GameOpcode.CharacterStats;
 
     public int UnknownHeader { get; set; } = 0;
     public TFID CharacterId { get; set; }

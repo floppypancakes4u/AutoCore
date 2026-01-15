@@ -7,6 +7,7 @@ using AutoCore.Game.Managers;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL.Ghost;
+using AutoCore.Utils;
 
 public class Creature : SimpleObject
 {
@@ -116,6 +117,26 @@ public class Creature : SimpleObject
             foreach (var character in map.Objects.Values.OfType<Character>().Where(c => c.OwningConnection != null))
             {
                 character.OwningConnection.SendGamePacket(destroyPacket);
+            }
+
+            // Award XP to killer for NPC kill
+            if (killerCharacter != null)
+            {
+                try
+                {
+                    var creatureLevel = GetLevel();
+                    var killXP = AssetManager.Instance.GetCreatureKillXP(creatureLevel);
+                    
+                    if (killXP > 0)
+                    {
+                        CharacterStatManager.Instance.GrantKillXPAndHandleLevelUps(killerCharacter, killXP);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Never let XP awarding break death handling
+                    Logger.WriteLog(LogType.Error, $"Failed to award XP on creature kill: {ex.Message}");
+                }
             }
 
             // Notify killer that death animation packet is missing

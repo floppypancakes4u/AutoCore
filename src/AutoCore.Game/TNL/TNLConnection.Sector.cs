@@ -96,6 +96,9 @@ public partial class TNLConnection
         ObjectLocalScopeAlways(character.Ghost);
         ObjectLocalScopeAlways(character.CurrentVehicle.Ghost);
 
+        // Prime character stats cache before building packets
+        Managers.CharacterStatManager.Instance.GetOrLoad(character.ObjectId.Coid);
+
         var charPacket = new CreateCharacterExtendedPacket();
         var vehiclePacket = new CreateVehicleExtendedPacket();
 

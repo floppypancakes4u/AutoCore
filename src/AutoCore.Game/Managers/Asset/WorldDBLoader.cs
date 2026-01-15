@@ -11,6 +11,7 @@ public class WorldDBLoader
     public IDictionary<Tuple<int, byte>, ContinentArea> ContinentAreas { get; set; }
     public IDictionary<int, ContinentObject> ContinentObjects { get; set; }
     public IDictionary<byte, ExperienceLevel> ExperienceLevels { get; set; }
+    public IDictionary<byte, uint> CreatureExperienceLevels { get; set; }
     public IDictionary<int, LootTable> LootTables { get; set; }
 
     public bool Load()
@@ -72,6 +73,12 @@ public class WorldDBLoader
                     {
                         LootTables = WadXmlWorldDataLoader.LoadLootTables(wadXmlPath);
                         Logger.WriteLog(LogType.Initialize, $"WorldDBLoader: Loaded {LootTables.Count} LootTables from wad.xml");
+                    }
+
+                    if (CreatureExperienceLevels == null || CreatureExperienceLevels.Count == 0)
+                    {
+                        CreatureExperienceLevels = WadXmlWorldDataLoader.LoadCreatureExperienceLevels(wadXmlPath);
+                        Logger.WriteLog(LogType.Initialize, $"WorldDBLoader: Loaded {CreatureExperienceLevels.Count} CreatureExperienceLevels from wad.xml");
                     }
                 }
             }

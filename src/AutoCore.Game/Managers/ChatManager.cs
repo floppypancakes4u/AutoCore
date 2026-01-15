@@ -369,21 +369,17 @@ public class ChatManager : Singleton<ChatManager>
 
                 try
                 {
-                    connection.SendGamePacket(new CharacterLevelPacket
-                    {
-                        CharacterId = character.ObjectId,
-                        Level = character.Level,
-                        Experience = xpAmount
-                    });
+                    CharacterStatManager.Instance.Update(character.ObjectId.Coid, stats => stats.Experience = xpAmount);
+                    connection.SendGamePacket(CharacterStatManager.Instance.BuildPacket(character));
                     respPacket.Message = $"Set Experience to {xpAmount}!";
                 }
                 catch (System.Exception ex)
                 {
-                    Logger.WriteLog(LogType.Error, $"Failed to send XP packet: {ex.Message}");
+                    Logger.WriteLog(LogType.Error, $"Failed to set XP: {ex.Message}");
                     respPacket.Message = $"Failed to set XP: {ex.Message}";
                 }
                 break;
-
+                
             case "/level":
                 if (parts.Length < 2)
                 {
@@ -399,17 +395,97 @@ public class ChatManager : Singleton<ChatManager>
 
                 try
                 {
-                    connection.SendGamePacket(new CharacterLevelPacket
+                    var oldLevel = character.Level;
+                    var levelsGained = level - oldLevel;
+
+                    // Persist level to CharacterData table
+                    using (var context = new AutoCore.Database.Char.CharContext())
                     {
-                        CharacterId = character.ObjectId,
-                        Level = level
-                    });
-                    respPacket.Message = $"Set level to {level}!";
+                        var charData = context.Characters.FirstOrDefault(c => c.Coid == character.ObjectId.Coid);
+                        if (charData != null)
+                        {
+                            charData.Level = level;
+                            context.SaveChanges();
+                        }
+                    }
+
+                    // Update in-memory character level
+                    character.SetLevel(level);
+
+                    // Apply level-up rewards if level increased
+                    if (levelsGained > 0)
+                    {
+                        CharacterStatManager.Instance.ApplyLevelUpRewards(character.ObjectId.Coid, levelsGained);
+                    }
+
+                    // Send full stats packet with updated level
+                    var packet = CharacterStatManager.Instance.BuildPacket(character);
+                    packet.Level = level;
+                    connection.SendGamePacket(packet);
+                    
+                    if (levelsGained > 0)
+                    {
+                        respPacket.Message = $"Leveled up from {oldLevel} to {level}! Gained {levelsGained} level(s) with rewards.";
+                    }
+                    else if (levelsGained < 0)
+                    {
+                        respPacket.Message = $"Set level to {level} (reduced from {oldLevel}).";
+                    }
+                    else
+                    {
+                        respPacket.Message = $"Set level to {level}!";
+                    }
                 }
                 catch (System.Exception ex)
                 {
-                    Logger.WriteLog(LogType.Error, $"Failed to send level packet: {ex.Message}");
+                    Logger.WriteLog(LogType.Error, $"Failed to set level: {ex.Message}");
                     respPacket.Message = $"Failed to set level: {ex.Message}";
+                }
+                break;
+
+            case "/resetcharacter":
+                try
+                {
+                    // Reset level to 1
+                    using (var context = new AutoCore.Database.Char.CharContext())
+                    {
+                        var charData = context.Characters.FirstOrDefault(c => c.Coid == character.ObjectId.Coid);
+                        if (charData != null)
+                        {
+                            charData.Level = 1;
+                            context.SaveChanges();
+                        }
+                    }
+
+                    // Update in-memory character level
+                    character.SetLevel(1);
+
+                    // Reset all stats to starting values
+                    CharacterStatManager.Instance.Update(character.ObjectId.Coid, stats =>
+                    {
+                        stats.Currency = 0;
+                        stats.Experience = 0;
+                        stats.CurrentMana = 100;
+                        stats.MaxMana = 100;
+                        stats.AttributeTech = 1;
+                        stats.AttributeCombat = 1;
+                        stats.AttributeTheory = 1;
+                        stats.AttributePerception = 1;
+                        stats.AttributePoints = 0;
+                        stats.SkillPoints = 0;
+                        stats.ResearchPoints = 0;
+                    });
+
+                    // Send full stats packet with reset values
+                    var packet = CharacterStatManager.Instance.BuildPacket(character);
+                    packet.Level = 1;
+                    connection.SendGamePacket(packet);
+                    respPacket.Message = "Character stats reset to starting values!";
+                }
+                catch (System.Exception ex)
+                {
+                    Logger.WriteLog(LogType.Error, $"Failed to reset character: {ex.Message}");
+                    respPacket.Message = $"Failed to reset character: {ex.Message}";
                 }
                 break;
 
@@ -429,17 +505,14 @@ public class ChatManager : Singleton<ChatManager>
 
                 try
                 {
-                    connection.SendGamePacket(new CharacterLevelPacket
-                    {
-                        CharacterId = character.ObjectId,
-                        Level = character.Level,
-                        Currency = CharacterLevelPacket.BuildCurrency(globes, bars, scrip, clink)
-                    });
+                    var currencyValue = CharacterStatsPacket.BuildCurrency(globes, bars, scrip, clink);
+                    CharacterStatManager.Instance.Update(character.ObjectId.Coid, stats => stats.Currency = currencyValue);
+                    connection.SendGamePacket(CharacterStatManager.Instance.BuildPacket(character));
                     respPacket.Message = $"Set currency to {globes} Globes, {bars} Bars, {scrip} Scrip, {clink} Clink!";
                 }
                 catch (System.Exception ex)
                 {
-                    Logger.WriteLog(LogType.Error, $"Failed to send currency packet: {ex.Message}");
+                    Logger.WriteLog(LogType.Error, $"Failed to set currency: {ex.Message}");
                     respPacket.Message = $"Failed to set currency: {ex.Message}";
                 }
                 break;
@@ -466,18 +539,17 @@ public class ChatManager : Singleton<ChatManager>
 
                 try
                 {
-                    connection.SendGamePacket(new CharacterLevelPacket
+                    CharacterStatManager.Instance.Update(character.ObjectId.Coid, stats =>
                     {
-                        CharacterId = character.ObjectId,
-                        Level = character.Level,
-                        CurrentMana = currentMana,
-                        MaxMana = maxMana
+                        stats.CurrentMana = currentMana;
+                        stats.MaxMana = maxMana;
                     });
+                    connection.SendGamePacket(CharacterStatManager.Instance.BuildPacket(character));
                     respPacket.Message = $"Set mana to {currentMana}/{maxMana}!";
                 }
                 catch (System.Exception ex)
                 {
-                    Logger.WriteLog(LogType.Error, $"Failed to send mana packet: {ex.Message}");
+                    Logger.WriteLog(LogType.Error, $"Failed to set mana: {ex.Message}");
                     respPacket.Message = $"Failed to set mana: {ex.Message}";
                 }
                 break;
@@ -497,17 +569,13 @@ public class ChatManager : Singleton<ChatManager>
 
                 try
                 {
-                    connection.SendGamePacket(new CharacterLevelPacket
-                    {
-                        CharacterId = character.ObjectId,
-                        Level = character.Level,
-                        AttributeTech = tech
-                    });
+                    CharacterStatManager.Instance.Update(character.ObjectId.Coid, stats => stats.AttributeTech = tech);
+                    connection.SendGamePacket(CharacterStatManager.Instance.BuildPacket(character));
                     respPacket.Message = $"Set Tech to {tech}!";
                 }
                 catch (System.Exception ex)
                 {
-                    Logger.WriteLog(LogType.Error, $"Failed to send tech packet: {ex.Message}");
+                    Logger.WriteLog(LogType.Error, $"Failed to set tech: {ex.Message}");
                     respPacket.Message = $"Failed to set tech: {ex.Message}";
                 }
                 break;
@@ -527,17 +595,13 @@ public class ChatManager : Singleton<ChatManager>
 
                 try
                 {
-                    connection.SendGamePacket(new CharacterLevelPacket
-                    {
-                        CharacterId = character.ObjectId,
-                        Level = character.Level,
-                        AttributeCombat = combat
-                    });
+                    CharacterStatManager.Instance.Update(character.ObjectId.Coid, stats => stats.AttributeCombat = combat);
+                    connection.SendGamePacket(CharacterStatManager.Instance.BuildPacket(character));
                     respPacket.Message = $"Set Combat to {combat}!";
                 }
                 catch (System.Exception ex)
                 {
-                    Logger.WriteLog(LogType.Error, $"Failed to send combat packet: {ex.Message}");
+                    Logger.WriteLog(LogType.Error, $"Failed to set combat: {ex.Message}");
                     respPacket.Message = $"Failed to set combat: {ex.Message}";
                 }
                 break;
@@ -557,17 +621,13 @@ public class ChatManager : Singleton<ChatManager>
 
                 try
                 {
-                    connection.SendGamePacket(new CharacterLevelPacket
-                    {
-                        CharacterId = character.ObjectId,
-                        Level = character.Level,
-                        AttributeTheory = theory
-                    });
+                    CharacterStatManager.Instance.Update(character.ObjectId.Coid, stats => stats.AttributeTheory = theory);
+                    connection.SendGamePacket(CharacterStatManager.Instance.BuildPacket(character));
                     respPacket.Message = $"Set Theory to {theory}!";
                 }
                 catch (System.Exception ex)
                 {
-                    Logger.WriteLog(LogType.Error, $"Failed to send theory packet: {ex.Message}");
+                    Logger.WriteLog(LogType.Error, $"Failed to set theory: {ex.Message}");
                     respPacket.Message = $"Failed to set theory: {ex.Message}";
                 }
                 break;
@@ -587,17 +647,13 @@ public class ChatManager : Singleton<ChatManager>
 
                 try
                 {
-                    connection.SendGamePacket(new CharacterLevelPacket
-                    {
-                        CharacterId = character.ObjectId,
-                        Level = character.Level,
-                        AttributePerception = perception
-                    });
+                    CharacterStatManager.Instance.Update(character.ObjectId.Coid, stats => stats.AttributePerception = perception);
+                    connection.SendGamePacket(CharacterStatManager.Instance.BuildPacket(character));
                     respPacket.Message = $"Set Perception to {perception}!";
                 }
                 catch (System.Exception ex)
                 {
-                    Logger.WriteLog(LogType.Error, $"Failed to send perception packet: {ex.Message}");
+                    Logger.WriteLog(LogType.Error, $"Failed to set perception: {ex.Message}");
                     respPacket.Message = $"Failed to set perception: {ex.Message}";
                 }
                 break;
@@ -618,17 +674,13 @@ public class ChatManager : Singleton<ChatManager>
 
                 try
                 {
-                    connection.SendGamePacket(new CharacterLevelPacket
-                    {
-                        CharacterId = character.ObjectId,
-                        Level = character.Level,
-                        AttributePoints = attrPoints
-                    });
+                    CharacterStatManager.Instance.Update(character.ObjectId.Coid, stats => stats.AttributePoints = attrPoints);
+                    connection.SendGamePacket(CharacterStatManager.Instance.BuildPacket(character));
                     respPacket.Message = $"Set Attribute Points to {attrPoints}!";
                 }
                 catch (System.Exception ex)
                 {
-                    Logger.WriteLog(LogType.Error, $"Failed to send attribute points packet: {ex.Message}");
+                    Logger.WriteLog(LogType.Error, $"Failed to set attribute points: {ex.Message}");
                     respPacket.Message = $"Failed to set attribute points: {ex.Message}";
                 }
                 break;
@@ -648,17 +700,13 @@ public class ChatManager : Singleton<ChatManager>
 
                 try
                 {
-                    connection.SendGamePacket(new CharacterLevelPacket
-                    {
-                        CharacterId = character.ObjectId,
-                        Level = character.Level,
-                        SkillPoints = skillPoints
-                    });
+                    CharacterStatManager.Instance.Update(character.ObjectId.Coid, stats => stats.SkillPoints = skillPoints);
+                    connection.SendGamePacket(CharacterStatManager.Instance.BuildPacket(character));
                     respPacket.Message = $"Set Skill Points to {skillPoints}!";
                 }
                 catch (System.Exception ex)
                 {
-                    Logger.WriteLog(LogType.Error, $"Failed to send skill points packet: {ex.Message}");
+                    Logger.WriteLog(LogType.Error, $"Failed to set skill points: {ex.Message}");
                     respPacket.Message = $"Failed to set skill points: {ex.Message}";
                 }
                 break;
@@ -679,17 +727,13 @@ public class ChatManager : Singleton<ChatManager>
 
                 try
                 {
-                    connection.SendGamePacket(new CharacterLevelPacket
-                    {
-                        CharacterId = character.ObjectId,
-                        Level = character.Level,
-                        ResearchPoints = researchPoints
-                    });
+                    CharacterStatManager.Instance.Update(character.ObjectId.Coid, stats => stats.ResearchPoints = researchPoints);
+                    connection.SendGamePacket(CharacterStatManager.Instance.BuildPacket(character));
                     respPacket.Message = $"Set Research Points to {researchPoints}!";
                 }
                 catch (System.Exception ex)
                 {
-                    Logger.WriteLog(LogType.Error, $"Failed to send research points packet: {ex.Message}");
+                    Logger.WriteLog(LogType.Error, $"Failed to set research points: {ex.Message}");
                     respPacket.Message = $"Failed to set research points: {ex.Message}";
                 }
                 break;

@@ -71,6 +71,15 @@ public class Character : Creature
         OwningConnection = owningConnection;
     }
 
+    /// <summary>
+    /// Updates the character's level in-memory. Does not persist to database.
+    /// </summary>
+    public void SetLevel(byte level)
+    {
+        if (DBData != null)
+            DBData.Level = level;
+    }
+
     public override Character GetAsCharacter() => this;
     public override Character GetSuperCharacter(bool includeSummons) => this;
 
@@ -162,6 +171,23 @@ public class Character : Creature
             extendedCharPacket.NumAchievements = 0;
             extendedCharPacket.NumDisciplines = 0;
             extendedCharPacket.NumSkills = 0;
+
+            // Load stats from CharacterStatManager (server-authoritative)
+            var stats = Managers.CharacterStatManager.Instance.GetOrLoad(ObjectId.Coid);
+            lock (stats)
+            {
+                extendedCharPacket.Credits = stats.Currency;
+                extendedCharPacket.XP = stats.Experience;
+                extendedCharPacket.CurrentMana = stats.CurrentMana;
+                extendedCharPacket.MaximumMana = stats.MaxMana;
+                extendedCharPacket.AttributePoints = stats.AttributePoints;
+                extendedCharPacket.AttributeTech = stats.AttributeTech;
+                extendedCharPacket.AttributeCombat = stats.AttributeCombat;
+                extendedCharPacket.AttributeTheory = stats.AttributeTheory;
+                extendedCharPacket.AttributePerception = stats.AttributePerception;
+                extendedCharPacket.SkillPoints = stats.SkillPoints;
+                extendedCharPacket.DisciplinePoints = stats.ResearchPoints; // Map ResearchPoints to DisciplinePoints
+            }
 
             // Load FirstTimeFlags from Account
             if (OwningConnection?.Account != null)

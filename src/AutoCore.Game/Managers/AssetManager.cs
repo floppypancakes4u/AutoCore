@@ -472,5 +472,31 @@ public class AssetManager : Singleton<AssetManager>
 
         return WorldDBLoader.LootTables.Values;
     }
+
+    public ExperienceLevel GetExperienceLevel(byte level)
+    {
+        if (WorldDBLoader.ExperienceLevels == null)
+            return null;
+
+        if (WorldDBLoader.ExperienceLevels.TryGetValue(level, out var result))
+            return result;
+
+        return null;
+    }
+
+    /// <summary>
+    /// Gets the XP awarded for killing a creature of the specified level.
+    /// Returns 0 if the creature level is not found in the table.
+    /// </summary>
+    public uint GetCreatureKillXP(byte creatureLevel)
+    {
+        if (WorldDBLoader.CreatureExperienceLevels == null)
+            return 0;
+
+        if (WorldDBLoader.CreatureExperienceLevels.TryGetValue(creatureLevel, out var xp))
+            return xp;
+
+        return 0;
+    }
     #endregion
 }

@@ -156,6 +156,28 @@ public static class WadXmlWorldDataLoader
         return dict;
     }
 
+    public static IDictionary<byte, uint> LoadCreatureExperienceLevels(string wadXmlPath)
+    {
+        var doc = XDocument.Load(wadXmlPath);
+        var section = doc.Descendants("tCreatureExperienceLevel").FirstOrDefault();
+        if (section == null)
+            return new Dictionary<byte, uint>();
+
+        var dict = new Dictionary<byte, uint>();
+
+        foreach (var row in section.Elements("row"))
+        {
+            var creatureLevel = GetInt(row, "IDCreatureLevel", defaultValue: -1);
+            if (creatureLevel < 0 || creatureLevel > byte.MaxValue)
+                continue;
+
+            var experience = (uint)Math.Max(0, GetInt(row, "intExperience", defaultValue: 0));
+            dict[(byte)creatureLevel] = experience;
+        }
+
+        return dict;
+    }
+
     public static IDictionary<int, LootTable> LoadLootTables(string wadXmlPath)
     {
         var doc = XDocument.Load(wadXmlPath);
