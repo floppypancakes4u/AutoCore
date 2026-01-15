@@ -522,41 +522,19 @@ public class Vehicle : SimpleObject
             }
         }
 
+        // Fallback to simple min/max if damage arrays are empty
         if (totalPreMit <= 0)
-            totalPreMit = (weaponSpec.DmgMinMin + weaponSpec.DmgMaxMax) / 2;
+        {
+            var minDmg = weaponSpec.DmgMinMin;
+            var maxDmg = weaponSpec.DmgMaxMax;
+            if (maxDmg < minDmg) (minDmg, maxDmg) = (maxDmg, minDmg);
+            totalPreMit = maxDmg > minDmg ? rng.Next(minDmg, maxDmg + 1) : Math.Max(1, minDmg);
+        }
 
+        // Apply damage modifiers
         var scalar = weaponSpec.DamageScalar > 0 ? weaponSpec.DamageScalar : 1.0f;
         var dmgBonus = 1.0f + (weaponSpec.DamageBonusPerLevel * attackerLevel);
-        var totalScaled = (int)MathF.Round(Math.Max(0, totalPreMit) * scalar * dmgBonus);
-
-        short[] resist = null;
-        var armorFlat = 0;
-        if (Target is Vehicle tv && tv.Armor?.CloneBaseArmor?.ArmorSpecific?.Resistances?.Damage != null)
-        {
-            resist = tv.Armor.CloneBaseArmor.ArmorSpecific.Resistances.Damage;
-            armorFlat = tv.Armor.CloneBaseArmor.ArmorSpecific.ArmorFactor;
-        }
-        else if (Target.CloneBaseObject?.SimpleObjectSpecific.DamageArmor?.Damage != null)
-        {
-            resist = Target.CloneBaseObject.SimpleObjectSpecific.DamageArmor.Damage;
-            armorFlat = Target.CloneBaseObject.SimpleObjectSpecific.Armor;
-        }
-
-        var totalPostResist = totalScaled;
-        if (resist != null && resist.Length >= 6 && dmgByType.Sum() > 0)
-        {
-            totalPostResist = 0;
-            for (var i = 0; i < 6; i++)
-            {
-                var r = Math.Clamp((int)resist[i], 0, 1000);
-                var scaledType = (int)MathF.Round(dmgByType[i] * scalar * dmgBonus);
-                var after = (int)MathF.Round(scaledType * (1.0f - (r / 1000.0f)));
-                totalPostResist += Math.Max(0, after);
-            }
-        }
-
-        var damage = Math.Max(0, totalPostResist - Math.Max(0, armorFlat));
-        if (damage <= 0) damage = 1;
+        var damage = (int)MathF.Round(Math.Max(1, totalPreMit) * scalar * dmgBonus);
 
 
         var actualDamage = Target.TakeDamage(damage);
