@@ -1,5 +1,7 @@
 ﻿namespace AutoCore.Game.Entities;
 
+using System.Linq;
+using System.Text;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Packets.Sector;
@@ -62,21 +64,25 @@ public class Creature : SimpleObject
     {
         base.OnDeath(deathType);
 
+        // Save object ID and map reference before removal
+        var creatureObjectId = ObjectId;
+        var map = Map;
+
+        // Try to find the killer character early (for loot and chat notification)
+        Character killerCharacter = null;
+        if (Murderer.Coid > 0)
+        {
+            var murdererObj = ObjectManager.Instance.GetObject(Murderer);
+            killerCharacter = murdererObj?.GetSuperCharacter(false);
+        }
+
         // Generate loot for this creature
-        if (Map != null)
+        if (map != null)
         {
             var lootItems = LootManager.Instance.GenerateLoot(this);
             
             if (lootItems.Count > 0)
             {
-                // Try to find the killer character for auto-loot
-                Character killerCharacter = null;
-                if (Murderer.Coid > 0)
-                {
-                    var murdererObj = ObjectManager.Instance.GetObject(Murderer);
-                    killerCharacter = murdererObj?.GetSuperCharacter(false);
-                }
-
                 var random = new System.Random();
                 foreach (var cbid in lootItems)
                 {
@@ -99,6 +105,39 @@ public class Creature : SimpleObject
                         // Regular items (consumables, resources) can be picked up from ground
                         SpawnLootOnGround(cbid, random);
                     }
+                }
+            }
+
+            // Remove creature from map (SetMap(null) handles calling LeaveMap internally)
+            SetMap(null);
+
+            // Broadcast destroy packet to all players in the map so they remove the creature client-side
+            var destroyPacket = new DestroyObjectPacket(creatureObjectId);
+            foreach (var character in map.Objects.Values.OfType<Character>().Where(c => c.OwningConnection != null))
+            {
+                character.OwningConnection.SendGamePacket(destroyPacket);
+            }
+
+            // Notify killer that death animation packet is missing
+            if (killerCharacter?.OwningConnection != null)
+            {
+                try
+                {
+                    var message = "Death animation packet is missing for creature death";
+                    var msgLen = (short)(Encoding.UTF8.GetByteCount(message) + 1); // include null terminator
+                    killerCharacter.OwningConnection.SendGamePacket(new BroadcastPacket
+                    {
+                        ChatType = ChatType.SystemMessage,
+                        SenderCoid = (ulong)creatureObjectId.Coid,
+                        IsGM = false,
+                        Sender = "System",
+                        MessageLength = msgLen,
+                        Message = message
+                    });
+                }
+                catch
+                {
+                    // Never let chat break death handling
                 }
             }
         }

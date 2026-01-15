@@ -395,16 +395,8 @@ public class LootManager : Singleton<LootManager>
         createPacket.IsBound = false;
         createPacket.IsIdentified = true;
 
-        // Create and send the inventory add packet
-        var inventoryPacket = new InventoryAddItemPacket
-        {
-            CreatePacket = createPacket
-        };
-
-        character.OwningConnection.SendGamePacket(inventoryPacket);
-
         var itemName = cloneBase.CloneBaseSpecific.UniqueName;
-        Logger.WriteLog(LogType.Debug, $"LootManager.AutoLootItem: Auto-looted {itemName} (CBID {cbid}) to {character.Name}'s inventory");
+        Logger.WriteLog(LogType.Debug, $"LootManager.AutoLootItem: Auto-looted {itemName} (CBID {cbid}). Inventory system WIP");
     }
 
     /// <summary>
