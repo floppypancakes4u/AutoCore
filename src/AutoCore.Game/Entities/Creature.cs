@@ -1,5 +1,6 @@
 ﻿namespace AutoCore.Game.Entities;
 
+using AutoCore.Game.Constants;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
@@ -55,6 +56,39 @@ public class Creature : SimpleObject
 
         Ghost = new GhostCreature();
         Ghost.SetParent(this);
+    }
+
+    public override void OnDeath(DeathType deathType)
+    {
+        base.OnDeath(deathType);
+
+        // Generate loot for this creature
+        if (Map != null)
+        {
+            var lootItems = LootManager.Instance.GenerateLoot(this);
+            
+            if (lootItems.Count > 0)
+            {
+                // Spawn each loot item with slight random offset to prevent stacking
+                var random = new System.Random();
+                foreach (var cbid in lootItems)
+                {
+                    // Calculate random offset: random angle, 1-2 units distance
+                    var angle = (float)(random.NextDouble() * 2.0 * System.Math.PI);
+                    var distance = 1.0f + (float)(random.NextDouble() * 1.0); // 1-2 units
+                    var offsetX = (float)(System.Math.Cos(angle) * distance);
+                    var offsetZ = (float)(System.Math.Sin(angle) * distance);
+                    
+                    var lootPosition = new Vector3(
+                        Position.X + offsetX,
+                        Position.Y,
+                        Position.Z + offsetZ
+                    );
+                    
+                    LootManager.Instance.SpawnLootItem(cbid, lootPosition, Rotation, Map);
+                }
+            }
+        }
     }
 
     public void HandleMovement(CreatureMovedPacket packet)

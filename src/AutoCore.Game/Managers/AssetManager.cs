@@ -231,7 +231,7 @@ public class AssetManager : Singleton<AssetManager>
     {
         var characterCBIDs = new List<int>();
         Logger.WriteLog(LogType.Debug, $"GetAllCharacterCBIDs: Total CloneBases loaded: {WADLoader.CloneBases.Count}");
-        
+
         foreach (var kvp in WADLoader.CloneBases)
         {
             var cloneBaseType = kvp.Value.GetType().Name;
@@ -241,9 +241,17 @@ public class AssetManager : Singleton<AssetManager>
                 Logger.WriteLog(LogType.Debug, $"GetAllCharacterCBIDs: Found character CBID {kvp.Key} (Type: {cloneBaseType})");
             }
         }
-        
+
         Logger.WriteLog(LogType.Debug, $"GetAllCharacterCBIDs: Found {characterCBIDs.Count} character CBIDs out of {WADLoader.CloneBases.Count} total CloneBases");
         return characterCBIDs.OrderBy(x => x).ToList();
+    }
+
+    /// <summary>
+    /// Returns all loaded CloneBases as a dictionary.
+    /// </summary>
+    public IReadOnlyDictionary<int, CloneBase> GetAllCloneBases()
+    {
+        return WADLoader.CloneBases;
     }
     #endregion
 
@@ -444,6 +452,25 @@ public class AssetManager : Singleton<AssetManager>
         Logger.WriteLog(LogType.Network, $"GenerateConfigFromGameData: Generated config for Race {characterRace}, Class {characterClass} - Vehicle: {config.Vehicle}, PowerPlant: {config.PowerPlant}, Armor: {config.Armor}, Weapon: {config.Weapon}, StartTown: {config.StartTown}");
 
         return config;
+    }
+
+    public LootTable GetLootTable(int lootTableId)
+    {
+        if (WorldDBLoader.LootTables == null)
+            return null;
+
+        if (WorldDBLoader.LootTables.TryGetValue(lootTableId, out var result))
+            return result;
+
+        return null;
+    }
+
+    public IEnumerable<LootTable> GetAllLootTables()
+    {
+        if (WorldDBLoader.LootTables == null)
+            return Enumerable.Empty<LootTable>();
+
+        return WorldDBLoader.LootTables.Values;
     }
     #endregion
 }

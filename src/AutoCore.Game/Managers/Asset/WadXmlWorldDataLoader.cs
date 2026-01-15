@@ -156,6 +156,90 @@ public static class WadXmlWorldDataLoader
         return dict;
     }
 
+    public static IDictionary<int, LootTable> LoadLootTables(string wadXmlPath)
+    {
+        var doc = XDocument.Load(wadXmlPath);
+        var section = doc.Descendants("tLootTable").FirstOrDefault();
+        if (section == null)
+            return new Dictionary<int, LootTable>();
+
+        var dict = new Dictionary<int, LootTable>();
+
+        foreach (var row in section.Elements("row"))
+        {
+            var id = GetInt(row, "IDLootTable", defaultValue: -1);
+            if (id < 0)
+                continue;
+
+            var lootTable = new LootTable
+            {
+                Id = id,
+                Name = GetString(row, "strLootTableName") ?? string.Empty,
+
+                // Drop parameters
+                LootRolls = (short)GetInt(row, "sinLootRolls", defaultValue: 0),
+                DropChance = GetFloat(row, "rlDropChance", defaultValue: 0),
+                ConsumableDropChance = GetFloat(row, "rlConsumableDropChance", defaultValue: 0),
+
+                // Level adjustment
+                DropLevelOffset = GetFloat(row, "rlDropLevelOffset", defaultValue: 0),
+                MaxLevelOffset = (short)GetInt(row, "sinMaxLevelOffset", defaultValue: 0),
+                LevelOffsetMultiplier = GetFloat(row, "rlLevelOffsetMultiplier", defaultValue: 0),
+
+                // Enhancement parameters
+                MaxEnhancementComplexity = (short)GetInt(row, "sinMaxEnhancementComplexity", defaultValue: 0),
+                BaseChanceEnhanced = GetInt(row, "intBaseChanceEnhanced", defaultValue: 0),
+                ChanceEnhancedModifierPerLevel = GetInt(row, "intChanceEnhancedModifierPerLevel", defaultValue: 0),
+
+                // Item type chances
+                ChanceWeapon = GetInt(row, "intChanceWeapon", defaultValue: 0),
+                ChanceArmor = GetInt(row, "intChanceArmor", defaultValue: 0),
+                ChancePowerPlant = GetInt(row, "intChancePowerPlant", defaultValue: 0),
+                ChanceWheelSet = GetInt(row, "intChanceWheelSet", defaultValue: 0),
+                ChanceVehicle = GetInt(row, "intChanceVehicle", defaultValue: 0),
+                ChanceGadget = GetInt(row, "intChanceGadget", defaultValue: 0),
+                ChanceTinkeringKit = GetInt(row, "intChanceTinkeringKit", defaultValue: 0),
+                ChanceAccessory = GetInt(row, "intChanceAccessory", defaultValue: 0),
+                ChanceRaceItem = GetInt(row, "intChanceRaceItem", defaultValue: 0),
+                ChanceOrnament = GetInt(row, "intChanceOrnament", defaultValue: 0),
+                ChanceOther = GetInt(row, "intChanceOther", defaultValue: 0),
+
+                // Rarity chances
+                ChanceRarity0 = GetInt(row, "intChanceRarity_0", defaultValue: 0),
+                ChanceRarity1 = GetInt(row, "intChanceRarity_1", defaultValue: 0),
+                ChanceRarity2 = GetInt(row, "intChanceRarity_2", defaultValue: 0),
+                ChanceRarity3 = GetInt(row, "intChanceRarity_3", defaultValue: 0),
+                ChanceRarity4 = GetInt(row, "intChanceRarity_4", defaultValue: 0),
+                ChanceRarity5 = GetInt(row, "intChanceRarity_5", defaultValue: 0),
+                ChanceRarity6 = GetInt(row, "intChanceRarity_6", defaultValue: 0),
+                ChanceRarity7 = GetInt(row, "intChanceRarity_7", defaultValue: 0),
+                ChanceRarity8 = GetInt(row, "intChanceRarity_8", defaultValue: 0),
+
+                // Credits
+                DropCreditsChance = GetFloat(row, "rlDropCreditsChance", defaultValue: 0),
+                MinCreditsDrop = GetInt(row, "intMinCreditsDrop", defaultValue: 0),
+                MaxCreditsDrop = GetInt(row, "intMaxCreditsDrop", defaultValue: 0),
+
+                // Broken modifiers
+                WeaponBrokenModifier = GetFloat(row, "rlWeaponBrokenModifier", defaultValue: 0),
+                ArmorBrokenModifier = GetFloat(row, "rlArmorBrokenModifier", defaultValue: 0),
+                PowerPlantBrokenModifier = GetFloat(row, "rlPowerPlantBrokenModifier", defaultValue: 0),
+                WheelSetBrokenModifier = GetFloat(row, "rlWheelsetBrokenModifier", defaultValue: 0),
+                VehicleBrokenModifier = GetFloat(row, "rlVehicleBrokenModifier", defaultValue: 0),
+                GadgetBrokenModifier = GetFloat(row, "rlGadgetBrokenModifier", defaultValue: 0),
+                TinkeringKitBrokenModifier = GetFloat(row, "rlTinkeringKitBrokenModifier", defaultValue: 0),
+                AccessoryBrokenModifier = GetFloat(row, "rlAccessoryBrokenModifier", defaultValue: 0),
+                RaceItemBrokenModifier = GetFloat(row, "rlRaceItemBrokenModifier", defaultValue: 0),
+                OrnamentBrokenModifier = GetFloat(row, "rlOrnamentBrokenModifier", defaultValue: 0),
+                OtherBrokenModifier = GetFloat(row, "rlOtherBrokenModifier", defaultValue: 0),
+            };
+
+            dict[id] = lootTable;
+        }
+
+        return dict;
+    }
+
     private static string? GetString(XElement row, string elementName)
         => row.Element(elementName)?.Value;
 

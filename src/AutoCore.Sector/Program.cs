@@ -48,6 +48,9 @@ public class Program : ExitableProgram
             throw new Exception("Critical asset loading failed!");
         }
 
+        // Initialize the loot manager (builds item index from CloneBase data)
+        LootManager.Instance.Initialize();
+
         if (!MapManager.Instance.Initialize())
         {
             Logger.WriteLog(LogType.Error, "MapManager initialization failed. Continuing anyway.");
