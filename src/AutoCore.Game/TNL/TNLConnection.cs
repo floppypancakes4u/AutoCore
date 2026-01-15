@@ -148,8 +148,14 @@ public partial class TNLConnection : GhostConnection
     private void HandlePacket(ByteBuffer buffer)
     {
         var reader = new BinaryReader(new MemoryStream(buffer.GetBuffer()));
-        var gameOpcode = reader.ReadGameOpcode();
+        var rawOpcode = reader.ReadUInt32();
+        var gameOpcode = (GameOpcode)rawOpcode;
 
+        // Check if the opcode is a valid enum value
+        if (!Enum.IsDefined(typeof(GameOpcode), gameOpcode))
+        {
+            Logger.WriteLog(LogType.Error, "Unknown GameOpcode received from client: 0x{0:X} ({1})", rawOpcode, rawOpcode);
+        }
 
         switch (gameOpcode)
         {
@@ -286,6 +292,10 @@ public partial class TNLConnection : GhostConnection
 
                 case GameOpcode.ChangeCombatModeRequest:
                     MapManager.Instance.HandleChangeCombatModeRequest(CurrentCharacter, reader);
+                    break;
+
+                case GameOpcode.ItemPickup:
+                    HandleItemPickupPacket(reader);
                     break;
 
                 case GameOpcode.Firing:

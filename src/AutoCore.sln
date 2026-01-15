@@ -29,8 +29,6 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TNL.NET", "..\lib\TNL.NET\T
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoCore.Launcher", "AutoCore.Launcher\AutoCore.Launcher.csproj", "{62B4725A-D4A7-4413-BDCF-DCA69020DE43}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AutoCore.Extractor", "AutoCore.Extractor\AutoCore.Extractor.csproj", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -77,10 +75,6 @@ Global
 		{62B4725A-D4A7-4413-BDCF-DCA69020DE43}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{62B4725A-D4A7-4413-BDCF-DCA69020DE43}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{62B4725A-D4A7-4413-BDCF-DCA69020DE43}.Release|Any CPU.Build.0 = Release|Any CPU
-		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -96,7 +90,6 @@ Global
 		{5BFE636E-FD92-49DA-BEB7-A31DA5D440E1} = {6EC7095A-5FB5-4F16-9B50-F0FE453F8F04}
 		{F9E15C7F-5C65-4F25-8FEE-534008D72121} = {098C2A7E-0BFE-4311-8F31-C8F0CAE16C69}
 		{62B4725A-D4A7-4413-BDCF-DCA69020DE43} = {6EC7095A-5FB5-4F16-9B50-F0FE453F8F04}
-		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890} = {6EC7095A-5FB5-4F16-9B50-F0FE453F8F04}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {BA9952EA-4196-4EB7-9548-6C4CE62781A5}

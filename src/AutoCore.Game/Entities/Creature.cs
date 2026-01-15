@@ -69,26 +69,56 @@ public class Creature : SimpleObject
             
             if (lootItems.Count > 0)
             {
-                // Spawn each loot item with slight random offset to prevent stacking
+                // Try to find the killer character for auto-loot
+                Character killerCharacter = null;
+                if (Murderer.Coid > 0)
+                {
+                    var murdererObj = ObjectManager.Instance.GetObject(Murderer);
+                    killerCharacter = murdererObj?.GetSuperCharacter(false);
+                }
+
                 var random = new System.Random();
                 foreach (var cbid in lootItems)
                 {
-                    // Calculate random offset: random angle, 1-2 units distance
-                    var angle = (float)(random.NextDouble() * 2.0 * System.Math.PI);
-                    var distance = 1.0f + (float)(random.NextDouble() * 1.0); // 1-2 units
-                    var offsetX = (float)(System.Math.Cos(angle) * distance);
-                    var offsetZ = (float)(System.Math.Sin(angle) * distance);
-                    
-                    var lootPosition = new Vector3(
-                        Position.X + offsetX,
-                        Position.Y,
-                        Position.Z + offsetZ
-                    );
-                    
-                    LootManager.Instance.SpawnLootItem(cbid, lootPosition, Rotation, Map);
+                    // Equipment items (armor, weapons, etc.) require auto-loot since the client
+                    // doesn't allow picking them up from the ground
+                    if (LootManager.Instance.RequiresAutoLoot(cbid))
+                    {
+                        if (killerCharacter != null)
+                        {
+                            LootManager.Instance.AutoLootItem(cbid, killerCharacter);
+                        }
+                        else
+                        {
+                            // No killer found - spawn on ground anyway (won't be pickable but visible)
+                            SpawnLootOnGround(cbid, random);
+                        }
+                    }
+                    else
+                    {
+                        // Regular items (consumables, resources) can be picked up from ground
+                        SpawnLootOnGround(cbid, random);
+                    }
                 }
             }
         }
+    }
+
+    private void SpawnLootOnGround(int cbid, System.Random random)
+    {
+        // Calculate random offset: random angle, 1-2 units distance
+        var angle = (float)(random.NextDouble() * 2.0 * System.Math.PI);
+        var distance = 1.0f + (float)(random.NextDouble() * 1.0); // 1-2 units
+        var offsetX = (float)(System.Math.Cos(angle) * distance);
+        var offsetZ = (float)(System.Math.Sin(angle) * distance);
+        
+        var lootPosition = new Vector3(
+            Position.X + offsetX,
+            Position.Y,
+            Position.Z + offsetZ
+        );
+        
+        LootManager.Instance.SpawnLootItem(cbid, lootPosition, Rotation, Map);
     }
 
     public void HandleMovement(CreatureMovedPacket packet)

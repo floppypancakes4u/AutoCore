@@ -296,6 +296,62 @@ public class ChatManager : Singleton<ChatManager>
                 }
                 break;
 
+            case "/kill":
+                if (character?.CurrentVehicle == null)
+                {
+                    respPacket.Message = "You are not in a vehicle!";
+                    break;
+                }
+
+                var vehicle = character.CurrentVehicle;
+                if (vehicle.Target == null)
+                {
+                    respPacket.Message = "You have no target!";
+                    break;
+                }
+
+                var target = vehicle.Target;
+                if (target.IsCorpse || target.IsInvincible)
+                {
+                    respPacket.Message = "Cannot damage target (corpse or invincible)!";
+                    break;
+                }
+
+                // Deal 10000 damage
+                const int killDamage = 10000;
+                var actualDamage = target.TakeDamage(killDamage);
+
+                // Send damage packet to show the damage
+                try
+                {
+                    connection.SendGamePacket(new DamagePacket
+                    {
+                        Target = target.ObjectId,
+                        Source = vehicle.ObjectId,
+                        Damage = actualDamage,
+                        DamageType = 0,
+                        Flags = 0
+                    });
+                }
+                catch (System.Exception ex)
+                {
+                    Logger.WriteLog(LogType.Error, $"Failed to send damage packet: {ex.Message}");
+                }
+
+                // Check if target died
+                if (target.GetCurrentHP() <= 0)
+                {
+                    // Set the murderer for loot attribution
+                    target.SetMurderer(character.CurrentVehicle ?? (ClonedObjectBase)character);
+                    target.OnDeath(DeathType.Silent);
+                    respPacket.Message = $"Killed {target.GetType().Name}#{target.ObjectId.Coid} with {actualDamage} damage!";
+                }
+                else
+                {
+                    respPacket.Message = $"Dealt {actualDamage} damage to {target.GetType().Name}#{target.ObjectId.Coid} (HP: {target.GetCurrentHP()}/{target.GetMaximumHP()})";
+                }
+                break;
+
             default:
                 Logger.WriteLog(LogType.Debug, $"Unhandled chat command: {parts[0]}");
                 break;

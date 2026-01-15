@@ -557,6 +557,8 @@ public class Vehicle : SimpleObject
 
         if (Target.GetCurrentHP() <= 0)
         {
+            // Set the murderer before calling OnDeath so loot can be attributed
+            Target.SetMurderer(this);
             Target.OnDeath(DeathType.Silent);
             TrySendCombatMessage(attackerChar, $"Killed {Target.GetType().Name}#{Target.ObjectId.Coid}", ChatType.CombatMessage_HighImportance);
 

@@ -109,6 +109,36 @@ public class LootManager : Singleton<LootManager>
         };
     }
 
+    /// <summary>
+    /// Determines if an item type requires auto-loot (direct to inventory) vs ground spawn.
+    /// Equipment types (armor, weapons, etc.) cannot be picked up from the ground by the client,
+    /// so they must be auto-looted directly to the player's inventory.
+    /// </summary>
+    public bool RequiresAutoLoot(int cbid)
+    {
+        var cloneBase = AssetManager.Instance.GetCloneBase(cbid);
+        if (cloneBase == null)
+            return false;
+
+        return cloneBase.Type switch
+        {
+            // Equipment types require auto-loot - client doesn't allow ground pickup
+            CloneBaseObjectType.Weapon => true,
+            CloneBaseObjectType.Armor => true,
+            CloneBaseObjectType.PowerPlant => true,
+            CloneBaseObjectType.WheelSet => true,
+            CloneBaseObjectType.Gadget => true,
+            CloneBaseObjectType.TinkeringKit => true,
+            CloneBaseObjectType.Accessory => true,
+            CloneBaseObjectType.RaceItem => true,
+            CloneBaseObjectType.Ornament => true,
+            CloneBaseObjectType.Vehicle => true,
+            // Item types can be picked up from ground
+            CloneBaseObjectType.Item => false,
+            _ => false
+        };
+    }
+
     private void LogLootStatistics()
     {
         var lootTables = AssetManager.Instance.GetAllLootTables().ToList();
@@ -308,6 +338,76 @@ public class LootManager : Singleton<LootManager>
     }
 
     /// <summary>
+    /// Auto-loots an item directly to a player's inventory.
+    /// Used for equipment types (armor, weapons, etc.) that the client doesn't allow ground pickup for.
+    /// </summary>
+    public void AutoLootItem(int cbid, Character character)
+    {
+        if (character?.OwningConnection == null)
+        {
+            Logger.WriteLog(LogType.Error, $"LootManager.AutoLootItem: Cannot auto-loot item {cbid} - character or connection is null");
+            return;
+        }
+
+        var cloneBase = AssetManager.Instance.GetCloneBase(cbid);
+        if (cloneBase == null)
+        {
+            Logger.WriteLog(LogType.Error, $"LootManager.AutoLootItem: CloneBase not found for CBID {cbid}");
+            return;
+        }
+
+        // Create the appropriate create packet based on item type
+        CreateSimpleObjectPacket createPacket = cloneBase.Type switch
+        {
+            CloneBaseObjectType.Armor => new CreateArmorPacket(),
+            CloneBaseObjectType.Weapon => new CreateWeaponPacket(),
+            CloneBaseObjectType.PowerPlant => new CreatePowerPlantPacket(),
+            CloneBaseObjectType.WheelSet => new CreateWheelSetPacket(),
+            _ => new CreateSimpleObjectPacket()
+        };
+
+        // Create a temporary item object to populate the packet
+        var item = ClonedObjectBase.AllocateNewObjectFromCBID(cbid);
+        if (item == null)
+        {
+            Logger.WriteLog(LogType.Error, $"LootManager.AutoLootItem: Unable to create item {cbid}");
+            return;
+        }
+
+        // Set up the item with a local COID for the character's inventory
+        var map = character.Map;
+        long assignedCoid = -1;
+        if (map != null)
+        {
+            assignedCoid = map.LocalCoidCounter++;
+        }
+        item.SetCoid(assignedCoid, false);
+        item.LoadCloneBase(cbid);
+
+        // Write item data to packet
+        if (item is SimpleObject simpleObject)
+        {
+            simpleObject.WriteToPacket(createPacket);
+        }
+
+        // Mark as inventory item
+        createPacket.IsInInventory = true;
+        createPacket.IsBound = false;
+        createPacket.IsIdentified = true;
+
+        // Create and send the inventory add packet
+        var inventoryPacket = new InventoryAddItemPacket
+        {
+            CreatePacket = createPacket
+        };
+
+        character.OwningConnection.SendGamePacket(inventoryPacket);
+
+        var itemName = cloneBase.CloneBaseSpecific.UniqueName;
+        Logger.WriteLog(LogType.Debug, $"LootManager.AutoLootItem: Auto-looted {itemName} (CBID {cbid}) to {character.Name}'s inventory");
+    }
+
+    /// <summary>
     /// Spawns a loot item at the specified position and broadcasts it to all players in the map.
     /// </summary>
     public void SpawnLootItem(int cbid, Vector3 position, Quaternion rotation, SectorMap map)
@@ -327,48 +427,38 @@ public class LootManager : Singleton<LootManager>
         }
 
         // Set up the item
-        item.SetCoid(map.LocalCoidCounter++, false);
+        var assignedCoid = map.LocalCoidCounter++;
+        item.SetCoid(assignedCoid, false);
         item.LoadCloneBase(cbid);
         item.Position = position;
         item.Rotation = rotation;
         item.Faction = -1; // Loot items are neutral
         item.SetMap(map);
         item.CreateGhost();
+        
+        // Verify the item was added to the map
+        var verifyItem = map.GetObjectByCoid(assignedCoid);
+        if (verifyItem == null)
+        {
+            Logger.WriteLog(LogType.Error, $"LootManager.SpawnLootItem: Item with COID {assignedCoid} was not found in map after SetMap! This is a critical error.");
+            return;
+        }
 
-        // Create appropriate packet based on item type
+        // For loot items, always use CreateSimpleObjectPacket so they can be picked up
+        // The client only recognizes CreateSimpleObject opcode items as pickable from the ground
+        // Even though armor/weapons have their own packet types, loot items must use CreateSimpleObject
         CreateSimpleObjectPacket createPacket = null;
 
-        switch (item)
+        if (item is SimpleObject simpleObject)
         {
-            case Armor armor:
-                createPacket = new CreateArmorPacket();
-                armor.WriteToPacket(createPacket);
-                break;
-
-            case Weapon weapon:
-                createPacket = new CreateWeaponPacket();
-                weapon.WriteToPacket(createPacket);
-                break;
-
-            case PowerPlant powerPlant:
-                createPacket = new CreatePowerPlantPacket();
-                powerPlant.WriteToPacket(createPacket);
-                break;
-
-            case WheelSet wheelSet:
-                createPacket = new CreateWheelSetPacket();
-                wheelSet.WriteToPacket(createPacket);
-                break;
-
-            case SimpleObject simpleObject:
-                createPacket = new CreateSimpleObjectPacket();
-                simpleObject.WriteToPacket(createPacket);
-                break;
-
-            default:
-                Logger.WriteLog(LogType.Error, $"LootManager.SpawnLootItem: Unsupported item type {item.GetType().Name} for CBID {cbid}");
-                item.SetMap(null);
-                return;
+            createPacket = new CreateSimpleObjectPacket();
+            simpleObject.WriteToPacket(createPacket);
+        }
+        else
+        {
+            Logger.WriteLog(LogType.Error, $"LootManager.SpawnLootItem: Item {item.GetType().Name} for CBID {cbid} is not a SimpleObject");
+            item.SetMap(null);
+            return;
         }
 
         if (createPacket == null)
@@ -378,11 +468,14 @@ public class LootManager : Singleton<LootManager>
             return;
         }
 
+        // Loot items should be pickupable (not bound)
+        createPacket.IsBound = false;
+
         // Broadcast to all players in the map
         BroadcastPacketToMap(map, createPacket);
 
         var itemName = AssetManager.Instance.GetCloneBase(cbid)?.CloneBaseSpecific.UniqueName ?? "Unknown";
-        Logger.WriteLog(LogType.Debug, $"LootManager.SpawnLootItem: Spawned {itemName} (CBID {cbid}) at {position}");
+        Logger.WriteLog(LogType.Debug, $"LootManager.SpawnLootItem: Spawned {itemName} (CBID {cbid}, COID {assignedCoid}) at {position}");
     }
 
     private void BroadcastPacketToMap(SectorMap map, BasePacket packet)

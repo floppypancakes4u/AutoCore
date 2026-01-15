@@ -76,7 +76,7 @@ public class MissionObjective
         var obj = elem?.Elements("Objective").SingleOrDefault(e => (uint)e.Attribute("sequence") == missionObjective.Sequence);
         if (obj == null)
         {
-            Logger.WriteLog(LogType.Debug, $"Mission ({owner.Id}, {owner.Name})'s objective {missionObjective.ObjectiveId} has no XML data?");
+            //Logger.WriteLog(LogType.Debug, $"Mission ({owner.Id}, {owner.Name})'s objective {missionObjective.ObjectiveId} has no XML data?");
 
             return missionObjective;
         }

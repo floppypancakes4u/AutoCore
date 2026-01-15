@@ -3,6 +3,7 @@
 using System.Text.Json;
 using System.Linq;
 using AutoCore.Database.Char;
+using AutoCore.Game.Entities;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Packets.Global;
 using AutoCore.Game.Packets.Sector;
@@ -234,5 +235,65 @@ public partial class TNLConnection
         {
             CurrentQuests = CurrentCharacter.CurrentQuests.ToList()
         });
+    }
+
+    private void HandleItemPickupPacket(BinaryReader reader)
+    {
+        if (CurrentCharacter == null || CurrentCharacter.Map == null)
+        {
+            Logger.WriteLog(LogType.Error, "HandleItemPickupPacket: Character or Map is null");
+            return;
+        }
+
+        var packet = new ItemPickupPacket();
+        packet.Read(reader);
+
+        // Find the item in the map
+        var item = CurrentCharacter.Map.GetObjectByCoid(packet.ItemId.Coid);
+        if (item == null)
+        {
+            Logger.WriteLog(LogType.Debug, $"HandleItemPickupPacket: Item {packet.ItemId.Coid} not found in map");
+            return;
+        }
+
+        // Verify the item is a pickupable item (SimpleObject or derived types)
+        if (item is not SimpleObject simpleObject)
+        {
+            Logger.WriteLog(LogType.Error, $"HandleItemPickupPacket: Item {packet.ItemId.Coid} is not a SimpleObject");
+            return;
+        }
+
+        // Check distance - player should be near the item to pick it up
+        var distance = CurrentCharacter.CurrentVehicle.Position.DistSq(item.Position);
+        const float maxPickupDistanceSq = 100.0f; // 10 units max distance
+        if (distance > maxPickupDistanceSq)
+        {
+            Logger.WriteLog(LogType.Debug, $"HandleItemPickupPacket: Item {packet.ItemId.Coid} too far away (distance: {Math.Sqrt(distance):F2})");
+            return;
+        }
+
+        Logger.WriteLog(LogType.Debug, $"HandleItemPickupPacket: Player {CurrentCharacter.Name} picking up item {packet.ItemId.Coid} (CBID: {simpleObject.CBID})");
+
+        // TODO: Add item to player's inventory
+        // For now, we'll just remove it from the world
+        // The actual inventory system integration will need to be implemented separately
+
+        // Save item info before removing from map
+        var itemObjectId = item.ObjectId;
+        var map = CurrentCharacter.Map;
+
+        // Remove item from map (SetMap(null) handles calling LeaveMap internally)
+        item.SetMap(null);
+
+        // Broadcast destroy packet to all players in the map so they remove the item client-side
+        var destroyPacket = new DestroyObjectPacket(itemObjectId);
+        foreach (var character in map.Objects.Values.OfType<Character>().Where(c => c.OwningConnection != null))
+        {
+            character.OwningConnection.SendGamePacket(destroyPacket);
+        }
+
+        Logger.WriteLog(LogType.Debug, $"HandleItemPickupPacket: Item {packet.ItemId.Coid} removed from world");
+
+        // TODO: Send InventoryAddItem packet to add the item to the player's inventory
     }
 }

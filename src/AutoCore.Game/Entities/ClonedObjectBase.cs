@@ -20,6 +20,23 @@ public abstract class ClonedObjectBase
     //public int LastServerUpdate { get; protected set; }
     //public int TimeOfDeath { get; protected set; }
     public TFID Murderer { get; protected set; }
+
+    /// <summary>
+    /// Sets the murderer (killer) of this object. Called before OnDeath for loot attribution.
+    /// </summary>
+    public void SetMurderer(TFID murderer)
+    {
+        Murderer = murderer;
+    }
+
+    /// <summary>
+    /// Sets the murderer from another object (e.g., the attacker's vehicle or character).
+    /// </summary>
+    public void SetMurderer(ClonedObjectBase murderer)
+    {
+        if (murderer != null)
+            Murderer = murderer.ObjectId;
+    }
     //public TFID LastMurderer { get; protected set; }
     //public float DamageByMurderer { get; protected set; }
     public Vector3 Position { get; set; }
@@ -197,7 +214,7 @@ public abstract class ClonedObjectBase
         }
     }
 
-    public void OnDeath(DeathType deathType)
+    public virtual void OnDeath(DeathType deathType)
     {
         //TimeOfDeath = Environment.TickCount; // TODO: linux time or what?
         Ghost?.SetMaskBits(8);
@@ -244,8 +261,12 @@ public abstract class ClonedObjectBase
             case CloneBaseObjectType.Weapon:
                 return new Weapon();
 
+            case CloneBaseObjectType.Item:
+                // Item types use SimpleObject with GraphicsObjectType.Graphics
+                return new SimpleObject(GraphicsObjectType.Graphics);
+
             default:
-                Logger.WriteLog(LogType.Error, $"Creating object of type {cloneBase.Type} is not yet supported! CBID: {cbid}");
+                Logger.WriteLog(LogType.Debug, $"Creating object of type {cloneBase.Type} is not yet supported! CBID: {cbid}");
                 return null;
         }
     }
