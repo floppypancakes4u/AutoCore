@@ -41,7 +41,7 @@ public class AuthContext : DbContext
         if (!context.Accounts.Any())
         {
             var salt = Account.CreateSalt();
-            var defaultPassword = "admin123"; // Default password - should be changed after first login
+            var defaultPassword = "admin"; // Default password - should be changed after first login
             
             context.Accounts.Add(new Account
             {
