@@ -96,6 +96,10 @@ public partial class TNLConnection
 
         SetScopeObject(character.Ghost);
 
+        // ActivateGhosting already set Scoping=true, but Ghosting stays false until the
+        // client answers rpcReadyForNormalGhosts. ObjectLocalScopeAlways still works while
+        // Scoping is true; call it again after ghost create so vehicle dirty masks have a
+        // GhostInfo connection ref (required for SetMaskBits → CollapseDirtyList delivery).
         ObjectLocalScopeAlways(character.Ghost);
         ObjectLocalScopeAlways(character.CurrentVehicle.Ghost);
 
@@ -320,7 +324,7 @@ public partial class TNLConnection
 
         Logger.WriteLog(
             LogType.Debug,
-            $"HandleInventoryGrabPacket: raw={Convert.ToHexString(packet.RawBytes)} parsedCoid={packet.ItemCoid} quantity={packet.Quantity}");
+            $"HandleInventoryGrabPacket: raw={Convert.ToHexString(packet.RawBytes)} parsedCoid={packet.ItemCoid} quantity={packet.Quantity} invType={packet.InventoryType}");
 
         var result = CurrentCharacter?.Inventory.Grab(packet, CurrentCharacter)
             ?? InventoryOperationResult.SinglePacket(

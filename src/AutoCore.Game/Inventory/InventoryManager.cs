@@ -6,6 +6,7 @@ using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.Structures;
 using AutoCore.Utils;
 
 public sealed class InventoryManager
@@ -15,6 +16,7 @@ public sealed class InventoryManager
     public const int CargoSlotCount = 312;
 
     private readonly List<CharacterInventoryItem> _items = new();
+    private readonly Dictionary<long, PendingEquippedItemDrag> _pendingEquippedItemDrags = new();
 
     public IReadOnlyList<CharacterInventoryItem> Items => _items;
 
@@ -187,6 +189,9 @@ public sealed class InventoryManager
                 $"HandleInventoryGrabPacket: Player {character.Name} grabbing existing inventory item {existingInventoryItem.Coid} (CBID: {existingInventoryItem.Cbid}) from slot {existingInventoryItem.InventoryPositionX},{existingInventoryItem.InventoryPositionY}");
         }
 
+        if (packet.InventoryType == 2)
+            return GrabEquippedVehicleItem(packet, character);
+
         var map = character.Map;
         if (!TryResolveInventoryGrabSource(packet, character, map, out var source))
         {
@@ -292,6 +297,9 @@ public sealed class InventoryManager
         var item = FindByCoid(packet.ItemCoid);
         if (item == null)
         {
+            if (_pendingEquippedItemDrags.TryGetValue(packet.ItemCoid, out var pendingEquippedItem))
+                return DropPendingEquippedItem(packet, character, pendingEquippedItem);
+
             return InventoryOperationResult.SinglePacket(
                 CreateDropFailure(packet),
                 $"HandleInventoryDropPacket: Item {packet.ItemCoid} not found in inventory");
@@ -316,6 +324,142 @@ public sealed class InventoryManager
                 HasSwappedOrConcatenatedItem = false
             },
             $"HandleInventoryDropPacket: Player {character.Name} moved item {movedItem.Coid} (CBID: {movedItem.Cbid}) to slot {movedItem.InventoryPositionX},{movedItem.InventoryPositionY}");
+    }
+
+    private InventoryOperationResult GrabEquippedVehicleItem(InventoryGrabPacket packet, Character character)
+    {
+        var vehicle = character.CurrentVehicle;
+        if (vehicle == null || !vehicle.TryFindEquippedItem(packet.ItemCoid, packet.EquipmentCbid, out var slot, out var item))
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateGrabFailure(packet),
+                $"HandleInventoryGrabPacket: Equipped item {packet.ItemCoid} (CBID fallback {packet.EquipmentCbid}, slot hint {packet.EquipmentSlotHint}) not found on vehicle");
+        }
+
+        var itemCoid = item.ObjectId.Coid;
+        var itemGlobal = item.ObjectId.Global;
+        var itemTfid = new TFID(itemCoid, itemGlobal);
+        var cbid = item.CBID;
+        var itemType = item.Type;
+        var displayName = item.CloneBaseObject?.CloneBaseSpecific.UniqueName ?? $"CBID {cbid}";
+
+        // Clear the hardpoint immediately so the client icon leaves the slot (0x203E),
+        // then acknowledge the grab. Cargo creation still happens on drop.
+        if (!vehicle.TryUnequipItem(itemCoid, out slot, out _))
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateGrabFailure(packet),
+                $"HandleInventoryGrabPacket: Failed to unequip vehicle item {itemCoid} from slot {slot}");
+        }
+
+        _pendingEquippedItemDrags[itemCoid] = new PendingEquippedItemDrag(
+            vehicle,
+            slot,
+            cbid,
+            itemType,
+            displayName,
+            itemGlobal,
+            AlreadyUnequipped: true);
+
+        return new InventoryOperationResult(
+            BuildEquippedGrabPackets(itemTfid, vehicle.ObjectId, itemGlobal, packet.InventoryType),
+            $"HandleInventoryGrabPacket: Player {character.Name} grabbing equipped vehicle item {itemCoid} (requestCoid={packet.ItemCoid}, CBID: {cbid}, slot={slot}, slotHint={packet.EquipmentSlotHint})");
+    }
+
+    /// <summary>
+    /// Packet order for hardpoint grab: InventoryUnequip (0x203E) first, then GrabResponse.
+    /// Unequip-first matches the client path that clears the equipped icon before the drag
+    /// cursor is acknowledged (validated by /tc method 6).
+    /// </summary>
+    public static IReadOnlyList<BasePacket> BuildEquippedGrabPackets(
+        TFID itemId,
+        TFID vehicleId,
+        bool itemGlobal,
+        byte inventoryType)
+    {
+        return new BasePacket[]
+        {
+            new InventoryUnequipPacket
+            {
+                ItemId = new TFID(itemId.Coid, itemId.Global),
+                VehicleId = new TFID(vehicleId.Coid, vehicleId.Global),
+                InventoryPositionX = 0,
+                InventoryPositionY = 0,
+                InventoryType = 2,
+            },
+            new InventoryGrabResponsePacket
+            {
+                ItemCoid = itemId.Coid,
+                ItemGlobal = itemGlobal,
+                InventoryType = inventoryType,
+                Quantity = 1,
+                AddToExistingItem = false,
+                WasSuccessful = true
+            }
+        };
+    }
+
+    private InventoryOperationResult DropPendingEquippedItem(
+        InventoryDropPacket packet,
+        Character character,
+        PendingEquippedItemDrag pendingEquippedItem)
+    {
+        if (pendingEquippedItem.Vehicle != character.CurrentVehicle)
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateDropFailure(packet),
+                $"HandleInventoryDropPacket: Pending equipped item {packet.ItemCoid} belongs to another vehicle");
+        }
+
+        var inventoryItem = new CharacterInventoryItem(
+            pendingEquippedItem.Cbid,
+            pendingEquippedItem.Type,
+            pendingEquippedItem.DisplayName,
+            packet.ItemCoid,
+            packet.InventoryPositionX,
+            packet.InventoryPositionY,
+            1);
+
+        if (!CanAdd(inventoryItem))
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateDropFailure(packet),
+                $"HandleInventoryDropPacket: Cargo slot {packet.InventoryPositionX},{packet.InventoryPositionY} is unavailable for equipped item {packet.ItemCoid}");
+        }
+
+        // Grab already cleared the hardpoint + sent 0x203E. Drop only creates cargo.
+        var slot = pendingEquippedItem.Slot;
+        if (!pendingEquippedItem.AlreadyUnequipped)
+        {
+            if (!pendingEquippedItem.Vehicle.TryUnequipItem(packet.ItemCoid, out slot, out _))
+            {
+                return InventoryOperationResult.SinglePacket(
+                    CreateDropFailure(packet),
+                    $"HandleInventoryDropPacket: Equipped item {packet.ItemCoid} not found on vehicle during drop");
+            }
+        }
+
+        _items.Add(inventoryItem);
+        _pendingEquippedItemDrags.Remove(packet.ItemCoid);
+
+        IReadOnlyList<BasePacket> packets = new BasePacket[]
+        {
+            InventoryPacketFactory.CreateCargoSendAll(this),
+            new InventoryDropResponsePacket
+            {
+                ItemCoid = inventoryItem.Coid,
+                ItemGlobal = packet.ItemGlobal,
+                InventoryPositionX = inventoryItem.InventoryPositionX,
+                InventoryPositionY = inventoryItem.InventoryPositionY,
+                InventoryType = packet.InventoryType,
+                WasSuccessful = true,
+                HasSwappedOrConcatenatedItem = false
+            }
+        };
+
+        return new InventoryOperationResult(
+            packets,
+            $"HandleInventoryDropPacket: Player {character.Name} unequipped item {inventoryItem.Coid} (CBID: {inventoryItem.Cbid}, slot={slot}) to cargo slot {inventoryItem.InventoryPositionX},{inventoryItem.InventoryPositionY}");
     }
 
     public static InventoryGrabResponsePacket CreateGrabFailure(InventoryGrabPacket packet)
@@ -433,5 +577,14 @@ public sealed class InventoryManager
         CloneBaseObjectType Type,
         string DisplayName,
         string SourceKind);
+
+    private readonly record struct PendingEquippedItemDrag(
+        Vehicle Vehicle,
+        VehicleEquipmentSlot Slot,
+        int Cbid,
+        CloneBaseObjectType Type,
+        string DisplayName,
+        bool Global,
+        bool AlreadyUnequipped = false);
 
 }

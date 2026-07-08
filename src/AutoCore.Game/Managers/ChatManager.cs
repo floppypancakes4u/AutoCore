@@ -3,7 +3,6 @@
 using System.Linq;
 using System.Text;
 using AutoCore.Game.Chat;
-using AutoCore.Database.World.Models;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Packets.Global;
@@ -163,6 +162,53 @@ public class ChatManager : Singleton<ChatManager>
                 }
 
                 respPacket.Message = $"Your current vehicle CBID: {vehicleCBID}";
+                break;
+
+            case "/equippedItems":
+            case "/equippeditems":
+                if (character?.CurrentVehicle == null)
+                {
+                    respPacket.Message = "You are not in a vehicle!";
+                    break;
+                }
+
+                var equippedItems = character.CurrentVehicle
+                    .EnumerateEquippedItems()
+                    .Where(e => e.Item != null)
+                    .ToList();
+
+                if (equippedItems.Count == 0)
+                {
+                    respPacket.Message = "No equipped vehicle items found.";
+                    Logger.WriteLog(LogType.Debug, $"Equipped items for {character.Name}: none");
+                    break;
+                }
+
+                var equippedList = new StringBuilder();
+                equippedList.Append($"Equipped items ({equippedItems.Count}):");
+
+                Logger.WriteLog(LogType.Debug, $"Equipped items for {character.Name}:");
+                foreach (var (slot, item) in equippedItems)
+                {
+                    var line = $"{slot}: COID={item.ObjectId.Coid} Global={item.ObjectId.Global} CBID={item.CBID} Type={item.GetType().Name} CloneType={item.Type}";
+                    Logger.WriteLog(LogType.Debug, $"  {line}");
+                    equippedList.Append('\n').Append(line);
+                }
+
+                respPacket.Message = equippedList.ToString();
+                break;
+
+            case "/tc":
+                if (!TurretClearProbe.TryExecute(character, parts, out var tcMessage, out var tcPackets))
+                {
+                    respPacket.Message = tcMessage;
+                    break;
+                }
+
+                foreach (var packet in tcPackets)
+                    connection.SendGamePacket(packet);
+
+                respPacket.Message = tcMessage;
                 break;
 
             case "/getNearbyCBIDs":

@@ -35,6 +35,18 @@ public class Vehicle : SimpleObject
     public Weapon WeaponMelee { get; private set; }
     public Weapon WeaponFront { get; private set; }
     public Weapon WeaponTurret { get; private set; }
+
+    /// <summary>
+    /// When true, the next GhostVehicle turret mask pack writes present=true with CBID/coid -1 (probe only).
+    /// </summary>
+    public bool ForceTurretGhostClearCbidMinusOne { get; set; }
+
+    private TFID? _lastProbeTurretTfid;
+
+    /// <summary>
+    /// Last turret TFID captured by <see cref="ClearTurretForProbe"/> for destroy-probe retries.
+    /// </summary>
+    public TFID? LastProbeTurretTfid => _lastProbeTurretTfid;
     public Weapon WeaponRear { get; private set; }
     public WheelSet WheelSet { get; private set; }
     public Vector3 Velocity { get; private set; }
@@ -113,6 +125,188 @@ public class Vehicle : SimpleObject
     }
 
     public override Vehicle GetAsVehicle() => this;
+
+    public bool TryFindEquippedItem(long coid, out VehicleEquipmentSlot slot, out SimpleObject item)
+    {
+        if (TryMatchEquippedItem(Armor, VehicleEquipmentSlot.Armor, coid, out slot, out item) ||
+            TryMatchEquippedItem(PowerPlant, VehicleEquipmentSlot.PowerPlant, coid, out slot, out item) ||
+            TryMatchEquippedItem(Ornament, VehicleEquipmentSlot.Ornament, coid, out slot, out item) ||
+            TryMatchEquippedItem(RaceItem, VehicleEquipmentSlot.RaceItem, coid, out slot, out item) ||
+            TryMatchEquippedItem(WeaponMelee, VehicleEquipmentSlot.WeaponMelee, coid, out slot, out item) ||
+            TryMatchEquippedItem(WeaponFront, VehicleEquipmentSlot.WeaponFront, coid, out slot, out item) ||
+            TryMatchEquippedItem(WeaponTurret, VehicleEquipmentSlot.WeaponTurret, coid, out slot, out item) ||
+            TryMatchEquippedItem(WeaponRear, VehicleEquipmentSlot.WeaponRear, coid, out slot, out item) ||
+            TryMatchEquippedItem(WheelSet, VehicleEquipmentSlot.WheelSet, coid, out slot, out item))
+        {
+            return true;
+        }
+
+        slot = default;
+        item = null;
+        return false;
+    }
+
+    public bool TryFindEquippedItem(long coid, int cbid, out VehicleEquipmentSlot slot, out SimpleObject item)
+    {
+        if (coid > 0 && TryFindEquippedItem(coid, out slot, out item))
+            return true;
+
+        if (cbid > 0 && TryFindEquippedItemByCbid(cbid, out slot, out item))
+            return true;
+
+        slot = default;
+        item = null;
+        return false;
+    }
+
+    public bool TryUnequipItem(long coid, out VehicleEquipmentSlot slot, out SimpleObject item)
+    {
+        if (!TryFindEquippedItem(coid, out slot, out item))
+            return false;
+
+        switch (slot)
+        {
+            case VehicleEquipmentSlot.Armor:
+                Armor = null;
+                if (DBData != null) DBData.Armor = 0;
+                EnsureGhostMaskDelivery(GhostVehicle.ChangeArmor);
+                return true;
+
+            case VehicleEquipmentSlot.PowerPlant:
+                PowerPlant = null;
+                if (DBData != null) DBData.PowerPlant = 0;
+                return true;
+
+            case VehicleEquipmentSlot.Ornament:
+                Ornament = null;
+                if (DBData != null) DBData.Ornament = 0;
+                EnsureGhostMaskDelivery(GhostVehicle.OrnamentMask);
+                return true;
+
+            case VehicleEquipmentSlot.RaceItem:
+                RaceItem = null;
+                if (DBData != null) DBData.RaceItem = 0;
+                return true;
+
+            case VehicleEquipmentSlot.WeaponMelee:
+                WeaponMelee = null;
+                if (DBData != null) DBData.MeleeWeapon = 0;
+                EnsureGhostMaskDelivery(GhostVehicle.MeleeWeaponMask);
+                return true;
+
+            case VehicleEquipmentSlot.WeaponFront:
+                WeaponFront = null;
+                if (DBData != null) DBData.Front = 0;
+                EnsureGhostMaskDelivery(GhostVehicle.FrontWeaponMask);
+                return true;
+
+            case VehicleEquipmentSlot.WeaponTurret:
+                WeaponTurret = null;
+                if (DBData != null) DBData.Turret = 0;
+                EnsureGhostMaskDelivery(GhostVehicle.TurretWeaponMask);
+                return true;
+
+            case VehicleEquipmentSlot.WeaponRear:
+                WeaponRear = null;
+                if (DBData != null) DBData.Rear = 0;
+                EnsureGhostMaskDelivery(GhostVehicle.RearWeaponMask);
+                return true;
+
+            case VehicleEquipmentSlot.WheelSet:
+                WheelSet = null;
+                if (DBData != null) DBData.Wheelset = 0;
+                EnsureGhostMaskDelivery(GhostVehicle.WheelSetMask);
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Clears server turret state for probe commands without inventory side effects.
+    /// </summary>
+    public TFID? ClearTurretForProbe()
+    {
+        TFID? previous = WeaponTurret?.ObjectId;
+        if (previous is { Coid: > 0 })
+            _lastProbeTurretTfid = previous;
+
+        WeaponTurret = null;
+        if (DBData != null)
+            DBData.Turret = 0;
+
+        return previous;
+    }
+
+    /// <summary>
+    /// Marks a ghost mask dirty only after ensuring this vehicle ghost has a connection
+    /// GhostInfo ref. Without that ref, SetMaskBits is collapsed and discarded.
+    /// </summary>
+    public void EnsureGhostMaskDelivery(ulong mask)
+    {
+        if (Ghost == null)
+            CreateGhost();
+
+        if (Owner?.GetAsCharacter()?.OwningConnection is TNL.TNLConnection connection && Ghost != null)
+        {
+            if (Ghost.GetFirstObjectRef() == null)
+                connection.ObjectLocalScopeAlways(Ghost);
+            else
+                connection.ObjectInScope(Ghost);
+        }
+
+        Ghost?.SetMaskBits(mask);
+    }
+
+    private static bool TryMatchEquippedItem(
+        SimpleObject equippedItem,
+        VehicleEquipmentSlot candidateSlot,
+        long coid,
+        out VehicleEquipmentSlot slot,
+        out SimpleObject item)
+    {
+        if (equippedItem?.ObjectId.Coid == coid)
+        {
+            slot = candidateSlot;
+            item = equippedItem;
+            return true;
+        }
+
+        slot = default;
+        item = null;
+        return false;
+    }
+
+    private bool TryFindEquippedItemByCbid(int cbid, out VehicleEquipmentSlot slot, out SimpleObject item)
+    {
+        foreach (var (candidateSlot, equippedItem) in EnumerateEquippedItems())
+        {
+            if (equippedItem?.CBID == cbid)
+            {
+                slot = candidateSlot;
+                item = equippedItem;
+                return true;
+            }
+        }
+
+        slot = default;
+        item = null;
+        return false;
+    }
+
+    public IEnumerable<(VehicleEquipmentSlot Slot, SimpleObject Item)> EnumerateEquippedItems()
+    {
+        yield return (VehicleEquipmentSlot.Armor, Armor);
+        yield return (VehicleEquipmentSlot.PowerPlant, PowerPlant);
+        yield return (VehicleEquipmentSlot.Ornament, Ornament);
+        yield return (VehicleEquipmentSlot.RaceItem, RaceItem);
+        yield return (VehicleEquipmentSlot.WeaponMelee, WeaponMelee);
+        yield return (VehicleEquipmentSlot.WeaponFront, WeaponFront);
+        yield return (VehicleEquipmentSlot.WeaponTurret, WeaponTurret);
+        yield return (VehicleEquipmentSlot.WeaponRear, WeaponRear);
+        yield return (VehicleEquipmentSlot.WheelSet, WheelSet);
+    }
 
     public override bool LoadFromDB(CharContext context, long coid, bool isInCharacterSelection = false)
     {

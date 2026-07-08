@@ -36,4 +36,59 @@ public class InventoryGrabPacketTests
         Assert.AreEqual(8, packet.RequestedInventoryPositionY);
     }
 
+    [TestMethod]
+    public void Read_EquipmentGrabUsesEquippedItemCoidAndQuantityOne()
+    {
+        var bytes = Convert.FromHexString("34200000A4F61901380000000000000001F519014307776D02824276A4F61901");
+
+        using var stream = new MemoryStream(bytes);
+        using var reader = new BinaryReader(stream);
+        _ = reader.ReadUInt32();
+
+        var packet = new InventoryGrabPacket();
+        packet.Read(reader);
+
+        Assert.AreEqual((byte)2, packet.InventoryType);
+        Assert.AreEqual(56, packet.ItemCoid);
+        Assert.AreEqual(0x0119F6A4, packet.EquipmentCbid);
+        Assert.AreEqual(1, packet.Quantity);
+    }
+
+    [TestMethod]
+    public void Read_EquipmentGrabWithDifferentEquippedCoidStillUsesTfidAtOffsetEight()
+    {
+        var bytes = Convert.FromHexString("34200000A4F61901CD0000000000000001F519014307776D02824276A4F61901");
+
+        using var stream = new MemoryStream(bytes);
+        using var reader = new BinaryReader(stream);
+        _ = reader.ReadUInt32();
+
+        var packet = new InventoryGrabPacket();
+        packet.Read(reader);
+
+        Assert.AreEqual((byte)2, packet.InventoryType);
+        Assert.AreEqual(205, packet.ItemCoid);
+        Assert.AreEqual(0x0119F6A4, packet.EquipmentCbid);
+        Assert.AreEqual(1, packet.Quantity);
+    }
+
+    [TestMethod]
+    public void Read_EquipmentGrabWithSourceTokenUsesEquippedItemTfid()
+    {
+        var bytes = Convert.FromHexString("3420000000000100CD0000000000000001000000040000000200000000000000");
+
+        using var stream = new MemoryStream(bytes);
+        using var reader = new BinaryReader(stream);
+        _ = reader.ReadUInt32();
+
+        var packet = new InventoryGrabPacket();
+        packet.Read(reader);
+
+        Assert.AreEqual((byte)2, packet.InventoryType);
+        Assert.AreEqual(205, packet.ItemCoid);
+        Assert.AreEqual(65536, packet.EquipmentCbid);
+        Assert.AreEqual(4, packet.EquipmentSlotHint);
+        Assert.AreEqual(1, packet.Quantity);
+    }
+
 }

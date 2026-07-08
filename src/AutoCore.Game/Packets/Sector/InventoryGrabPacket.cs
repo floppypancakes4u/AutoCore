@@ -10,6 +10,8 @@ public sealed class InventoryGrabPacket : BasePacket
     public long ItemCoid { get; private set; } = -1;
     public bool ItemGlobal { get; private set; }
     public byte InventoryType { get; private set; } = 1;
+    public int EquipmentCbid { get; private set; } = -1;
+    public int EquipmentSlotHint { get; private set; } = -1;
     public int Quantity { get; private set; } = 1;
     public byte RequestedInventoryPositionX { get; private set; }
     public byte RequestedInventoryPositionY { get; private set; }
@@ -30,11 +32,27 @@ public sealed class InventoryGrabPacket : BasePacket
         if (RawBytes.Length > 0x18)
             InventoryType = RawBytes[0x18] == 0 ? (byte)1 : RawBytes[0x18];
 
-        if (RawBytes.Length >= 16)
-            ItemCoid = BitConverter.ToInt64(RawBytes, 8);
+        if (InventoryType == 2)
+        {
+            if (RawBytes.Length >= 16)
+                ItemCoid = BitConverter.ToInt64(RawBytes, 8);
 
-        if (RawBytes.Length >= 0x20)
-            Quantity = Math.Max(1, BitConverter.ToInt32(RawBytes, 0x1c));
+            if (RawBytes.Length >= 0x0c)
+                EquipmentCbid = BitConverter.ToInt32(RawBytes, 0x04);
+
+            if (RawBytes.Length >= 0x18)
+                EquipmentSlotHint = BitConverter.ToInt32(RawBytes, 0x14);
+
+            Quantity = 1;
+        }
+        else
+        {
+            if (RawBytes.Length >= 16)
+                ItemCoid = BitConverter.ToInt64(RawBytes, 8);
+
+            if (RawBytes.Length >= 0x20)
+                Quantity = Math.Max(1, BitConverter.ToInt32(RawBytes, 0x1c));
+        }
 
         // Provisional, based on Client_RecvInventoryGrab reading response offsets
         // +0x28/+0x2c. Live capture will verify whether requests mirror this.

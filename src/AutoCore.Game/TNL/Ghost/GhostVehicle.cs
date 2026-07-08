@@ -200,7 +200,7 @@ public class GhostVehicle : GhostObject
             }
         }
 
-        if (stream.WriteFlag((updateMask & WheelSetMask) != 0))
+        if (stream.WriteFlag((updateMask & WheelSetMask) != 0) && stream.WriteFlag(parentVehicle.WheelSet != null))
         {
             stream.WriteInt((uint)parentVehicle.WheelSet.CBID, 20);
             stream.Write(parentVehicle.WheelSet.ObjectId.Coid);
@@ -214,11 +214,25 @@ public class GhostVehicle : GhostObject
             stream.WriteFlag(parentVehicle.WeaponFront.ObjectId.Global);
         }
 
-        if (stream.WriteFlag((updateMask & TurretWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponTurret != null))
+        if (stream.WriteFlag((updateMask & TurretWeaponMask) != 0))
         {
-            stream.WriteInt((uint)parentVehicle.WeaponTurret.CBID, 20);
-            stream.Write(parentVehicle.WeaponTurret.ObjectId.Coid);
-            stream.WriteFlag(parentVehicle.WeaponTurret.ObjectId.Global);
+            if (parentVehicle.ForceTurretGhostClearCbidMinusOne)
+            {
+                parentVehicle.ForceTurretGhostClearCbidMinusOne = false;
+
+                if (stream.WriteFlag(true))
+                {
+                    stream.WriteInt(unchecked((uint)-1), 20);
+                    stream.Write((long)-1);
+                    stream.WriteFlag(false);
+                }
+            }
+            else if (stream.WriteFlag(parentVehicle.WeaponTurret != null))
+            {
+                stream.WriteInt((uint)parentVehicle.WeaponTurret.CBID, 20);
+                stream.Write(parentVehicle.WeaponTurret.ObjectId.Coid);
+                stream.WriteFlag(parentVehicle.WeaponTurret.ObjectId.Global);
+            }
         }
 
         if (stream.WriteFlag((updateMask & RearWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponRear != null))
@@ -228,7 +242,7 @@ public class GhostVehicle : GhostObject
             stream.WriteFlag(parentVehicle.WeaponRear.ObjectId.Global);
         }
 
-        if (stream.WriteFlag((updateMask & MeleeWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponRear != null))
+        if (stream.WriteFlag((updateMask & MeleeWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponMelee != null))
         {
             stream.WriteInt((uint)parentVehicle.WeaponMelee.CBID, 20);
             stream.Write(parentVehicle.WeaponMelee.ObjectId.Coid);
