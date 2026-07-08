@@ -1,6 +1,7 @@
-﻿namespace AutoCore.Game.Managers;
+namespace AutoCore.Game.Managers;
 
 using System;
+using Microsoft.EntityFrameworkCore;
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
 using AutoCore.Database.World.Models;
@@ -192,23 +193,27 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
             CBID = configNewCharacter.Weapon
         };
 
-        context.SimpleObjects.Add(characterSimpleObject);
-        context.SimpleObjects.Add(vehicleSimpleObject);
-        context.SimpleObjects.Add(wheelSetSimpleObject);
-        context.SimpleObjects.Add(powerPlantSimpleObject);
-        context.SimpleObjects.Add(armorSimpleObject);
-        context.SimpleObjects.Add(raceItemSimpleObject);
-        context.SimpleObjects.Add(turretSimpleObject);
-        context.SaveChanges();
-
+        using var transaction = context.Database.BeginTransaction();
         try
         {
+            context.Database.ExecuteSqlRaw("SET FOREIGN_KEY_CHECKS = 0;");
+
+            context.SimpleObjects.Add(characterSimpleObject);
+            context.SimpleObjects.Add(vehicleSimpleObject);
+            context.SimpleObjects.Add(wheelSetSimpleObject);
+            context.SimpleObjects.Add(powerPlantSimpleObject);
+            context.SimpleObjects.Add(armorSimpleObject);
+            context.SimpleObjects.Add(raceItemSimpleObject);
+            context.SimpleObjects.Add(turretSimpleObject);
+            context.SaveChanges();
+
             AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Network, $"CreateNewCharacter: Creating character with Coid {characterSimpleObject.Coid}, Name '{packet.CharacterName}' (Length: {packet.CharacterName?.Length ?? 0})");
             
             var character = new CharacterData
             {
                 Coid = characterSimpleObject.Coid,
                 AccountId = client.Account.Id,
+                ActiveVehicleCoid = vehicleSimpleObject.Coid, // Set vehicle Coid directly to satisfy the database NOT NULL constraint
                 Name = packet.CharacterName ?? string.Empty,
                 HeadId = packet.HeadId,
                 BodyId = packet.BodyId,
@@ -235,6 +240,7 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
             };
             context.Characters.Add(character);
             AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Network, $"CreateNewCharacter: Character.Name before SaveChanges: '{character.Name}' (Length: {character.Name?.Length ?? 0})");
+            context.SaveChanges(); // Save Character first (foreign key checks are disabled, so we can reference the not-yet-created vehicle)
 
             var vehicle = new VehicleData
             {
@@ -258,18 +264,34 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
                 Turret = turretSimpleObject.Coid
             };
             context.Vehicles.Add(vehicle);
-            context.SaveChanges();
+            context.SaveChanges(); // Save Vehicle second (which references the existing character)
+
+            context.Database.ExecuteSqlRaw("SET FOREIGN_KEY_CHECKS = 1;");
+            transaction.Commit();
+
             AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Network, $"CreateNewCharacter: After SaveChanges, reloading character from DB...");
             
             // Reload to verify what was saved
             context.Entry(character).Reload();
             AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Network, $"CreateNewCharacter: Character.Name after reload: '{character.Name}' (Length: {character.Name?.Length ?? 0})");
-
-            character.ActiveVehicleCoid = vehicleSimpleObject.Coid;
-            context.SaveChanges();
         }
         catch (Exception ex)
         {
+            try
+            {
+                context.Database.ExecuteSqlRaw("SET FOREIGN_KEY_CHECKS = 1;");
+            }
+            catch {}
+
+            try
+            {
+                transaction.Rollback();
+            }
+            catch (Exception rollbackEx)
+            {
+                AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error, $"CreateNewCharacter: Exception during transaction rollback: {rollbackEx.Message}");
+            }
+
             AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error, $"CreateNewCharacter: Exception during character creation: {ex.Message}");
             if (ex.InnerException != null)
             {
@@ -281,15 +303,6 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
             }
             AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error, $"CreateNewCharacter: Stack trace: {ex.StackTrace}");
             
-            context.SimpleObjects.Remove(characterSimpleObject);
-            context.SimpleObjects.Remove(vehicleSimpleObject);
-            context.SimpleObjects.Remove(wheelSetSimpleObject);
-            context.SimpleObjects.Remove(powerPlantSimpleObject);
-            context.SimpleObjects.Remove(armorSimpleObject);
-            context.SimpleObjects.Remove(raceItemSimpleObject);
-            context.SimpleObjects.Remove(turretSimpleObject);
-            context.SaveChanges();
-
             return (false, -1);
         }
 
