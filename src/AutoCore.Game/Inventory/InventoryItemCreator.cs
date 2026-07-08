@@ -37,10 +37,20 @@ public sealed class InventoryItemCreator : IInventoryItemCreator
         return InventoryItemCreateResult.Success(packet, displayName);
     }
 
-    private static CreateSimpleObjectPacket CreatePacketFor(CloneBaseObjectType type)
+    /// <summary>
+    /// Must match LootManager / vehicle create: weapons/armor/powerplants/wheelsets
+    /// write typed opcodes and trailing stats. A plain CreateSimpleObject for a weapon
+    /// CBID makes the client mis-parse the object and show jumbled stats on relog.
+    /// </summary>
+    public static CreateSimpleObjectPacket CreatePacketFor(CloneBaseObjectType type)
     {
-        // Inventory grants need the created object to be visible to the generic
-        // object resolver used by Client_RecvInventoryAddItem.
-        return new CreateSimpleObjectPacket();
+        return type switch
+        {
+            CloneBaseObjectType.Armor => new CreateArmorPacket(),
+            CloneBaseObjectType.Weapon => new CreateWeaponPacket(),
+            CloneBaseObjectType.PowerPlant => new CreatePowerPlantPacket(),
+            CloneBaseObjectType.WheelSet => new CreateWheelSetPacket(),
+            _ => new CreateSimpleObjectPacket()
+        };
     }
 }

@@ -1,5 +1,6 @@
 namespace AutoCore.Game.Inventory;
 
+using AutoCore.Game.CloneBases;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Managers;
@@ -280,6 +281,10 @@ public sealed class InventoryManager
                 "HandleInventoryDropPacket: Character is null");
         }
 
+        // HARDPOINT (2): equip from cargo / pending drag onto a vehicle slot.
+        if (packet.InventoryType == 2)
+            return DropToHardpoint(packet, character);
+
         if (packet.InventoryType != 1)
         {
             return InventoryOperationResult.SinglePacket(
@@ -324,6 +329,179 @@ public sealed class InventoryManager
                 HasSwappedOrConcatenatedItem = false
             },
             $"HandleInventoryDropPacket: Player {character.Name} moved item {movedItem.Coid} (CBID: {movedItem.Cbid}) to slot {movedItem.InventoryPositionX},{movedItem.InventoryPositionY}");
+    }
+
+    private InventoryOperationResult DropToHardpoint(InventoryDropPacket packet, Character character)
+    {
+        var vehicle = character.CurrentVehicle;
+        if (vehicle == null)
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateDropFailure(packet),
+                "HandleInventoryDropPacket: No current vehicle for hardpoint equip");
+        }
+
+        CharacterInventoryItem cargoItem = null;
+        PendingEquippedItemDrag? pending = null;
+        int cbid;
+        CloneBaseObjectType type;
+        string displayName;
+        bool itemGlobal;
+        byte sourceInventoryType;
+
+        if (_pendingEquippedItemDrags.TryGetValue(packet.ItemCoid, out var pendingDrag))
+        {
+            pending = pendingDrag;
+            cbid = pendingDrag.Cbid;
+            type = pendingDrag.Type;
+            displayName = pendingDrag.DisplayName;
+            itemGlobal = pendingDrag.Global;
+            sourceInventoryType = 2;
+        }
+        else
+        {
+            cargoItem = FindByCoid(packet.ItemCoid);
+            if (cargoItem == null)
+            {
+                return InventoryOperationResult.SinglePacket(
+                    CreateDropFailure(packet),
+                    $"HandleInventoryDropPacket: Item {packet.ItemCoid} not found for hardpoint equip");
+            }
+
+            cbid = cargoItem.Cbid;
+            type = cargoItem.Type;
+            displayName = cargoItem.DisplayName;
+            itemGlobal = packet.ItemGlobal;
+            sourceInventoryType = 1;
+        }
+
+        var cloneBase = AssetManager.Instance.GetCloneBase(cbid);
+        if (cloneBase == null)
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateDropFailure(packet),
+                $"HandleInventoryDropPacket: CloneBase {cbid} not loaded for equip");
+        }
+
+        if (!VehicleEquipmentSlotResolver.TryResolve(type, cloneBase, packet.InventoryPositionX, out var slot))
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateDropFailure(packet),
+                $"HandleInventoryDropPacket: Cannot resolve hardpoint slot for CBID {cbid} (type={type}, dropX={packet.InventoryPositionX})");
+        }
+
+        var equipObject = CreateEquippableObject(cbid, type, packet.ItemCoid, itemGlobal);
+        if (equipObject == null)
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateDropFailure(packet),
+                $"HandleInventoryDropPacket: Cannot create equippable object for CBID {cbid}");
+        }
+
+        if (!vehicle.TryEquipItem(slot, equipObject, out var previousItem))
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateDropFailure(packet),
+                $"HandleInventoryDropPacket: Failed to equip CBID {cbid} into slot {slot}");
+        }
+
+        if (cargoItem != null)
+            _items.Remove(cargoItem);
+
+        if (pending.HasValue)
+            _pendingEquippedItemDrags.Remove(packet.ItemCoid);
+
+        // Swapped previous hardpoint item goes into cargo (prefer the drop's cargo coords if valid).
+        CharacterInventoryItem swappedCargoItem = null;
+        if (previousItem != null)
+        {
+            byte swapX = 0;
+            byte swapY = 0;
+            if (!TryGetFirstFreeCargoSlot(out swapX, out swapY))
+            {
+                // Roll back equip if cargo is full — put previous back.
+                vehicle.TryEquipItem(slot, previousItem, out _);
+                if (cargoItem != null)
+                    _items.Add(cargoItem);
+                if (pending.HasValue)
+                    _pendingEquippedItemDrags[packet.ItemCoid] = pending.Value;
+
+                return InventoryOperationResult.SinglePacket(
+                    CreateDropFailure(packet),
+                    $"HandleInventoryDropPacket: Cargo full; cannot unequip previous item from {slot}");
+            }
+
+            swappedCargoItem = new CharacterInventoryItem(
+                previousItem.CBID,
+                previousItem.Type,
+                previousItem.CloneBaseObject?.CloneBaseSpecific.UniqueName ?? $"CBID {previousItem.CBID}",
+                previousItem.ObjectId.Coid,
+                swapX,
+                swapY,
+                1);
+            _items.Add(swappedCargoItem);
+        }
+
+        // Always refresh cargo: item left cargo, and a swap may have added the previous hardpoint item.
+        var packets = BuildHardpointEquipPackets(
+            this,
+            vehicle,
+            new TFID(packet.ItemCoid, itemGlobal),
+            previousItem?.ObjectId,
+            sourceInventoryType);
+
+        return new InventoryOperationResult(
+            packets,
+            $"HandleInventoryDropPacket: Player {character.Name} equipped {displayName} (CBID {cbid}, coid={packet.ItemCoid}) into {slot}" +
+            (previousItem != null ? $" (swapped out coid={previousItem.ObjectId.Coid})" : string.Empty));
+    }
+
+    /// <summary>
+    /// Hardpoint equip ack: InventoryEquip (0x203C) only, then CargoSendAll.
+    /// Do NOT send InventoryDropResponse with type HARDPOINT — Client_RecvInventoryDrop
+    /// rejects type 2 with "Called Drop on invalid inventory object".
+    /// PutInHand=true matches ghost-synthesized equips and clears the drag cursor
+    /// via client FUN_007fc270.
+    /// </summary>
+    public static IReadOnlyList<BasePacket> BuildHardpointEquipPackets(
+        InventoryManager inventory,
+        Vehicle vehicle,
+        TFID newItemId,
+        TFID oldItemId,
+        byte sourceInventoryType)
+    {
+        var hasOldItem = oldItemId is { Coid: > 0 };
+        var packets = new List<BasePacket>
+        {
+            new InventoryEquipPacket
+            {
+                ItemId = new TFID(newItemId.Coid, newItemId.Global),
+                VehicleId = new TFID(vehicle.ObjectId.Coid, vehicle.ObjectId.Global),
+                OldItemId = hasOldItem
+                    ? new TFID(oldItemId.Coid, oldItemId.Global)
+                    : new TFID(-1, false),
+                PutInHand = true,
+                InventoryPositionX = 0,
+                InventoryPositionY = 0,
+                InventoryTypeFrom = sourceInventoryType,
+            }
+        };
+
+        if (inventory != null)
+            packets.Add(InventoryPacketFactory.CreateCargoSendAll(inventory));
+
+        return packets;
+    }
+
+    private static SimpleObject CreateEquippableObject(int cbid, CloneBaseObjectType type, long coid, bool global)
+    {
+        var created = ClonedObjectBase.AllocateNewObjectFromCBID(cbid);
+        if (created is not SimpleObject simpleObject)
+            return null;
+
+        simpleObject.SetCoid(coid, global);
+        simpleObject.LoadCloneBase(cbid);
+        return simpleObject;
     }
 
     private InventoryOperationResult GrabEquippedVehicleItem(InventoryGrabPacket packet, Character character)

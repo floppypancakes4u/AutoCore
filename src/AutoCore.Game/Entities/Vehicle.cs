@@ -164,6 +164,48 @@ public class Vehicle : SimpleObject
         if (!TryFindEquippedItem(coid, out slot, out item))
             return false;
 
+        return ClearEquipmentSlot(slot);
+    }
+
+    /// <summary>
+    /// Equips <paramref name="item"/> into <paramref name="slot"/>, replacing any occupant.
+    /// Returns the previous occupant (if any) so callers can move it to cargo.
+    /// </summary>
+    public bool TryEquipItem(VehicleEquipmentSlot slot, SimpleObject item, out SimpleObject previousItem)
+    {
+        previousItem = null;
+        if (item == null)
+            return false;
+
+        previousItem = GetEquippedItem(slot);
+        if (!AssignEquipmentSlot(slot, item))
+        {
+            previousItem = null;
+            return false;
+        }
+
+        return true;
+    }
+
+    public SimpleObject GetEquippedItem(VehicleEquipmentSlot slot)
+    {
+        return slot switch
+        {
+            VehicleEquipmentSlot.Armor => Armor,
+            VehicleEquipmentSlot.PowerPlant => PowerPlant,
+            VehicleEquipmentSlot.Ornament => Ornament,
+            VehicleEquipmentSlot.RaceItem => RaceItem,
+            VehicleEquipmentSlot.WeaponMelee => WeaponMelee,
+            VehicleEquipmentSlot.WeaponFront => WeaponFront,
+            VehicleEquipmentSlot.WeaponTurret => WeaponTurret,
+            VehicleEquipmentSlot.WeaponRear => WeaponRear,
+            VehicleEquipmentSlot.WheelSet => WheelSet,
+            _ => null
+        };
+    }
+
+    private bool ClearEquipmentSlot(VehicleEquipmentSlot slot)
+    {
         switch (slot)
         {
             case VehicleEquipmentSlot.Armor:
@@ -215,6 +257,82 @@ public class Vehicle : SimpleObject
             case VehicleEquipmentSlot.WheelSet:
                 WheelSet = null;
                 if (DBData != null) DBData.Wheelset = 0;
+                EnsureGhostMaskDelivery(GhostVehicle.WheelSetMask);
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    private bool AssignEquipmentSlot(VehicleEquipmentSlot slot, SimpleObject item)
+    {
+        var coid = item.ObjectId.Coid;
+        switch (slot)
+        {
+            case VehicleEquipmentSlot.Armor:
+                if (item is not Armor armor)
+                    return false;
+                Armor = armor;
+                if (DBData != null) DBData.Armor = coid;
+                EnsureGhostMaskDelivery(GhostVehicle.ChangeArmor);
+                return true;
+
+            case VehicleEquipmentSlot.PowerPlant:
+                if (item is not PowerPlant powerPlant)
+                    return false;
+                PowerPlant = powerPlant;
+                if (DBData != null) DBData.PowerPlant = coid;
+                return true;
+
+            case VehicleEquipmentSlot.Ornament:
+                Ornament = item;
+                if (DBData != null) DBData.Ornament = coid;
+                EnsureGhostMaskDelivery(GhostVehicle.OrnamentMask);
+                return true;
+
+            case VehicleEquipmentSlot.RaceItem:
+                RaceItem = item;
+                if (DBData != null) DBData.RaceItem = coid;
+                return true;
+
+            case VehicleEquipmentSlot.WeaponMelee:
+                if (item is not Weapon melee)
+                    return false;
+                WeaponMelee = melee;
+                if (DBData != null) DBData.MeleeWeapon = coid;
+                EnsureGhostMaskDelivery(GhostVehicle.MeleeWeaponMask);
+                return true;
+
+            case VehicleEquipmentSlot.WeaponFront:
+                if (item is not Weapon front)
+                    return false;
+                WeaponFront = front;
+                if (DBData != null) DBData.Front = coid;
+                EnsureGhostMaskDelivery(GhostVehicle.FrontWeaponMask);
+                return true;
+
+            case VehicleEquipmentSlot.WeaponTurret:
+                if (item is not Weapon turret)
+                    return false;
+                WeaponTurret = turret;
+                if (DBData != null) DBData.Turret = coid;
+                EnsureGhostMaskDelivery(GhostVehicle.TurretWeaponMask);
+                return true;
+
+            case VehicleEquipmentSlot.WeaponRear:
+                if (item is not Weapon rear)
+                    return false;
+                WeaponRear = rear;
+                if (DBData != null) DBData.Rear = coid;
+                EnsureGhostMaskDelivery(GhostVehicle.RearWeaponMask);
+                return true;
+
+            case VehicleEquipmentSlot.WheelSet:
+                if (item is not WheelSet wheelSet)
+                    return false;
+                WheelSet = wheelSet;
+                if (DBData != null) DBData.Wheelset = coid;
                 EnsureGhostMaskDelivery(GhostVehicle.WheelSetMask);
                 return true;
 
