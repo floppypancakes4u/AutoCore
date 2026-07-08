@@ -35,18 +35,6 @@ public class Vehicle : SimpleObject
     public Weapon WeaponMelee { get; private set; }
     public Weapon WeaponFront { get; private set; }
     public Weapon WeaponTurret { get; private set; }
-
-    /// <summary>
-    /// When true, the next GhostVehicle turret mask pack writes present=true with CBID/coid -1 (probe only).
-    /// </summary>
-    public bool ForceTurretGhostClearCbidMinusOne { get; set; }
-
-    private TFID? _lastProbeTurretTfid;
-
-    /// <summary>
-    /// Last turret TFID captured by <see cref="ClearTurretForProbe"/> for destroy-probe retries.
-    /// </summary>
-    public TFID? LastProbeTurretTfid => _lastProbeTurretTfid;
     public Weapon WeaponRear { get; private set; }
     public WheelSet WheelSet { get; private set; }
     public Vector3 Velocity { get; private set; }
@@ -204,6 +192,20 @@ public class Vehicle : SimpleObject
         };
     }
 
+    public VehicleEquipmentSnapshot CreateEquipmentSnapshot()
+    {
+        return new VehicleEquipmentSnapshot(
+            Ornament?.ObjectId.Coid ?? DBData?.Ornament ?? 0,
+            RaceItem?.ObjectId.Coid ?? DBData?.RaceItem ?? 0,
+            PowerPlant?.ObjectId.Coid ?? DBData?.PowerPlant ?? 0,
+            WheelSet?.ObjectId.Coid ?? DBData?.Wheelset ?? 0,
+            Armor?.ObjectId.Coid ?? DBData?.Armor ?? 0,
+            WeaponMelee?.ObjectId.Coid ?? DBData?.MeleeWeapon ?? 0,
+            WeaponFront?.ObjectId.Coid ?? DBData?.Front ?? 0,
+            WeaponTurret?.ObjectId.Coid ?? DBData?.Turret ?? 0,
+            WeaponRear?.ObjectId.Coid ?? DBData?.Rear ?? 0);
+    }
+
     private bool ClearEquipmentSlot(VehicleEquipmentSlot slot)
     {
         switch (slot)
@@ -339,22 +341,6 @@ public class Vehicle : SimpleObject
             default:
                 return false;
         }
-    }
-
-    /// <summary>
-    /// Clears server turret state for probe commands without inventory side effects.
-    /// </summary>
-    public TFID? ClearTurretForProbe()
-    {
-        TFID? previous = WeaponTurret?.ObjectId;
-        if (previous is { Coid: > 0 })
-            _lastProbeTurretTfid = previous;
-
-        WeaponTurret = null;
-        if (DBData != null)
-            DBData.Turret = 0;
-
-        return previous;
     }
 
     /// <summary>

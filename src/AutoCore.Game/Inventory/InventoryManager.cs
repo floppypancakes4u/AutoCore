@@ -12,34 +12,83 @@ using AutoCore.Utils;
 
 public sealed class InventoryManager
 {
-    public const int CargoWidth = 24;
-    public const int CargoPageCount = 13;
-    public const int CargoSlotCount = 312;
+    public const int DefaultCargoWidth = 24;
+    public const int DefaultCargoPageCount = 13;
+    public const int DefaultCargoSlotCount = DefaultCargoWidth * DefaultCargoPageCount;
+    public const int MaxCargoSlotCount = 512;
+
+    /// <summary>Legacy alias for default width; prefer <see cref="Width"/> on instances.</summary>
+    public const int CargoWidth = DefaultCargoWidth;
+
+    /// <summary>Legacy alias for default page count; prefer <see cref="PageCount"/> on instances.</summary>
+    public const int CargoPageCount = DefaultCargoPageCount;
+
+    /// <summary>Legacy alias for default slot count; prefer <see cref="SlotCount"/> on instances.</summary>
+    public const int CargoSlotCount = DefaultCargoSlotCount;
 
     private readonly List<CharacterInventoryItem> _items = new();
     private readonly Dictionary<long, PendingEquippedItemDrag> _pendingEquippedItemDrags = new();
+    private readonly IInventoryPersistence _persistence;
+
+    public InventoryManager(IInventoryPersistence persistence = null)
+    {
+        _persistence = persistence;
+    }
+
+    public int Width { get; private set; } = DefaultCargoWidth;
+    public int PageCount { get; private set; } = DefaultCargoPageCount;
+    public int SlotCount => Width * PageCount;
 
     public IReadOnlyList<CharacterInventoryItem> Items => _items;
 
-    public bool IsFull => _items.Count >= CargoSlotCount || !TryGetFirstFreeCargoSlot(out _, out _);
+    public bool IsFull => _items.Count >= SlotCount || !TryGetFirstFreeCargoSlot(out _, out _);
+
+    public void SetCapacity(int width, int pageCount)
+    {
+        if (width < 1)
+            width = 1;
+        if (pageCount < 1)
+            pageCount = 1;
+
+        while (width * pageCount > MaxCargoSlotCount && pageCount > 1)
+            pageCount--;
+        while (width * pageCount > MaxCargoSlotCount && width > 1)
+            width--;
+
+        Width = width;
+        PageCount = pageCount;
+    }
+
+    public void LoadItems(IEnumerable<CharacterInventoryItem> items)
+    {
+        _items.Clear();
+        if (items == null)
+            return;
+
+        foreach (var item in items)
+        {
+            if (item != null && IsValidCargoSlot(item.InventoryPositionX, item.InventoryPositionY))
+                _items.Add(item);
+        }
+    }
 
     public bool TryGetFirstFreeCargoSlot(out byte x, out byte y)
     {
-        var occupied = new bool[CargoSlotCount];
+        var occupied = new bool[SlotCount];
         foreach (var item in _items)
         {
-            var slot = item.InventoryPositionY * CargoWidth + item.InventoryPositionX;
-            if (slot >= 0 && slot < CargoSlotCount)
+            var slot = item.InventoryPositionY * Width + item.InventoryPositionX;
+            if (slot >= 0 && slot < SlotCount)
                 occupied[slot] = true;
         }
 
-        for (var slot = 0; slot < CargoSlotCount; slot++)
+        for (var slot = 0; slot < SlotCount; slot++)
         {
             if (occupied[slot])
                 continue;
 
-            x = (byte)(slot % CargoWidth);
-            y = (byte)(slot / CargoWidth);
+            x = (byte)(slot % Width);
+            y = (byte)(slot / Width);
             return true;
         }
 
@@ -92,9 +141,9 @@ public sealed class InventoryManager
         return true;
     }
 
-    private static bool IsValidCargoSlot(byte x, byte y)
+    private bool IsValidCargoSlot(byte x, byte y)
     {
-        return x < CargoWidth && y < CargoPageCount;
+        return x < Width && y < PageCount;
     }
 
     private bool CanAdd(CharacterInventoryItem item)
@@ -111,10 +160,10 @@ public sealed class InventoryManager
         return true;
     }
 
-    public InventoryCommandResult AddItem(InventoryCatalogEntry entry, IInventoryItemCreator itemCreator, long coid)
+    public InventoryCommandResult AddItem(InventoryCatalogEntry entry, IInventoryItemCreator itemCreator, long coid, long characterCoid = 0)
     {
         if (!TryGetFirstFreeCargoSlot(out var x, out var y))
-            return new InventoryCommandResult($"Cargo inventory is full ({CargoSlotCount}/{CargoSlotCount}).");
+            return new InventoryCommandResult($"Cargo inventory is full ({SlotCount}/{SlotCount}).");
 
         var createResult = itemCreator.Create(entry, coid, x, y);
         if (!createResult.WasSuccessful)
@@ -122,7 +171,10 @@ public sealed class InventoryManager
 
         var item = new CharacterInventoryItem(entry.Cbid, entry.Type, createResult.DisplayName, coid, x, y, 1);
         if (!TryAdd(item))
-            return new InventoryCommandResult($"Cargo inventory is full ({CargoSlotCount}/{CargoSlotCount}).");
+            return new InventoryCommandResult($"Cargo inventory is full ({SlotCount}/{SlotCount}).");
+
+        if (characterCoid != 0)
+            PersistCargoUpsert(characterCoid, item);
 
         IReadOnlyList<BasePacket> packets = new BasePacket[]
         {
@@ -250,6 +302,8 @@ public sealed class InventoryManager
                 $"HandleInventoryGrabPacket: Cargo slot {x},{y} is unavailable for {character.Name}");
         }
 
+        PersistCargoUpsert(character.ObjectId.Coid, inventoryItem);
+
         IReadOnlyList<BasePacket> packets = new BasePacket[]
         {
             InventoryPacketFactory.CreateCargoSendAll(this),
@@ -292,7 +346,7 @@ public sealed class InventoryManager
                 $"HandleInventoryDropPacket: Inventory type {packet.InventoryType} is not supported yet");
         }
 
-        if (packet.InventoryPositionX >= CargoWidth || packet.InventoryPositionY >= CargoPageCount)
+        if (packet.InventoryPositionX >= Width || packet.InventoryPositionY >= PageCount)
         {
             return InventoryOperationResult.SinglePacket(
                 CreateDropFailure(packet),
@@ -316,6 +370,8 @@ public sealed class InventoryManager
                 CreateDropFailure(packet),
                 $"HandleInventoryDropPacket: Could not move item {packet.ItemCoid} to slot {packet.InventoryPositionX},{packet.InventoryPositionY}");
         }
+
+        PersistCargoMove(character.ObjectId.Coid, movedItem);
 
         return InventoryOperationResult.SinglePacket(
             new InventoryDropResponsePacket
@@ -406,7 +462,10 @@ public sealed class InventoryManager
         }
 
         if (cargoItem != null)
+        {
             _items.Remove(cargoItem);
+            PersistCargoDelete(character.ObjectId.Coid, cargoItem.Coid);
+        }
 
         if (pending.HasValue)
             _pendingEquippedItemDrags.Remove(packet.ItemCoid);
@@ -422,7 +481,10 @@ public sealed class InventoryManager
                 // Roll back equip if cargo is full — put previous back.
                 vehicle.TryEquipItem(slot, previousItem, out _);
                 if (cargoItem != null)
+                {
                     _items.Add(cargoItem);
+                    PersistCargoUpsert(character.ObjectId.Coid, cargoItem);
+                }
                 if (pending.HasValue)
                     _pendingEquippedItemDrags[packet.ItemCoid] = pending.Value;
 
@@ -440,7 +502,10 @@ public sealed class InventoryManager
                 swapY,
                 1);
             _items.Add(swappedCargoItem);
+            PersistCargoUpsert(character.ObjectId.Coid, swappedCargoItem);
         }
+
+        PersistEquip(vehicle, equipObject);
 
         // Always refresh cargo: item left cargo, and a swap may have added the previous hardpoint item.
         var packets = BuildHardpointEquipPackets(
@@ -530,6 +595,8 @@ public sealed class InventoryManager
                 $"HandleInventoryGrabPacket: Failed to unequip vehicle item {itemCoid} from slot {slot}");
         }
 
+        PersistUnequip(vehicle);
+
         _pendingEquippedItemDrags[itemCoid] = new PendingEquippedItemDrag(
             vehicle,
             slot,
@@ -547,7 +614,7 @@ public sealed class InventoryManager
     /// <summary>
     /// Packet order for hardpoint grab: InventoryUnequip (0x203E) first, then GrabResponse.
     /// Unequip-first matches the client path that clears the equipped icon before the drag
-    /// cursor is acknowledged (validated by /tc method 6).
+    /// cursor is acknowledged.
     /// </summary>
     public static IReadOnlyList<BasePacket> BuildEquippedGrabPackets(
         TFID itemId,
@@ -619,6 +686,9 @@ public sealed class InventoryManager
 
         _items.Add(inventoryItem);
         _pendingEquippedItemDrags.Remove(packet.ItemCoid);
+        PersistCargoUpsert(character.ObjectId.Coid, inventoryItem);
+        if (!pendingEquippedItem.AlreadyUnequipped)
+            PersistUnequip(pendingEquippedItem.Vehicle);
 
         IReadOnlyList<BasePacket> packets = new BasePacket[]
         {
@@ -745,6 +815,49 @@ public sealed class InventoryManager
 
         source = default;
         return false;
+    }
+
+    private void PersistCargoUpsert(long characterCoid, CharacterInventoryItem item)
+    {
+        if (_persistence == null || characterCoid == 0 || item == null)
+            return;
+
+        _persistence.UpsertCargo(characterCoid, item);
+    }
+
+    private void PersistCargoMove(long characterCoid, CharacterInventoryItem item)
+    {
+        if (_persistence == null || characterCoid == 0 || item == null)
+            return;
+
+        _persistence.MoveCargo(characterCoid, item);
+    }
+
+    private void PersistCargoDelete(long characterCoid, long itemCoid)
+    {
+        if (_persistence == null || characterCoid == 0)
+            return;
+
+        _persistence.DeleteCargo(characterCoid, itemCoid);
+    }
+
+    private void PersistEquip(Vehicle vehicle, SimpleObject equippedItem)
+    {
+        if (_persistence == null || vehicle == null)
+            return;
+
+        if (equippedItem != null)
+            _persistence.EnsureSimpleObject(equippedItem.ObjectId.Coid, (byte)equippedItem.Type, equippedItem.CBID);
+
+        _persistence.SaveVehicleEquipment(vehicle.ObjectId.Coid, vehicle.CreateEquipmentSnapshot());
+    }
+
+    private void PersistUnequip(Vehicle vehicle)
+    {
+        if (_persistence == null || vehicle == null)
+            return;
+
+        _persistence.SaveVehicleEquipment(vehicle.ObjectId.Coid, vehicle.CreateEquipmentSnapshot());
     }
 
     private readonly record struct InventoryGrabSource(

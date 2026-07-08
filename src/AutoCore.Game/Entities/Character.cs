@@ -55,7 +55,7 @@ public class Character : Creature
     public byte GMLevel { get; set; }
     public TNLConnection OwningConnection { get; private set; }
     public Vehicle CurrentVehicle { get; private set; }
-    public InventoryManager Inventory { get; } = new();
+    public InventoryManager Inventory { get; } = new(InventoryPersistence.Instance);
 
     // Mission tracking
     public List<CharacterQuest> CurrentQuests { get; } = new();
@@ -96,6 +96,16 @@ public class Character : Creature
         HP = MaxHP = CloneBaseObject.SimpleObjectSpecific.MaxHitPoint;
         Faction = CloneBaseObject.SimpleObjectSpecific.Faction;
         TeamFaction = CloneBaseObject.SimpleObjectSpecific.Faction;
+
+        var width = DBData.CargoWidth > 0 ? DBData.CargoWidth : InventoryManager.DefaultCargoWidth;
+        var pageCount = DBData.CargoPageCount > 0 ? DBData.CargoPageCount : InventoryManager.DefaultCargoPageCount;
+        Inventory.SetCapacity(width, pageCount);
+
+        if (!isInCharacterSelection)
+        {
+            var cargoItems = InventoryPersistence.Instance.LoadCargo(coid);
+            Inventory.LoadItems(cargoItems);
+        }
 
         // TODO: set up stuff, fields, baseclasses, etc
 

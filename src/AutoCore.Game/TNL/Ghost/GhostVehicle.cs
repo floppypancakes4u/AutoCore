@@ -12,7 +12,6 @@ public class GhostVehicle : GhostObject
 
     public const ulong AttributeMask    = 0x0000200000ul;
     public const ulong ClanMask         = 0x0000400000ul;
-    public const ulong HardpointMask    = 0x0000800000ul;
     public const ulong PetCBIDMask      = 0x0001000000ul;
     public const ulong ShieldMaxMask    = 0x0002000000ul;
     public const ulong ShieldMask       = 0x0004000000ul;
@@ -214,25 +213,11 @@ public class GhostVehicle : GhostObject
             stream.WriteFlag(parentVehicle.WeaponFront.ObjectId.Global);
         }
 
-        if (stream.WriteFlag((updateMask & TurretWeaponMask) != 0))
+        if (stream.WriteFlag((updateMask & TurretWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponTurret != null))
         {
-            if (parentVehicle.ForceTurretGhostClearCbidMinusOne)
-            {
-                parentVehicle.ForceTurretGhostClearCbidMinusOne = false;
-
-                if (stream.WriteFlag(true))
-                {
-                    stream.WriteInt(unchecked((uint)-1), 20);
-                    stream.Write((long)-1);
-                    stream.WriteFlag(false);
-                }
-            }
-            else if (stream.WriteFlag(parentVehicle.WeaponTurret != null))
-            {
-                stream.WriteInt((uint)parentVehicle.WeaponTurret.CBID, 20);
-                stream.Write(parentVehicle.WeaponTurret.ObjectId.Coid);
-                stream.WriteFlag(parentVehicle.WeaponTurret.ObjectId.Global);
-            }
+            stream.WriteInt((uint)parentVehicle.WeaponTurret.CBID, 20);
+            stream.Write(parentVehicle.WeaponTurret.ObjectId.Coid);
+            stream.WriteFlag(parentVehicle.WeaponTurret.ObjectId.Global);
         }
 
         if (stream.WriteFlag((updateMask & RearWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponRear != null))

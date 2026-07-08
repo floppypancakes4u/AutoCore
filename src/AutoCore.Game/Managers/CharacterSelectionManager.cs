@@ -8,6 +8,7 @@ using AutoCore.Database.World.Models;
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
+using AutoCore.Game.Inventory;
 using AutoCore.Game.Packets.Login;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.TNL;
@@ -236,7 +237,9 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
                 RotationX = 0.0f,
                 RotationY = 0.0f,
                 RotationZ = 0.0f,
-                RotationW = 1.0f
+                RotationW = 1.0f,
+                CargoWidth = InventoryManager.DefaultCargoWidth,
+                CargoPageCount = InventoryManager.DefaultCargoPageCount
             };
             context.Characters.Add(character);
             AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Network, $"CreateNewCharacter: Character.Name before SaveChanges: '{character.Name}' (Length: {character.Name?.Length ?? 0})");

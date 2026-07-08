@@ -6,20 +6,23 @@ public static class InventoryPacketFactory
 {
     public static void ConfigureVehicleCargo(CreateVehiclePacket packet, InventoryManager inventory = null)
     {
-        packet.InventorySlots = (short)InventoryManager.CargoSlotCount;
+        var slotCount = inventory?.SlotCount ?? InventoryManager.DefaultCargoSlotCount;
+        var width = inventory?.Width ?? InventoryManager.DefaultCargoWidth;
+
+        packet.InventorySlots = (short)slotCount;
 
         if (packet is not CreateVehicleExtendedPacket extendedPacket)
             return;
 
-        extendedPacket.NumInventorySlots = (short)InventoryManager.CargoSlotCount;
-        extendedPacket.InventorySize = InventoryManager.CargoSlotCount;
+        extendedPacket.NumInventorySlots = (short)slotCount;
+        extendedPacket.InventorySize = (ushort)slotCount;
 
         if (inventory == null)
             return;
 
         foreach (var item in inventory.Items)
         {
-            var slot = item.InventoryPositionY * InventoryManager.CargoWidth + item.InventoryPositionX;
+            var slot = item.InventoryPositionY * width + item.InventoryPositionX;
             if (slot < 0 || slot >= extendedPacket.InventoryCoids.Length)
                 continue;
 
@@ -29,15 +32,22 @@ public static class InventoryPacketFactory
 
     public static InventoryCargoSendAllPacket CreateCargoSendAll(InventoryManager inventory)
     {
+        var pageCount = inventory?.PageCount ?? InventoryManager.DefaultCargoPageCount;
+        var width = inventory?.Width ?? InventoryManager.DefaultCargoWidth;
+        var slotCount = inventory?.SlotCount ?? InventoryManager.DefaultCargoSlotCount;
+
         var packet = new InventoryCargoSendAllPacket
         {
-            InventorySize = InventoryManager.CargoPageCount
+            InventorySize = (byte)Math.Min(byte.MaxValue, pageCount)
         };
+
+        if (inventory == null)
+            return packet;
 
         foreach (var item in inventory.Items)
         {
-            var slot = item.InventoryPositionY * InventoryManager.CargoWidth + item.InventoryPositionX;
-            if (slot < 0 || slot >= InventoryManager.CargoSlotCount)
+            var slot = item.InventoryPositionY * width + item.InventoryPositionX;
+            if (slot < 0 || slot >= slotCount || slot >= packet.Items.Length)
                 continue;
 
             packet.Items[slot] = new InventoryPacketItem

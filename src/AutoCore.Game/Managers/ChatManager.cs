@@ -198,19 +198,6 @@ public class ChatManager : Singleton<ChatManager>
                 respPacket.Message = equippedList.ToString();
                 break;
 
-            case "/tc":
-                if (!TurretClearProbe.TryExecute(character, parts, out var tcMessage, out var tcPackets))
-                {
-                    respPacket.Message = tcMessage;
-                    break;
-                }
-
-                foreach (var packet in tcPackets)
-                    connection.SendGamePacket(packet);
-
-                respPacket.Message = tcMessage;
-                break;
-
             case "/getNearbyCBIDs":
                 if (character?.CurrentVehicle == null)
                 {

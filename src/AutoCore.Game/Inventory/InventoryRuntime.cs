@@ -15,6 +15,8 @@ public sealed class InventoryRuntime : IInventoryRuntime
 
     public InventoryManager Inventory => _character.Inventory;
 
+    public long CharacterCoid => _character?.ObjectId.Coid ?? 0;
+
     public long AllocateItemCoid()
     {
         return _character.Map.LocalCoidCounter++;

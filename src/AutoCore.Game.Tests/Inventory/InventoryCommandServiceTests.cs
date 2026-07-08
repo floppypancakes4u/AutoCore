@@ -104,6 +104,7 @@ public class InventoryCommandServiceTests
 
         public bool CanAllocateItem { get; }
         public InventoryManager Inventory { get; } = new();
+        public long CharacterCoid => 5001;
 
         public long AllocateItemCoid()
         {
