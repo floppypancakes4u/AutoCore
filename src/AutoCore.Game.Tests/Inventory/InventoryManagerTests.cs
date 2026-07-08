@@ -76,6 +76,41 @@ public class InventoryManagerTests
         Assert.IsTrue(second.IsInInventory);
     }
 
+    [TestMethod]
+    public void CreateItemObjectPackets_SkipsUnknownCatalogEntriesAndFailedCreates()
+    {
+        var inventory = new InventoryManager();
+        inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "Known", 1001, 0, 0, 1));
+        inventory.TryAdd(new CharacterInventoryItem(99, CloneBaseObjectType.Item, "Unknown", 1002, 1, 0, 1));
+
+        var packets = inventory.CreateItemObjectPackets(
+            new InventoryCatalog(() => new[] { new InventoryCatalogEntry(10, CloneBaseObjectType.Item, "Known") }),
+            new CatalogAwareCreator());
+
+        Assert.AreEqual(1, packets.Count);
+    }
+
+    private sealed class CatalogAwareCreator : IInventoryItemCreator
+    {
+        public InventoryItemCreateResult Create(InventoryCatalogEntry entry, long coid, byte x, byte y)
+        {
+            if (entry.Cbid != 10)
+                return InventoryItemCreateResult.Unsupported("skip");
+
+            return InventoryItemCreateResult.Success(
+                new CreateSimpleObjectPacket
+                {
+                    CBID = entry.Cbid,
+                    ObjectId = new(coid, true),
+                    InventoryPositionX = x,
+                    InventoryPositionY = y,
+                    Quantity = 1,
+                    IsInInventory = true
+                },
+                entry.DisplayName);
+        }
+    }
+
     private sealed class FakeInventoryItemCreator : IInventoryItemCreator
     {
         public InventoryItemCreateResult Create(InventoryCatalogEntry entry, long coid, byte x, byte y)

@@ -1,5 +1,8 @@
 namespace AutoCore.Game.Inventory;
 
+using System.Diagnostics.CodeAnalysis;
+
+[ExcludeFromCodeCoverage]
 public static class InventoryGrabDebugLog
 {
     private const int MaxEntries = 32;

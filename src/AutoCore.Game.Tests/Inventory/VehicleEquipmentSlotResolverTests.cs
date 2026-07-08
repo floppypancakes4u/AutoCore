@@ -54,9 +54,44 @@ public class VehicleEquipmentSlotResolverTests
     }
 
     [TestMethod]
+    public void TryResolveWeaponSlot_UsesFrontTurretRearFlags()
+    {
+        Assert.IsTrue(VehicleEquipmentSlotResolver.TryResolveWeaponSlot(CreateWeapon(flags: VehicleEquipmentSlotResolver.WeaponFlagFront), 0, out var front));
+        Assert.AreEqual(VehicleEquipmentSlot.WeaponFront, front);
+
+        Assert.IsTrue(VehicleEquipmentSlotResolver.TryResolveWeaponSlot(CreateWeapon(flags: VehicleEquipmentSlotResolver.WeaponFlagTurret), 0, out var turret));
+        Assert.AreEqual(VehicleEquipmentSlot.WeaponTurret, turret);
+
+        Assert.IsTrue(VehicleEquipmentSlotResolver.TryResolveWeaponSlot(CreateWeapon(flags: VehicleEquipmentSlotResolver.WeaponFlagRear), 0, out var rear));
+        Assert.AreEqual(VehicleEquipmentSlot.WeaponRear, rear);
+    }
+
+    [TestMethod]
+    public void TryResolveWeaponSlot_MeleeSubtype9_MapsToWeaponMelee()
+    {
+        Assert.IsTrue(VehicleEquipmentSlotResolver.TryResolveWeaponSlot(CreateWeapon(subType: 9), 0, out var slot));
+        Assert.AreEqual(VehicleEquipmentSlot.WeaponMelee, slot);
+    }
+
+    [TestMethod]
     public void TryResolveWeaponSlot_UsesDropXFallbackWhenFlagsEmpty()
     {
-        Assert.IsTrue(VehicleEquipmentSlotResolver.TryResolveWeaponSlot(null, 1, out var slot) == false);
+        Assert.IsTrue(VehicleEquipmentSlotResolver.TryResolveWeaponSlot(CreateWeapon(), 0, out var front));
+        Assert.AreEqual(VehicleEquipmentSlot.WeaponFront, front);
+
+        Assert.IsTrue(VehicleEquipmentSlotResolver.TryResolveWeaponSlot(CreateWeapon(), 1, out var turret));
+        Assert.AreEqual(VehicleEquipmentSlot.WeaponTurret, turret);
+
+        Assert.IsTrue(VehicleEquipmentSlotResolver.TryResolveWeaponSlot(CreateWeapon(), 2, out var rear));
+        Assert.AreEqual(VehicleEquipmentSlot.WeaponRear, rear);
+
+        Assert.IsFalse(VehicleEquipmentSlotResolver.TryResolveWeaponSlot(CreateWeapon(), 3, out _));
+    }
+
+    [TestMethod]
+    public void TryResolveWeaponSlot_ReturnsFalseWhenWeaponNull()
+    {
+        Assert.IsFalse(VehicleEquipmentSlotResolver.TryResolveWeaponSlot(null, 1, out var slot));
         Assert.AreEqual(default, slot);
     }
 
@@ -70,10 +105,16 @@ public class VehicleEquipmentSlotResolverTests
 
     private static CloneBaseObject CreateItemCloneBase(short subType)
     {
-        // CloneBaseObject requires a BinaryReader ctor; build a minimal fake via uninitialized + field set.
         var clone = (CloneBaseObject)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(CloneBaseObject));
         clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.Item };
         clone.SimpleObjectSpecific = new SimpleObjectSpecific { SubType = subType };
+        return clone;
+    }
+
+    private static CloneBaseWeapon CreateWeapon(byte flags = 0, byte subType = 0)
+    {
+        var clone = (CloneBaseWeapon)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(CloneBaseWeapon));
+        clone.WeaponSpecific = new WeaponSpecific { Flags = flags, SubType = subType };
         return clone;
     }
 }

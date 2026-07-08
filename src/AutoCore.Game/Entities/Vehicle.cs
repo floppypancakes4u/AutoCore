@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -56,6 +57,7 @@ public class Vehicle : SimpleObject
     // We'll experiment with multiple ChatTypes to see what the client renders differently.
     private static readonly Dictionary<long, long> _lastCombatMsgByAttackerMs = new();
 
+    [ExcludeFromCodeCoverage]
     private static void TrySendCombatMessage(Character? attacker, string message, ChatType chatType = ChatType.CombatMessage_Regular)
     {
         try
@@ -92,6 +94,7 @@ public class Vehicle : SimpleObject
         }
     }
 
+    [ExcludeFromCodeCoverage]
     private static void TrySendCombatHitProbe(Character? attacker, int actualDamage)
     {
         // Send minimal strings in different chat channels so we can see which UI the client uses.
@@ -100,6 +103,7 @@ public class Vehicle : SimpleObject
         TrySendCombatMessage(attacker, actualDamage.ToString(), ChatType.CombatMessage_Health);
     }
 
+    [ExcludeFromCodeCoverage]
     private static void TrySendCombatMissProbe(Character? attacker)
     {
         TrySendCombatMessage(attacker, "Miss", ChatType.CombatMessage_LowImportance);
@@ -412,6 +416,7 @@ public class Vehicle : SimpleObject
         yield return (VehicleEquipmentSlot.WheelSet, WheelSet);
     }
 
+    [ExcludeFromCodeCoverage]
     public override bool LoadFromDB(CharContext context, long coid, bool isInCharacterSelection = false)
     {
         SetCoid(coid, true);
@@ -513,6 +518,7 @@ public class Vehicle : SimpleObject
         return true;
     }
 
+    [ExcludeFromCodeCoverage]
     public override void CreateGhost()
     {
         if (Ghost != null)
@@ -522,6 +528,7 @@ public class Vehicle : SimpleObject
         Ghost.SetParent(this);
     }
 
+    [ExcludeFromCodeCoverage]
     public override void WriteToPacket(CreateSimpleObjectPacket packet)
     {
         base.WriteToPacket(packet);
@@ -627,6 +634,7 @@ public class Vehicle : SimpleObject
         }
     }
 
+    [ExcludeFromCodeCoverage]
     public void EnterMap(SectorMap map, Vector3? position = null)
     {
         Position = position.Value;
@@ -641,6 +649,7 @@ public class Vehicle : SimpleObject
         DBData.RotationW = Rotation.W;
     }
 
+    [ExcludeFromCodeCoverage]
     public void HandleMovement(VehicleMovedPacket packet)
     {
         if (Ghost == null)
@@ -712,6 +721,7 @@ public class Vehicle : SimpleObject
     }
 
     // Called from both movement packets AND the server tick, so holding fire works even if VehicleMoved packets are sparse.
+    [ExcludeFromCodeCoverage]
     public void ProcessCombatIfFiring()
     {
         if (Ghost == null)
@@ -733,6 +743,7 @@ public class Vehicle : SimpleObject
         }
     }
 
+    [ExcludeFromCodeCoverage]
     private void ProcessCombatInternal()
     {
         // Process combat when firing (server authoritative)

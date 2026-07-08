@@ -83,6 +83,19 @@ public class InventoryCommandServiceTests
         Assert.AreEqual("Cargo inventory is full (312/312).", service.AddItem(fullRuntime, new[] { "/addItem", "20" }).Message);
     }
 
+    [TestMethod]
+    public void ListItems_ReturnsCatalogPage()
+    {
+        var service = CreateService(
+            Enumerable.Range(1, 3).Select(i => Entry(i, CloneBaseObjectType.Item, $"Item {i}")),
+            new FakeInventoryItemCreator());
+
+        var message = service.ListItems(new[] { "/listItems", "1" });
+
+        StringAssert.Contains(message, "Item 1");
+        StringAssert.Contains(message, "page 1/1");
+    }
+
     private static InventoryCommandService CreateService(IEnumerable<InventoryCatalogEntry> entries, IInventoryItemCreator creator)
     {
         return new InventoryCommandService(new InventoryCatalog(() => entries), creator);

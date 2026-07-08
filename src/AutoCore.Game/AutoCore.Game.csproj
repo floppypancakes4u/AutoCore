@@ -12,6 +12,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="AutoCore.Game.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\lib\TNL.NET\TNL.NET\TNL.NET.csproj" />
     <ProjectReference Include="..\AutoCore.Database\AutoCore.Database.csproj" />
     <ProjectReference Include="..\AutoCore.Utils\AutoCore.Utils.csproj" />

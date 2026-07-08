@@ -13,7 +13,7 @@ public sealed class InventoryRuntime : IInventoryRuntime
 
     public bool CanAllocateItem => _character?.Map != null;
 
-    public InventoryManager Inventory => _character.Inventory;
+    public InventoryManager Inventory => _character?.Inventory;
 
     public long CharacterCoid => _character?.ObjectId.Coid ?? 0;
 

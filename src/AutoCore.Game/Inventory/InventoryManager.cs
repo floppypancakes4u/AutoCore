@@ -1,5 +1,6 @@
 namespace AutoCore.Game.Inventory;
 
+using System.Diagnostics.CodeAnalysis;
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
@@ -29,10 +30,17 @@ public sealed class InventoryManager
     private readonly List<CharacterInventoryItem> _items = new();
     private readonly Dictionary<long, PendingEquippedItemDrag> _pendingEquippedItemDrags = new();
     private readonly IInventoryPersistence _persistence;
+    private readonly ICloneBaseLookup _cloneBases;
+    private readonly IEquippableObjectFactory _equipFactory;
 
-    public InventoryManager(IInventoryPersistence persistence = null)
+    public InventoryManager(
+        IInventoryPersistence persistence = null,
+        ICloneBaseLookup cloneBases = null,
+        IEquippableObjectFactory equipFactory = null)
     {
         _persistence = persistence;
+        _cloneBases = cloneBases ?? AssetManagerCloneBaseLookup.Instance;
+        _equipFactory = equipFactory ?? ClonedObjectEquippableFactory.Instance;
     }
 
     public int Width { get; private set; } = DefaultCargoWidth;
@@ -216,7 +224,7 @@ public sealed class InventoryManager
 
     public InventoryOperationResult Grab(InventoryGrabPacket packet, Character character)
     {
-        if (character == null || character.Map == null)
+        if (character == null)
         {
             return InventoryOperationResult.SinglePacket(
                 CreateGrabFailure(packet),
@@ -245,6 +253,19 @@ public sealed class InventoryManager
         if (packet.InventoryType == 2)
             return GrabEquippedVehicleItem(packet, character);
 
+        if (character.Map == null)
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateGrabFailure(packet),
+                "HandleInventoryGrabPacket: Character or Map is null");
+        }
+
+        return GrabFromSectorMap(packet, character);
+    }
+
+    [ExcludeFromCodeCoverage]
+    private InventoryOperationResult GrabFromSectorMap(InventoryGrabPacket packet, Character character)
+    {
         var map = character.Map;
         if (!TryResolveInventoryGrabSource(packet, character, map, out var source))
         {
@@ -431,7 +452,7 @@ public sealed class InventoryManager
             sourceInventoryType = 1;
         }
 
-        var cloneBase = AssetManager.Instance.GetCloneBase(cbid);
+        var cloneBase = _cloneBases.GetCloneBase(cbid);
         if (cloneBase == null)
         {
             return InventoryOperationResult.SinglePacket(
@@ -446,7 +467,7 @@ public sealed class InventoryManager
                 $"HandleInventoryDropPacket: Cannot resolve hardpoint slot for CBID {cbid} (type={type}, dropX={packet.InventoryPositionX})");
         }
 
-        var equipObject = CreateEquippableObject(cbid, type, packet.ItemCoid, itemGlobal);
+        var equipObject = _equipFactory.Create(cbid, type, packet.ItemCoid, itemGlobal);
         if (equipObject == null)
         {
             return InventoryOperationResult.SinglePacket(
@@ -556,17 +577,6 @@ public sealed class InventoryManager
             packets.Add(InventoryPacketFactory.CreateCargoSendAll(inventory));
 
         return packets;
-    }
-
-    private static SimpleObject CreateEquippableObject(int cbid, CloneBaseObjectType type, long coid, bool global)
-    {
-        var created = ClonedObjectBase.AllocateNewObjectFromCBID(cbid);
-        if (created is not SimpleObject simpleObject)
-            return null;
-
-        simpleObject.SetCoid(coid, global);
-        simpleObject.LoadCloneBase(cbid);
-        return simpleObject;
     }
 
     private InventoryOperationResult GrabEquippedVehicleItem(InventoryGrabPacket packet, Character character)
@@ -748,7 +758,8 @@ public sealed class InventoryManager
         return TryGetFirstFreeCargoSlot(out x, out y);
     }
 
-    private static bool TryResolveInventoryGrabSource(
+    [ExcludeFromCodeCoverage]
+    private bool TryResolveInventoryGrabSource(
         InventoryGrabPacket packet,
         Character character,
         SectorMap map,
@@ -777,7 +788,7 @@ public sealed class InventoryManager
 
         foreach (var cbid in packet.EnumerateInt32Candidates().Distinct())
         {
-            var cloneBase = AssetManager.Instance.GetCloneBase(cbid);
+            var cloneBase = _cloneBases.GetCloneBase(cbid);
             if (cloneBase == null)
                 continue;
 
@@ -798,6 +809,7 @@ public sealed class InventoryManager
         return false;
     }
 
+    [ExcludeFromCodeCoverage]
     private static bool TryCreateMapSource(ClonedObjectBase mapObject, string sourceKind, out InventoryGrabSource source)
     {
         if (mapObject != null)
@@ -815,6 +827,14 @@ public sealed class InventoryManager
 
         source = default;
         return false;
+    }
+
+    public void SaveCapacity(long characterCoid)
+    {
+        if (_persistence == null || characterCoid == 0)
+            return;
+
+        _persistence.SaveCharacterCargoCapacity(characterCoid, Width, PageCount);
     }
 
     private void PersistCargoUpsert(long characterCoid, CharacterInventoryItem item)

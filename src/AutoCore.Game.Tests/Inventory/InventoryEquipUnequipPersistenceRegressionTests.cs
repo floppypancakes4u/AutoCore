@@ -3,6 +3,7 @@ using AutoCore.Game.Entities;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
+using AutoCore.Game.Tests.Inventory.Fakes;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace AutoCore.Game.Tests.Inventory;
@@ -111,36 +112,6 @@ public class InventoryEquipUnequipPersistenceRegressionTests
                     IsInInventory = true
                 },
                 entry.DisplayName);
-        }
-    }
-
-    private sealed class RecordingInventoryPersistence : IInventoryPersistence
-    {
-        public List<(long CharacterCoid, CharacterInventoryItem Item)> Upserted { get; } = new();
-
-        public IReadOnlyList<CharacterInventoryItem> LoadCargo(long characterCoid) => Array.Empty<CharacterInventoryItem>();
-
-        public void UpsertCargo(long characterCoid, CharacterInventoryItem item) =>
-            Upserted.Add((characterCoid, item));
-
-        public void MoveCargo(long characterCoid, CharacterInventoryItem item)
-        {
-        }
-
-        public void DeleteCargo(long characterCoid, long itemCoid)
-        {
-        }
-
-        public void EnsureSimpleObject(long itemCoid, byte type, int cbid, int faction = 0, int teamFaction = 0)
-        {
-        }
-
-        public void SaveVehicleEquipment(long vehicleCoid, VehicleEquipmentSnapshot snapshot)
-        {
-        }
-
-        public void SaveCharacterCargoCapacity(long characterCoid, int width, int pageCount)
-        {
         }
     }
 }

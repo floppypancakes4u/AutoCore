@@ -61,10 +61,7 @@ public sealed class ChatCommandService
         }
 
         character.Inventory.SetCapacity(width, pageCount);
-        InventoryPersistence.Instance.SaveCharacterCargoCapacity(
-            character.ObjectId.Coid,
-            character.Inventory.Width,
-            character.Inventory.PageCount);
+        character.Inventory.SaveCapacity(character.ObjectId.Coid);
 
         IReadOnlyList<BasePacket> packets = new BasePacket[]
         {

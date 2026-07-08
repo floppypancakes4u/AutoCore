@@ -55,7 +55,8 @@ public class Character : Creature
     public byte GMLevel { get; set; }
     public TNLConnection OwningConnection { get; private set; }
     public Vehicle CurrentVehicle { get; private set; }
-    public InventoryManager Inventory { get; } = new(InventoryPersistence.Instance);
+    private InventoryManager _inventory = new(InventoryPersistence.Instance);
+    public InventoryManager Inventory => _inventory;
 
     // Mission tracking
     public List<CharacterQuest> CurrentQuests { get; } = new();
@@ -71,6 +72,26 @@ public class Character : Creature
     public void SetOwningConnection(TNLConnection owningConnection)
     {
         OwningConnection = owningConnection;
+    }
+
+    internal void AttachCurrentVehicleForTests(Vehicle vehicle)
+    {
+        CurrentVehicle = vehicle;
+        vehicle?.SetOwner(this);
+    }
+
+    internal void AttachInventoryForTests(InventoryManager inventory)
+    {
+        _inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
+    }
+
+    internal void AttachTestDataForTests(string name = "TestPilot")
+    {
+        DBData = new CharacterData
+        {
+            Coid = ObjectId.Coid,
+            Name = name
+        };
     }
 
     public override Character GetAsCharacter() => this;

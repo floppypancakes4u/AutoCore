@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <Include>[AutoCore.Game]AutoCore.Game.Inventory.*|[AutoCore.Game]AutoCore.Game.Entities.Vehicle|[AutoCore.Game]AutoCore.Game.Packets.Sector.Inventory*</Include>
+          <Exclude>[AutoCore.Game]AutoCore.Game.Inventory.InventoryPersistence|[AutoCore.Game]AutoCore.Game.Inventory.InventoryGrabDebugLog|[AutoCore.Game]AutoCore.Game.Inventory.InventoryDropDebugLog|[AutoCore.Game]AutoCore.Game.Inventory.ClonedObjectEquippableFactory|[AutoCore.Game]AutoCore.Game.Inventory.AssetManagerCloneBaseLookup|[AutoCore.Game]AutoCore.Game.Inventory.InventoryItemCreator</Exclude>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

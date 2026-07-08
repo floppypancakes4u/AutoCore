@@ -74,6 +74,28 @@ public class InventoryCatalogTests
         Assert.AreEqual("Invalid page 3. Valid pages: 1-2.", message);
     }
 
+    [TestMethod]
+    public void FormatPage_ReturnsErrorForNonNumericPage()
+    {
+        var catalog = new InventoryCatalog(() => new[] { Entry(1, CloneBaseObjectType.Item, "Alpha") });
+        Assert.AreEqual("Invalid listItems page 'abc'. Page must be a number.", catalog.FormatPage("abc"));
+    }
+
+    [TestMethod]
+    public void FormatPage_WhenNoInventoryItemsLoaded_ReturnsMessage()
+    {
+        var catalog = new InventoryCatalog(() => new[] { Entry(1, CloneBaseObjectType.Creature, "Mob") });
+        Assert.AreEqual("No inventory-capable items are loaded.", catalog.FormatPage("1"));
+    }
+
+    [TestMethod]
+    public void FindAny_ReturnsMatchingEntry()
+    {
+        var catalog = new InventoryCatalog(() => new[] { Entry(42, CloneBaseObjectType.Item, "Answer") });
+        Assert.AreEqual(42, catalog.FindAny(42).Cbid);
+        Assert.IsNull(catalog.FindAny(99));
+    }
+
     private static InventoryCatalogEntry Entry(int cbid, CloneBaseObjectType type, string name)
     {
         return new InventoryCatalogEntry(cbid, type, name);

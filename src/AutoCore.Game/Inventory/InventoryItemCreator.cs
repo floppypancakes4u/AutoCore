@@ -4,7 +4,9 @@ using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Packets.Sector;
+using System.Diagnostics.CodeAnalysis;
 
+[ExcludeFromCodeCoverage]
 public sealed class InventoryItemCreator : IInventoryItemCreator
 {
     public InventoryItemCreateResult Create(InventoryCatalogEntry entry, long coid, byte x, byte y)
