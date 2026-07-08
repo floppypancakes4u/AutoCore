@@ -3,8 +3,11 @@
 using System.Text.Json;
 using System.Linq;
 using AutoCore.Database.Char;
+using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
+using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Global;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
@@ -102,8 +105,21 @@ public partial class TNLConnection
         character.WriteToPacket(charPacket);
         character.CurrentVehicle.WriteToPacket(vehiclePacket);
 
+        SendInventoryLoginObjectPackets(character);
         SendGamePacket(vehiclePacket);
         SendGamePacket(charPacket);
+        SendGamePacket(InventoryPacketFactory.CreateCargoSendAll(character.Inventory));
+    }
+
+    private void SendInventoryLoginObjectPackets(Character character)
+    {
+        if (character.Inventory.Items.Count == 0)
+            return;
+
+        var catalog = InventoryCatalog.FromAssetManager();
+        var itemCreator = new InventoryItemCreator();
+        foreach (var itemPacket in character.Inventory.CreateItemObjectPackets(catalog, itemCreator))
+            SendGamePacket(itemPacket);
     }
 
     private void HandleCreatureMovedPacket(BinaryReader reader)
@@ -295,5 +311,71 @@ public partial class TNLConnection
         Logger.WriteLog(LogType.Debug, $"HandleItemPickupPacket: Item {packet.ItemId.Coid} removed from world");
 
         // TODO: Send InventoryAddItem packet to add the item to the player's inventory
+    }
+
+    private void HandleInventoryGrabPacket(BinaryReader reader)
+    {
+        var packet = new InventoryGrabPacket();
+        packet.Read(reader);
+
+        Logger.WriteLog(
+            LogType.Debug,
+            $"HandleInventoryGrabPacket: raw={Convert.ToHexString(packet.RawBytes)} parsedCoid={packet.ItemCoid} quantity={packet.Quantity}");
+
+        var result = CurrentCharacter?.Inventory.Grab(packet, CurrentCharacter)
+            ?? InventoryOperationResult.SinglePacket(
+                InventoryManager.CreateGrabFailure(packet),
+                "HandleInventoryGrabPacket: Character is null");
+
+        LogInventoryOperationResult(result);
+        SendInventoryOperationPackets(result);
+        DestroyInventoryWorldObject(result.WorldObjectToDestroy);
+    }
+
+    private void HandleInventoryDropPacket(BinaryReader reader)
+    {
+        var packet = new InventoryDropPacket();
+        packet.Read(reader);
+
+        Logger.WriteLog(
+            LogType.Debug,
+            $"HandleInventoryDropPacket: raw={Convert.ToHexString(packet.RawBytes)} coid={packet.ItemCoid} global={packet.ItemGlobal} invType={packet.InventoryType} slot={packet.InventoryPositionX},{packet.InventoryPositionY}");
+
+        var result = CurrentCharacter?.Inventory.Drop(packet, CurrentCharacter)
+            ?? InventoryOperationResult.SinglePacket(
+                InventoryManager.CreateDropFailure(packet),
+                "HandleInventoryDropPacket: Character is null");
+
+        LogInventoryOperationResult(result);
+        SendInventoryOperationPackets(result);
+    }
+
+    private void LogInventoryOperationResult(InventoryOperationResult result)
+    {
+        if (!string.IsNullOrWhiteSpace(result?.LogMessage))
+            Logger.WriteLog(LogType.Debug, result.LogMessage);
+    }
+
+    private void SendInventoryOperationPackets(InventoryOperationResult result)
+    {
+        foreach (var response in result.Packets)
+            SendGamePacket(response);
+    }
+
+    private void DestroyInventoryWorldObject(ClonedObjectBase worldObject)
+    {
+        if (worldObject == null)
+            return;
+
+        var map = worldObject.Map;
+        var objectId = worldObject.ObjectId;
+        worldObject.SetMap(null);
+
+        if (map == null)
+            return;
+
+        var destroyPacket = new DestroyObjectPacket(objectId);
+        foreach (var character in map.Objects.Values.OfType<Character>().Where(c => c.OwningConnection != null))
+            character.OwningConnection.SendGamePacket(destroyPacket);
     }
 }

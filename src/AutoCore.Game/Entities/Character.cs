@@ -5,6 +5,7 @@ namespace AutoCore.Game.Entities;
 
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
+using AutoCore.Game.Inventory;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
@@ -54,6 +55,7 @@ public class Character : Creature
     public byte GMLevel { get; set; }
     public TNLConnection OwningConnection { get; private set; }
     public Vehicle CurrentVehicle { get; private set; }
+    public InventoryManager Inventory { get; } = new();
 
     // Mission tracking
     public List<CharacterQuest> CurrentQuests { get; } = new();

@@ -13,6 +13,7 @@ using AutoCore.Database.Char.Models;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Extensions;
+using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Packets;
 using AutoCore.Utils;
@@ -86,6 +87,27 @@ public partial class TNLConnection : GhostConnection
             arr = stream.ToArray();
         }
 
+        if (packet.Opcode == GameOpcode.InventoryGrabResponse)
+            InventoryGrabDebugLog.RecordOutgoing(arr);
+        else if (packet.Opcode == GameOpcode.InventoryDropResponse)
+            InventoryDropDebugLog.RecordOutgoing(arr);
+
+        if (packet.Opcode is GameOpcode.CreateSimpleObject
+            or GameOpcode.CreateArmor
+            or GameOpcode.CreatePowerPlant
+            or GameOpcode.CreateWeapon
+            or GameOpcode.CreateWheelSet
+            or GameOpcode.InventoryCargoSendAll
+            or GameOpcode.InventoryAddItem
+            or GameOpcode.InventoryGrabResponse
+            or GameOpcode.InventoryDropResponse)
+        {
+            var previewLength = Math.Min(arr.Length, 96);
+            Logger.WriteLog(
+                LogType.Debug,
+                $"Outgoing InventoryFlow Packet: {packet.Opcode} bytes={arr.Length} preview={Convert.ToHexString(arr.AsSpan(0, previewLength))}");
+        }
+
         var arrLength = (uint)arr.Length;
         if (arrLength > 1400U)
         {
@@ -147,9 +169,17 @@ public partial class TNLConnection : GhostConnection
 
     private void HandlePacket(ByteBuffer buffer)
     {
-        var reader = new BinaryReader(new MemoryStream(buffer.GetBuffer()));
+        var rawBytes = new byte[buffer.GetBufferSize()];
+        Array.Copy(buffer.GetBuffer(), rawBytes, rawBytes.Length);
+
+        var reader = new BinaryReader(new MemoryStream(rawBytes));
         var rawOpcode = reader.ReadUInt32();
         var gameOpcode = (GameOpcode)rawOpcode;
+
+        if (gameOpcode == GameOpcode.InventoryGrab)
+            InventoryGrabDebugLog.RecordIncoming(rawBytes);
+        else if (gameOpcode == GameOpcode.InventoryDrop)
+            InventoryDropDebugLog.RecordIncoming(rawBytes);
 
         // Check if the opcode is a valid enum value
         if (!Enum.IsDefined(typeof(GameOpcode), gameOpcode))
@@ -296,6 +326,14 @@ public partial class TNLConnection : GhostConnection
 
                 case GameOpcode.ItemPickup:
                     HandleItemPickupPacket(reader);
+                    break;
+
+                case GameOpcode.InventoryGrab:
+                    HandleInventoryGrabPacket(reader);
+                    break;
+
+                case GameOpcode.InventoryDrop:
+                    HandleInventoryDropPacket(reader);
                     break;
 
                 case GameOpcode.Firing:

@@ -8,7 +8,7 @@ public class CreateVehicleExtendedPacket : CreateVehiclePacket
 
     public short NumInventorySlots { get; set; }
     public ushort InventorySize { get; set; }
-    public long[] InventoryCoids { get; } = new long[512];
+    public long[] InventoryCoids { get; } = Enumerable.Repeat(-1L, 512).ToArray();
 
     public override void Write(BinaryWriter writer)
     {

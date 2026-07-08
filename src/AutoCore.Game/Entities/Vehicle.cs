@@ -10,6 +10,7 @@ namespace AutoCore.Game.Entities;
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.Constants;
+using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
@@ -44,6 +45,7 @@ public class Vehicle : SimpleObject
     public float WantedTurretDirection { get; set; }
     public byte Firing { get; set; }
     public VehicleMovedFlags VehicleFlags { get; set; }
+    public InventoryManager Inventory => Owner?.GetAsCharacter()?.Inventory;
 
     // Server-side combat state (very lightweight)
     private long _lastFireMsFront;
@@ -240,7 +242,7 @@ public class Vehicle : SimpleObject
             vehiclePacket.PowerMaxAdd = 0;
             vehiclePacket.HeatMaxAdd = 0;
             vehiclePacket.CooldownAdd = 0;
-            vehiclePacket.InventorySlots = 0;
+            InventoryPacketFactory.ConfigureVehicleCargo(vehiclePacket, Inventory);
             vehiclePacket.MaxWeightWeaponFront = 0.0f;
             vehiclePacket.MaxWeightWeaponTurret = 0.0f;
             vehiclePacket.MaxWeightWeaponRear = 0.0f;
@@ -277,8 +279,11 @@ public class Vehicle : SimpleObject
                 PowerPlant.WriteToPacket(vehiclePacket.CreatePowerPlant);
             }
 
-            vehiclePacket.CreateWheelSet = new CreateWheelSetPacket();
-            WheelSet.WriteToPacket(vehiclePacket.CreateWheelSet);
+            if (WheelSet != null)
+            {
+                vehiclePacket.CreateWheelSet = new CreateWheelSetPacket();
+                WheelSet.WriteToPacket(vehiclePacket.CreateWheelSet);
+            }
 
             if (Armor != null)
             {
@@ -321,11 +326,6 @@ public class Vehicle : SimpleObject
             vehiclePacket.WeaponsCBID[1] = WeaponTurret?.CBID ?? -1;
             vehiclePacket.WeaponsCBID[2] = WeaponRear?.CBID ?? -1;
             vehiclePacket.Name = DBData.Name;
-        }
-
-        if (packet is CreateVehicleExtendedPacket extendedPacket)
-        {
-            // TODO
         }
     }
 

@@ -36,7 +36,7 @@ public class CreateCharacterExtendedPacket : CreateCharacterPacket
     public uint[] FirstTimeFlags { get; set; } = new uint[4];
     public long[] MemorizedList { get; set; } = new long[8];
     public int[] ArenaRanks { get; set; } = new int[7];
-    public long[] InventoryCoids { get; set; } = new long[312];
+    public long[] InventoryCoids { get; set; } = Enumerable.Repeat(-1L, 312).ToArray();
     public float KMTravelled { get; set; }
     public float HazardModeCount { get; set; }
     public int RespecsBought { get; set; }
