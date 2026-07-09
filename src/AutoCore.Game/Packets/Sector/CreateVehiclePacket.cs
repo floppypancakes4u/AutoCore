@@ -131,7 +131,14 @@ public class CreateVehiclePacket : CreateSimpleObjectPacket
         // WheelSet
         writer.Write(GameOpcode.CreateWheelSet);
 
-        CreateWheelSet.Write(writer);
+        if (CreateWheelSet != null)
+        {
+            CreateWheelSet.Write(writer);
+        }
+        else
+        {
+            CreateWheelSetPacket.WriteEmptyPacket(writer);
+        }
 
         // Armor
         writer.Write(GameOpcode.CreateArmor);

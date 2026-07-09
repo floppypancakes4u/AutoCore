@@ -1,9 +1,10 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 
 namespace AutoCore.Game.Entities;
 
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
+using AutoCore.Game.Inventory;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
@@ -107,6 +108,8 @@ public partial class Character : Creature
     public byte GMLevel { get; set; }
     public TNLConnection OwningConnection { get; private set; }
     public Vehicle CurrentVehicle { get; private set; }
+    private InventoryManager _inventory = new(InventoryPersistence.Instance);
+    public InventoryManager Inventory => _inventory;
 
     // Mission tracking
     public List<CharacterQuest> CurrentQuests { get; } = new();
@@ -151,6 +154,23 @@ public partial class Character : Creature
         vehicle?.SetOwner(this);
     }
 
+    /// <summary>Inventory-test alias for <see cref="SetCurrentVehicleForTests"/>.</summary>
+    internal void AttachCurrentVehicleForTests(Vehicle vehicle) => SetCurrentVehicleForTests(vehicle);
+
+    internal void AttachInventoryForTests(InventoryManager inventory)
+    {
+        _inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
+    }
+
+    internal void AttachTestDataForTests(string name = "TestPilot")
+    {
+        DBData = new CharacterData
+        {
+            Coid = ObjectId.Coid,
+            Name = name
+        };
+    }
+
     public override Character GetAsCharacter() => this;
     public override Character GetSuperCharacter(bool includeSummons) => this;
 
@@ -176,6 +196,16 @@ public partial class Character : Creature
         TeamFaction = CloneBaseObject.SimpleObjectSpecific.Faction;
 
         LoadExplorations(context);
+
+        var width = DBData.CargoWidth > 0 ? DBData.CargoWidth : InventoryManager.DefaultCargoWidth;
+        var pageCount = DBData.CargoPageCount > 0 ? DBData.CargoPageCount : InventoryManager.DefaultCargoPageCount;
+        Inventory.SetCapacity(width, pageCount);
+
+        if (!isInCharacterSelection)
+        {
+            var cargoItems = InventoryPersistence.Instance.LoadCargo(coid);
+            Inventory.LoadItems(cargoItems);
+        }
 
         // TODO: set up stuff, fields, baseclasses, etc
 

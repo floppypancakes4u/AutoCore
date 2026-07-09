@@ -4,6 +4,8 @@ public class GameConfig
 {
     public string PublicAddress { get; set; }
     public int Port { get; set; }
+    public bool EnableDevControl { get; set; } = true;
+    public int DevControlPort { get; set; } = 27999;
     /// <summary>
     /// If true, allows clients with different TNL versions to connect (for testing)
     /// </summary>

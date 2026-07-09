@@ -12,7 +12,6 @@ public class GhostVehicle : GhostObject
 
     public const ulong AttributeMask    = 0x0000200000ul;
     public const ulong ClanMask         = 0x0000400000ul;
-    public const ulong HardpointMask    = 0x0000800000ul;
     public const ulong PetCBIDMask      = 0x0001000000ul;
     public const ulong ShieldMaxMask    = 0x0002000000ul;
     public const ulong ShieldMask       = 0x0004000000ul;
@@ -200,7 +199,7 @@ public class GhostVehicle : GhostObject
             }
         }
 
-        if (stream.WriteFlag((updateMask & WheelSetMask) != 0))
+        if (stream.WriteFlag((updateMask & WheelSetMask) != 0) && stream.WriteFlag(parentVehicle.WheelSet != null))
         {
             stream.WriteInt((uint)parentVehicle.WheelSet.CBID, 20);
             stream.Write(parentVehicle.WheelSet.ObjectId.Coid);
@@ -228,7 +227,7 @@ public class GhostVehicle : GhostObject
             stream.WriteFlag(parentVehicle.WeaponRear.ObjectId.Global);
         }
 
-        if (stream.WriteFlag((updateMask & MeleeWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponRear != null))
+        if (stream.WriteFlag((updateMask & MeleeWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponMelee != null))
         {
             stream.WriteInt((uint)parentVehicle.WeaponMelee.CBID, 20);
             stream.Write(parentVehicle.WeaponMelee.ObjectId.Coid);
@@ -370,4 +369,5 @@ public class GhostVehicle : GhostObject
 
         return ret;
     }
+
 }

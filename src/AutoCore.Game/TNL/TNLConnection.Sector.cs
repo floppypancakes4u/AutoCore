@@ -1,9 +1,12 @@
-﻿namespace AutoCore.Game.TNL;
+namespace AutoCore.Game.TNL;
 
 using System.Linq;
 using AutoCore.Database.Char;
+using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
+using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Global;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
@@ -92,6 +95,10 @@ public partial class TNLConnection
 
         SetScopeObject(character.Ghost);
 
+        // ActivateGhosting already set Scoping=true, but Ghosting stays false until the
+        // client answers rpcReadyForNormalGhosts. ObjectLocalScopeAlways still works while
+        // Scoping is true; call it again after ghost create so vehicle dirty masks have a
+        // GhostInfo connection ref (required for SetMaskBits → CollapseDirtyList delivery).
         ObjectLocalScopeAlways(character.Ghost);
         ObjectLocalScopeAlways(character.CurrentVehicle.Ghost);
 
@@ -149,8 +156,11 @@ public partial class TNLConnection
         character.WriteToPacket(charPacket);
         character.CurrentVehicle.WriteToPacket(vehiclePacket);
 
+        InventoryCoidCounter.SyncFromCargo(character);
+        SendInventoryLoginObjectPackets(character);
         SendGamePacket(vehiclePacket);
         SendGamePacket(charPacket);
+        SendGamePacket(InventoryPacketFactory.CreateCargoSendAll(character.Inventory));
 
         // CreateCharacterExtended hash-inserts continents without per-bit UI notify.
         // UnlockRegion (sent twice) forces client apply + map fog refresh.
@@ -159,6 +169,17 @@ public partial class TNLConnection
         // Fire map PerPlayerLoad trigger (if findable) with CHARACTER activator after create
         // packets so 0x206C GiveMission can seed client mission state.
         character.Map?.FireOnLoadPlayerMissions(character);
+    }
+
+    private void SendInventoryLoginObjectPackets(Character character)
+    {
+        if (character.Inventory.Items.Count == 0)
+            return;
+
+        var catalog = InventoryCatalog.FromAssetManager();
+        var itemCreator = new InventoryItemCreator();
+        foreach (var itemPacket in character.Inventory.CreateItemObjectPackets(catalog, itemCreator))
+            SendGamePacket(itemPacket);
     }
 
     private void HandleCreatureMovedPacket(BinaryReader reader)
@@ -287,5 +308,146 @@ public partial class TNLConnection
         Logger.WriteLog(LogType.Debug, $"HandleItemPickupPacket: Item {packet.ItemId.Coid} removed from world");
 
         // TODO: Send InventoryAddItem packet to add the item to the player's inventory
+    }
+
+    private void HandleItemDropPacket(BinaryReader reader)
+    {
+        var packet = new ItemDropPacket();
+        packet.Read(reader);
+
+        Logger.WriteLog(
+            LogType.Network,
+            $"HandleItemDropPacket: raw={Convert.ToHexString(packet.RawBytes)} source={packet.SourceObjectId} coid={packet.ItemCoid} pos={packet.DropPosition}" +
+            (packet.RawBytes.Length >= ItemDropPacket.MinimumLength ? $" tail={packet.TailValue}" : string.Empty));
+
+        var result = CurrentCharacter?.Inventory.TossToWorld(packet, CurrentCharacter)
+            ?? InventoryOperationResult.SinglePacket(
+                InventoryManager.CreateItemDropFailure(packet),
+                "HandleItemDropPacket: Character is null");
+
+        LogInventoryOperationResult(result);
+        SendInventoryOperationPackets(result);
+    }
+
+    private void HandleInventoryGrabPacket(BinaryReader reader)
+    {
+        var packet = new InventoryGrabPacket();
+        packet.Read(reader);
+
+        Logger.WriteLog(
+            LogType.Debug,
+            $"HandleInventoryGrabPacket: raw={Convert.ToHexString(packet.RawBytes)} parsedCoid={packet.ItemCoid} quantity={packet.Quantity} invType={packet.InventoryType}");
+
+        var result = CurrentCharacter?.Inventory.Grab(packet, CurrentCharacter)
+            ?? InventoryOperationResult.SinglePacket(
+                InventoryManager.CreateGrabFailure(packet),
+                "HandleInventoryGrabPacket: Character is null");
+
+        LogInventoryOperationResult(result);
+        SendInventoryOperationPackets(result);
+        DestroyInventoryWorldObject(result.WorldObjectToDestroy);
+    }
+
+    private void HandleInventoryDropPacket(BinaryReader reader)
+    {
+        var packet = new InventoryDropPacket();
+        packet.Read(reader);
+
+        LogInventoryTossPacket("HandleInventoryDropPacket", packet.RawBytes, packet.ItemCoid, packet.ItemGlobal,
+            packet.InventoryType, packet.InventoryPositionX, packet.InventoryPositionY, packet.TailBytes,
+            packet.EnumerateInt64Candidates(), packet.EnumerateInt32Candidates());
+
+        var result = CurrentCharacter?.Inventory.Drop(packet, CurrentCharacter)
+            ?? InventoryOperationResult.SinglePacket(
+                InventoryManager.CreateDropFailure(packet),
+                "HandleInventoryDropPacket: Character is null");
+
+        LogInventoryOperationResult(result);
+        SendInventoryOperationPackets(result);
+    }
+
+    private void HandleInventoryDropMMPacket(BinaryReader reader)
+    {
+        var packet = new InventoryDropMMPacket();
+        packet.Read(reader);
+
+        LogInventoryTossPacket("HandleInventoryDropMMPacket", packet.RawBytes, packet.ItemCoid, packet.ItemGlobal,
+            packet.InventoryType, packet.InventoryPositionX, packet.InventoryPositionY, packet.TailBytes,
+            packet.EnumerateInt64Candidates(), packet.EnumerateInt32Candidates());
+
+        Logger.WriteLog(
+            LogType.Network,
+            "HandleInventoryDropMMPacket: log-only stub — world toss via InventoryDropMM is not implemented yet");
+    }
+
+    private void HandleInventoryDestroyItemPacket(BinaryReader reader)
+    {
+        var packet = new InventoryDestroyItemPacket();
+        packet.Read(reader);
+
+        Logger.WriteLog(
+            LogType.Network,
+            $"HandleInventoryDestroyItemPacket: raw={Convert.ToHexString(packet.RawBytes)} coid={packet.ItemCoid} global={packet.ItemGlobal}" +
+            (packet.TailBytes.Length > 0 ? $" tail={Convert.ToHexString(packet.TailBytes)}" : string.Empty) +
+            $" i32=[{string.Join(",", packet.EnumerateInt32Candidates())}] i64=[{string.Join(",", packet.EnumerateInt64Candidates())}]");
+
+        Logger.WriteLog(
+            LogType.Network,
+            "HandleInventoryDestroyItemPacket: log-only stub — inventory destroy/toss is not implemented yet");
+    }
+
+    private static void LogInventoryTossPacket(
+        string handler,
+        byte[] rawBytes,
+        long itemCoid,
+        bool itemGlobal,
+        byte inventoryType,
+        byte inventoryPositionX,
+        byte inventoryPositionY,
+        ReadOnlySpan<byte> tailBytes,
+        IEnumerable<long> int64Candidates,
+        IEnumerable<int> int32Candidates)
+    {
+        var message =
+            $"{handler}: raw={Convert.ToHexString(rawBytes)} coid={itemCoid} global={itemGlobal} invType={inventoryType} slot={inventoryPositionX},{inventoryPositionY}";
+
+        if (tailBytes.Length > 0)
+            message += $" tail={Convert.ToHexString(tailBytes)}";
+
+        if (inventoryType is not 1 and not 2)
+        {
+            message += $" i32=[{string.Join(",", int32Candidates)}] i64=[{string.Join(",", int64Candidates)}]";
+        }
+
+        Logger.WriteLog(LogType.Network, message);
+    }
+
+    private void LogInventoryOperationResult(InventoryOperationResult result)
+    {
+        if (!string.IsNullOrWhiteSpace(result?.LogMessage))
+            Logger.WriteLog(LogType.Debug, result.LogMessage);
+    }
+
+    private void SendInventoryOperationPackets(InventoryOperationResult result)
+    {
+        foreach (var response in result.Packets)
+            SendGamePacket(response);
+    }
+
+    private void DestroyInventoryWorldObject(ClonedObjectBase worldObject)
+    {
+        if (worldObject == null)
+            return;
+
+        var map = worldObject.Map;
+        var objectId = worldObject.ObjectId;
+        worldObject.SetMap(null);
+
+        if (map == null)
+            return;
+
+        var destroyPacket = new DestroyObjectPacket(objectId);
+        foreach (var character in map.Objects.Values.OfType<Character>().Where(c => c.OwningConnection != null))
+            character.OwningConnection.SendGamePacket(destroyPacket);
     }
 }

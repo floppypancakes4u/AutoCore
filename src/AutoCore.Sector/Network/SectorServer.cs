@@ -3,6 +3,7 @@
 using AutoCore.Game.Constants;
 using AutoCore.Game.Managers;
 using AutoCore.Game.TNL;
+using AutoCore.Sector.Dev;
 using AutoCore.Sector.Config;
 using AutoCore.Utils;
 using AutoCore.Utils.Server;
@@ -21,6 +22,7 @@ public partial class SectorServer : BaseServer, ILoopable
     public override bool IsRunning => Loop != null && Loop.Running;
     public TNLInterface Interface { get; private set; }
     private readonly object _interfaceLock = new();
+    private DevControlServer _devControlServer;
 
     public SectorServer()
         : base("Sector")
@@ -91,12 +93,21 @@ public partial class SectorServer : BaseServer, ILoopable
 
         Logger.WriteLog(LogType.Network, "*** Listening for clients on port {0}", Config.GameConfig.Port);
 
+        if (Config.GameConfig.EnableDevControl)
+        {
+            _devControlServer = new DevControlServer(() => Interface);
+            _devControlServer.Start(Config.GameConfig.DevControlPort);
+        }
+
         return true;
     }
 
     public void Shutdown()
     {
         Logger.WriteLog(LogType.None, "Shutting down the server...");
+
+        _devControlServer?.Stop();
+        _devControlServer = null;
 
         lock (_interfaceLock)
         {

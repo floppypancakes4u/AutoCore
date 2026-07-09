@@ -12,6 +12,7 @@ public class CharContext : DbContext
     public DbSet<CharacterData> Characters { get; set; }
     public DbSet<CharacterExploration> CharacterExplorations { get; set; }
     public DbSet<CharacterSocial> CharacterSocials { get; set; }
+    public DbSet<CharacterInventoryData> CharacterInventories { get; set; }
     public DbSet<VehicleData> Vehicles { get; set; }
     public DbSet<Clan> Clans { get; set; }
     public DbSet<ClanMember> ClanMembers { get; set; }
@@ -36,6 +37,50 @@ public class CharContext : DbContext
     {
         using var context = new CharContext();
         context.Database.EnsureCreated();
+        context.EnsureInventorySchema();
+    }
+
+    /// <summary>
+    /// Adds inventory columns/tables to existing MySQL databases created before cargo persistence.
+    /// Safe to call repeatedly (ignores duplicate-column / already-exists errors).
+    /// </summary>
+    public void EnsureInventorySchema()
+    {
+        TryExecute("""
+            ALTER TABLE `character`
+            ADD COLUMN `CargoWidth` INT NOT NULL DEFAULT 24
+            """);
+        TryExecute("""
+            ALTER TABLE `character`
+            ADD COLUMN `CargoPageCount` INT NOT NULL DEFAULT 13
+            """);
+        TryExecute("""
+            CREATE TABLE IF NOT EXISTS `character_inventory` (
+                `Id` BIGINT NOT NULL AUTO_INCREMENT,
+                `CharacterCoid` BIGINT NOT NULL,
+                `ItemCoid` BIGINT NOT NULL,
+                `Cbid` INT NOT NULL,
+                `Type` TINYINT UNSIGNED NOT NULL,
+                `SlotX` TINYINT UNSIGNED NOT NULL,
+                `SlotY` TINYINT UNSIGNED NOT NULL,
+                `Quantity` INT NOT NULL DEFAULT 1,
+                PRIMARY KEY (`Id`),
+                UNIQUE KEY `IX_character_inventory_ItemCoid` (`ItemCoid`),
+                KEY `IX_character_inventory_CharacterCoid` (`CharacterCoid`)
+            )
+            """);
+    }
+
+    private void TryExecute(string sql)
+    {
+        try
+        {
+            Database.ExecuteSqlRaw(sql);
+        }
+        catch
+        {
+            // Column/table already exists on upgraded databases.
+        }
     }
 
     protected override void OnConfiguring(DbContextOptionsBuilder options) => options.UseMySql(ConnectionString, ServerVersion.AutoDetect(ConnectionString));
@@ -47,5 +92,10 @@ public class CharContext : DbContext
         modelBuilder.Entity<CharacterExploration>().HasKey(ce => new { ce.CharacterCoid, ce.ContinentId });
         modelBuilder.Entity<CharacterSocial>().HasKey(cs => new { cs.CharacterCoid, cs.TargetCoid });
         modelBuilder.Entity<ClanMember>().HasKey(cm => new { cm.ClanId, cm.CharacterCoid });
+        modelBuilder.Entity<CharacterInventoryData>()
+            .HasIndex(ci => ci.ItemCoid)
+            .IsUnique();
+        modelBuilder.Entity<CharacterInventoryData>()
+            .HasIndex(ci => ci.CharacterCoid);
     }
 }

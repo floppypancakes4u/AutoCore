@@ -5,7 +5,9 @@ using System.Linq;
 using AutoCore.Database.World.Models;
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.Constants;
+using AutoCore.Game.AgentDebug;
 using AutoCore.Game.Entities;
+using AutoCore.Game.Inventory;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Sector;
@@ -404,70 +406,106 @@ public class LootManager : Singleton<LootManager>
     /// </summary>
     public void SpawnLootItem(int cbid, Vector3 position, Quaternion rotation, SectorMap map)
     {
+        if (!TrySpawnLootItem(cbid, position, rotation, map, out _))
+            return;
+    }
+
+    /// <summary>
+    /// Spawns a world item and broadcasts CreateSimpleObject to all players in the map.
+    /// Returns the assigned local COID when successful.
+    /// </summary>
+    public bool TrySpawnLootItem(
+        int cbid,
+        Vector3 position,
+        Quaternion rotation,
+        SectorMap map,
+        out long spawnedCoid)
+    {
+        spawnedCoid = -1;
+
         if (map == null)
         {
-            Logger.WriteLog(LogType.Error, $"LootManager.SpawnLootItem: Cannot spawn loot item {cbid} - map is null");
-            return;
+            Logger.WriteLog(LogType.Error, $"LootManager.TrySpawnLootItem: Cannot spawn item {cbid} - map is null");
+            return false;
         }
 
-        // Create the item using AllocateNewObjectFromCBID
         var item = ClonedObjectBase.AllocateNewObjectFromCBID(cbid);
         if (item == null)
         {
-            Logger.WriteLog(LogType.Error, $"LootManager.SpawnLootItem: Unable to create item {cbid}");
-            return;
+            Logger.WriteLog(LogType.Error, $"LootManager.TrySpawnLootItem: Unable to create item {cbid}");
+            return false;
         }
 
-        // Set up the item
-        var assignedCoid = map.LocalCoidCounter++;
-        item.SetCoid(assignedCoid, false);
+        var cloneBase = AssetManager.Instance.GetCloneBase(cbid);
+        var cloneType = cloneBase?.Type ?? CloneBaseObjectType.Object;
+
+        // #region agent log
+        TossDebugLogger.Log(
+            "H1",
+            "LootManager.TrySpawnLootItem:allocate",
+            "spawn item allocated",
+            new { cbid, cloneType = cloneType.ToString(), runtimeType = item.GetType().Name });
+        // #endregion
+
+        spawnedCoid = map.LocalCoidCounter++;
+        item.SetCoid(spawnedCoid, false);
         item.LoadCloneBase(cbid);
         item.Position = position;
         item.Rotation = rotation;
-        item.Faction = -1; // Loot items are neutral
+        item.Faction = -1;
         item.SetMap(map);
         item.CreateGhost();
-        
-        // Verify the item was added to the map
-        var verifyItem = map.GetObjectByCoid(assignedCoid);
-        if (verifyItem == null)
-        {
-            Logger.WriteLog(LogType.Error, $"LootManager.SpawnLootItem: Item with COID {assignedCoid} was not found in map after SetMap! This is a critical error.");
-            return;
-        }
 
-        // For loot items, always use CreateSimpleObjectPacket so they can be picked up
-        // The client only recognizes CreateSimpleObject opcode items as pickable from the ground
-        // Even though armor/weapons have their own packet types, loot items must use CreateSimpleObject
-        CreateSimpleObjectPacket createPacket = null;
-
-        if (item is SimpleObject simpleObject)
+        if (map.GetObjectByCoid(spawnedCoid) == null)
         {
-            createPacket = new CreateSimpleObjectPacket();
-            simpleObject.WriteToPacket(createPacket);
-        }
-        else
-        {
-            Logger.WriteLog(LogType.Error, $"LootManager.SpawnLootItem: Item {item.GetType().Name} for CBID {cbid} is not a SimpleObject");
+            Logger.WriteLog(LogType.Error, $"LootManager.TrySpawnLootItem: Item with COID {spawnedCoid} was not found in map after SetMap");
             item.SetMap(null);
-            return;
+            spawnedCoid = -1;
+            return false;
         }
 
-        if (createPacket == null)
+        if (item is not SimpleObject simpleObject)
         {
-            Logger.WriteLog(LogType.Error, $"LootManager.SpawnLootItem: Failed to create packet for item {cbid}");
+            Logger.WriteLog(LogType.Error, $"LootManager.TrySpawnLootItem: Item {item.GetType().Name} for CBID {cbid} is not a SimpleObject");
             item.SetMap(null);
-            return;
+            spawnedCoid = -1;
+            return false;
         }
 
-        // Loot items should be pickupable (not bound)
-        createPacket.IsBound = false;
+        var createPacket = CreateWorldSpawnPacket(cloneType, simpleObject);
 
-        // Broadcast to all players in the map
+        // #region agent log
+        TossDebugLogger.Log(
+            "H1",
+            "LootManager.TrySpawnLootItem:packet",
+            "broadcast create packet",
+            new
+            {
+                cbid,
+                cloneType = cloneType.ToString(),
+                packetOpcode = createPacket.Opcode.ToString(),
+                packetRuntimeType = createPacket.GetType().Name,
+                position = new { position.X, position.Y, position.Z },
+                spawnedCoid
+            },
+            "post-fix");
+        // #endregion
+
         BroadcastPacketToMap(map, createPacket);
 
         var itemName = AssetManager.Instance.GetCloneBase(cbid)?.CloneBaseSpecific.UniqueName ?? "Unknown";
-        Logger.WriteLog(LogType.Debug, $"LootManager.SpawnLootItem: Spawned {itemName} (CBID {cbid}, COID {assignedCoid}) at {position}");
+        Logger.WriteLog(LogType.Debug, $"LootManager.TrySpawnLootItem: Spawned {itemName} (CBID {cbid}, COID {spawnedCoid}) at {position}");
+        return true;
+    }
+
+    private static CreateSimpleObjectPacket CreateWorldSpawnPacket(CloneBaseObjectType cloneType, SimpleObject simpleObject)
+    {
+        var createPacket = InventoryItemCreator.CreatePacketFor(cloneType);
+        simpleObject.WriteToPacket(createPacket);
+        createPacket.IsBound = false;
+        createPacket.IsInInventory = false;
+        createPacket.IsIdentified = true;
+        return createPacket;
     }
 
     private void BroadcastPacketToMap(SectorMap map, BasePacket packet)

@@ -35,7 +35,20 @@ public static class CommandProcessor
     {
         var command = string.Empty;
 
-        if (Console.KeyAvailable)
+        if (Console.IsInputRedirected)
+            return null;
+
+        bool keyAvailable;
+        try
+        {
+            keyAvailable = Console.KeyAvailable;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+
+        if (keyAvailable)
         {
             while (true)
             {

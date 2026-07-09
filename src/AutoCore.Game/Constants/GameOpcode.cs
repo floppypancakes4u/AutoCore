@@ -92,7 +92,10 @@ public enum GameOpcode : uint
     InventoryUseItem = 0x2045,
     InventoryUseItemResponse = 0x2046,
     InventoryAddItem = 0x2047,
-    InventoryAddItemResponse = 0x2048,
+    // Ghidra: Client_PacketDispatch routes incoming opcode 0x2047 to
+    // Client_RecvInventoryAddItem. Opcode 0x2048 is not handled by this client.
+    InventoryAddItemResponse = 0x2047,
+    Unknown2048 = 0x2048,
     InventoryDestroyItem = 0x2049,
     InventorySort = 0x204A,
     CraftFromAssemblyKit = 0x204B,

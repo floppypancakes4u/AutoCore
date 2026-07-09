@@ -1,7 +1,8 @@
 ﻿namespace AutoCore.Game.Managers;
 
 using System.Linq;
-using AutoCore.Database.World.Models;
+using System.Text;
+using AutoCore.Game.Chat;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Packets.Global;
@@ -85,6 +86,14 @@ public class ChatManager : Singleton<ChatManager>
         Logger.WriteLog(LogType.Debug, $"Conn {connection.Account.Name} sent chat command: {command}");
 
         var parts = command.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+            return;
+
+        if (parts[0].StartsWith("//"))
+        {
+            Logger.WriteLog(LogType.Debug, $"Ignoring client chat control command: {parts[0]}");
+            return;
+        }
 
         var respPacket = new BroadcastPacket
         {
@@ -95,6 +104,17 @@ public class ChatManager : Singleton<ChatManager>
         };
 
         var character = connection.CurrentCharacter;
+
+        var commandResult = ChatCommandService.Instance.Execute(character, command);
+        if (commandResult.Handled)
+        {
+            foreach (var packet in commandResult.Packets)
+                connection.SendGamePacket(packet);
+
+            respPacket.Message = commandResult.Message;
+            SendChatCommandResponse(connection, respPacket);
+            return;
+        }
 
         switch (parts[0])
         {
@@ -156,6 +176,40 @@ public class ChatManager : Singleton<ChatManager>
                 }
 
                 respPacket.Message = $"Your current vehicle CBID: {vehicleCBID}";
+                break;
+
+            case "/equippedItems":
+            case "/equippeditems":
+                if (character?.CurrentVehicle == null)
+                {
+                    respPacket.Message = "You are not in a vehicle!";
+                    break;
+                }
+
+                var equippedItems = character.CurrentVehicle
+                    .EnumerateEquippedItems()
+                    .Where(e => e.Item != null)
+                    .ToList();
+
+                if (equippedItems.Count == 0)
+                {
+                    respPacket.Message = "No equipped vehicle items found.";
+                    Logger.WriteLog(LogType.Debug, $"Equipped items for {character.Name}: none");
+                    break;
+                }
+
+                var equippedList = new StringBuilder();
+                equippedList.Append($"Equipped items ({equippedItems.Count}):");
+
+                Logger.WriteLog(LogType.Debug, $"Equipped items for {character.Name}:");
+                foreach (var (slot, item) in equippedItems)
+                {
+                    var line = $"{slot}: COID={item.ObjectId.Coid} Global={item.ObjectId.Global} CBID={item.CBID} Type={item.GetType().Name} CloneType={item.Type}";
+                    Logger.WriteLog(LogType.Debug, $"  {line}");
+                    equippedList.Append('\n').Append(line);
+                }
+
+                respPacket.Message = equippedList.ToString();
                 break;
 
             case "/getNearbyCBIDs":
@@ -710,11 +764,18 @@ public class ChatManager : Singleton<ChatManager>
 
             default:
                 Logger.WriteLog(LogType.Debug, $"Unhandled chat command: {parts[0]}");
-                break;
+                return;
         }
 
-        respPacket.MessageLength = (short)respPacket.Message.Length;
+        SendChatCommandResponse(connection, respPacket);
+    }
 
+    private static void SendChatCommandResponse(TNLConnection connection, BroadcastPacket respPacket)
+    {
+        if (string.IsNullOrEmpty(respPacket.Message))
+            return;
+
+        respPacket.MessageLength = (short)(Encoding.UTF8.GetByteCount(respPacket.Message) + 1);
         connection.SendGamePacket(respPacket);
     }
 }

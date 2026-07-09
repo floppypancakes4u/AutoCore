@@ -39,6 +39,16 @@ public class CharacterData
     public byte Level { get; set; } = 1;
     public bool Deleted { get; set; }
 
+    /// <summary>
+    /// Cargo grid width (columns). Chassis systems can later overwrite this per character.
+    /// </summary>
+    public int CargoWidth { get; set; } = 24;
+
+    /// <summary>
+    /// Cargo grid page/row count. Chassis systems can later overwrite this per character.
+    /// </summary>
+    public int CargoPageCount { get; set; } = 13;
+
     [ForeignKey("Coid")]
     public SimpleObjectData SimpleObjectBase { get; set; }
 
@@ -50,4 +60,7 @@ public class CharacterData
 
     [InverseProperty("Character")]
     public List<VehicleData> Vehicles { get; set; }
+
+    [InverseProperty(nameof(CharacterInventoryData.Character))]
+    public List<CharacterInventoryData> InventoryItems { get; set; }
 }
