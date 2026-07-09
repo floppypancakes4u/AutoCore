@@ -537,6 +537,8 @@ public partial class TNLConnection : GhostConnection
     {
         if (CurrentCharacter != null)
         {
+            // SS-04: drop ownership before teardown so chat/send paths cannot use a dead connection.
+            CurrentCharacter.SetOwningConnection(null);
             CurrentCharacter.SetMap(null);
             CurrentCharacter.CurrentVehicle.SetMap(null);
             CurrentCharacter.ClearGhost();
