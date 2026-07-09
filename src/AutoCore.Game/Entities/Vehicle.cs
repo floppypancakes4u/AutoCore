@@ -345,13 +345,10 @@ public class Vehicle : SimpleObject
 
     public void HandleMovement(VehicleMovedPacket packet)
     {
-        if (Ghost == null)
-            return;
-
         if (packet.ObjectId != ObjectId)
             throw new Exception("WTF? Someone else moves me?");
 
-        // Update position
+        // Update position (even if ghost is not ready — exploration must still track travel).
         Position = packet.Location;
         Rotation = packet.Rotation;
         Velocity = packet.Velocity;
@@ -363,6 +360,10 @@ public class Vehicle : SimpleObject
         VehicleFlags = packet.VehicleFlags;
         Firing = packet.Firing;
 
+        ExplorationManager.Instance.OnVehicleMoved(this);
+
+        if (Ghost == null)
+            return;
 
         Ghost.SetMaskBits(GhostObject.PositionMask);
 

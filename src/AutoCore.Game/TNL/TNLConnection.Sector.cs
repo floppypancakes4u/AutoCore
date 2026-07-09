@@ -151,6 +151,10 @@ public partial class TNLConnection
 
         SendGamePacket(vehiclePacket);
         SendGamePacket(charPacket);
+
+        // CreateCharacterExtended hash-inserts continents without per-bit UI notify.
+        // UnlockRegion (sent twice) forces client apply + map fog refresh.
+        ExplorationManager.Instance.SyncExplorationAfterLogin(character);
     }
 
     private void HandleCreatureMovedPacket(BinaryReader reader)

@@ -157,6 +157,8 @@ public partial class Character : Creature
         Faction = CloneBaseObject.SimpleObjectSpecific.Faction;
         TeamFaction = CloneBaseObject.SimpleObjectSpecific.Faction;
 
+        LoadExplorations(context);
+
         // TODO: set up stuff, fields, baseclasses, etc
 
         return true;
@@ -226,6 +228,7 @@ public partial class Character : Creature
             extendedCharPacket.NumSkills = 0;
 
             WriteFirstTimeFlags(extendedCharPacket);
+            WriteExploration(extendedCharPacket);
 
             AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Debug, $"Character.WriteToPacket: Sending {CurrentQuests.Count} current quests");
         }
