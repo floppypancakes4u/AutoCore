@@ -1,6 +1,8 @@
 using AutoCore.Game.Constants;
+using AutoCore.Game.Entities;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.Tests.Inventory.Fakes;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace AutoCore.Game.Tests.Inventory;
@@ -27,6 +29,7 @@ public class InventoryManagerTossTests
     public void TossToWorld_NoVehicle_ReturnsFailureResponse()
     {
         var harness = new InventoryTestHarness();
+        InventoryTestMapHelper.AttachMap(harness.Character);
         harness.Character.AttachCurrentVehicleForTests(null);
         var packet = CreatePacket(itemCoid: 100, sourceObjectId: 0);
 
@@ -35,6 +38,49 @@ public class InventoryManagerTossTests
         Assert.AreEqual(1, result.Packets.Count);
         var response = (ItemDropResponsePacket)result.Packets[0];
         Assert.IsFalse(response.WasSuccessful);
+    }
+
+    [TestMethod]
+    public void TossToWorld_PendingEquippedAfterGrab_DeletesWithoutCargoSendAll()
+    {
+        var harness = new InventoryTestHarness();
+        InventoryTestMapHelper.AttachMap(harness.Character);
+        harness.RegisterWeapon(cbid: 8096, flags: VehicleEquipmentSlotResolver.WeaponFlagTurret);
+        harness.EquipWeapon(VehicleEquipmentSlot.WeaponTurret, cbid: 8096, coid: 205);
+
+        harness.Inventory.Grab(
+            InventoryTestHarness.CreateGrabPacket(205, inventoryType: 2, equipmentCbid: 8096),
+            harness.Character);
+
+        var result = harness.Inventory.TossToWorld(
+            CreatePacket(itemCoid: 205, sourceObjectId: 18477756),
+            harness.Character);
+
+        Assert.AreEqual(1, result.Packets.Count);
+        var response = (ItemDropResponsePacket)result.Packets[0];
+        Assert.IsTrue(response.WasSuccessful);
+        Assert.AreEqual(205, response.ItemCoid);
+        Assert.IsNull(harness.Inventory.FindByCoid(205));
+        Assert.IsNull(harness.Vehicle.GetEquippedItem(VehicleEquipmentSlot.WeaponTurret));
+    }
+
+    [TestMethod]
+    public void TossToWorld_PendingEquippedWrongVehicle_Fails()
+    {
+        var harness = new InventoryTestHarness();
+        InventoryTestMapHelper.AttachMap(harness.Character);
+        harness.RegisterWeapon(8096, VehicleEquipmentSlotResolver.WeaponFlagTurret);
+        harness.EquipWeapon(VehicleEquipmentSlot.WeaponTurret, 8096, coid: 205);
+        harness.Inventory.Grab(
+            InventoryTestHarness.CreateGrabPacket(205, inventoryType: 2, equipmentCbid: 8096),
+            harness.Character);
+
+        var otherVehicle = new Vehicle();
+        otherVehicle.SetCoid(9999, true);
+        harness.Character.AttachCurrentVehicleForTests(otherVehicle);
+
+        var result = harness.Inventory.TossToWorld(CreatePacket(205), harness.Character);
+        Assert.IsFalse(((ItemDropResponsePacket)result.Packets[0]).WasSuccessful);
     }
 
     private static ItemDropPacket CreatePacket(long itemCoid, int sourceObjectId = 1)

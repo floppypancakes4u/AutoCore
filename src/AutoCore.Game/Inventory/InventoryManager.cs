@@ -804,6 +804,9 @@ public sealed class InventoryManager
         var cargoItem = FindByCoid(packet.ItemCoid);
         if (cargoItem == null)
         {
+            if (_pendingEquippedItemDrags.TryGetValue(packet.ItemCoid, out var pendingEquipped))
+                return TossPendingEquippedItem(packet, character, pendingEquipped);
+
             return InventoryOperationResult.SinglePacket(
                 CreateItemDropFailure(packet),
                 $"HandleItemDropPacket: Cargo item {packet.ItemCoid} not found");
@@ -837,6 +840,62 @@ public sealed class InventoryManager
         return new InventoryOperationResult(
             packets,
             $"HandleItemDropPacket: Player {character.Name} tossed {cargoItem.DisplayName} (CBID {cargoItem.Cbid}, cargo coid={cargoItem.Coid}) — removed from cargo (no world spawn)");
+    }
+
+    private InventoryOperationResult TossPendingEquippedItem(
+        ItemDropPacket packet,
+        Character character,
+        PendingEquippedItemDrag pendingEquipped)
+    {
+        if (pendingEquipped.Vehicle != character.CurrentVehicle)
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateItemDropFailure(packet),
+                $"HandleItemDropPacket: Pending equipped item {packet.ItemCoid} belongs to another vehicle");
+        }
+
+        if (!pendingEquipped.AlreadyUnequipped)
+        {
+            if (!pendingEquipped.Vehicle.TryUnequipItem(packet.ItemCoid, out _, out _))
+            {
+                return InventoryOperationResult.SinglePacket(
+                    CreateItemDropFailure(packet),
+                    $"HandleItemDropPacket: Equipped item {packet.ItemCoid} not found on vehicle during toss");
+            }
+
+            PersistUnequip(pendingEquipped.Vehicle);
+        }
+
+        _pendingEquippedItemDrags.Remove(packet.ItemCoid);
+
+        // #region agent log
+        TossDebugLogger.Log(
+            "H7",
+            "InventoryManager.TossPendingEquippedItem",
+            "equipped module toss deleted pending drag",
+            new
+            {
+                itemCoid = packet.ItemCoid,
+                cbid = pendingEquipped.Cbid,
+                slot = pendingEquipped.Slot.ToString(),
+                sourceObjectId = packet.SourceObjectId
+            },
+            "post-fix");
+        // #endregion
+
+        return new InventoryOperationResult(
+            new List<BasePacket>
+            {
+                new ItemDropResponsePacket
+                {
+                    SourceObjectId = packet.SourceObjectId,
+                    ItemCoid = packet.ItemCoid,
+                    DropPosition = packet.DropPosition,
+                    TailValue = packet.TailValue,
+                    WasSuccessful = true
+                }
+            },
+            $"HandleItemDropPacket: Player {character.Name} tossed equipped {pendingEquipped.DisplayName} (CBID {pendingEquipped.Cbid}, coid={packet.ItemCoid}, slot={pendingEquipped.Slot}) — deleted (no world spawn)");
     }
 
     public static ItemDropResponsePacket CreateItemDropFailure(ItemDropPacket packet)

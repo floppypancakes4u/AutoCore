@@ -123,7 +123,7 @@ On success the sector server sends, in order:
 1. `ItemDropResponse` (`0x2058`) — echoes the **cargo item COID** from the request at offset `+0x8` (the client resolves this and destroys the dragged inventory object)
 2. `InventoryCargoSendAll` — refreshes cargo after the drop
 
-World toss currently **does not spawn a ground object**; the item is removed from server cargo only. This avoids client crashes from world pickup/spawn state until full ground-loot flow is implemented.
+World toss currently **does not spawn a ground object**; the item is removed from server state only. This works for **cargo** items and for **equipped vehicle modules** after an `InventoryGrab` with `inventoryType=2` (the server tracks these as pending equipped drags between grab and drop/toss).
 
 ## Next Steps
 
