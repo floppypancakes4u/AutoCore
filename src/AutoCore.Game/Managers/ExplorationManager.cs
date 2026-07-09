@@ -1,6 +1,7 @@
 namespace AutoCore.Game.Managers;
 
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.Entities;
@@ -18,6 +19,32 @@ public class ExplorationManager : Singleton<ExplorationManager>
 {
     private readonly ConcurrentDictionary<int, ContinentAreaMask> _masks = new();
     private readonly ConcurrentDictionary<int, byte> _missingMaskLogged = new();
+    private readonly ExplorationPersistenceQueue _persistQueue = new();
+    private int _backgroundFlushScheduled;
+
+    /// <summary>
+    /// When true (default), enqueue schedules a ThreadPool flush so production persists
+    /// without blocking the vehicle-move / tick path (SS-05).
+    /// </summary>
+    internal bool AutoFlushOnEnqueue { get; set; } = true;
+
+    /// <summary>
+    /// Persist one (coid, continent, bits) row. Defaults to EF <see cref="CharContext"/> write.
+    /// Replace in tests (pattern: FirstTimeFlagsAccountSync saveChanges DI).
+    /// </summary>
+    internal Action<long, int, uint> PersistRow { get; set; }
+
+    /// <summary>
+    /// Optional mask resolver for unit tests (skips GLM/TGA I/O).
+    /// </summary>
+    internal Func<SectorMap, ContinentAreaMask> ResolveMaskForTests { get; set; }
+
+    internal int PendingPersistCount => _persistQueue.PendingCount;
+
+    public ExplorationManager()
+    {
+        PersistRow = PersistRowToDatabase;
+    }
 
     /// <summary>
     /// Called from vehicle movement. No-ops when map/TGA/character data is unavailable.
@@ -63,6 +90,7 @@ public class ExplorationManager : Singleton<ExplorationManager>
 
     /// <summary>
     /// Test hook: attempt reveal without TGA/position (direct area id).
+    /// Uses the same enqueue persist path as production discovery (SS-05).
     /// </summary>
     internal bool TryRevealForTests(Character character, int continentId, byte areaId, out uint newBits)
     {
@@ -73,8 +101,37 @@ public class ExplorationManager : Singleton<ExplorationManager>
         if (!character.TryRevealArea(continentId, areaId, out newBits))
             return false;
 
+        EnqueuePersist(character, continentId, newBits);
         SendUnlockRegion(character, continentId, newBits);
         return true;
+    }
+
+    /// <summary>
+    /// Drain pending exploration writes (background path / tests). Ordered by drain snapshot;
+    /// latest-wins already applied at enqueue time per (coid, continentId).
+    /// </summary>
+    public int FlushPendingExplorations()
+    {
+        var persist = PersistRow ?? PersistRowToDatabase;
+        return _persistQueue.Flush(persist);
+    }
+
+    /// <summary>Reset queue and test hooks (unit tests).</summary>
+    internal void ResetPersistenceForTests()
+    {
+        AutoFlushOnEnqueue = false;
+        PersistRow = PersistRowToDatabase;
+        ResolveMaskForTests = null;
+        _persistQueue.Clear();
+        Interlocked.Exchange(ref _backgroundFlushScheduled, 0);
+        ClearMaskCache();
+    }
+
+    /// <summary>Install a continent mask in the cache (unit tests / discover path).</summary>
+    internal void SetMaskForTests(ContinentAreaMask mask)
+    {
+        ArgumentNullException.ThrowIfNull(mask);
+        _masks[mask.ContinentId] = mask;
     }
 
     private void TryDiscoverAt(Character character, SectorMap map, float x, float z, bool forceSample)
@@ -98,16 +155,60 @@ public class ExplorationManager : Singleton<ExplorationManager>
         if (!character.TryRevealArea(continentId, areaId, out var newBits))
             return;
 
-        PersistExploration(character, continentId, newBits);
+        EnqueuePersist(character, continentId, newBits);
         SendUnlockRegion(character, continentId, newBits);
+    }
+
+    private void EnqueuePersist(Character character, int continentId, uint exploredBits)
+    {
+        _persistQueue.Enqueue(character.ObjectId.Coid, continentId, exploredBits);
+
+        if (AutoFlushOnEnqueue)
+            ScheduleBackgroundFlush();
+    }
+
+    private void ScheduleBackgroundFlush()
+    {
+        if (Interlocked.CompareExchange(ref _backgroundFlushScheduled, 1, 0) != 0)
+            return;
+
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                FlushPendingExplorations();
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _backgroundFlushScheduled, 0);
+
+                // Race: items enqueued after drain but before flag clear.
+                if (_persistQueue.PendingCount > 0)
+                    ScheduleBackgroundFlush();
+            }
+        });
     }
 
     private ContinentAreaMask GetOrLoadMask(SectorMap map)
     {
+        if (ResolveMaskForTests != null)
+            return ResolveMaskForTests(map);
+
         var continentId = map.ContinentId;
         if (_masks.TryGetValue(continentId, out var cached))
             return cached;
 
+        return LoadMaskFromAssets(map, continentId);
+    }
+
+    /// <summary>
+    /// GLM/TGA I/O path. Separated so unit tests can cover discovery without assets while
+    /// production still loads masks from GLMs. Failures are logged once per continent.
+    /// Covered by integration / asset load; unit tests inject masks via ResolveMaskForTests.
+    /// </summary>
+    [ExcludeFromCodeCoverage(Justification = "GLM/TGA asset I/O; unit tests inject masks.")]
+    private ContinentAreaMask LoadMaskFromAssets(SectorMap map, int continentId)
+    {
         var mapData = map.MapData;
         var mapFileName = mapData.ContinentObject?.MapFileName;
         if (string.IsNullOrEmpty(mapFileName) || mapData.GridSize <= 0f)
@@ -157,12 +258,16 @@ public class ExplorationManager : Singleton<ExplorationManager>
         Logger.WriteLog(LogType.Error, "Exploration: no area mask for continent {0}: {1}", continentId, reason);
     }
 
-    private static void PersistExploration(Character character, int continentId, uint exploredBits)
+    /// <summary>
+    /// EF write used by background flush. Must never be invoked on the vehicle-move hot path.
+    /// Unit tests inject <see cref="PersistRow"/>; live DB path needs CharContext connection string.
+    /// </summary>
+    [ExcludeFromCodeCoverage(Justification = "EF CharContext I/O; unit tests inject PersistRow.")]
+    private static void PersistRowToDatabase(long coid, int continentId, uint exploredBits)
     {
         try
         {
             using var context = new CharContext();
-            var coid = character.ObjectId.Coid;
             var row = context.CharacterExplorations
                 .FirstOrDefault(e => e.CharacterCoid == coid && e.ContinentId == continentId);
 
@@ -186,7 +291,7 @@ public class ExplorationManager : Singleton<ExplorationManager>
         {
             Logger.WriteLog(LogType.Error,
                 "Exploration: failed to persist coid={0} continent={1}: {2}",
-                character.ObjectId.Coid, continentId, ex.Message);
+                coid, continentId, ex.Message);
         }
     }
 
