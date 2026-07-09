@@ -301,6 +301,10 @@ public partial class TNLConnection : GhostConnection
                     RespawnManager.Instance.HandleRespawnInSectorPacket(CurrentCharacter, reader);
                     break;
                 
+                case GameOpcode.UseObject:
+                    HandleUseObjectPacket(reader);
+                    break;
+
                 case GameOpcode.MissionDialogResponse:
                     HandleMissionDialogResponse(reader);
                     break;

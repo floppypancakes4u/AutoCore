@@ -172,15 +172,27 @@ public class Reaction : ClonedObjectBase
         switch (Template.ReactionType)
         {
             case ReactionType.Activate:
+                HandleActivateCascade(activator);
+                return true;
+
             case ReactionType.Deactivate:
             case ReactionType.Enable:
             case ReactionType.Disable:
-                // These are primarily handled client-side
-                // The LogicStateChangePacket tells the client to activate/deactivate objects
+                // Primarily client-side via 0x206C reaction COID lookup.
                 return true;
 
             case ReactionType.Delete:
                 return HandleDelete(activator);
+
+            case ReactionType.VariableSet:
+            case ReactionType.VariableSetRandom:
+                return HandleVariableSet(activator);
+
+            case ReactionType.VariableAdd:
+            case ReactionType.VariableSub:
+            case ReactionType.VariableMul:
+            case ReactionType.VariableDiv:
+                return HandleVariableArithmetic(activator);
 
             case ReactionType.UnlockContObj:
                 return HandleUnlockContObj(activator);
@@ -290,6 +302,77 @@ public class Reaction : ClonedObjectBase
 
         // Return true to indicate the reaction triggered successfully.
         // The GroupReactionCallPacket with this reaction's coid will be sent by TriggerReactionsInternal.
+        return true;
+    }
+
+    /// <summary>
+    /// Activate targeting a Trigger COID fires that trigger's reactions server-side
+    /// (client 0x206C alone does not run nested map trigger graphs).
+    /// </summary>
+    private void HandleActivateCascade(ClonedObjectBase activator)
+    {
+        var map = activator?.Map;
+        if (map == null)
+            return;
+
+        foreach (var objectCoid in Template.Objects)
+        {
+            if (!map.Triggers.TryGetValue(new TFID(objectCoid, false), out var trigger))
+                continue;
+
+            if (trigger.Template.Reactions.Count == 0)
+                continue;
+
+            Logger.WriteLog(LogType.Debug,
+                "Activate reaction {0}: cascade trigger {1} reactions=[{2}]",
+                Template.COID,
+                objectCoid,
+                string.Join(',', trigger.Template.Reactions));
+            TriggerManager.Instance.FireTriggerReactions(activator, trigger);
+        }
+    }
+
+    private bool HandleVariableSet(ClonedObjectBase activator)
+    {
+        var character = GetCharacterFromActivator(activator);
+        var store = character?.EnsureLogicVariables();
+        if (store == null)
+            return true;
+
+        // VariableSet: var[GenericVar1] = var[GenericVar3] (GhidraMCP-verified).
+        var value = store.Get(Template.GenericVar3);
+        store.Set(Template.GenericVar1, value);
+        Logger.WriteLog(LogType.Debug,
+            "VariableSet reaction {0}: var[{1}] = var[{2}] = {3}",
+            Template.COID,
+            Template.GenericVar1,
+            Template.GenericVar3,
+            value);
+
+        TriggerManager.Instance.OnVariableChanged(activator, Template.GenericVar1);
+        return true;
+    }
+
+    private bool HandleVariableArithmetic(ClonedObjectBase activator)
+    {
+        var character = GetCharacterFromActivator(activator);
+        var store = character?.EnsureLogicVariables();
+        if (store == null)
+            return true;
+
+        var left = store.Get(Template.GenericVar1);
+        var right = store.Get(Template.GenericVar3);
+        var result = Template.ReactionType switch
+        {
+            ReactionType.VariableAdd => left + right,
+            ReactionType.VariableSub => left - right,
+            ReactionType.VariableMul => left * right,
+            ReactionType.VariableDiv => Math.Abs(right) < 1e-6f ? left : left / right,
+            _ => left,
+        };
+
+        store.Set(Template.GenericVar1, result);
+        TriggerManager.Instance.OnVariableChanged(activator, Template.GenericVar1);
         return true;
     }
 
@@ -435,6 +518,7 @@ public class Reaction : ClonedObjectBase
             missionId,
             character.ObjectId.Coid);
 
+        TriggerManager.Instance.OnMissionStateChanged(character.CurrentVehicle ?? (ClonedObjectBase)character);
         return true;
     }
 
@@ -466,7 +550,10 @@ public class Reaction : ClonedObjectBase
             {
                 var quest = character.CurrentQuests.FirstOrDefault(q => q.MissionId == mission.Id);
                 if (quest != null)
+                {
                     quest.ActiveObjectiveSequence = objective.Sequence;
+                    TriggerManager.Instance.OnMissionStateChanged(character.CurrentVehicle ?? (ClonedObjectBase)character);
+                }
                 else
                 {
                     Logger.WriteLog(LogType.Debug,

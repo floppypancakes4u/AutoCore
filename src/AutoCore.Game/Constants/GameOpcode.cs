@@ -130,33 +130,25 @@ public enum GameOpcode : uint
     LogicStateChange = 0x206B,
     
     /// <summary>
-    /// GroupReactionCall / MissionDialog (server→client).
-    /// Client EMSG name: EMSG_Sector_MissionDialog (index 0x6C = opcode 0x206C).
-    /// This is the packet used to trigger reactions and mission dialogs on the client.
-    /// The client looks up the reaction coid in clonebase to determine the action.
-    /// Wire format: count(8 bits) + entries[] where each entry has type(8 bits) + type-specific data.
+    /// GroupReactionCall (server→client). Client EMSG index 0x6C = opcode 0x206C.
+    /// Bit-packed reaction batch; client looks up reaction coid in clonebase.
+    /// Note: client EMSG string table also labels 0x206C as MissionDialog for the reaction path.
     /// </summary>
     GroupReactionCall = 0x206C,
-    
+
     /// <summary>
-    /// MissionDialog (server→client) is opcode 0x206C and is handled via GroupReactionCall.
-    /// Kept as an alias for readability, but should not be used directly.
+    /// NPC mission dialog opener (server→client, opcode 0x206D).
+    /// Ghidra Client_RecvNpcMissionDialog @ 0x00815070. Flat NpcMissionDialogPacket.
+    /// Distinct from 0x206C GroupReactionCall (GiveMission / reaction path).
     /// </summary>
-    [Obsolete("Use GroupReactionCall (0x206C). MissionDialog is an alias of the same opcode.", true)]
-    MissionDialog = 0x206C,
-    
+    MissionDialog = 0x206D,
+
     /// <summary>
-    /// MissionDialog_Response (client→server).
-    /// Client EMSG name: EMSG_Sector_MissionDialog_Response (index 0x6D = opcode 0x206D).
+    /// Mission dialog OK/accept (client→server, opcode 0x206E).
+    /// Ghidra Client_NpcDialog_PrepareResponseOpcode @ 0x008abd70 sets dialog+0x650 = 0x206E.
+    /// Layout: missionId i32 + accepted bool + pad3 + pad4 + npc TFID16.
     /// </summary>
-    MissionDialogResponse = 0x206D,
-    
-    /// <summary>
-    /// Unknown / reserved in this emulator currently.
-    /// Previously (incorrectly) labeled as MissionDialogResponse.
-    /// </summary>
-    [Obsolete("Opcode 0x206E is not yet identified. Do not use.", true)]
-    Unknown206E = 0x206E,
+    MissionDialogResponse = 0x206E,
     
     ChoiceDialogResponse = 0x206F,
     CompleteDynamicObjective = 0x2070,

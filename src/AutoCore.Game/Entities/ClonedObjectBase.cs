@@ -13,7 +13,11 @@ public abstract class ClonedObjectBase
 {
     public CloneBaseObject CloneBaseObject { get; private set; }
     public CloneBaseObjectType Type => CloneBaseObject?.Type ?? CloneBaseObjectType.Base;
-    public int CBID => CloneBaseObject?.CloneBaseSpecific.CloneBaseId ?? -1;
+    private int? _cbidOverride;
+    public int CBID => _cbidOverride ?? CloneBaseObject?.CloneBaseSpecific.CloneBaseId ?? -1;
+
+    /// <summary>Unit-test helper when clonebase assets are not loaded.</summary>
+    internal void SetCbidForTests(int cbid) => _cbidOverride = cbid;
     
     public int Faction { get; set; }
     public GhostObject Ghost { get; protected set; }

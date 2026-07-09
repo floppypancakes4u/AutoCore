@@ -253,9 +253,39 @@ public class AssetManager : Singleton<AssetManager>
             return;
         _testMissions ??= new Dictionary<int, Mission.Mission>();
         _testMissions[mission.Id] = mission;
+        NpcInteractHandler.InvalidateMissionIndex();
     }
 
-    internal void ClearTestMissions() => _testMissions = null;
+    internal void ClearTestMissions()
+    {
+        _testMissions = null;
+        NpcInteractHandler.InvalidateMissionIndex();
+    }
+
+    /// <summary>All loaded missions (test overrides take precedence over WAD).</summary>
+    public IEnumerable<Mission.Mission> GetAllMissions()
+    {
+        if (_testMissions != null)
+        {
+            var seen = new HashSet<int>();
+            foreach (var mission in _testMissions.Values)
+            {
+                seen.Add(mission.Id);
+                yield return mission;
+            }
+
+            foreach (var mission in WADLoader.Missions.Values)
+            {
+                if (seen.Add(mission.Id))
+                    yield return mission;
+            }
+
+            yield break;
+        }
+
+        foreach (var mission in WADLoader.Missions.Values)
+            yield return mission;
+    }
 
     public IEnumerable<Mission.Mission> GetMissionsForContinent(int continentId)
     {

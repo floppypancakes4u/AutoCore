@@ -103,7 +103,7 @@ public class FirstTimeFlagsPacketTests
         packet.NumAchievements = 1;
         packet.NumDisciplines = 2;
         packet.NumCurrentQuests = 1;
-        packet.CurrentQuests = new List<CharacterQuest> { new(554, 0) };
+        packet.CurrentQuests = new List<CharacterQuest> { new(91001, 0) };
 
         var bytes = WritePacketWithOpcode(packet);
         var expectedExtra = 8 * 2 + 4 * 3 + 4 * 1 + 12 * 2 + 72; // skills + quests + ach + disc + current quest

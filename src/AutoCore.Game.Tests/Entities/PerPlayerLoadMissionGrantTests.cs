@@ -15,10 +15,18 @@ using AutoCore.Game.TNL;
 
 /// <summary>
 /// Tests for map PerPlayerLoad on-load mission grant (FireOnLoadPlayerMissions + GiveMission + 0x206C).
+/// Uses synthetic mission/trigger/reaction ids only.
 /// </summary>
 [TestClass]
 public class PerPlayerLoadMissionGrantTests
 {
+    private const int MissionId = 91001;
+    private const int ObjectiveId = 92001;
+    private const int TriggerCoid = 95001;
+    private const int GiveMissionReactionCoid = 95002;
+    private const int SetActiveReactionCoid = 95003;
+    private const int ContinentId = 707;
+
     private readonly List<BasePacket> _sent = new();
 
     [TestInitialize]
@@ -38,7 +46,7 @@ public class PerPlayerLoadMissionGrantTests
     }
 
     [TestMethod]
-    public void Character_DoesNotPreSeedMission554()
+    public void Character_DoesNotPreSeedAnyMission()
     {
         Assert.AreEqual(0, new Character().CurrentQuests.Count);
     }
@@ -46,34 +54,34 @@ public class PerPlayerLoadMissionGrantTests
     [TestMethod]
     public void GiveMission_TracksQuestOnServer()
     {
-        SeedMission(554, (714, 0, 1));
+        SeedMission(MissionId, (ObjectiveId, 0, 1));
         var (character, vehicle, map) = CreatePlayer();
-        PlaceReaction(map, 14137, ReactionType.GiveMission, genericVar1: 554);
+        PlaceReaction(map, GiveMissionReactionCoid, ReactionType.GiveMission, genericVar1: MissionId);
 
-        Assert.IsTrue((map.GetObjectByCoid(14137) as Reaction).TriggerIfPossible(character));
+        Assert.IsTrue((map.GetObjectByCoid(GiveMissionReactionCoid) as Reaction).TriggerIfPossible(character));
         Assert.AreEqual(1, character.CurrentQuests.Count);
-        Assert.AreEqual(554, character.CurrentQuests[0].MissionId);
+        Assert.AreEqual(MissionId, character.CurrentQuests[0].MissionId);
     }
 
     [TestMethod]
     public void TryGetPerPlayerLoadTrigger_WhenFindable_ReturnsTriggerWithReactions()
     {
         var (character, vehicle, map) = CreatePlayer();
-        map.MapData.SetEventTriggerCoidsForTests(perPlayerLoad: 16217);
-        PlaceEventTrigger(map, triggerCoid: 16217, reactionCoid: 14137, ReactionType.GiveMission, genericVar1: 554);
+        map.MapData.SetEventTriggerCoidsForTests(perPlayerLoad: TriggerCoid);
+        PlaceEventTrigger(map, triggerCoid: TriggerCoid, reactionCoid: GiveMissionReactionCoid, ReactionType.GiveMission, genericVar1: MissionId);
 
         Assert.IsTrue(map.TryGetPerPlayerLoadTrigger(out var trigger));
         Assert.IsNotNull(trigger);
-        Assert.AreEqual(16217, trigger.ObjectId.Coid);
+        Assert.AreEqual(TriggerCoid, trigger.ObjectId.Coid);
         Assert.AreEqual(1, trigger.Template.Reactions.Count);
-        Assert.AreEqual(14137, trigger.Template.Reactions[0]);
+        Assert.AreEqual(GiveMissionReactionCoid, trigger.Template.Reactions[0]);
     }
 
     [TestMethod]
     public void TryGetPerPlayerLoadTrigger_WhenMissing_ReturnsFalse()
     {
         var (character, vehicle, map) = CreatePlayer();
-        map.MapData.SetEventTriggerCoidsForTests(perPlayerLoad: 16217);
+        map.MapData.SetEventTriggerCoidsForTests(perPlayerLoad: TriggerCoid);
         // Trigger COID set in header but not placed on map / templates.
 
         Assert.IsFalse(map.TryGetPerPlayerLoadTrigger(out var trigger));
@@ -93,18 +101,18 @@ public class PerPlayerLoadMissionGrantTests
     public void FireOnLoadPlayerMissions_WhenTriggerFindable_GrantsMissionViaGiveMissionReaction()
     {
         // Retail design: client DoPlayerOnLoad looks up m_coidPerPlayerLoadTrigger and fires it.
-        // Server mirrors: only if findable, run that trigger's reaction list (GiveMission 554 on 707).
-        SeedMission(554, (714, 0, 1));
+        // Server mirrors: only if findable, run that trigger's reaction list.
+        SeedMission(MissionId, (ObjectiveId, 0, 1));
         var (character, vehicle, map) = CreatePlayer();
 
-        map.MapData.SetEventTriggerCoidsForTests(perPlayerLoad: 16217);
-        PlaceEventTrigger(map, triggerCoid: 16217, reactionCoid: 14137, ReactionType.GiveMission, genericVar1: 554);
+        map.MapData.SetEventTriggerCoidsForTests(perPlayerLoad: TriggerCoid);
+        PlaceEventTrigger(map, triggerCoid: TriggerCoid, reactionCoid: GiveMissionReactionCoid, ReactionType.GiveMission, genericVar1: MissionId);
 
         var fired = map.FireOnLoadPlayerMissions(character);
 
         Assert.IsTrue(fired);
         Assert.AreEqual(1, character.CurrentQuests.Count);
-        Assert.AreEqual(554, character.CurrentQuests[0].MissionId);
+        Assert.AreEqual(MissionId, character.CurrentQuests[0].MissionId);
         Assert.IsTrue(_sent.OfType<GroupReactionCallPacket>().Any());
         Assert.AreEqual(1, _sent.OfType<GroupReactionCallPacket>().First().Count);
     }
@@ -112,10 +120,10 @@ public class PerPlayerLoadMissionGrantTests
     [TestMethod]
     public void FireOnLoadPlayerMissions_WhenTriggerNotFindable_DoesNotGrantOrSend()
     {
-        SeedMission(554, (714, 0, 1));
+        SeedMission(MissionId, (ObjectiveId, 0, 1));
         var (character, vehicle, map) = CreatePlayer();
-        map.MapData.SetEventTriggerCoidsForTests(perPlayerLoad: 16217);
-        // Header names 16217 but trigger is not on the map → not findable.
+        map.MapData.SetEventTriggerCoidsForTests(perPlayerLoad: TriggerCoid);
+        // Header names TriggerCoid but trigger is not on the map → not findable.
 
         var fired = map.FireOnLoadPlayerMissions(character);
 
@@ -127,10 +135,10 @@ public class PerPlayerLoadMissionGrantTests
     [TestMethod]
     public void FireOnLoadPlayerMissions_WhenNoPerPlayerLoad_DoesNotGrant()
     {
-        SeedMission(554, (714, 0, 1));
+        SeedMission(MissionId, (ObjectiveId, 0, 1));
         var (character, vehicle, map) = CreatePlayer();
         map.MapData.SetEventTriggerCoidsForTests(perPlayerLoad: -1);
-        PlaceEventTrigger(map, triggerCoid: 16217, reactionCoid: 14137, ReactionType.GiveMission, genericVar1: 554);
+        PlaceEventTrigger(map, triggerCoid: TriggerCoid, reactionCoid: GiveMissionReactionCoid, ReactionType.GiveMission, genericVar1: MissionId);
 
         Assert.IsFalse(map.FireOnLoadPlayerMissions(character));
         Assert.AreEqual(0, character.CurrentQuests.Count);
@@ -150,14 +158,14 @@ public class PerPlayerLoadMissionGrantTests
     [TestMethod]
     public void SetActiveObjective_UpdatesSequenceWhenQuestPresent()
     {
-        SeedMission(554, (714, 0, 1));
+        SeedMission(MissionId, (ObjectiveId, 0, 1));
         var (character, vehicle, map) = CreatePlayer();
-        var quest = new CharacterQuest(554, 0);
+        var quest = new CharacterQuest(MissionId, 0);
         quest.PopulateFromAssets();
         character.CurrentQuests.Add(quest);
 
-        PlaceReaction(map, 17935, ReactionType.SetActiveObjective, genericVar1: 714);
-        Assert.IsTrue((map.GetObjectByCoid(17935) as Reaction).TriggerIfPossible(character));
+        PlaceReaction(map, SetActiveReactionCoid, ReactionType.SetActiveObjective, genericVar1: ObjectiveId);
+        Assert.IsTrue((map.GetObjectByCoid(SetActiveReactionCoid) as Reaction).TriggerIfPossible(character));
         Assert.AreEqual(0, character.CurrentQuests[0].ActiveObjectiveSequence);
     }
 
@@ -169,7 +177,7 @@ public class PerPlayerLoadMissionGrantTests
         AssetManager.Instance.SetTestMission(Mission.CreateForTests(missionId, objs));
     }
 
-    private static SectorMap CreateMap(int continentId = 707)
+    private static SectorMap CreateMap(int continentId = ContinentId)
     {
         var continent = new ContinentObject
         {

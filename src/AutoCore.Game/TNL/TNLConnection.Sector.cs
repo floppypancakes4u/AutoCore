@@ -177,15 +177,26 @@ public partial class TNLConnection
         CurrentCharacter.CurrentVehicle.HandleMovement(packet);
     }
 
+    private void HandleUseObjectPacket(BinaryReader reader)
+    {
+        var packet = new UseObjectPacket();
+        try
+        {
+            packet.Read(reader);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error, "HandleUseObjectPacket: parse failed: {0}", ex.Message);
+            return;
+        }
+
+        NpcInteractHandler.HandleUseObject(this, packet);
+    }
+
     private void HandleMissionDialogResponse(BinaryReader reader)
     {
-        // Source of truth: src/MISSION_DIALOG_CLIENT_ANALYSIS.md
-        // - MissionDialog (server→client): 0x206C (handled via GroupReactionCallPacket)
-        // - MissionDialog_Response (client→server): 0x206D
-        //
-        // NOTE: The exact 0x206D payload format is not yet fully reverse engineered.
-        // This handler uses our current best-effort parser and logs values for iterative refinement.
-
+        // Ghidra: S2C dialog open is 0x206D (NpcMissionDialogPacket);
+        // C2S OK/Accept is 0x206E (MissionDialogResponsePacket) via dialog+0x650.
         var packet = new MissionDialogResponsePacket();
 
         try
@@ -194,26 +205,11 @@ public partial class TNLConnection
         }
         catch (Exception ex)
         {
-            Logger.WriteLog(LogType.Error, $"HandleMissionDialogResponse: Failed to parse packet: {ex}");
+            Logger.WriteLog(LogType.Error, "HandleMissionDialogResponse: Failed to parse packet: {0}", ex.Message);
             return;
         }
 
-        Logger.WriteLog(LogType.Debug, $"HandleMissionDialogResponse: MissionId={packet.MissionId}, MixedVar={packet.MixedVar}, MissionGiver={packet.MissionGiver}");
-
-        if (CurrentCharacter == null)
-            return;
-
-        // Best-effort: treat this as a mission accept/selection and ensure the mission exists in CurrentQuests.
-        if (packet.MissionId > 0 && !CurrentCharacter.CurrentQuests.Any(q => q.MissionId == packet.MissionId))
-        {
-            CurrentCharacter.CurrentQuests.Add(new CharacterQuest(packet.MissionId, 0));
-        }
-
-        // Refresh mission list UI (client is observed to request via ConvoyMissionsRequest).
-        SendGamePacket(new ConvoyMissionsResponsePacket
-        {
-            CurrentQuests = CurrentCharacter.CurrentQuests.ToList()
-        });
+        NpcInteractHandler.HandleMissionDialogResponse(this, packet);
     }
 
     private void HandleItemPickupPacket(BinaryReader reader)

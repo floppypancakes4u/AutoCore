@@ -110,6 +110,25 @@ public partial class Character : Creature
 
     // Mission tracking
     public List<CharacterQuest> CurrentQuests { get; } = new();
+    /// <summary>Finished mission ids (prereq checks for NPC offers).</summary>
+    public HashSet<int> CompletedMissionIds { get; } = new();
+
+    /// <summary>Per-map logic variables used by trigger/reaction conditions.</summary>
+    public LogicVariableStore LogicVariables { get; private set; }
+
+    /// <summary>
+    /// Returns the logic-variable store for the character's current map, creating it if needed.
+    /// </summary>
+    public LogicVariableStore EnsureLogicVariables()
+    {
+        if (Map == null)
+            return null;
+
+        if (LogicVariables == null || LogicVariables.Map != Map)
+            LogicVariables = new LogicVariableStore(Map, this);
+
+        return LogicVariables;
+    }
     #endregion
 
     public Character()

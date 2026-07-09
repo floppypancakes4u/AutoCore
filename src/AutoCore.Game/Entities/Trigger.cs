@@ -2,7 +2,6 @@
 
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Structures;
-using System.Diagnostics;
 
 public enum TriggerTargetType
 {
@@ -21,6 +20,9 @@ public class Trigger : GraphicsObject
     public long LeftObject { get; set; }
     public long RightObject { get; set; }
 
+    /// <summary>Times this instance has fired; compared to ActivationCount (-1 unlimited).</summary>
+    public int FireCount { get; set; }
+
     public Trigger(TriggerTemplate template)
         : base(GraphicsObjectType.GraphicsPhysics)
     {
@@ -32,32 +34,59 @@ public class Trigger : GraphicsObject
         if (activator is null || activator.Map is null)
             return false;
 
-        if ((activator is Character || (activator is Vehicle playerVehicle && playerVehicle.GetSuperCharacter(false) != null)) && Template.TargetType != TriggerTargetType.Players)
+        if (activator is Character && Template.TargetType != TriggerTargetType.Players)
             return false;
 
-        if (activator is Vehicle && activator.GetSuperCharacter(false) == null && Template.TargetType != TriggerTargetType.Vehicles)
-            return false;
+        if (activator is Vehicle vehicle)
+        {
+            if (vehicle.GetSuperCharacter(false) != null)
+            {
+                // Player vehicles may activate Players or Vehicles target types.
+                if (Template.TargetType != TriggerTargetType.Players
+                    && Template.TargetType != TriggerTargetType.Vehicles)
+                {
+                    return false;
+                }
+            }
+            else if (Template.TargetType != TriggerTargetType.Vehicles)
+            {
+                return false;
+            }
+        }
 
-        if (activator is Creature && Template.TargetType != TriggerTargetType.Creatures)
+        if (activator is Creature && activator is not Character && Template.TargetType != TriggerTargetType.Creatures)
             return false;
 
         if (activator.Position.DistSq(Position) > Scale * Scale)
             return false;
 
-        if (Template.Conditions.Count > 0)
-        {
-            foreach (var condition in Template.Conditions)
-            {
-                var conditionSatisfied = condition.Check(activator);
-                if (conditionSatisfied && !Template.AllConditionsNeeded)
-                    break;
-
-                if (!conditionSatisfied && Template.AllConditionsNeeded)
-                    return false;
-            }
-        }
+        if (!ConditionsPass(activator))
+            return false;
 
         return true;
+    }
+
+    /// <summary>
+    /// Conditions only (no range/target). Used for remote logic triggers on variable/mission change.
+    /// </summary>
+    public bool ConditionsPass(ClonedObjectBase activator)
+    {
+        if (Template.Conditions.Count == 0)
+            return true;
+
+        foreach (var condition in Template.Conditions)
+        {
+            var conditionSatisfied = condition.Check(activator);
+            if (conditionSatisfied && !Template.AllConditionsNeeded)
+                return true;
+
+            if (!conditionSatisfied && Template.AllConditionsNeeded)
+                return false;
+        }
+
+        // AllConditionsNeeded: every condition satisfied.
+        // Any-condition (AllConditionsNeeded=false): none were true above.
+        return Template.AllConditionsNeeded;
     }
 
     public bool TriggerIfPossible(ClonedObjectBase clonedObject)
@@ -109,11 +138,14 @@ public class TriggerConditional
 
     public bool Check(ClonedObjectBase activator)
     {
-        // TODO: Properly check conditions
-        //Debugger.Break();
+        // Client FUN_00579160 / CVOGVariable_EvaluateComputed: var[LeftId] OP var[RightId].
+        var character = activator?.GetAsCharacter() ?? activator?.GetSuperCharacter(false);
+        var store = character?.EnsureLogicVariables();
+        if (store == null)
+            return false;
 
-        var leftValue = 0.0f;
-        var rightValue = 0.0f;
+        var leftValue = store.Get(LeftId);
+        var rightValue = store.Get(RightId);
 
         return Type switch
         {

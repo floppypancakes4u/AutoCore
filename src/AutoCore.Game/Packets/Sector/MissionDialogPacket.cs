@@ -7,21 +7,15 @@ using AutoCore.Game.Extensions;
 using AutoCore.Game.Structures;
 
 /// <summary>
-/// MissionDialog packet - DEPRECATED/NOT USED.
-/// 
-/// According to client memory analysis (see MISSION_DIALOG_CLIENT_ANALYSIS.md):
-/// - EMSG_Sector_MissionDialog (index 0x6C) → opcode 0x206C (server→client)
-/// - EMSG_Sector_MissionDialog_Response (index 0x6D) → opcode 0x206D (client→server)
-/// 
-/// Mission dialogs are actually triggered via GroupReactionCallPacket (opcode 0x206C),
-/// whose bit-packed payload format is documented/verified in src/MISSION_DIALOG_CLIENT_ANALYSIS.md.
-///
-/// This class does NOT represent the real 0x206C payload and is intentionally unusable.
+/// DEPRECATED. Do not use.
+/// Reactions use <see cref="GroupReactionCallPacket"/> (0x206C).
+/// NPC mission dialog open uses <see cref="NpcMissionDialogPacket"/> (0x206D).
+/// Dialog OK/Accept uses <see cref="MissionDialogResponsePacket"/> (0x206E).
 /// </summary>
-[Obsolete("Do not use. MissionDialog (0x206C) is GroupReactionCall, and this class does not match the real payload format.", true)]
+[Obsolete("Do not use. Use GroupReactionCallPacket (0x206C) or NpcMissionDialogPacket (0x206D).", true)]
 public class MissionDialogPacket : BasePacket
 {
-    public override GameOpcode Opcode => throw new NotSupportedException("MissionDialogPacket is obsolete and does not match the real 0x206C payload. Use GroupReactionCallPacket.");
+    public override GameOpcode Opcode => throw new NotSupportedException("MissionDialogPacket is obsolete. Use GroupReactionCallPacket or NpcMissionDialogPacket.");
 
     /// <summary>
     /// The creature/NPC that is offering the missions.

@@ -25,4 +25,17 @@ public class Variable
             Name = reader.ReadUTF8StringOn(64)
         };
     }
+
+    /// <summary>Unit-test factory for map logic variables.</summary>
+    internal static Variable CreateForTests(int id, byte type, float value, float initialValue = 0f, string name = null)
+    {
+        return new Variable
+        {
+            Id = id,
+            Type = type,
+            Value = value,
+            InitialValue = initialValue,
+            Name = name ?? $"var_{id}",
+        };
+    }
 }
