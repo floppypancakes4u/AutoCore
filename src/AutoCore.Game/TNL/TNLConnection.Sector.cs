@@ -96,6 +96,54 @@ public partial class TNLConnection
         ObjectLocalScopeAlways(character.Ghost);
         ObjectLocalScopeAlways(character.CurrentVehicle.Ghost);
 
+        SendLocalPlayerCreatePackets(character);
+    }
+
+    /// <summary>
+    /// Restarts TNL ghosting after a map change and re-scopes the local character/vehicle.
+    /// <see cref="ResetGhosting"/> tears down all ghosts and leaves Ghosting/Scoping off;
+    /// without this follow-up the client never receives object ghosts on the new map, and
+    /// in-flight ghost teardown can leave half-initialized creature ghosts that crash the
+    /// client (GhostCreature apply at 0x005D262A).
+    /// </summary>
+    public void ReestablishGhostingAfterMapTransfer(Character character, bool sendCreatePackets = true)
+    {
+        EnsureGhostsAndScopeAfterMapTransfer(character);
+
+        // Client deleted local ghosts on rpcEndGhosting; global entities need create packets
+        // again after MapInfo so ghost assignment can find the player/vehicle.
+        if (sendCreatePackets)
+            SendLocalPlayerCreatePackets(character);
+    }
+
+    /// <summary>
+    /// Creates/reuses character+vehicle ghosts, restarts ghosting, and re-scopes them.
+    /// Separated from create-packet send so ghosting restart can be regression-tested
+    /// without full clonebase-backed WriteToPacket data.
+    /// </summary>
+    public void EnsureGhostsAndScopeAfterMapTransfer(Character character)
+    {
+        if (character == null)
+            throw new ArgumentNullException(nameof(character));
+
+        if (character.CurrentVehicle == null)
+            throw new InvalidOperationException("Cannot re-establish ghosting without a current vehicle.");
+
+        // Ensure NetObjects exist (no-op if already created before the transfer).
+        character.CreateGhost();
+        character.CurrentVehicle.CreateGhost();
+
+        // ResetGhosting always clears Ghosting and Scoping; restart the full sequence.
+        ActivateGhosting();
+
+        SetScopeObject(character.Ghost);
+
+        ObjectLocalScopeAlways(character.Ghost);
+        ObjectLocalScopeAlways(character.CurrentVehicle.Ghost);
+    }
+
+    private void SendLocalPlayerCreatePackets(Character character)
+    {
         var charPacket = new CreateCharacterExtendedPacket();
         var vehiclePacket = new CreateVehicleExtendedPacket();
 

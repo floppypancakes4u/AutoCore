@@ -30,6 +30,38 @@ public class SectorMap
         InitializeLocalObjects();
     }
 
+    /// <summary>
+    /// Builds a minimal in-memory map for unit tests (no GLM/WAD I/O).
+    /// </summary>
+    internal static SectorMap CreateForTests(ContinentObject continentObject, Vector4 entryPoint)
+    {
+        ArgumentNullException.ThrowIfNull(continentObject);
+
+        var map = (SectorMap)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(SectorMap));
+        var mapData = new MapData(continentObject);
+        typeof(MapData).GetProperty(nameof(MapData.EntryPoint))!
+            .SetValue(mapData, entryPoint);
+
+        typeof(SectorMap).GetField($"<{nameof(ContinentId)}>k__BackingField",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(map, continentObject.Id);
+        typeof(SectorMap).GetField($"<{nameof(MapData)}>k__BackingField",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(map, mapData);
+        typeof(SectorMap).GetField($"<{nameof(Objects)}>k__BackingField",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(map, new Dictionary<TFID, ClonedObjectBase>());
+        typeof(SectorMap).GetField($"<{nameof(Triggers)}>k__BackingField",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(map, new Dictionary<TFID, Trigger>());
+        typeof(SectorMap).GetField($"<{nameof(Reactions)}>k__BackingField",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(map, new Dictionary<TFID, Reaction>());
+
+        map.LocalCoidCounter = mapData.HighestCoid + 1;
+        return map;
+    }
+
     private void InitializeLocalObjects()
     {
         // TODO: some objects are only needed on Sector? Global? Both?

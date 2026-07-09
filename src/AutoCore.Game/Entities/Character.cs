@@ -71,6 +71,15 @@ public class Character : Creature
         OwningConnection = owningConnection;
     }
 
+    /// <summary>
+    /// Test/helper hook to attach a vehicle without loading from the character database.
+    /// </summary>
+    internal void SetCurrentVehicleForTests(Vehicle vehicle)
+    {
+        CurrentVehicle = vehicle;
+        vehicle?.SetOwner(this);
+    }
+
     public override Character GetAsCharacter() => this;
     public override Character GetSuperCharacter(bool includeSummons) => this;
 

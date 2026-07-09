@@ -11,6 +11,18 @@ public class MapManager : Singleton<MapManager>
 {
     private Dictionary<int, SectorMap> SectorMaps { get; } = new();
 
+    /// <summary>
+    /// Optional map resolver for unit tests. When set, <see cref="TransferCharacterToMap"/>
+    /// uses it instead of <see cref="GetMap"/>.
+    /// </summary>
+    internal Func<int, SectorMap> ResolveMapForTests { get; set; }
+
+    /// <summary>
+    /// When true, map transfer re-scopes ghosts but skips create packets (needs clonebase data).
+    /// Production always leaves this false.
+    /// </summary>
+    internal bool SuppressCreatePacketsForTests { get; set; }
+
     public bool Initialize()
     {
         var continentObjects = AssetManager.Instance.GetContinentObjects().ToList();
@@ -123,7 +135,25 @@ public class MapManager : Singleton<MapManager>
     {
         try
         {
-            var map = GetMap(continentId);
+            if (!MapTransferPreconditions.TryValidate(character, out var failure))
+            {
+                var detail = failure switch
+                {
+                    MapTransferPreconditions.Failure.NoConnection
+                        => $"TransferCharacterToMap: character {character.ObjectId.Coid} has no connection!",
+                    MapTransferPreconditions.Failure.NoVehicle
+                        => $"TransferCharacterToMap: character {character.ObjectId.Coid} has no vehicle!",
+                    _ => MapTransferPreconditions.Describe(failure)
+                };
+                Logger.WriteLog(LogType.Error, detail);
+                return false;
+            }
+
+            var connection = character.OwningConnection;
+
+            var map = ResolveMapForTests != null
+                ? ResolveMapForTests(continentId)
+                : GetMap(continentId);
             if (map == null)
             {
                 Logger.WriteLog(LogType.Error, $"Trying to transfer to non-existant map: {continentId}!");
@@ -133,9 +163,12 @@ public class MapManager : Singleton<MapManager>
             var mapInfoPacket = new MapInfoPacket();
             map.Fill(mapInfoPacket);
 
-            character.OwningConnection.ResetGhosting();
-            character.OwningConnection.SendGamePacket(mapInfoPacket, skipOpcode: true);
+            // Tear down old-map ghosts first so the client does not apply creature updates
+            // against objects from the previous sector while MapInfo loads the new one.
+            connection.ResetGhosting();
 
+            // Move server-side state onto the destination map before restarting ghosting,
+            // so scope queries (ObjectsInRange) see the new continent's entities.
             character.SetMap(map);
             character.Position = map.MapData.EntryPoint.ToVector3();
             character.Rotation = Quaternion.Default;
@@ -143,6 +176,17 @@ public class MapManager : Singleton<MapManager>
             character.CurrentVehicle.SetMap(map);
             character.CurrentVehicle.Position = character.Position;
             character.CurrentVehicle.Rotation = character.Rotation;
+
+            connection.SendGamePacket(mapInfoPacket, skipOpcode: true);
+
+            // Restart ghosting, re-scope self/vehicle, and re-send create packets.
+            // ResetGhosting alone leaves Ghosting/Scoping off permanently until this runs.
+            connection.ReestablishGhostingAfterMapTransfer(
+                character,
+                sendCreatePackets: !SuppressCreatePacketsForTests);
+
+            Logger.WriteLog(LogType.Network,
+                $"Transferred character {character.ObjectId.Coid} to map {continentId} and re-established ghosting.");
 
             return true;
         }

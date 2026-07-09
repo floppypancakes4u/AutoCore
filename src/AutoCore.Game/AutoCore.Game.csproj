@@ -6,6 +6,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="AutoCore.Game.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Remove="Packets\Arena\**" />
     <EmbeddedResource Remove="Packets\Arena\**" />
     <None Remove="Packets\Arena\**" />

@@ -4,6 +4,7 @@ using AutoCore.Game.Constants;
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Map;
 using AutoCore.Utils;
 using System.Diagnostics;
 
@@ -60,12 +61,35 @@ public class SpawnPoint : ClonedObjectBase
         return true;
     }
 
+    /// <summary>
+    /// Applies map-NPC COID policy (global + high range) used by <see cref="SpawnCreature"/>.
+    /// Exposed for regression tests of the 0x005D262A crash fix.
+    /// </summary>
+    internal static void AssignMapNpcIdentity(Creature creature, ref long localCoidCounter)
+    {
+        ArgumentNullException.ThrowIfNull(creature);
+        var objectId = MapNpcIdentity.AllocateCoid(ref localCoidCounter);
+        creature.SetCoid(objectId.Coid, objectId.Global);
+    }
+
+    /// <summary>
+    /// Clamps spawn level into the valid byte range (1..255).
+    /// </summary>
+    internal static byte CalculateSpawnLevel(int baseLevel, int levelOffset)
+    {
+        var calculatedLevel = baseLevel + levelOffset;
+        return (byte)Math.Max(1, Math.Min(255, calculatedLevel));
+    }
+
     private Creature SpawnCreature(int cbid, SpawnPointTemplate.SpawnList spawnList)
     {
         // TODO: faction of the creature should be the faction of the spawnpoint?
 
         var creature = new Creature();
-        creature.SetCoid(Map.LocalCoidCounter++, false);
+        // Global=true + high COID range: see MapNpcIdentity (client crash 0x005D262A).
+        var counter = Map.LocalCoidCounter;
+        AssignMapNpcIdentity(creature, ref counter);
+        Map.LocalCoidCounter = counter;
         creature.LoadCloneBase(cbid);
         creature.SetupCBFields();
         
@@ -74,16 +98,8 @@ public class SpawnPoint : ClonedObjectBase
         if (cloneBaseCreature != null)
         {
             var baseLevel = cloneBaseCreature.CreatureSpecific.BaseLevel;
-            var levelOffset = spawnList.LevelOffset;
-            var calculatedLevel = baseLevel + levelOffset;
-            // Ensure level is at least 1 and within byte range
-            creature.Level = (byte)Math.Max(1, Math.Min(255, (int)calculatedLevel));
-            
-            // Scale health based on level difference from base level
+            creature.Level = CalculateSpawnLevel(baseLevel, spawnList.LevelOffset);
             creature.ScaleHealthForLevel((byte)baseLevel);
-            
-            var baseHP = creature.CloneBaseObject.SimpleObjectSpecific.MaxHitPoint;
-            //Logger.WriteLog(LogType.Debug, $"SpawnPoint.SpawnCreature: Spawned creature CBID={cbid}, BaseLevel={baseLevel}, LevelOffset={levelOffset}, FinalLevel={creature.Level}, BaseHP={baseHP}, ScaledHP={creature.GetMaximumHP()}");
         }
         else
         {
@@ -97,7 +113,6 @@ public class SpawnPoint : ClonedObjectBase
         creature.SpawnOwner = ObjectId.Coid;
         creature.SetMap(Map);
         creature.CreateGhost();
-
 
         return creature;
     }
