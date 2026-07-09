@@ -1,5 +1,6 @@
 ﻿namespace AutoCore.Game.Entities;
 
+using System.Linq;
 using AutoCore.Game.Constants;
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
@@ -191,12 +192,12 @@ public class Reaction : ClonedObjectBase
                 return HandleSetActiveObjective(activator);
 
             case ReactionType.GiveMission:
+                return HandleGiveMission(activator);
+
             case ReactionType.CompleteObjective:
             case ReactionType.FailMission:
             case ReactionType.AddMissionString:
             case ReactionType.DelMissionString:
-                // Mission-related reactions are primarily client-side
-                // Server will need to track mission state in the future
                 Logger.WriteLog(LogType.Debug, $"Mission reaction {Template.ReactionType} triggered for reaction {Template.COID}");
                 return true;
 
@@ -398,32 +399,84 @@ public class Reaction : ClonedObjectBase
         return true;
     }
 
+    /// <summary>
+    /// GiveMission (type 30). GenericVar1 = mission id. Server tracks CurrentQuests;
+    /// client applies via 0x206C reaction COID.
+    /// </summary>
+    private bool HandleGiveMission(ClonedObjectBase activator)
+    {
+        var missionId = Template.GenericVar1;
+        Logger.WriteLog(LogType.Debug,
+            "Mission reaction GiveMission triggered for reaction {0} mission={1}",
+            Template.COID,
+            missionId);
+
+        if (missionId <= 0)
+            return true;
+
+        var character = GetCharacterFromActivator(activator);
+        if (character == null)
+            return true;
+
+        if (character.CurrentQuests.Any(q => q.MissionId == missionId))
+        {
+            Logger.WriteLog(LogType.Debug,
+                "GiveMission: mission {0} already tracked for coid={1}",
+                missionId,
+                character.ObjectId.Coid);
+            return true;
+        }
+
+        var quest = new CharacterQuest(missionId, 0);
+        quest.PopulateFromAssets();
+        character.CurrentQuests.Add(quest);
+        Logger.WriteLog(LogType.Debug,
+            "GiveMission: tracked mission {0} on server for coid={1}",
+            missionId,
+            character.ObjectId.Coid);
+
+        return true;
+    }
+
+    /// <summary>
+    /// SetActiveObjective (type 60). GenericVar1 = objective id.
+    /// Client UI is driven by 0x206C apply (case 0x3C); server tracks sequence.
+    /// </summary>
     private bool HandleSetActiveObjective(ClonedObjectBase activator)
     {
-        // SetActiveObjective sets the current active objective for the mission
-        // GenericVar1 contains the objective index to set as active
         var character = GetCharacterFromActivator(activator);
         var objectiveId = Template.GenericVar1;
 
-        // Look up which mission this objective belongs to
-        var mission = Managers.AssetManager.Instance.GetMissionByObjectiveId(objectiveId);
+        var mission = AssetManager.Instance.GetMissionByObjectiveId(objectiveId);
         if (mission != null)
         {
-            Logger.WriteLog(LogType.Debug, $"SetActiveObjective reaction {Template.COID}: ObjectiveID={objectiveId} belongs to Mission {mission.Id} '{mission.Name}' (Title: {mission.Title})");
+            Logger.WriteLog(LogType.Debug,
+                $"SetActiveObjective reaction {Template.COID}: ObjectiveID={objectiveId} belongs to Mission {mission.Id} '{mission.Name}'");
         }
         else
         {
-            Logger.WriteLog(LogType.Debug, $"SetActiveObjective reaction {Template.COID}: ObjectiveID={objectiveId} - no mission found containing this objective");
+            Logger.WriteLog(LogType.Debug,
+                $"SetActiveObjective reaction {Template.COID}: ObjectiveID={objectiveId} - no mission found");
         }
 
-        Logger.WriteLog(LogType.Debug, $"SetActiveObjective reaction {Template.COID}: ObjectiveID={objectiveId}, GenericVar3={Template.GenericVar3}, ObjectiveIDCheck={Template.ObjectiveIDCheck}");
-
-        if (character != null)
+        if (character != null && mission != null)
         {
-            Logger.WriteLog(LogType.Debug, $"SetActiveObjective reaction {Template.COID}: Setting active objective to {objectiveId} for character {character.Name}");
-            // TODO: Store active objective on character when mission tracking is implemented
-            // TODO: Give the player this mission if they don't have it yet
+            var objective = AssetManager.Instance.GetObjectiveById(objectiveId);
+            if (objective != null)
+            {
+                var quest = character.CurrentQuests.FirstOrDefault(q => q.MissionId == mission.Id);
+                if (quest != null)
+                    quest.ActiveObjectiveSequence = objective.Sequence;
+                else
+                {
+                    Logger.WriteLog(LogType.Debug,
+                        "SetActiveObjective reaction {0}: mission {1} not granted yet — 0x206C only",
+                        Template.COID,
+                        mission.Id);
+                }
+            }
         }
+
         return true;
     }
 

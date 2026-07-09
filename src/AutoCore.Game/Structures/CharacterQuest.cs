@@ -1,5 +1,8 @@
 namespace AutoCore.Game.Structures;
 
+using AutoCore.Game.Managers;
+using AutoCore.Game.Mission;
+
 /// <summary>
 /// Represents a player's current quest/mission state.
 /// The client expects 72 bytes per quest in CreateCharacterExtendedPacket.
@@ -20,8 +23,7 @@ public class CharacterQuest
     public byte ActiveObjectiveSequence { get; set; }
     public byte State { get; set; } // 0 = active, 1 = completed, etc.
 
-    // Progress for each objective (up to 8)
-    // Each objective: 4 bytes current progress, 4 bytes max progress
+    // Progress for each objective (up to 8 on the wire; runtime may be larger)
     public int[] ObjectiveProgress { get; set; } = new int[MaxObjectives];
     public int[] ObjectiveMax { get; set; } = new int[MaxObjectives];
 
@@ -31,38 +33,58 @@ public class CharacterQuest
         ActiveObjectiveSequence = activeObjectiveSequence;
         State = 0; // Active
 
-        // Initialize all objectives with 0 progress
         for (int i = 0; i < MaxObjectives; i++)
         {
             ObjectiveProgress[i] = 0;
-            ObjectiveMax[i] = 1; // Default max of 1
+            ObjectiveMax[i] = 1;
         }
     }
 
-    /// <summary>
-    /// Write the quest state to the packet (72 bytes total).
-    /// </summary>
     public void Write(BinaryWriter writer)
     {
-        // Mission ID (4 bytes)
         writer.Write(MissionId);
-
-        // Active objective sequence (1 byte)
         writer.Write(ActiveObjectiveSequence);
-
-        // State/Flags (1 byte)
         writer.Write(State);
-
-        // Padding (2 bytes)
         writer.Write((short)0);
 
-        // Objective progress data (64 bytes = 8 objectives x 8 bytes)
         for (int i = 0; i < MaxObjectives; i++)
         {
-            writer.Write(ObjectiveProgress[i]);  // 4 bytes
-            writer.Write(ObjectiveMax[i]);       // 4 bytes
+            var progress = i < ObjectiveProgress.Length ? ObjectiveProgress[i] : 0;
+            var max = i < ObjectiveMax.Length ? ObjectiveMax[i] : 1;
+            writer.Write(progress);
+            writer.Write(max);
+        }
+    }
+
+    /// <summary>Size progress arrays from mission template assets.</summary>
+    public void PopulateFromAssets()
+    {
+        PopulateFromMission(AssetManager.Instance.GetMission(MissionId));
+    }
+
+    public void PopulateFromMission(Mission mission)
+    {
+        if (mission?.Objectives is null || mission.Objectives.Count == 0)
+            return;
+
+        var maxSeq = 0;
+        foreach (var objective in mission.Objectives.Values)
+        {
+            if (objective.Sequence > maxSeq)
+                maxSeq = objective.Sequence;
         }
 
-        // Total: 4 + 1 + 1 + 2 + 64 = 72 bytes
+        var capacity = Math.Max(MaxObjectives, maxSeq + 1);
+        if (ObjectiveProgress.Length < capacity)
+        {
+            ObjectiveProgress = new int[capacity];
+            ObjectiveMax = new int[capacity];
+        }
+
+        for (var i = 0; i < ObjectiveMax.Length; i++)
+            ObjectiveMax[i] = 1;
+
+        foreach (var objective in mission.Objectives.Values)
+            ObjectiveMax[objective.Sequence] = objective.CompleteCount > 0 ? objective.CompleteCount : 1;
     }
 }

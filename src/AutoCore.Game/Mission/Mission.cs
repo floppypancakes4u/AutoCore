@@ -157,4 +157,24 @@ public class Mission
 
         return mission;
     }
+
+    /// <summary>Unit-test factory.</summary>
+    internal static Mission CreateForTests(int id, params MissionObjective[] objectives)
+    {
+        var mission = new Mission
+        {
+            Id = id,
+            Name = $"mission_{id}",
+            Objectives = new Dictionary<byte, MissionObjective>(),
+            NumberOfObjectives = (byte)(objectives?.Length ?? 0),
+        };
+
+        if (objectives != null)
+        {
+            foreach (var objective in objectives)
+                mission.Objectives[objective.Sequence] = objective;
+        }
+
+        return mission;
+    }
 }

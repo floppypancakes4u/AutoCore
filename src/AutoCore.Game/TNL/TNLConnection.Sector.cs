@@ -155,6 +155,10 @@ public partial class TNLConnection
         // CreateCharacterExtended hash-inserts continents without per-bit UI notify.
         // UnlockRegion (sent twice) forces client apply + map fog refresh.
         ExplorationManager.Instance.SyncExplorationAfterLogin(character);
+
+        // Fire map PerPlayerLoad trigger (if findable) with CHARACTER activator after create
+        // packets so 0x206C GiveMission can seed client mission state.
+        character.Map?.FireOnLoadPlayerMissions(character);
     }
 
     private void HandleCreatureMovedPacket(BinaryReader reader)

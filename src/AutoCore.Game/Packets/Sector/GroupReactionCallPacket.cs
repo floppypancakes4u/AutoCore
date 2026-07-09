@@ -10,6 +10,9 @@ public class GroupReactionCallPacket : BasePacket
 
     private List<LogicStateChangePacket> Packets { get; } = new();
 
+    /// <summary>Number of nested entries (max 255).</summary>
+    public int Count => Packets.Count;
+
     public bool AddPacket(LogicStateChangePacket packet)
     {
         if (Packets.Count == 255)
@@ -19,13 +22,10 @@ public class GroupReactionCallPacket : BasePacket
         return true;
     }
 
-    // VERIFIED (see src/MISSION_DIALOG_CLIENT_ANALYSIS.md):
-    // Wire payload for opcode 0x206C (EMSG_Sector_MissionDialog) is bit-packed:
+    // Wire payload for 0x206C is bit-packed (opcode is NOT in this buffer when sent
+    // with skipOpcode: true — TNL carries opcode as RPC type):
     // - count: 8 bits
-    // - entries[count]:
-    //   - entryType: 8 bits
-    //   - if entryType == 1: u16 + f32
-    //   - else: u19 + u64 + flag + flag (no byte alignment between fields)
+    // - entries[count]: type 8 bits; Reaction: u19 coid + u64 activator + 2 flags
     public override void Write(BinaryWriter writer)
     {
         var stream = new BitStream();
@@ -42,7 +42,7 @@ public class GroupReactionCallPacket : BasePacket
             }
             else if (packet.Type == LogicStateChangeType.Reaction)
             {
-                stream.WriteInt((uint)packet.ReactionCoid, 19);
+                stream.WriteInt((uint)(packet.ReactionCoid & 0x7FFFF), 19);
                 stream.Write(packet.Activator.Coid);
                 stream.WriteFlag(packet.Activator.Global);
                 stream.WriteFlag(packet.SingleClientOnly);
@@ -51,6 +51,7 @@ public class GroupReactionCallPacket : BasePacket
                 throw new InvalidDataException($"Unknown LogicStateChangeType {packet.Type}!");
         }
 
+        stream.ZeroToByteBoundary();
         writer.Write(stream.GetBuffer(), 0, (int)stream.GetBytePosition());
     }
 }

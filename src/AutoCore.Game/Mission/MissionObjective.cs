@@ -93,4 +93,19 @@ public class MissionObjective
 
         return missionObjective;
     }
+
+    /// <summary>Unit-test factory.</summary>
+    internal static MissionObjective CreateForTests(int objectiveId, byte sequence, int questId, int completeCount = 1)
+    {
+        return new MissionObjective
+        {
+            ObjectiveId = objectiveId,
+            Sequence = sequence,
+            QuestId = questId,
+            CompleteCount = completeCount,
+            ObjectiveName = $"obj_{objectiveId}",
+            MapName = string.Empty,
+            Requirements = new List<ObjectiveRequirement>(),
+        };
+    }
 }

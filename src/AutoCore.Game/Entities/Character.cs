@@ -114,9 +114,8 @@ public partial class Character : Creature
 
     public Character()
     {
-        // Add the starting mission (New Day Dawning!) by default
-        // Mission 554, with first objective (sequence 0) active
-        CurrentQuests.Add(new CharacterQuest(554, 0));
+        // Do not pre-seed starter missions. Client GiveMission rejects duplicates if the
+        // create packet already carried the quest blob. Grant via map PerPlayerLoad → 0x206C.
     }
 
     public void SetOwningConnection(TNLConnection owningConnection)

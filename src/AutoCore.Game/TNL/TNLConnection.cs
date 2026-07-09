@@ -63,9 +63,20 @@ public partial class TNLConnection : GhostConnection
             Logger.WriteLog(LogType.Network, "Client ({0}) disconnected", PlayerCoid);
     }
 
+    /// <summary>
+    /// When set (unit tests), invoked instead of the real TNL RPC send path.
+    /// </summary>
+    internal static Action<TNLConnection, BasePacket> TestPacketSink { get; set; }
+
     public void SendGamePacket(BasePacket packet, RPCGuaranteeType type = RPCGuaranteeType.RPCGuaranteedOrdered, bool skipOpcode = false)
     {
         Logger.WriteLog(LogType.Network, "Outgoing Packet: {0}", packet.Opcode);
+
+        if (TestPacketSink != null)
+        {
+            TestPacketSink(this, packet);
+            return;
+        }
 
         byte[] arr;
 

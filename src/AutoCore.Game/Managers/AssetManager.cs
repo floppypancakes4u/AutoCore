@@ -17,6 +17,9 @@ public class AssetManager : Singleton<AssetManager>
     private MapDataLoader MapDataLoader { get; } = new();
     private WorldDBLoader WorldDBLoader { get; } = new();
 
+    /// <summary>Unit-test mission overrides (checked before WAD).</summary>
+    private Dictionary<int, Mission.Mission> _testMissions;
+
     public string GamePath { get; private set; }
     public ServerType ServerType { get; private set; }
     public bool AllowMissingCBID { get; set; } = false;
@@ -186,6 +189,9 @@ public class AssetManager : Singleton<AssetManager>
     #region WAD
     public Mission.Mission GetMission(int missionId)
     {
+        if (_testMissions != null && _testMissions.TryGetValue(missionId, out var testMission))
+            return testMission;
+
         if (WADLoader.Missions.TryGetValue(missionId, out var mission))
             return mission;
         return null;
@@ -193,6 +199,18 @@ public class AssetManager : Singleton<AssetManager>
 
     public Mission.Mission GetMissionByObjectiveId(int objectiveId)
     {
+        if (_testMissions != null)
+        {
+            foreach (var mission in _testMissions.Values)
+            {
+                foreach (var objective in mission.Objectives.Values)
+                {
+                    if (objective.ObjectiveId == objectiveId)
+                        return mission;
+                }
+            }
+        }
+
         foreach (var mission in WADLoader.Missions.Values)
         {
             foreach (var objective in mission.Objectives.Values)
@@ -203,6 +221,41 @@ public class AssetManager : Singleton<AssetManager>
         }
         return null;
     }
+
+    public Mission.MissionObjective GetObjectiveById(int objectiveId)
+    {
+        if (_testMissions != null)
+        {
+            foreach (var mission in _testMissions.Values)
+            {
+                foreach (var objective in mission.Objectives.Values)
+                {
+                    if (objective.ObjectiveId == objectiveId)
+                        return objective;
+                }
+            }
+        }
+
+        foreach (var mission in WADLoader.Missions.Values)
+        {
+            foreach (var objective in mission.Objectives.Values)
+            {
+                if (objective.ObjectiveId == objectiveId)
+                    return objective;
+            }
+        }
+        return null;
+    }
+
+    internal void SetTestMission(Mission.Mission mission)
+    {
+        if (mission is null)
+            return;
+        _testMissions ??= new Dictionary<int, Mission.Mission>();
+        _testMissions[mission.Id] = mission;
+    }
+
+    internal void ClearTestMissions() => _testMissions = null;
 
     public IEnumerable<Mission.Mission> GetMissionsForContinent(int continentId)
     {

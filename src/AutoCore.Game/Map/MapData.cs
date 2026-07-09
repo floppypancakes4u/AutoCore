@@ -37,6 +37,16 @@ public class MapData
     public long CreatorLoadTrigger { get; private set; }
     public long OnKillTrigger { get; private set; }
     public long LastTeamTrigger { get; private set; }
+
+    /// <summary>Test helper: set map-header event trigger COIDs without loading a .fam.</summary>
+    internal void SetEventTriggerCoidsForTests(long perPlayerLoad = 0, long creatorLoad = 0, long onKill = 0, long lastTeam = 0)
+    {
+        PerPlayerLoadTrigger = perPlayerLoad;
+        CreatorLoadTrigger = creatorLoad;
+        OnKillTrigger = onKill;
+        LastTeamTrigger = lastTeam;
+    }
+
     public string WeatherStrEffect { get; private set; }
     public SeaPlane SeaPlane { get; private set; }
     public int Flags { get; private set; }
