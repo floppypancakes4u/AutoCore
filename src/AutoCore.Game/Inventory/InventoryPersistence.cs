@@ -155,6 +155,27 @@ public sealed class InventoryPersistence : IInventoryPersistence
         Save(context, $"SaveCharacterCargoCapacity character={characterCoid} {width}x{pageCount}");
     }
 
+    public long LoadCredits(long characterCoid)
+    {
+        using var context = new CharContext();
+        var character = context.Characters.AsNoTracking().FirstOrDefault(c => c.Coid == characterCoid);
+        return character?.Credits ?? 0L;
+    }
+
+    public void SaveCredits(long characterCoid, long credits)
+    {
+        using var context = new CharContext();
+        var character = context.Characters.FirstOrDefault(c => c.Coid == characterCoid);
+        if (character == null)
+        {
+            Logger.WriteLog(LogType.Error, $"SaveCredits: character {characterCoid} not found");
+            return;
+        }
+
+        character.Credits = credits;
+        Save(context, $"SaveCredits character={characterCoid} credits={credits}");
+    }
+
     private static void EnsureSimpleObjectInternal(
         CharContext context,
         long itemCoid,

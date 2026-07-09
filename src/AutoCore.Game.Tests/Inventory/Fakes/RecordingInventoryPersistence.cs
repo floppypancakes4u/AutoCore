@@ -9,9 +9,11 @@ public sealed class RecordingInventoryPersistence : IInventoryPersistence
     public List<long> DeletedItemCoids { get; } = new();
     public List<(long VehicleCoid, VehicleEquipmentSnapshot Snapshot)> EquipmentSaves { get; } = new();
     public List<(long CharacterCoid, int Width, int PageCount)> CapacitySaves { get; } = new();
+    public List<(long CharacterCoid, long Credits)> CreditsSaves { get; } = new();
     public List<(long ItemCoid, byte Type, int Cbid)> EnsuredSimpleObjects { get; } = new();
 
     public List<CharacterInventoryItem> CargoToLoad { get; } = new();
+    public long CreditsToLoad { get; set; }
 
     public IReadOnlyList<CharacterInventoryItem> LoadCargo(long characterCoid) => CargoToLoad;
 
@@ -37,4 +39,12 @@ public sealed class RecordingInventoryPersistence : IInventoryPersistence
 
     public void SaveCharacterCargoCapacity(long characterCoid, int width, int pageCount) =>
         CapacitySaves.Add((characterCoid, width, pageCount));
+
+    public long LoadCredits(long characterCoid) => CreditsToLoad;
+
+    public void SaveCredits(long characterCoid, long credits)
+    {
+        CreditsToLoad = credits;
+        CreditsSaves.Add((characterCoid, credits));
+    }
 }

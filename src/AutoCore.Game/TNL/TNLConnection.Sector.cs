@@ -114,6 +114,11 @@ public partial class TNLConnection
         SendGamePacket(vehiclePacket);
         SendGamePacket(charPacket);
         SendGamePacket(InventoryPacketFactory.CreateCargoSendAll(character.Inventory));
+
+        // CreateCharacterExtended.Credits stay 0 (login-safe). Restore via CharacterLevel.
+        var currencyRestore = CurrencySync.TryCreateLoginRestorePacket(character);
+        if (currencyRestore != null)
+            SendGamePacket(currencyRestore);
     }
 
     private void SendInventoryLoginObjectPackets(Character character)

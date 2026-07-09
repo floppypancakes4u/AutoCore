@@ -1027,6 +1027,18 @@ public sealed class InventoryManager
         _persistence.SaveCharacterCargoCapacity(characterCoid, Width, PageCount);
     }
 
+    /// <summary>
+    /// Apply a signed credit delta for a character, persist absolute balance, and build a
+    /// client <see cref="GiveCreditsPacket"/> for the applied delta (0x205E is additive on the client).
+    /// Negative deltas floor at zero unless <paramref name="allowDebt"/> is true.
+    /// </summary>
+    public AddCreditsResult AddCredits(Character character, long amount, bool allowDebt = false) =>
+        CurrencySync.AddCredits(_persistence, character, amount, allowDebt);
+
+    /// <summary>Set absolute credits, persist, and return a CharacterLevel-friendly absolute value.</summary>
+    public long SetCreditsAbsolute(Character character, long absoluteCredits, bool allowDebt = false) =>
+        CurrencySync.SetCreditsAbsolute(_persistence, character, absoluteCredits, allowDebt);
+
     public void ReloadCargo(long characterCoid)
     {
         if (_persistence == null || characterCoid == 0)

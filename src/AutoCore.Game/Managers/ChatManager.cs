@@ -3,10 +3,13 @@
 using System.Linq;
 using System.Text;
 using AutoCore.Game.Chat;
+using AutoCore.Game.Combat;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
+using AutoCore.Game.Inventory;
 using AutoCore.Game.Packets.Global;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.Structures;
 using AutoCore.Game.TNL;
 using AutoCore.Utils;
 using AutoCore.Utils.Memory;
@@ -102,7 +105,8 @@ public class ChatManager : Singleton<ChatManager>
             return;
         }
 
-        switch (parts[0])
+        // Client chat is not always lowercase; match commands case-insensitively.
+        switch (parts[0].ToLowerInvariant())
         {
             case "/loot":
                 if (parts.Length < 2)
@@ -376,17 +380,11 @@ public class ChatManager : Singleton<ChatManager>
                 const int killDamage = 10000;
                 var actualDamage = target.TakeDamage(killDamage);
 
-                // Send damage packet to show the damage
                 try
                 {
-                    connection.SendGamePacket(new DamagePacket
-                    {
-                        Target = target.ObjectId,
-                        Source = vehicle.ObjectId,
-                        Damage = actualDamage,
-                        DamageType = 0,
-                        Flags = 0
-                    });
+                    var dmg = new DamagePacket { Source = vehicle.ObjectId };
+                    dmg.AddHit(target.ObjectId, actualDamage);
+                    connection.SendGamePacket(dmg, skipOpcode: true);
                 }
                 catch (System.Exception ex)
                 {
@@ -468,35 +466,14 @@ public class ChatManager : Singleton<ChatManager>
                 break;
 
             case "/currency":
-                if (parts.Length < 5)
-                {
-                    respPacket.Message = "Invalid currency command! Usage: /currency <globes> <bars> <scrip> <clink>";
-                    break;
-                }
-
-                if (!long.TryParse(parts[1], out var globes) || !int.TryParse(parts[2], out var bars) || 
-                    !int.TryParse(parts[3], out var scrip) || !int.TryParse(parts[4], out var clink))
-                {
-                    respPacket.Message = "Invalid currency values! All values must be numbers.";
-                    break;
-                }
-
-                try
-                {
-                    connection.SendGamePacket(new CharacterLevelPacket
-                    {
-                        CharacterId = character.ObjectId,
-                        Level = character.Level,
-                        Currency = CharacterLevelPacket.BuildCurrency(globes, bars, scrip, clink)
-                    });
-                    respPacket.Message = $"Set currency to {globes} Globes, {bars} Bars, {scrip} Scrip, {clink} Clink!";
-                }
-                catch (System.Exception ex)
-                {
-                    Logger.WriteLog(LogType.Error, $"Failed to send currency packet: {ex.Message}");
-                    respPacket.Message = $"Failed to set currency: {ex.Message}";
-                }
+            {
+                // Absolute set only: CharacterLevel (0x2017) + server persist.
+                var currency = CurrencySync.TryApplyCurrencyCommand(character, parts);
+                if (currency.Success && currency.Packet != null)
+                    connection.SendGamePacket(currency.Packet);
+                respPacket.Message = currency.Message;
                 break;
+            }
 
             case "/mana":
                 if (parts.Length < 2)
@@ -748,6 +725,11 @@ public class ChatManager : Singleton<ChatManager>
                 }
                 break;
 
+            case "/combattext":
+            case "/ct":
+                respPacket.Message = HandleCombatTextTest(connection, character, parts);
+                break;
+
             default:
                 Logger.WriteLog(LogType.Debug, $"Unhandled chat command: {parts[0]}");
                 return;
@@ -756,12 +738,42 @@ public class ChatManager : Singleton<ChatManager>
         SendChatCommandResponse(connection, respPacket);
     }
 
+    private static string HandleCombatTextTest(TNLConnection connection, Character character, string[] parts)
+    {
+        var vehicle = character?.CurrentVehicle;
+        var result = CombatTextCommand.Execute(parts, new CombatTextCommand.Context
+        {
+            HasVehicle = vehicle != null,
+            Source = vehicle?.ObjectId ?? new TFID(),
+            Target = vehicle?.Target?.ObjectId ?? vehicle?.ObjectId ?? new TFID(),
+            HasExplicitTarget = vehicle?.Target != null,
+            TargetTypeName = vehicle?.Target?.GetType().Name ?? "Vehicle"
+        });
+
+        foreach (var send in result.Packets)
+        {
+            try
+            {
+                connection.SendGamePacket(send.Packet, skipOpcode: send.SkipOpcode);
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLog(LogType.Error, $"combattext send failed: {ex}");
+                return $"combattext failed: {ex.Message}";
+            }
+        }
+
+        return result.Message;
+    }
+
     private static void SendChatCommandResponse(TNLConnection connection, BroadcastPacket respPacket)
     {
         if (string.IsNullOrEmpty(respPacket.Message))
             return;
 
         respPacket.MessageLength = (short)(Encoding.UTF8.GetByteCount(respPacket.Message) + 1);
+        if (respPacket.SenderCoid == 0)
+            respPacket.SenderCoid = unchecked((ulong)-1L);
         connection.SendGamePacket(respPacket);
     }
 }

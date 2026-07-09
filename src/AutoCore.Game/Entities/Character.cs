@@ -41,9 +41,30 @@ public class Character : Creature
     public int LastStationMapId => DBData.LastStationMapId;
     public int LastStationId => DBData.LastStationId;
     public new byte Level => DBData.Level;
+
+    /// <summary>Absolute money balance (persisted). Client UI splits into Globes/Bars/Scrip/Clink.</summary>
+    public long Credits => DBData?.Credits ?? 0L;
+
+    /// <summary>Optional server-side debt (not written on login spawn).</summary>
+    public long CreditDebt => DBData?.CreditDebt ?? 0L;
     #endregion
 
     public override byte GetLevel() => Level;
+
+    /// <summary>Update in-memory credits (caller persists via InventoryManager).</summary>
+    public void SetCredits(long credits)
+    {
+        if (DBData == null)
+            return;
+        DBData.Credits = credits;
+    }
+
+    public void SetCreditDebt(long debt)
+    {
+        if (DBData == null)
+            return;
+        DBData.CreditDebt = debt;
+    }
 
     #region Database Clan Data
     private ClanMember ClanMemberDBData { get; set; }
@@ -195,6 +216,10 @@ public class Character : Creature
             extendedCharPacket.NumAchievements = 0;
             extendedCharPacket.NumDisciplines = 0;
             extendedCharPacket.NumSkills = 0;
+
+            // Do NOT write live Credits into CreateCharacterExtended — non-zero values crash
+            // the retail client. Restore after spawn via CurrencySync / CharacterLevel.
+            CurrencySync.ClearCreateCharacterCredits(extendedCharPacket);
 
             // Load FirstTimeFlags from Account
             if (OwningConnection?.Account != null)
