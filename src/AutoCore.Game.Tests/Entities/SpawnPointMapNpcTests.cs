@@ -2,8 +2,10 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace AutoCore.Game.Tests.Entities;
 
+using AutoCore.Game.CloneBases.Specifics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
+using AutoCore.Game.Structures;
 using AutoCore.Game.TNL.Ghost;
 
 [TestClass]
@@ -79,5 +81,90 @@ public class SpawnPointMapNpcTests
         Assert.AreEqual(1, SpawnPoint.CalculateSpawnLevel(0, 0));
         Assert.AreEqual(1, SpawnPoint.CalculateSpawnLevel(1, -10));
         Assert.AreEqual(255, SpawnPoint.CalculateSpawnLevel(200, 100));
+    }
+
+    [TestMethod]
+    public void ApplyStaticNpcSpawnHeight_CombatIsNpcZero_Unchanged()
+    {
+        var spawn = new Vector3(10f, 50f, 20f);
+        var specific = new CreatureSpecific { IsNPC = 0, FlyingHeight = 2f, PhysicsScale = 1f };
+
+        var result = SpawnPoint.ApplyStaticNpcSpawnHeight(spawn, specific, "creature");
+
+        Assert.AreEqual(spawn.X, result.X);
+        Assert.AreEqual(spawn.Y, result.Y);
+        Assert.AreEqual(spawn.Z, result.Z);
+    }
+
+    [TestMethod]
+    public void ApplyStaticNpcSpawnHeight_IsNpc_AddsPhysicsFootAndFlyingHeight()
+    {
+        var spawn = new Vector3(1f, 100f, 3f);
+        var specific = new CreatureSpecific
+        {
+            IsNPC = 1,
+            FlyingHeight = 1.25f,
+            PhysicsScale = 1f
+        };
+
+        var result = SpawnPoint.ApplyStaticNpcSpawnHeight(spawn, specific, "creature");
+
+        Assert.AreEqual(1f, result.X);
+        Assert.AreEqual(3f, result.Z);
+        Assert.AreEqual(
+            100f + 1.25f + SpawnPoint.CreaturePhysicsFootOffset,
+            result.Y,
+            0.0001f);
+    }
+
+    [TestMethod]
+    public void ApplyStaticNpcSpawnHeight_IsNpc_ScalesFootByPhysicsScale()
+    {
+        var spawn = new Vector3(0f, 10f, 0f);
+        var specific = new CreatureSpecific
+        {
+            IsNPC = 1,
+            FlyingHeight = 0f,
+            PhysicsScale = 1.2f
+        };
+
+        var result = SpawnPoint.ApplyStaticNpcSpawnHeight(spawn, specific, "humanoid");
+
+        Assert.AreEqual(10f + SpawnPoint.CreaturePhysicsFootOffset * 1.2f, result.Y, 0.0001f);
+    }
+
+    [TestMethod]
+    public void ApplyStaticNpcSpawnHeight_IsNpc_ZeroFlyingHeight_StillAddsFoot()
+    {
+        var spawn = new Vector3(0f, 42f, 0f);
+        var specific = new CreatureSpecific
+        {
+            IsNPC = 1,
+            FlyingHeight = 0f,
+            PhysicsScale = 1f
+        };
+
+        var result = SpawnPoint.ApplyStaticNpcSpawnHeight(spawn, specific, "creature");
+
+        Assert.AreEqual(42f + SpawnPoint.CreaturePhysicsFootOffset, result.Y, 0.0001f);
+    }
+
+    [TestMethod]
+    public void ApplyStaticNpcSpawnHeight_NullSpecific_Unchanged()
+    {
+        var spawn = new Vector3(5f, 6f, 7f);
+        var result = SpawnPoint.ApplyStaticNpcSpawnHeight(spawn, null, "creature");
+        Assert.AreEqual(6f, result.Y);
+    }
+
+    [TestMethod]
+    public void ResolvePhysicsFootOffset_CreatureAndHumanoid_KnownOffset()
+    {
+        Assert.AreEqual(SpawnPoint.CreaturePhysicsFootOffset, SpawnPoint.ResolvePhysicsFootOffset("creature"));
+        Assert.AreEqual(SpawnPoint.CreaturePhysicsFootOffset, SpawnPoint.ResolvePhysicsFootOffset("HUMANOID"));
+        Assert.AreEqual(SpawnPoint.CreaturePhysicsFootOffset, SpawnPoint.ResolvePhysicsFootOffset(null));
+        Assert.AreEqual(SpawnPoint.CreaturePhysicsFootOffset, SpawnPoint.ResolvePhysicsFootOffset(""));
+        Assert.AreEqual(0f, SpawnPoint.ResolvePhysicsFootOffset("sphere"));
+        Assert.AreEqual(0f, SpawnPoint.ResolvePhysicsFootOffset("mine"));
     }
 }
