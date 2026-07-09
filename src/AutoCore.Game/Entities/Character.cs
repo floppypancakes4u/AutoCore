@@ -36,11 +36,65 @@ public class Character : Creature
     public uint SkinColor => DBData.SkinColor;
     public uint SpecialityColor => DBData.SpecialityColor;
     public float ScaleOffset => DBData.ScaleOffset;
-    public int LastTownId => DBData.LastTownId;
-    public int LastStationMapId => DBData.LastStationMapId;
-    public int LastStationId => DBData.LastStationId;
-    public new byte Level => DBData.Level;
+    public int LastTownId => DBData?.LastTownId ?? -1;
+    public int LastStationMapId => DBData?.LastStationMapId ?? -1;
+    public int LastStationId => DBData?.LastStationId ?? -1;
+    public new byte Level => DBData?.Level ?? 1;
     #endregion
+
+    private int _runtimeLastStationId = -1;
+    private int _runtimeLastStationMapId = -1;
+    private bool _hasRuntimeLastStation;
+    private bool _hasRuntimeLastStationPose;
+    private Vector3 _runtimeLastStationPosition;
+    private Quaternion _runtimeLastStationRotation = Quaternion.Default;
+
+    /// <summary>
+    /// Records the last repair station the player visited (MarkRepairStation reaction).
+    /// Stores pad pose for respawn; also writes ids through to <see cref="DBData"/> when loaded.
+    /// </summary>
+    public void SetLastRepairStation(int stationId, int stationMapId, Vector3? position = null, Quaternion? rotation = null)
+    {
+        _runtimeLastStationId = stationId;
+        _runtimeLastStationMapId = stationMapId;
+        _hasRuntimeLastStation = true;
+
+        if (position.HasValue)
+        {
+            _runtimeLastStationPosition = position.Value;
+            _runtimeLastStationRotation = rotation ?? Quaternion.Default;
+            _hasRuntimeLastStationPose = true;
+        }
+
+        if (DBData != null)
+        {
+            DBData.LastStationId = stationId;
+            DBData.LastStationMapId = stationMapId;
+        }
+    }
+
+    /// <summary>Effective last station id (runtime mark preferred over DB defaults).</summary>
+    public int GetLastStationId() =>
+        _hasRuntimeLastStation ? _runtimeLastStationId : (DBData?.LastStationId ?? -1);
+
+    /// <summary>Effective last station map id (runtime mark preferred over DB defaults).</summary>
+    public int GetLastStationMapId() =>
+        _hasRuntimeLastStation ? _runtimeLastStationMapId : (DBData?.LastStationMapId ?? -1);
+
+    /// <summary>True when MarkRepairStation stored a concrete pad pose this session.</summary>
+    public bool TryGetLastStationPose(out Vector3 position, out Quaternion rotation)
+    {
+        if (_hasRuntimeLastStationPose)
+        {
+            position = _runtimeLastStationPosition;
+            rotation = _runtimeLastStationRotation;
+            return true;
+        }
+
+        position = default;
+        rotation = Quaternion.Default;
+        return false;
+    }
 
     public override byte GetLevel() => Level;
 

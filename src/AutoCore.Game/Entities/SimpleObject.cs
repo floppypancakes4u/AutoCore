@@ -42,9 +42,23 @@ public class SimpleObject : GraphicsObject
         HP = Math.Max(0, HP - actualDamage);
 
         if (Ghost != null)
-            Ghost.SetMaskBits(8); // Health mask
+            Ghost.SetMaskBits(GhostObject.HealthMask);
 
         return actualDamage;
+    }
+
+    public override void Revive()
+    {
+        HP = Math.Max(1, MaxHP);
+        base.Revive();
+    }
+
+    /// <summary>
+    /// Test helper: set current HP without going through combat.
+    /// </summary>
+    internal void SetHPForTests(int hp)
+    {
+        HP = Math.Clamp(hp, 0, Math.Max(1, MaxHP));
     }
 
     public SimpleObject(GraphicsObjectType type)

@@ -285,6 +285,10 @@ public partial class TNLConnection : GhostConnection
                 case GameOpcode.MapTransferRequest:
                     MapManager.Instance.HandleTransferRequestPacket(CurrentCharacter, reader);
                     break;
+
+                case GameOpcode.RespawnInSector:
+                    RespawnManager.Instance.HandleRespawnInSectorPacket(CurrentCharacter, reader);
+                    break;
                 
                 case GameOpcode.MissionDialogResponse:
                     HandleMissionDialogResponse(reader);

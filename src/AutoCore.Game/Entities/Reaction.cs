@@ -3,7 +3,9 @@
 using AutoCore.Game.Constants;
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.Structures;
 using AutoCore.Utils;
 
 public enum ReactionType : byte
@@ -231,6 +233,9 @@ public class Reaction : ClonedObjectBase
             case ReactionType.TransferMap:
                 return HandleTransferMap(activator);
 
+            case ReactionType.MarkRepairStation:
+                return HandleMarkRepairStation(activator);
+
             case ReactionType.ResetTrigger:
                 return HandleResetTrigger(activator);
 
@@ -420,6 +425,246 @@ public class Reaction : ClonedObjectBase
             // TODO: Give the player this mission if they don't have it yet
         }
         return true;
+    }
+
+    private bool HandleMarkRepairStation(ClonedObjectBase activator)
+    {
+        // GenericVar1 is a station key (often small), not a map object COID.
+        // Pad pose: linked Objects → nearby graphics → trigger (Y-safe) → activator.
+        var character = GetCharacterFromActivator(activator);
+        if (character == null)
+        {
+            Logger.WriteLog(LogType.Debug, $"MarkRepairStation reaction {Template.COID}: Could not get character from activator");
+            return true;
+        }
+
+        var map = activator.Map ?? character.Map;
+        var mapId = map?.ContinentId ?? character.LastTownId;
+        var stationId = Template.GenericVar1 != 0 ? Template.GenericVar1 : Template.COID;
+
+        // Activator is always non-null from TriggerIfPossible; pose resolve always succeeds.
+        ResolveRepairStationPose(map, activator, out var posePos, out var poseRot, out var poseSource);
+        character.SetLastRepairStation(stationId, mapId, posePos, poseRot);
+
+        Logger.WriteLog(LogType.Network,
+            $"MarkRepairStation reaction {Template.COID}: character {character.ObjectId.Coid} stationId={stationId} mapId={mapId} objects={Template.Objects.Count} pose={posePos} via {poseSource}");
+
+        return true;
+    }
+
+    private void ResolveRepairStationPose(
+        SectorMap map,
+        ClonedObjectBase activator,
+        out Vector3 posePos,
+        out Quaternion poseRot,
+        out string poseSource)
+    {
+        var reactionCoid = ObjectId.Coid != 0 ? ObjectId.Coid : Template.COID;
+        var groundY = activator.Position.Y;
+
+        if (map != null && TryResolveLinkedPadPose(map, out posePos, out poseRot, out var linkedCoid))
+        {
+            posePos = ApplyGroundYSafety(posePos, groundY);
+            poseSource = $"linked-pad:{linkedCoid}";
+            return;
+        }
+
+        var firingTrigger = map != null ? FindTriggerForReaction(map, reactionCoid, activator) : null;
+
+        if (map != null && firingTrigger != null &&
+            TryFindNearbyPadGraphics(map, firingTrigger, out posePos, out poseRot, out var nearbyCoid))
+        {
+            posePos = ApplyGroundYSafety(posePos, groundY);
+            poseSource = $"nearby-pad:{nearbyCoid}";
+            return;
+        }
+
+        if (firingTrigger != null)
+        {
+            posePos = ApplyGroundYSafety(firingTrigger.Position, groundY);
+            poseRot = firingTrigger.Rotation;
+            poseSource = $"trigger:{firingTrigger.ObjectId.Coid}";
+            return;
+        }
+
+        if (Position.X != 0f || Position.Y != 0f || Position.Z != 0f)
+        {
+            posePos = ApplyGroundYSafety(Position, groundY);
+            poseRot = Rotation;
+            poseSource = "reaction";
+            return;
+        }
+
+        posePos = activator.Position;
+        poseRot = activator.Rotation;
+        poseSource = "activator";
+    }
+
+    private bool TryResolveLinkedPadPose(
+        SectorMap map,
+        out Vector3 posePos,
+        out Quaternion poseRot,
+        out long objectCoid)
+    {
+        posePos = default;
+        poseRot = Quaternion.Default;
+        objectCoid = 0;
+
+        foreach (var coid in Template.Objects)
+        {
+            var linked = map.GetObjectByCoid(coid);
+            if (linked != null && linked is not Trigger && linked is not Reaction)
+            {
+                posePos = linked.Position;
+                poseRot = linked.Rotation;
+                objectCoid = coid;
+                return true;
+            }
+
+            if (map.MapData?.Templates != null &&
+                map.MapData.Templates.TryGetValue(coid, out var template) &&
+                template is GraphicsObjectTemplate graphics &&
+                template is not TriggerTemplate &&
+                template is not SpawnPointTemplate)
+            {
+                posePos = graphics.Location.ToVector3();
+                poseRot = graphics.Rotation;
+                objectCoid = coid;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private Trigger FindTriggerForReaction(SectorMap map, long reactionCoid, ClonedObjectBase activator)
+    {
+        Trigger bestInRange = null;
+        Trigger bestAny = null;
+
+        foreach (var trigger in map.Triggers.Values)
+        {
+            if (trigger.Template?.Reactions == null)
+                continue;
+
+            var listsThis = false;
+            foreach (var listed in trigger.Template.Reactions)
+            {
+                if (listed == reactionCoid || listed == Template.COID)
+                {
+                    listsThis = true;
+                    break;
+                }
+            }
+
+            if (!listsThis)
+                continue;
+
+            bestAny ??= trigger;
+
+            var range = trigger.Scale > 0f ? trigger.Scale : 1f;
+            if (activator.Position.DistSq(trigger.Position) <= range * range)
+            {
+                bestInRange = trigger;
+                break;
+            }
+        }
+
+        return bestInRange ?? bestAny;
+    }
+
+    private static bool TryFindNearbyPadGraphics(
+        SectorMap map,
+        Trigger trigger,
+        out Vector3 posePos,
+        out Quaternion poseRot,
+        out long objectCoid)
+    {
+        posePos = default;
+        poseRot = Quaternion.Default;
+        objectCoid = 0;
+
+        var searchRadius = Math.Max(trigger.Scale * 2f, 25f);
+        var searchRadiusSq = searchRadius * searchRadius;
+        var origin = trigger.Position;
+
+        ClonedObjectBase best = null;
+        var bestDistSq = float.MaxValue;
+
+        foreach (var obj in map.Objects.Values)
+        {
+            if (obj is null or Trigger or Reaction or SpawnPoint or Vehicle or Character or Creature)
+                continue;
+
+            var distSq = obj.Position.DistSq(origin);
+            if (distSq > searchRadiusSq)
+                continue;
+
+            var score = distSq;
+            if (obj.Position.Y + 0.5f < origin.Y)
+                score += 1000f;
+
+            if (score < bestDistSq)
+            {
+                bestDistSq = score;
+                best = obj;
+            }
+        }
+
+        if (best == null && map.MapData?.Templates != null)
+        {
+            GraphicsObjectTemplate bestTmpl = null;
+            var bestTmplDistSq = float.MaxValue;
+            long bestTmplCoid = 0;
+
+            foreach (var kvp in map.MapData.Templates)
+            {
+                if (kvp.Value is not GraphicsObjectTemplate graphics)
+                    continue;
+                if (kvp.Value is TriggerTemplate or SpawnPointTemplate)
+                    continue;
+
+                var loc = graphics.Location.ToVector3();
+                var distSq = loc.DistSq(origin);
+                if (distSq > searchRadiusSq)
+                    continue;
+
+                var score = distSq;
+                if (loc.Y + 0.5f < origin.Y)
+                    score += 1000f;
+
+                if (score < bestTmplDistSq)
+                {
+                    bestTmplDistSq = score;
+                    bestTmpl = graphics;
+                    bestTmplCoid = kvp.Key;
+                }
+            }
+
+            if (bestTmpl != null)
+            {
+                posePos = bestTmpl.Location.ToVector3();
+                poseRot = bestTmpl.Rotation;
+                objectCoid = bestTmplCoid;
+                return true;
+            }
+        }
+
+        if (best == null)
+            return false;
+
+        posePos = best.Position;
+        poseRot = best.Rotation;
+        objectCoid = best.ObjectId.Coid;
+        return true;
+    }
+
+    private static Vector3 ApplyGroundYSafety(Vector3 pose, float groundY)
+    {
+        if (pose.Y < groundY - 2f)
+            return new Vector3(pose.X, groundY, pose.Z);
+
+        return pose;
     }
 
     private bool HandleTransferMap(ClonedObjectBase activator)

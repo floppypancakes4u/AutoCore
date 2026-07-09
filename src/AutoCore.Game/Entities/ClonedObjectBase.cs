@@ -217,10 +217,21 @@ public abstract class ClonedObjectBase
     public virtual void OnDeath(DeathType deathType)
     {
         //TimeOfDeath = Environment.TickCount; // TODO: linux time or what?
-        Ghost?.SetMaskBits(8);
+        Ghost?.SetMaskBits(GhostObject.HealthMask);
 
         IsCorpse = true;
-        // TODO: DeathType?
+        DeathType = deathType;
+    }
+
+    /// <summary>
+    /// Clears corpse state after INC respawn / revive. Subclasses restore HP.
+    /// </summary>
+    public virtual void Revive()
+    {
+        IsCorpse = false;
+        DeathType = DeathType.Silent;
+        Murderer = new TFID();
+        Ghost?.SetMaskBits(GhostObject.HealthMask);
     }
 
     public int GetIDFaction()
