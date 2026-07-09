@@ -66,15 +66,15 @@ public partial class SectorServer : BaseServer, ILoopable
 
             // Server-side combat tick: decouple firing from VehicleMoved packet arrival rate.
             // This fixes "clicking fires faster than holding" when the client sends fewer movement packets while stationary.
-            try
+            // SS-02: isolate per connection so one bad vehicle cannot skip others and failures are logged.
+            var combatEntries = new List<(long Coid, Action ProcessCombat)>(Interface.MapConnections.Count);
+            foreach (var kvp in Interface.MapConnections)
             {
-                foreach (var kvp in Interface.MapConnections)
-                {
-                    var conn = kvp.Value;
-                    conn?.CurrentCharacter?.CurrentVehicle?.ProcessCombatIfFiring();
-                }
+                var conn = kvp.Value;
+                var coid = conn != null ? conn.GetPlayerCOID() : kvp.Key;
+                combatEntries.Add((coid, () => conn?.CurrentCharacter?.CurrentVehicle?.ProcessCombatIfFiring()));
             }
-            catch { }
+            SectorCombatTick.ProcessAll(combatEntries);
         }
     }
 

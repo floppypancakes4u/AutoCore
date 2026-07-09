@@ -31,6 +31,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoCore.Launcher", "AutoCo
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoCore.Game.Tests", "AutoCore.Game.Tests\AutoCore.Game.Tests.csproj", "{7EAD9814-D516-42E8-A195-4A7A93F6A234}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoCore.Sector.Tests", "AutoCore.Sector.Tests\AutoCore.Sector.Tests.csproj", "{6B067557-6DFF-4702-A1F9-1E16BB9BE8B1}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -173,6 +175,18 @@ Global
 		{7EAD9814-D516-42E8-A195-4A7A93F6A234}.Release|x64.Build.0 = Release|Any CPU
 		{7EAD9814-D516-42E8-A195-4A7A93F6A234}.Release|x86.ActiveCfg = Release|Any CPU
 		{7EAD9814-D516-42E8-A195-4A7A93F6A234}.Release|x86.Build.0 = Release|Any CPU
+		{6B067557-6DFF-4702-A1F9-1E16BB9BE8B1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6B067557-6DFF-4702-A1F9-1E16BB9BE8B1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6B067557-6DFF-4702-A1F9-1E16BB9BE8B1}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{6B067557-6DFF-4702-A1F9-1E16BB9BE8B1}.Debug|x64.Build.0 = Debug|Any CPU
+		{6B067557-6DFF-4702-A1F9-1E16BB9BE8B1}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{6B067557-6DFF-4702-A1F9-1E16BB9BE8B1}.Debug|x86.Build.0 = Debug|Any CPU
+		{6B067557-6DFF-4702-A1F9-1E16BB9BE8B1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6B067557-6DFF-4702-A1F9-1E16BB9BE8B1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6B067557-6DFF-4702-A1F9-1E16BB9BE8B1}.Release|x64.ActiveCfg = Release|Any CPU
+		{6B067557-6DFF-4702-A1F9-1E16BB9BE8B1}.Release|x64.Build.0 = Release|Any CPU
+		{6B067557-6DFF-4702-A1F9-1E16BB9BE8B1}.Release|x86.ActiveCfg = Release|Any CPU
+		{6B067557-6DFF-4702-A1F9-1E16BB9BE8B1}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -189,6 +203,7 @@ Global
 		{F9E15C7F-5C65-4F25-8FEE-534008D72121} = {098C2A7E-0BFE-4311-8F31-C8F0CAE16C69}
 		{62B4725A-D4A7-4413-BDCF-DCA69020DE43} = {6EC7095A-5FB5-4F16-9B50-F0FE453F8F04}
 		{7EAD9814-D516-42E8-A195-4A7A93F6A234} = {032B04CA-4839-4D1C-AA37-0EB6A048F2F1}
+		{6B067557-6DFF-4702-A1F9-1E16BB9BE8B1} = {032B04CA-4839-4D1C-AA37-0EB6A048F2F1}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {BA9952EA-4196-4EB7-9548-6C4CE62781A5}
