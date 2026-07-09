@@ -12,6 +12,20 @@ using AutoCore.Utils.Memory;
 
 public class ChatManager : Singleton<ChatManager>
 {
+    /// <summary>
+    /// Delivers a private message to <paramref name="target"/> when online.
+    /// Returns false when the target is missing or has no <see cref="Character.OwningConnection"/> (SS-04).
+    /// Extracted for unit testing without full chat packet / ObjectManager plumbing.
+    /// </summary>
+    public static bool TryDeliverPrivateMessage(Character target, Action deliver)
+    {
+        if (target?.OwningConnection == null)
+            return false;
+
+        deliver?.Invoke();
+        return true;
+    }
+
     public void HandleChatPacket(TNLConnection connection, BinaryReader reader)
     {
         var packet = new ChatPacket();
@@ -39,7 +53,7 @@ public class ChatManager : Singleton<ChatManager>
                     break;
 
                 connection.SendGamePacket(packet);
-                target.OwningConnection.SendGamePacket(packet);
+                TryDeliverPrivateMessage(target, () => target.OwningConnection.SendGamePacket(packet));
                 break;
 
             default:
