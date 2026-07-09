@@ -50,12 +50,7 @@ public class ExplorationManager : Singleton<ExplorationManager>
 
         // Push known continents first (login restore → live UnlockRegion).
         foreach (var kvp in character.GetExplorationSnapshot())
-        {
-            Logger.WriteLog(LogType.Network,
-                "Exploration: sync UnlockRegion continent={0} bits=0x{1:X8} coid={2}",
-                kvp.Key, kvp.Value, character.ObjectId.Coid);
             SendUnlockRegion(character, kvp.Key, kvp.Value);
-        }
 
         // Sample current map position even if bits were already restored.
         var map = character.Map ?? character.CurrentVehicle?.Map;
@@ -105,10 +100,6 @@ public class ExplorationManager : Singleton<ExplorationManager>
 
         PersistExploration(character, continentId, newBits);
         SendUnlockRegion(character, continentId, newBits);
-
-        Logger.WriteLog(LogType.Network,
-            "Exploration: coid={0} revealed continent={1} area={2} bits=0x{3:X8}",
-            character.ObjectId.Coid, continentId, areaId, newBits);
     }
 
     private ContinentAreaMask GetOrLoadMask(SectorMap map)
@@ -149,9 +140,6 @@ public class ExplorationManager : Singleton<ExplorationManager>
 
             var mask = new ContinentAreaMask(continentId, width, height, mapData.GridSize, areaIds);
             _masks[continentId] = mask;
-            Logger.WriteLog(LogType.Initialize,
-                "Exploration: loaded area mask for continent {0} file={1} ({2}x{3}, grid={4})",
-                continentId, tgaName, width, height, mapData.GridSize);
             return mask;
         }
         catch (Exception ex)

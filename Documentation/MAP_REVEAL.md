@@ -122,7 +122,11 @@ Renamed in the Auto Assault Ghidra project during this work:
 | `0x005326b0` | `CVOGCharacter_SetAreaExploredBit` | Set/clear bit + LogicUI |
 | `0x0052b310` | `CVOGCharacter_IsAreaExplored` | Test explored bit |
 | `0x00531c80` | `CVOGReaction_UnlockContinentObject` | Create empty continent entry |
+| `0x005b0920` | `CNDHash_LookupByKey` | Hash lookup (continent unlocked table) |
+| `0x0053c560` | `CNDHash_Insert` | Hash insert (create-packet continent slots) |
 | `0x005d6c60` | `Client_LocalDiscoveryTick` | Client-only discovery while driving |
+
+Structs: `USContinentUnlocked` (12B), `SMSG_Sector_UnlockRegion` (16B).
 
 ## Live verification
 

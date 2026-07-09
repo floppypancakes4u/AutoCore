@@ -4,7 +4,6 @@ using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
-using AutoCore.Utils;
 
 public partial class Character
 {
@@ -35,10 +34,6 @@ public partial class Character
 
             _exploredByContinent[row.ContinentId] = row.ExploredBits;
         }
-
-        Logger.WriteLog(LogType.Debug,
-            "Character.LoadExplorations: coid={0} loaded {1} continent exploration row(s)",
-            ObjectId.Coid, _exploredByContinent.Count);
     }
 
     /// <summary>Test hook to seed exploration without DB.</summary>
@@ -80,17 +75,6 @@ public partial class Character
 
         for (; i < extended.ContinentUnlocked.Length; ++i)
             extended.ContinentUnlocked[i] = null;
-
-        if (_exploredByContinent.Count > 0)
-        {
-            var detail = string.Join(", ",
-                _exploredByContinent.OrderBy(k => k.Key).Select(k => $"{k.Key}=0x{k.Value:X8}"));
-            Logger.WriteLog(LogType.Network,
-                "Character.WriteExploration: coid={0} slots={1} [{2}]",
-                ObjectId.Coid,
-                Math.Min(_exploredByContinent.Count, extended.ContinentUnlocked.Length),
-                detail);
-        }
     }
 
     public uint GetExploredBits(int continentId)
