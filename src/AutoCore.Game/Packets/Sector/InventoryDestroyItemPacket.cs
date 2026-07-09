@@ -2,16 +2,13 @@ namespace AutoCore.Game.Packets.Sector;
 
 using AutoCore.Game.Constants;
 
-public sealed class InventoryDropPacket : BasePacket
+public sealed class InventoryDestroyItemPacket : BasePacket
 {
-    public override GameOpcode Opcode => GameOpcode.InventoryDrop;
+    public override GameOpcode Opcode => GameOpcode.InventoryDestroyItem;
 
     public byte[] RawBytes { get; private set; } = [];
     public long ItemCoid { get; private set; } = -1;
     public bool ItemGlobal { get; private set; }
-    public byte InventoryPositionX { get; private set; } = byte.MaxValue;
-    public byte InventoryPositionY { get; private set; } = byte.MaxValue;
-    public byte InventoryType { get; private set; }
 
     public override void Read(BinaryReader reader)
     {
@@ -27,19 +24,10 @@ public sealed class InventoryDropPacket : BasePacket
 
         if (RawBytes.Length > 0x10)
             ItemGlobal = RawBytes[0x10] != 0;
-
-        if (RawBytes.Length > 0x18)
-            InventoryPositionX = RawBytes[0x18];
-
-        if (RawBytes.Length > 0x19)
-            InventoryPositionY = RawBytes[0x19];
-
-        if (RawBytes.Length > 0x1a)
-            InventoryType = RawBytes[0x1a];
     }
 
-    public ReadOnlySpan<byte> TailBytes => RawBytes.Length > 0x1b
-        ? RawBytes.AsSpan(0x1b)
+    public ReadOnlySpan<byte> TailBytes => RawBytes.Length > 0x11
+        ? RawBytes.AsSpan(0x11)
         : ReadOnlySpan<byte>.Empty;
 
     public IEnumerable<long> EnumerateInt64Candidates()

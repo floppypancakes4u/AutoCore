@@ -2,9 +2,9 @@ namespace AutoCore.Game.Packets.Sector;
 
 using AutoCore.Game.Constants;
 
-public sealed class InventoryDropPacket : BasePacket
+public sealed class InventoryDropMMPacket : BasePacket
 {
-    public override GameOpcode Opcode => GameOpcode.InventoryDrop;
+    public override GameOpcode Opcode => GameOpcode.InventoryDropMM;
 
     public byte[] RawBytes { get; private set; } = [];
     public long ItemCoid { get; private set; } = -1;

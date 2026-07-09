@@ -89,8 +89,8 @@ public partial class TNLConnection : GhostConnection
 
         if (packet.Opcode == GameOpcode.InventoryGrabResponse)
             InventoryGrabDebugLog.RecordOutgoing(arr);
-        else if (packet.Opcode == GameOpcode.InventoryDropResponse)
-            InventoryDropDebugLog.RecordOutgoing(arr);
+        else
+            InventoryDropDebugLog.RecordOutgoingIfTossRelated(packet.Opcode, arr);
 
         if (packet.Opcode is GameOpcode.CreateSimpleObject
             or GameOpcode.CreateArmor
@@ -178,8 +178,8 @@ public partial class TNLConnection : GhostConnection
 
         if (gameOpcode == GameOpcode.InventoryGrab)
             InventoryGrabDebugLog.RecordIncoming(rawBytes);
-        else if (gameOpcode == GameOpcode.InventoryDrop)
-            InventoryDropDebugLog.RecordIncoming(rawBytes);
+        else
+            InventoryDropDebugLog.RecordIncomingIfTossRelated(gameOpcode, rawBytes);
 
         // Check if the opcode is a valid enum value
         if (!Enum.IsDefined(typeof(GameOpcode), gameOpcode))
@@ -328,12 +328,24 @@ public partial class TNLConnection : GhostConnection
                     HandleItemPickupPacket(reader);
                     break;
 
+                case GameOpcode.ItemDrop:
+                    HandleItemDropPacket(reader);
+                    break;
+
                 case GameOpcode.InventoryGrab:
                     HandleInventoryGrabPacket(reader);
                     break;
 
                 case GameOpcode.InventoryDrop:
                     HandleInventoryDropPacket(reader);
+                    break;
+
+                case GameOpcode.InventoryDropMM:
+                    HandleInventoryDropMMPacket(reader);
+                    break;
+
+                case GameOpcode.InventoryDestroyItem:
+                    HandleInventoryDestroyItemPacket(reader);
                     break;
 
                 case GameOpcode.Firing:

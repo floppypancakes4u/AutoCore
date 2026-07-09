@@ -92,6 +92,39 @@ A default admin account is automatically created when the database is first init
 
 You can use these credentials to log in immediately after starting the server.
 
+## Capturing Inventory Toss Packets (Dev)
+
+When investigating dragging a cargo item onto the world (toss/delete), the sector server records related packets via the dev control API (enabled by default on port `27999`).
+
+1. Start the server and connect a client.
+2. Clear the capture log:
+
+```powershell
+Invoke-RestMethod -Method Delete http://127.0.0.1:27999/inventory-drop-log
+```
+
+3. In the client, drag a cargo item onto the world.
+4. Read captured packets:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:27999/inventory-drop-log
+```
+
+Or run the live watcher (defaults to toss capture mode):
+
+```powershell
+dotnet run --project src/AutoCore.Dev -- inventory-drop-live --mode toss
+```
+
+Use `--mode cargo-move` to validate cargo slot moves instead. World tosses from cargo use the `ItemDrop` opcode (`0x2057`), not `InventoryDrop`. Check sector logs for decoded fields (`unknown`, coid, tail bytes, and candidate integers).
+
+On success the sector server sends, in order:
+
+1. `ItemDropResponse` (`0x2058`) — echoes the **cargo item COID** from the request at offset `+0x8` (the client resolves this and destroys the dragged inventory object)
+2. `InventoryCargoSendAll` — refreshes cargo after the drop
+
+World toss currently **does not spawn a ground object**; the item is removed from server cargo only. This avoids client crashes from world pickup/spawn state until full ground-loot flow is implemented.
+
 ## Next Steps
 
 See `SETUP.md` for detailed configuration and troubleshooting.

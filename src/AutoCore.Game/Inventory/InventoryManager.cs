@@ -3,6 +3,7 @@ namespace AutoCore.Game.Inventory;
 using System.Diagnostics.CodeAnalysis;
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.Constants;
+using AutoCore.Game.AgentDebug;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
@@ -766,6 +767,88 @@ public sealed class InventoryManager
         return new InventoryOperationResult(
             packets,
             $"HandleInventoryDropPacket: Player {character.Name} unequipped item {inventoryItem.Coid} (CBID: {inventoryItem.Cbid}, slot={slot}) to cargo slot {inventoryItem.InventoryPositionX},{inventoryItem.InventoryPositionY}");
+    }
+
+    public InventoryOperationResult TossToWorld(ItemDropPacket packet, Character character)
+    {
+        if (character == null)
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateItemDropFailure(packet),
+                "HandleItemDropPacket: Character is null");
+        }
+
+        if (packet.RawBytes.Length < ItemDropPacket.MinimumLength)
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateItemDropFailure(packet),
+                $"HandleItemDropPacket: Packet too short ({packet.RawBytes.Length} bytes, expected {ItemDropPacket.MinimumLength})");
+        }
+
+        var map = character.Map;
+        if (map == null)
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateItemDropFailure(packet),
+                "HandleItemDropPacket: Character has no map");
+        }
+
+        var vehicle = character.CurrentVehicle;
+        if (vehicle == null)
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateItemDropFailure(packet),
+                "HandleItemDropPacket: Character has no vehicle");
+        }
+
+        var cargoItem = FindByCoid(packet.ItemCoid);
+        if (cargoItem == null)
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateItemDropFailure(packet),
+                $"HandleItemDropPacket: Cargo item {packet.ItemCoid} not found");
+        }
+
+        _items.Remove(cargoItem);
+        PersistCargoDelete(character.ObjectId.Coid, cargoItem.Coid);
+
+        // #region agent log
+        TossDebugLogger.Log(
+            "H6",
+            "InventoryManager.TossToWorld:inventory-only",
+            "toss deletes cargo only; no world spawn",
+            new { cargoCbid = cargoItem.Cbid, cargoCoid = packet.ItemCoid, cbid = cargoItem.Cbid },
+            "post-fix");
+        // #endregion
+
+        var packets = new List<BasePacket>
+        {
+            new ItemDropResponsePacket
+            {
+                SourceObjectId = packet.SourceObjectId,
+                ItemCoid = packet.ItemCoid,
+                DropPosition = packet.DropPosition,
+                TailValue = packet.TailValue,
+                WasSuccessful = true
+            },
+            InventoryPacketFactory.CreateCargoSendAll(this)
+        };
+
+        return new InventoryOperationResult(
+            packets,
+            $"HandleItemDropPacket: Player {character.Name} tossed {cargoItem.DisplayName} (CBID {cargoItem.Cbid}, cargo coid={cargoItem.Coid}) — removed from cargo (no world spawn)");
+    }
+
+    public static ItemDropResponsePacket CreateItemDropFailure(ItemDropPacket packet)
+    {
+        return new ItemDropResponsePacket
+        {
+            SourceObjectId = packet.SourceObjectId,
+            ItemCoid = packet.ItemCoid,
+            DropPosition = packet.DropPosition,
+            TailValue = packet.TailValue,
+            WasSuccessful = false
+        };
     }
 
     public static InventoryGrabResponsePacket CreateGrabFailure(InventoryGrabPacket packet)

@@ -20,7 +20,7 @@ public static class Program
         Console.Error.WriteLine("Usage:");
         Console.Error.WriteLine("  AutoCore.Dev inventory-add-live [--character <name>] [--api <url>] [--process <name>] [--items <cbid,cbid>]");
         Console.Error.WriteLine("  AutoCore.Dev inventory-grab-live [--character <name>] [--api <url>] [--process <name>] [--timeout <seconds>] [--breakpoint]");
-        Console.Error.WriteLine("  AutoCore.Dev inventory-drop-live [--character <name>] [--api <url>] [--process <name>] [--timeout <seconds>]");
+        Console.Error.WriteLine("  AutoCore.Dev inventory-drop-live [--character <name>] [--api <url>] [--process <name>] [--timeout <seconds>] [--mode toss|cargo-move]");
         Console.Error.WriteLine("  AutoCore.Dev export-inventory-catalog [--game-path <path>] [--output <json-path>]");
         return 2;
     }

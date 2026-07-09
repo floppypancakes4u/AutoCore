@@ -1,11 +1,18 @@
 namespace AutoCore.Dev;
 
+public enum LiveInventoryDropMode
+{
+    Toss,
+    CargoMove
+}
+
 public sealed class LiveInventoryDropOptions
 {
     public string ApiBaseUrl { get; private set; } = "http://127.0.0.1:27999";
     public string ProcessName { get; private set; } = "autoassault";
     public string? Character { get; private set; }
     public int TimeoutSeconds { get; private set; } = 120;
+    public LiveInventoryDropMode Mode { get; private set; } = LiveInventoryDropMode.Toss;
 
     public static LiveInventoryDropOptions Parse(string[] args)
     {
@@ -31,6 +38,10 @@ public sealed class LiveInventoryDropOptions
                     options.TimeoutSeconds = int.Parse(RequireValue(args, ref i, "--timeout"));
                     break;
 
+                case "--mode":
+                    options.Mode = ParseMode(RequireValue(args, ref i, "--mode"));
+                    break;
+
                 default:
                     throw new ArgumentException($"Unknown option '{args[i]}'.");
             }
@@ -41,6 +52,14 @@ public sealed class LiveInventoryDropOptions
 
         return options;
     }
+
+    private static LiveInventoryDropMode ParseMode(string value) =>
+        value.ToLowerInvariant() switch
+        {
+            "toss" => LiveInventoryDropMode.Toss,
+            "cargo-move" => LiveInventoryDropMode.CargoMove,
+            _ => throw new ArgumentException("--mode must be 'toss' or 'cargo-move'.")
+        };
 
     private static string RequireValue(string[] args, ref int index, string option)
     {

@@ -285,6 +285,25 @@ public partial class TNLConnection
         // TODO: Send InventoryAddItem packet to add the item to the player's inventory
     }
 
+    private void HandleItemDropPacket(BinaryReader reader)
+    {
+        var packet = new ItemDropPacket();
+        packet.Read(reader);
+
+        Logger.WriteLog(
+            LogType.Network,
+            $"HandleItemDropPacket: raw={Convert.ToHexString(packet.RawBytes)} source={packet.SourceObjectId} coid={packet.ItemCoid} pos={packet.DropPosition}" +
+            (packet.RawBytes.Length >= ItemDropPacket.MinimumLength ? $" tail={packet.TailValue}" : string.Empty));
+
+        var result = CurrentCharacter?.Inventory.TossToWorld(packet, CurrentCharacter)
+            ?? InventoryOperationResult.SinglePacket(
+                InventoryManager.CreateItemDropFailure(packet),
+                "HandleItemDropPacket: Character is null");
+
+        LogInventoryOperationResult(result);
+        SendInventoryOperationPackets(result);
+    }
+
     private void HandleInventoryGrabPacket(BinaryReader reader)
     {
         var packet = new InventoryGrabPacket();
@@ -309,9 +328,9 @@ public partial class TNLConnection
         var packet = new InventoryDropPacket();
         packet.Read(reader);
 
-        Logger.WriteLog(
-            LogType.Debug,
-            $"HandleInventoryDropPacket: raw={Convert.ToHexString(packet.RawBytes)} coid={packet.ItemCoid} global={packet.ItemGlobal} invType={packet.InventoryType} slot={packet.InventoryPositionX},{packet.InventoryPositionY}");
+        LogInventoryTossPacket("HandleInventoryDropPacket", packet.RawBytes, packet.ItemCoid, packet.ItemGlobal,
+            packet.InventoryType, packet.InventoryPositionX, packet.InventoryPositionY, packet.TailBytes,
+            packet.EnumerateInt64Candidates(), packet.EnumerateInt32Candidates());
 
         var result = CurrentCharacter?.Inventory.Drop(packet, CurrentCharacter)
             ?? InventoryOperationResult.SinglePacket(
@@ -320,6 +339,62 @@ public partial class TNLConnection
 
         LogInventoryOperationResult(result);
         SendInventoryOperationPackets(result);
+    }
+
+    private void HandleInventoryDropMMPacket(BinaryReader reader)
+    {
+        var packet = new InventoryDropMMPacket();
+        packet.Read(reader);
+
+        LogInventoryTossPacket("HandleInventoryDropMMPacket", packet.RawBytes, packet.ItemCoid, packet.ItemGlobal,
+            packet.InventoryType, packet.InventoryPositionX, packet.InventoryPositionY, packet.TailBytes,
+            packet.EnumerateInt64Candidates(), packet.EnumerateInt32Candidates());
+
+        Logger.WriteLog(
+            LogType.Network,
+            "HandleInventoryDropMMPacket: log-only stub — world toss via InventoryDropMM is not implemented yet");
+    }
+
+    private void HandleInventoryDestroyItemPacket(BinaryReader reader)
+    {
+        var packet = new InventoryDestroyItemPacket();
+        packet.Read(reader);
+
+        Logger.WriteLog(
+            LogType.Network,
+            $"HandleInventoryDestroyItemPacket: raw={Convert.ToHexString(packet.RawBytes)} coid={packet.ItemCoid} global={packet.ItemGlobal}" +
+            (packet.TailBytes.Length > 0 ? $" tail={Convert.ToHexString(packet.TailBytes)}" : string.Empty) +
+            $" i32=[{string.Join(",", packet.EnumerateInt32Candidates())}] i64=[{string.Join(",", packet.EnumerateInt64Candidates())}]");
+
+        Logger.WriteLog(
+            LogType.Network,
+            "HandleInventoryDestroyItemPacket: log-only stub — inventory destroy/toss is not implemented yet");
+    }
+
+    private static void LogInventoryTossPacket(
+        string handler,
+        byte[] rawBytes,
+        long itemCoid,
+        bool itemGlobal,
+        byte inventoryType,
+        byte inventoryPositionX,
+        byte inventoryPositionY,
+        ReadOnlySpan<byte> tailBytes,
+        IEnumerable<long> int64Candidates,
+        IEnumerable<int> int32Candidates)
+    {
+        var message =
+            $"{handler}: raw={Convert.ToHexString(rawBytes)} coid={itemCoid} global={itemGlobal} invType={inventoryType} slot={inventoryPositionX},{inventoryPositionY}";
+
+        if (tailBytes.Length > 0)
+            message += $" tail={Convert.ToHexString(tailBytes)}";
+
+        if (inventoryType is not 1 and not 2)
+        {
+            message += $" i32=[{string.Join(",", int32Candidates)}] i64=[{string.Join(",", int64Candidates)}]";
+        }
+
+        Logger.WriteLog(LogType.Network, message);
     }
 
     private void LogInventoryOperationResult(InventoryOperationResult result)
