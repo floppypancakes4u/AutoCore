@@ -305,6 +305,10 @@ public partial class TNLConnection : GhostConnection
                     HandleUseObjectPacket(reader);
                     break;
 
+                case GameOpcode.AutoPatrol:
+                    HandleAutoPatrolPacket(reader);
+                    break;
+
                 case GameOpcode.MissionDialogResponse:
                     HandleMissionDialogResponse(reader);
                     break;

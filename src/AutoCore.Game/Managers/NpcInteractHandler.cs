@@ -479,6 +479,156 @@ public static class NpcInteractHandler
         return true;
     }
 
+    /// <summary>
+    /// C2S AutoPatrol (0x20B3): client is within auto-complete range of a patrol waypoint.
+    /// Match packet target to the active AutoComplete patrol requirement, verify range, then
+    /// advance the objective sequence or complete the mission.
+    /// </summary>
+    public static void HandleAutoPatrol(TNLConnection conn, AutoPatrolPacket packet)
+    {
+        if (conn == null || packet == null)
+            return;
+
+        var character = conn.CurrentCharacter;
+        var vehicle = character?.CurrentVehicle;
+        if (character?.Map == null || vehicle == null)
+            return;
+
+        var targetCoid = packet.Target?.Coid ?? -1;
+        if (targetCoid <= 0)
+            return;
+
+        foreach (var quest in character.CurrentQuests.ToList())
+        {
+            if (character.CompletedMissionIds.Contains(quest.MissionId))
+                continue;
+
+            var mission = AssetManager.Instance.GetMission(quest.MissionId);
+            if (mission == null
+                || !mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var objective))
+            {
+                continue;
+            }
+
+            var patrol = objective.Requirements.OfType<ObjectiveRequirementPatrol>().FirstOrDefault();
+            if (patrol == null || !patrol.AutoComplete)
+                continue;
+
+            if (!PatrolListsTarget(patrol, targetCoid))
+                continue;
+
+            if (!TryGetWorldPosition(character.Map, targetCoid, out var targetPos))
+                continue;
+
+            var radius = patrol.AutoCompleteDistance > 0f ? patrol.AutoCompleteDistance : 25f;
+            if (vehicle.Position.DistSq(targetPos) > radius * radius)
+                continue;
+
+            AdvanceOrCompleteObjective(conn, character, quest, mission, objective);
+            return;
+        }
+    }
+
+    private static bool PatrolListsTarget(ObjectiveRequirementPatrol patrol, long targetCoid)
+    {
+        var count = Math.Max(patrol.TargetCount, 0);
+        if (count == 0)
+            count = patrol.GenericTargets.Length;
+
+        for (var i = 0; i < count && i < patrol.GenericTargets.Length; i++)
+        {
+            if (patrol.GenericTargets[i] == targetCoid)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetWorldPosition(SectorMap map, long coid, out Vector3 position)
+    {
+        var live = map.GetObjectByCoid(coid);
+        if (live != null)
+        {
+            position = live.Position;
+            return true;
+        }
+
+        if (map.MapData.Templates.TryGetValue(coid, out var template)
+            && template is EntityTemplates.GraphicsObjectTemplate graphics)
+        {
+            position = graphics.Location.ToVector3();
+            return true;
+        }
+
+        position = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Finish the current objective: advance to the next sequence, or complete the mission.
+    /// Sends CompleteDynamicObjective so the client retargets UI / waypoints.
+    /// </summary>
+    private static void AdvanceOrCompleteObjective(
+        TNLConnection conn,
+        Character character,
+        CharacterQuest quest,
+        Mission mission,
+        MissionObjective objective)
+    {
+        var seq = quest.ActiveObjectiveSequence;
+        var hasNext = mission.Objectives.Values.Any(o => o.Sequence > seq);
+
+        conn.SendGamePacket(new CompleteDynamicObjectivePacket
+        {
+            MissionId = quest.MissionId,
+            ObjectiveId = objective.ObjectiveId,
+        });
+
+        if (hasNext)
+        {
+            var nextSeq = mission.Objectives.Values
+                .Where(o => o.Sequence > seq)
+                .Min(o => o.Sequence);
+            quest.ActiveObjectiveSequence = nextSeq;
+            if (seq < quest.ObjectiveProgress.Length)
+                quest.ObjectiveProgress[seq] = quest.ObjectiveMax[seq];
+
+            Logger.WriteLog(LogType.Debug,
+                "AutoPatrol: advanced mission={0} seq {1} -> {2} objective={3}",
+                quest.MissionId,
+                seq,
+                nextSeq,
+                objective.ObjectiveId);
+
+            var nextObjective = GetActiveObjective(quest);
+            if (nextObjective != null)
+            {
+                conn.SendGamePacket(new ObjectiveStatePacket
+                {
+                    ObjectiveBitmask = 0u,
+                    ObjectiveId = nextObjective.ObjectiveId,
+                });
+            }
+
+            PushJournalMissionList(conn, character);
+            TriggerManager.Instance.OnMissionStateChanged(
+                character.CurrentVehicle ?? (ClonedObjectBase)character);
+            return;
+        }
+
+        character.CurrentQuests.Remove(quest);
+        character.CompletedMissionIds.Add(quest.MissionId);
+
+        Logger.WriteLog(LogType.Debug,
+            "AutoPatrol: completed mission={0} objective={1}",
+            quest.MissionId,
+            objective.ObjectiveId);
+
+        PushJournalMissionList(conn, character);
+        TriggerManager.Instance.OnMissionStateChanged(
+            character.CurrentVehicle ?? (ClonedObjectBase)character);
+    }
+
     private static void PushJournalMissionList(TNLConnection conn, Character character)
     {
         conn.SendGamePacket(new ConvoyMissionsResponsePacket

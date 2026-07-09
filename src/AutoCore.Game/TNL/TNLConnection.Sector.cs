@@ -193,6 +193,23 @@ public partial class TNLConnection
         NpcInteractHandler.HandleUseObject(this, packet);
     }
 
+    private void HandleAutoPatrolPacket(BinaryReader reader)
+    {
+        // Client may send this every tick while near a waypoint — quiet parse + progress once.
+        var packet = new AutoPatrolPacket();
+        try
+        {
+            packet.Read(reader);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error, "HandleAutoPatrolPacket: parse failed: {0}", ex.Message);
+            return;
+        }
+
+        NpcInteractHandler.HandleAutoPatrol(this, packet);
+    }
+
     private void HandleMissionDialogResponse(BinaryReader reader)
     {
         // Ghidra: S2C dialog open is 0x206D (NpcMissionDialogPacket);
