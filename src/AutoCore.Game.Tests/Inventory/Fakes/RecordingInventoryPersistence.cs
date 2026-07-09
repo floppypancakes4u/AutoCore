@@ -11,7 +11,9 @@ public sealed class RecordingInventoryPersistence : IInventoryPersistence
     public List<(long CharacterCoid, int Width, int PageCount)> CapacitySaves { get; } = new();
     public List<(long ItemCoid, byte Type, int Cbid)> EnsuredSimpleObjects { get; } = new();
 
-    public IReadOnlyList<CharacterInventoryItem> LoadCargo(long characterCoid) => Array.Empty<CharacterInventoryItem>();
+    public List<CharacterInventoryItem> CargoToLoad { get; } = new();
+
+    public IReadOnlyList<CharacterInventoryItem> LoadCargo(long characterCoid) => CargoToLoad;
 
     public void UpsertCargo(long characterCoid, CharacterInventoryItem item) =>
         Upserted.Add((characterCoid, item));

@@ -7,6 +7,7 @@
 - **[Quick Start Guide](QUICKSTART.md)** - Get running in 5 minutes
 - **[Setup Guide](SETUP.md)** - Detailed server setup instructions
 - **[Client Setup Guide](CLIENT_SETUP.md)** - Configure the Auto Assault client to connect to your server
+- **[Documentation index](docs/TOC.md)** - Networking, packet layout, and subsystem docs
 - **[Inventory Catalog](tools/inventory-catalog/README.md)** - Browse exported inventory item definitions and stack sizes
 
 ## Overview

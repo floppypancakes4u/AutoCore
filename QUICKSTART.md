@@ -118,12 +118,29 @@ dotnet run --project src/AutoCore.Dev -- inventory-drop-live --mode toss
 
 Use `--mode cargo-move` to validate cargo slot moves instead. World tosses from cargo use the `ItemDrop` opcode (`0x2057`), not `InventoryDrop`. Check sector logs for decoded fields (`unknown`, coid, tail bytes, and candidate integers).
 
+For how to implement and test client-compatible packet layouts (padding, TFID, `SendGamePacket`), see [docs/networking.md](docs/networking.md).
+
 On success the sector server sends, in order:
 
 1. `ItemDropResponse` (`0x2058`) — echoes the **cargo item COID** from the request at offset `+0x8` (the client resolves this and destroys the dragged inventory object)
 2. `InventoryCargoSendAll` — refreshes cargo after the drop
 
 World toss currently **does not spawn a ground object**; the item is removed from server state only. This works for **cargo** items and for **equipped vehicle modules** after an `InventoryGrab` with `inventoryType=2` (the server tracks these as pending equipped drags between grab and drop/toss).
+
+## Inventory test coverage gate
+
+Run inventory-related unit tests with coverlet, then enforce the scoped **90%** line-coverage gate:
+
+```powershell
+dotnet test src/AutoCore.Game.Tests/AutoCore.Game.Tests.csproj `
+  --filter "FullyQualifiedName~Inventory|FullyQualifiedName~ItemDrop|FullyQualifiedName~InventoryDropMM" `
+  --collect:"XPlat Code Coverage" `
+  --results-directory TestResults
+
+powershell scripts/measure-scoped-coverage.ps1 -MinimumRate 90
+```
+
+The gate covers `src/AutoCore.Game/Inventory/*` (except `InventoryPersistence.cs`), `Entities/Vehicle.cs`, and `Packets/Sector/Inventory*` / `ItemDrop*` types. Debug-log helpers and `[ExcludeFromCodeCoverage]` world-loot grab internals are excluded from the scope.
 
 ## Next Steps
 

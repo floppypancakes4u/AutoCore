@@ -145,6 +145,25 @@ public sealed class InventoryTestHarness
         return ReadPacket<InventoryDropPacket>(bytes);
     }
 
+    public static ItemDropPacket CreateItemDropPacket(
+        long itemCoid,
+        int sourceObjectId = 0,
+        float dropX = 1f,
+        float dropY = 2f,
+        float dropZ = 3f,
+        long tailValue = 5276635759L)
+    {
+        var bytes = new byte[ItemDropPacket.MinimumLength];
+        BitConverter.GetBytes((uint)GameOpcode.ItemDrop).CopyTo(bytes, 0);
+        BitConverter.GetBytes(sourceObjectId).CopyTo(bytes, 4);
+        BitConverter.GetBytes(itemCoid).CopyTo(bytes, 8);
+        BitConverter.GetBytes(dropX).CopyTo(bytes, 0x10);
+        BitConverter.GetBytes(dropY).CopyTo(bytes, 0x14);
+        BitConverter.GetBytes(dropZ).CopyTo(bytes, 0x18);
+        BitConverter.GetBytes(tailValue).CopyTo(bytes, 0x28);
+        return ReadPacket<ItemDropPacket>(bytes);
+    }
+
     private static T ReadPacket<T>(byte[] bytes) where T : BasePacket, new()
     {
         using var stream = new MemoryStream(bytes);
