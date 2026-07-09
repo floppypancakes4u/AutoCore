@@ -1,5 +1,4 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace AutoCore.Game.Entities;
 
@@ -11,7 +10,7 @@ using AutoCore.Game.Structures;
 using AutoCore.Game.TNL;
 using AutoCore.Game.TNL.Ghost;
 
-public class Character : Creature
+public partial class Character : Creature
 {
     #region Properties
     #region Database Character Data
@@ -226,24 +225,7 @@ public class Character : Creature
             extendedCharPacket.NumDisciplines = 0;
             extendedCharPacket.NumSkills = 0;
 
-            // Load FirstTimeFlags from Account
-            if (OwningConnection?.Account != null)
-            {
-                extendedCharPacket.FirstTimeFlags[0] = OwningConnection.Account.FirstFlags1;
-                extendedCharPacket.FirstTimeFlags[1] = OwningConnection.Account.FirstFlags2;
-                extendedCharPacket.FirstTimeFlags[2] = OwningConnection.Account.FirstFlags3;
-                extendedCharPacket.FirstTimeFlags[3] = OwningConnection.Account.FirstFlags4;
-
-                // #region agent log
-                try { var logData = new { location = "Character.cs:171", message = "Populated FirstTimeFlags from Account", data = new { accountId = OwningConnection.Account.Id, FirstFlags1 = OwningConnection.Account.FirstFlags1, FirstFlags2 = OwningConnection.Account.FirstFlags2, FirstFlags3 = OwningConnection.Account.FirstFlags3, FirstFlags4 = OwningConnection.Account.FirstFlags4 }, timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), sessionId = "debug-session", runId = "run1", hypothesisId = "F" }; File.AppendAllText(@"c:\Users\josh\Documents\GitHub\AutoCore\.cursor\debug.log", System.Text.Json.JsonSerializer.Serialize(logData) + "\n"); } catch { }
-                // #endregion
-            }
-            else
-            {
-                // #region agent log
-                try { var logData = new { location = "Character.cs:179", message = "OwningConnection or Account is null, FirstTimeFlags will be zeros", data = new { hasOwningConnection = OwningConnection != null, hasAccount = OwningConnection?.Account != null }, timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), sessionId = "debug-session", runId = "run1", hypothesisId = "F" }; File.AppendAllText(@"c:\Users\josh\Documents\GitHub\AutoCore\.cursor\debug.log", System.Text.Json.JsonSerializer.Serialize(logData) + "\n"); } catch { }
-                // #endregion
-            }
+            WriteFirstTimeFlags(extendedCharPacket);
 
             AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Debug, $"Character.WriteToPacket: Sending {CurrentQuests.Count} current quests");
         }

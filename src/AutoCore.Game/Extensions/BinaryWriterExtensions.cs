@@ -23,4 +23,31 @@ public static class BinaryWriterExtensions
     {
         writer.Write((uint)opcode);
     }
+
+    /// <summary>
+    /// Writes <paramref name="count"/> zero bytes. Prefer this over advancing Position
+    /// so MemoryStream gaps are always defined zeros for packet layout tests.
+    /// </summary>
+    public static void WriteZeros(this BinaryWriter writer, int count)
+    {
+        if (count <= 0)
+            return;
+
+        if (count <= 64)
+        {
+            Span<byte> zeros = stackalloc byte[count];
+            zeros.Clear();
+            writer.Write(zeros);
+            return;
+        }
+
+        var buffer = new byte[Math.Min(count, 256)];
+        var remaining = count;
+        while (remaining > 0)
+        {
+            var chunk = Math.Min(remaining, buffer.Length);
+            writer.Write(buffer, 0, chunk);
+            remaining -= chunk;
+        }
+    }
 }
