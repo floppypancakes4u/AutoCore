@@ -162,6 +162,11 @@ public partial class TNLConnection
         SendGamePacket(charPacket);
         SendGamePacket(InventoryPacketFactory.CreateCargoSendAll(character.Inventory));
 
+        // CreateCharacterExtended.Credits stay 0 (login-safe). Restore via CharacterLevel.
+        var currencyRestore = CurrencySync.TryCreateLoginRestorePacket(character);
+        if (currencyRestore != null)
+            SendGamePacket(currencyRestore);
+
         // CreateCharacterExtended hash-inserts continents without per-bit UI notify.
         // UnlockRegion (sent twice) forces client apply + map fog refresh.
         ExplorationManager.Instance.SyncExplorationAfterLogin(character);

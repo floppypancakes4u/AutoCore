@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
-using System.Text;
 
 namespace AutoCore.Game.Entities;
 
@@ -53,12 +52,17 @@ public class Vehicle : SimpleObject
     private long _lastFireMsTurret;
     private long _lastFireMsRear;
 
-    // Chat-based combat feedback (this is NOT the "floating combat text"; it's the combat log/chat channel)
-    // We'll experiment with multiple ChatTypes to see what the client renders differently.
+    // Retail floating numbers use EMSG_Sector_Damage (0x2023) → combat-event list (game+0xAA8).
+    // Broadcast freeform floaters use a different list (game+0xAC0) and do not reliably render.
     private static readonly Dictionary<long, long> _lastCombatMsgByAttackerMs = new();
 
     [ExcludeFromCodeCoverage]
-    private static void TrySendCombatMessage(Character? attacker, string message, ChatType chatType = ChatType.CombatMessage_Regular)
+    private static void TrySendDamagePacket(
+        Character? attacker,
+        TFID source,
+        TFID target,
+        int actualDamage,
+        DamagePacket.DamageEntryFlags flags = default)
     {
         try
         {
@@ -66,48 +70,23 @@ public class Vehicle : SimpleObject
             if (conn == null)
                 return;
 
-            // Simple rate limit per attacker to avoid flooding client chat.
             var now = Environment.TickCount64;
             var key = attacker?.ObjectId.Coid ?? 0;
             if (key != 0)
             {
-                if (_lastCombatMsgByAttackerMs.TryGetValue(key, out var last) && now - last < 200)
+                if (_lastCombatMsgByAttackerMs.TryGetValue(key, out var last) && now - last < 100)
                     return;
                 _lastCombatMsgByAttackerMs[key] = now;
             }
 
-            var msgLen = (short)(Encoding.UTF8.GetByteCount(message) + 1); // include null terminator
-            conn.SendGamePacket(new BroadcastPacket
-            {
-                ChatType = chatType,
-                SenderCoid = (ulong)(attacker?.ObjectId.Coid ?? 0),
-                IsGM = false,
-                Sender = "Combat",
-                MessageLength = msgLen,
-                Message = message
-            });
-
+            var packet = new DamagePacket { Source = source ?? new TFID() };
+            packet.AddHit(target ?? new TFID(), actualDamage, flags);
+            conn.SendGamePacket(packet, skipOpcode: true);
         }
         catch
         {
-            // never let chat break combat loop
+            // never let combat networking break the fire loop
         }
-    }
-
-    [ExcludeFromCodeCoverage]
-    private static void TrySendCombatHitProbe(Character? attacker, int actualDamage)
-    {
-        // Send minimal strings in different chat channels so we can see which UI the client uses.
-        // (If none become "floating text", then floating text likely requires a different opcode/packet than Broadcast.)
-        TrySendCombatMessage(attacker, actualDamage.ToString(), ChatType.CombatMessage_Regular);
-        TrySendCombatMessage(attacker, actualDamage.ToString(), ChatType.CombatMessage_Health);
-    }
-
-    [ExcludeFromCodeCoverage]
-    private static void TrySendCombatMissProbe(Character? attacker)
-    {
-        TrySendCombatMessage(attacker, "Miss", ChatType.CombatMessage_LowImportance);
-        TrySendCombatMessage(attacker, "Miss", ChatType.CombatMessage_Regular);
     }
     #endregion
 
@@ -812,7 +791,8 @@ public class Vehicle : SimpleObject
         var roll = (float)rng.NextDouble();
         if (roll > hitChance)
         {
-            TrySendCombatMissProbe(attackerChar);
+            // No floater on miss: client only shows "Miss" via a local-sim flag we cannot set
+            // from the Damage packet (event+0x2A is hardcoded 0 in the recv path).
             return;
         }
 
@@ -848,30 +828,12 @@ public class Vehicle : SimpleObject
 
 
         var actualDamage = Target.TakeDamage(damage);
-        TrySendCombatHitProbe(attackerChar, actualDamage);
-
-
-        try
-        {
-            attackerChar?.OwningConnection?.SendGamePacket(new DamagePacket
-            {
-                Target = Target.ObjectId,
-                Source = ObjectId,
-                Damage = actualDamage,
-                DamageType = 0,
-                Flags = 0
-            });
-        }
-        catch { }
-
+        TrySendDamagePacket(attackerChar, ObjectId, Target.ObjectId, actualDamage);
 
         if (Target.GetCurrentHP() <= 0)
         {
-            // Set the murderer before calling OnDeath so loot can be attributed
             Target.SetMurderer(this);
             Target.OnDeath(DeathType.Silent);
-            TrySendCombatMessage(attackerChar, $"Killed {Target.GetType().Name}#{Target.ObjectId.Coid}", ChatType.CombatMessage_HighImportance);
-
         }
     }
 }

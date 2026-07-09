@@ -20,6 +20,12 @@ public interface IInventoryPersistence
     void SaveVehicleEquipment(long vehicleCoid, VehicleEquipmentSnapshot snapshot);
 
     void SaveCharacterCargoCapacity(long characterCoid, int width, int pageCount);
+
+    /// <summary>Load absolute credits balance for a character (0 if missing).</summary>
+    long LoadCredits(long characterCoid);
+
+    /// <summary>Persist absolute credits balance for a character.</summary>
+    void SaveCredits(long characterCoid, long credits);
 }
 
 public readonly record struct VehicleEquipmentSnapshot(

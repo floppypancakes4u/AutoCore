@@ -38,6 +38,7 @@ public class CharContext : DbContext
         using var context = new CharContext();
         context.Database.EnsureCreated();
         context.EnsureInventorySchema();
+        context.EnsureCharacterEconomySchema();
     }
 
     /// <summary>
@@ -68,6 +69,21 @@ public class CharContext : DbContext
                 UNIQUE KEY `IX_character_inventory_ItemCoid` (`ItemCoid`),
                 KEY `IX_character_inventory_CharacterCoid` (`CharacterCoid`)
             )
+            """);
+    }
+
+    /// <summary>
+    /// Adds currency columns for existing character DBs created before economy persistence.
+    /// </summary>
+    public void EnsureCharacterEconomySchema()
+    {
+        TryExecute("""
+            ALTER TABLE `character`
+            ADD COLUMN `Credits` BIGINT NOT NULL DEFAULT 0
+            """);
+        TryExecute("""
+            ALTER TABLE `character`
+            ADD COLUMN `CreditDebt` BIGINT NOT NULL DEFAULT 0
             """);
     }
 

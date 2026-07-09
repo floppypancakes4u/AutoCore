@@ -37,6 +37,17 @@ public class CharacterData
     public float RotationW { get; set; }
     public float ScaleOffset { get; set; }
     public byte Level { get; set; } = 1;
+
+    /// <summary>
+    /// Server-authoritative money as a single int64 (Globes/Bars/Scrip/Clink groups of 1000).
+    /// Client UI is restored after login via CharacterLevel (0x2017); do not write non-zero
+    /// values into CreateCharacterExtended.Credits (that crashes the retail client).
+    /// </summary>
+    public long Credits { get; set; }
+
+    /// <summary>Optional debt mirror (server-side only; not written on login spawn).</summary>
+    public long CreditDebt { get; set; }
+
     public bool Deleted { get; set; }
 
     /// <summary>
