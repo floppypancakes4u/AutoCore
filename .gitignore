@@ -291,3 +291,7 @@ src/AutoCore.sln
 src/AutoCore.sln
 /.claude
 /Documentation
+
+# Git worktrees (local isolated checkouts)
+.worktrees/
+
