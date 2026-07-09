@@ -1,5 +1,7 @@
 ﻿namespace AutoCore.Utils.Threading;
 
+using AutoCore.Utils;
+
 public class MainLoop
 {
     public int LoopTime { get; }
@@ -52,7 +54,16 @@ public class MainLoop
 
             var delta = realTime - prevTime;
 
-            Object.MainLoop(delta);
+            // SS-01: never let a tick exception kill the main loop thread.
+            try
+            {
+                Object.MainLoop(delta);
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLog(LogType.Error,
+                    $"Unhandled exception in MainLoop tick; continuing. {ex}");
+            }
 
             prevTime = realTime;
 
