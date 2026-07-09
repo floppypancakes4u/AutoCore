@@ -1,4 +1,4 @@
-﻿namespace AutoCore.Game.Managers;
+namespace AutoCore.Game.Managers;
 
 using AutoCore.Database.Char;
 using AutoCore.Game.Entities;
@@ -19,6 +19,37 @@ public class ObjectManager : Singleton<ObjectManager>
 
         Objects.Add(obj.ObjectId.Coid, obj);
         return true;
+    }
+
+    /// <summary>
+    /// Removes a living entity from the registry. Safe if missing.
+    /// </summary>
+    public bool Remove(long coid) => Objects.Remove(coid);
+
+    /// <summary>
+    /// Removes a living entity from the registry by object reference. Safe if null/missing.
+    /// </summary>
+    public bool Remove(ClonedObjectBase obj)
+    {
+        if (obj == null)
+            return false;
+
+        return Remove(obj.ObjectId.Coid);
+    }
+
+    /// <summary>
+    /// Session end: unregister character and its current vehicle so reconnect cannot
+    /// receive a stale living instance (SS-03).
+    /// </summary>
+    public void UnregisterCharacterSession(Character character)
+    {
+        if (character == null)
+            return;
+
+        if (character.CurrentVehicle != null)
+            Remove(character.CurrentVehicle);
+
+        Remove(character);
     }
 
     public Character GetOrLoadCharacter(long coid, CharContext context)

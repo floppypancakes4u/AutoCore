@@ -541,6 +541,9 @@ public partial class TNLConnection : GhostConnection
             CurrentCharacter.CurrentVehicle.SetMap(null);
             CurrentCharacter.ClearGhost();
             CurrentCharacter.CurrentVehicle.ClearGhost();
+            // Drop living entities from the global registry before clearing the connection
+            // binding so reconnect loads a fresh character/vehicle (SS-03).
+            ObjectManager.Instance.UnregisterCharacterSession(CurrentCharacter);
             CurrentCharacter = null;
         }
 
