@@ -125,6 +125,79 @@ public class InventoryManagerEdgeTests
     }
 
     [TestMethod]
+    public void AddItem_WithQuantity_PersistsQuantityAndSetsPacketQuantity()
+    {
+        var persistence = new Fakes.RecordingInventoryPersistence();
+        var inventory = new InventoryManager(persistence);
+        var entry = new InventoryCatalogEntry(10, CloneBaseObjectType.Item, "Widget");
+        var creator = new FakeItemCreator();
+
+        var result = inventory.AddItem(entry, creator, coid: 1001, characterCoid: 5001, quantity: 2);
+
+        Assert.IsNotNull(result.AddedItem);
+        Assert.AreEqual(2, result.AddedItem.Quantity);
+        Assert.AreEqual(1, persistence.Upserted.Count);
+        Assert.AreEqual(2, persistence.Upserted[0].Item.Quantity);
+
+        var createPacket = (CreateSimpleObjectPacket)result.Packets[0];
+        Assert.AreEqual(2, createPacket.Quantity);
+
+        var response = (InventoryAddItemResponsePacket)result.Packets[1];
+        Assert.IsFalse(response.AddToExistingItem);
+        Assert.AreEqual(2, response.Quantity);
+        StringAssert.Contains(result.Message, "x2");
+    }
+
+    [TestMethod]
+    public void LoadItems_SkipsDuplicateSlotEntries()
+    {
+        var inventory = new InventoryManager();
+        inventory.SetCapacity(4, 1);
+
+        inventory.LoadItems(new CharacterInventoryItem[]
+        {
+            new(1, CloneBaseObjectType.Item, "First", 100, 0, 0, 1),
+            new(2, CloneBaseObjectType.Item, "DuplicateSlot", 101, 0, 0, 1),
+            new(3, CloneBaseObjectType.Item, "Second", 102, 1, 0, 1),
+        });
+
+        Assert.AreEqual(2, inventory.Items.Count);
+        Assert.AreEqual(100, inventory.FindByCoid(100).Coid);
+        Assert.AreEqual(102, inventory.FindByCoid(102).Coid);
+        Assert.IsTrue(inventory.TryGetFirstFreeCargoSlot(out _, out _));
+    }
+
+    [TestMethod]
+    public void ClearCargo_RemovesItemsPersistsAndReturnsCargoSnapshot()
+    {
+        var persistence = new Fakes.RecordingInventoryPersistence();
+        var inventory = new InventoryManager(persistence);
+        inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "Widget", 1001, 0, 0, 1));
+
+        var result = inventory.ClearCargo(5001);
+
+        Assert.AreEqual(0, inventory.Items.Count);
+        Assert.AreEqual(1, persistence.ClearedCharacterCoids.Count);
+        Assert.AreEqual(5001, persistence.ClearedCharacterCoids[0]);
+        Assert.AreEqual(1, result.Packets.Count);
+        StringAssert.Contains(result.Message, "Cleared 1 cargo item");
+    }
+
+    [TestMethod]
+    public void DescribeCargoStatus_ReportsLoadedItemsAndOccupiedSlots()
+    {
+        var inventory = new InventoryManager();
+        inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "A", 100, 0, 0, 1));
+        inventory.TryAdd(new CharacterInventoryItem(11, CloneBaseObjectType.Item, "B", 101, 1, 0, 1));
+
+        var status = inventory.DescribeCargoStatus();
+
+        StringAssert.Contains(status, "2 item(s) loaded");
+        StringAssert.Contains(status, "2/");
+        StringAssert.Contains(status, "slots occupied");
+    }
+
+    [TestMethod]
     public void AddItem_WhenCargoFull_ReturnsFailure()
     {
         var inventory = new InventoryManager();
@@ -136,6 +209,33 @@ public class InventoryManagerEdgeTests
 
         Assert.IsNull(result.AddedItem);
         StringAssert.Contains(result.Message, "full");
+    }
+
+    [TestMethod]
+    public void AddItem_WhenDuplicateCoid_ReturnsRejectedMessage()
+    {
+        var inventory = new InventoryManager();
+        inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "Existing", 1001, 0, 0, 1));
+        var entry = new InventoryCatalogEntry(11, CloneBaseObjectType.Item, "Duplicate");
+
+        var result = inventory.AddItem(entry, new FakeItemCreator(), coid: 1001);
+
+        Assert.IsNull(result.AddedItem);
+        StringAssert.Contains(result.Message, "COID 1001 is already in cargo");
+        StringAssert.Contains(result.Message, "item(s) loaded");
+    }
+
+    [TestMethod]
+    public void ClearCargo_WithZeroCharacterCoid_SkipsPersistence()
+    {
+        var persistence = new Fakes.RecordingInventoryPersistence();
+        var inventory = new InventoryManager(persistence);
+        inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "Widget", 1001, 0, 0, 1));
+
+        inventory.ClearCargo(characterCoid: 0);
+
+        Assert.AreEqual(0, inventory.Items.Count);
+        Assert.AreEqual(0, persistence.ClearedCharacterCoids.Count);
     }
 
     [TestMethod]

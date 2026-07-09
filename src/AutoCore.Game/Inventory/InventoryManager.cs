@@ -73,11 +73,55 @@ public sealed class InventoryManager
         if (items == null)
             return;
 
+        var occupied = new HashSet<int>();
         foreach (var item in items)
         {
-            if (item != null && IsValidCargoSlot(item.InventoryPositionX, item.InventoryPositionY))
-                _items.Add(item);
+            if (item == null || !IsValidCargoSlot(item.InventoryPositionX, item.InventoryPositionY))
+                continue;
+
+            var slot = item.InventoryPositionY * Width + item.InventoryPositionX;
+            if (!occupied.Add(slot))
+                continue;
+
+            _items.Add(item);
         }
+    }
+
+    public int GetOccupiedSlotCount()
+    {
+        var occupied = new HashSet<int>();
+        foreach (var item in _items)
+        {
+            var slot = item.InventoryPositionY * Width + item.InventoryPositionX;
+            if (slot >= 0 && slot < SlotCount)
+                occupied.Add(slot);
+        }
+
+        return occupied.Count;
+    }
+
+    public InventoryCommandResult ClearCargo(long characterCoid)
+    {
+        var removed = _items.Count;
+        _items.Clear();
+
+        if (characterCoid != 0)
+            PersistCargoClear(characterCoid);
+
+        IReadOnlyList<BasePacket> packets = new BasePacket[]
+        {
+            InventoryPacketFactory.CreateCargoSendAll(this)
+        };
+
+        return new InventoryCommandResult(
+            $"Cleared {removed} cargo item(s). Capacity is {Width}x{PageCount} ({SlotCount} slots).",
+            packets);
+    }
+
+    public string DescribeCargoStatus()
+    {
+        var occupied = GetOccupiedSlotCount();
+        return $"{_items.Count} item(s) loaded, {occupied}/{SlotCount} slots occupied, capacity {Width}x{PageCount}.";
     }
 
     public bool TryGetFirstFreeCargoSlot(out byte x, out byte y)
@@ -168,18 +212,21 @@ public sealed class InventoryManager
         return true;
     }
 
-    public InventoryCommandResult AddItem(InventoryCatalogEntry entry, IInventoryItemCreator itemCreator, long coid, long characterCoid = 0)
+    public InventoryCommandResult AddItem(InventoryCatalogEntry entry, IInventoryItemCreator itemCreator, long coid, long characterCoid = 0, int quantity = 1)
     {
         if (!TryGetFirstFreeCargoSlot(out var x, out var y))
-            return new InventoryCommandResult($"Cargo inventory is full ({SlotCount}/{SlotCount}).");
+            return new InventoryCommandResult(BuildCargoFullMessage());
 
         var createResult = itemCreator.Create(entry, coid, x, y);
         if (!createResult.WasSuccessful)
             return new InventoryCommandResult($"Cannot add CBID {entry.Cbid}: {createResult.Error}");
 
-        var item = new CharacterInventoryItem(entry.Cbid, entry.Type, createResult.DisplayName, coid, x, y, 1);
+        // New stacks take quantity from the create packet; send AddItemResponse next
+        // so the client places the object before CargoSendAll.
+        createResult.Packet.Quantity = quantity;
+        var item = new CharacterInventoryItem(entry.Cbid, entry.Type, createResult.DisplayName, coid, x, y, quantity);
         if (!TryAdd(item))
-            return new InventoryCommandResult($"Cargo inventory is full ({SlotCount}/{SlotCount}).");
+            return new InventoryCommandResult(BuildCargoAddRejectedMessage(coid, x, y));
 
         if (characterCoid != 0)
             PersistCargoUpsert(characterCoid, item);
@@ -187,19 +234,20 @@ public sealed class InventoryManager
         IReadOnlyList<BasePacket> packets = new BasePacket[]
         {
             createResult.Packet,
-            InventoryPacketFactory.CreateCargoSendAll(this),
             new InventoryAddItemResponsePacket
             {
                 ItemCoid = coid,
                 InventoryPositionX = x,
                 InventoryPositionY = y,
                 AddToExistingItem = false,
-                Quantity = 1,
+                Quantity = quantity,
                 WasSuccessful = true
-            }
+            },
+            InventoryPacketFactory.CreateCargoSendAll(this)
         };
 
-        return new InventoryCommandResult($"Added {createResult.DisplayName} ({entry.Cbid}) to cargo slot {x},{y}.", packets, item);
+        var quantitySuffix = quantity > 1 ? $" x{quantity}" : string.Empty;
+        return new InventoryCommandResult($"Added {createResult.DisplayName} ({entry.Cbid}){quantitySuffix} to cargo slot {x},{y}.", packets, item);
     }
 
     public IReadOnlyList<BasePacket> CreateItemObjectPackets(InventoryCatalog catalog, IInventoryItemCreator itemCreator)
@@ -837,6 +885,14 @@ public sealed class InventoryManager
         _persistence.SaveCharacterCargoCapacity(characterCoid, Width, PageCount);
     }
 
+    public void ReloadCargo(long characterCoid)
+    {
+        if (_persistence == null || characterCoid == 0)
+            return;
+
+        LoadItems(_persistence.LoadCargo(characterCoid));
+    }
+
     private void PersistCargoUpsert(long characterCoid, CharacterInventoryItem item)
     {
         if (_persistence == null || characterCoid == 0 || item == null)
@@ -859,6 +915,34 @@ public sealed class InventoryManager
             return;
 
         _persistence.DeleteCargo(characterCoid, itemCoid);
+    }
+
+    private void PersistCargoClear(long characterCoid)
+    {
+        if (_persistence == null || characterCoid == 0)
+            return;
+
+        _persistence.ClearCargo(characterCoid);
+    }
+
+    private string BuildCargoFullMessage()
+    {
+        return $"Cargo inventory is full ({GetOccupiedSlotCount()}/{SlotCount} slots used, {_items.Count} item(s) loaded). Try /cargoinfo or /clearcargo.";
+    }
+
+    private string BuildCargoAddRejectedMessage(long coid, byte x, byte y)
+    {
+        if (_items.Any(i => i.Coid == coid))
+        {
+            return $"Cannot add item: COID {coid} is already in cargo. {DescribeCargoStatus()}";
+        }
+
+        if (_items.Any(i => i.InventoryPositionX == x && i.InventoryPositionY == y))
+        {
+            return $"Cannot add item: cargo slot {x},{y} is already occupied. {DescribeCargoStatus()}";
+        }
+
+        return $"Cannot add item to cargo slot {x},{y}. {DescribeCargoStatus()}";
     }
 
     private void PersistEquip(Vehicle vehicle, SimpleObject equippedItem)

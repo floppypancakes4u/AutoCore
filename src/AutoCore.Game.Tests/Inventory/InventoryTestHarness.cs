@@ -105,7 +105,8 @@ public sealed class InventoryTestHarness
         byte inventoryType = 1,
         bool itemGlobal = true,
         int equipmentCbid = -1,
-        int equipmentSlotHint = -1)
+        int equipmentSlotHint = -1,
+        int quantity = 1)
     {
         var bytes = new byte[0x30];
         BitConverter.GetBytes((uint)GameOpcode.InventoryGrab).CopyTo(bytes, 0);
@@ -118,6 +119,10 @@ public sealed class InventoryTestHarness
                 BitConverter.GetBytes(equipmentCbid).CopyTo(bytes, 4);
             if (equipmentSlotHint >= 0)
                 BitConverter.GetBytes(equipmentSlotHint).CopyTo(bytes, 0x14);
+        }
+        else if (quantity > 1)
+        {
+            BitConverter.GetBytes(quantity).CopyTo(bytes, 0x1c);
         }
 
         return ReadPacket<InventoryGrabPacket>(bytes);

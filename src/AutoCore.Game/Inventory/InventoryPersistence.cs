@@ -98,6 +98,19 @@ public sealed class InventoryPersistence : IInventoryPersistence
         Save(context, $"DeleteCargo character={characterCoid} item={itemCoid}");
     }
 
+    public void ClearCargo(long characterCoid)
+    {
+        using var context = new CharContext();
+        var rows = context.CharacterInventories
+            .Where(i => i.CharacterCoid == characterCoid)
+            .ToList();
+        if (rows.Count == 0)
+            return;
+
+        context.CharacterInventories.RemoveRange(rows);
+        Save(context, $"ClearCargo character={characterCoid} count={rows.Count}");
+    }
+
     public void EnsureSimpleObject(long itemCoid, byte type, int cbid, int faction = 0, int teamFaction = 0)
     {
         using var context = new CharContext();

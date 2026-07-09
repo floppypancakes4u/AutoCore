@@ -19,6 +19,11 @@ public sealed class InventoryRuntime : IInventoryRuntime
 
     public long AllocateItemCoid()
     {
-        return _character.Map.LocalCoidCounter++;
+        var next = _character.Map.LocalCoidCounter;
+        while (_character.Inventory.FindByCoid(next) != null)
+            next++;
+
+        _character.Map.LocalCoidCounter = next + 1;
+        return next;
     }
 }

@@ -24,8 +24,8 @@ public class InventoryCommandServiceTests
         Assert.AreEqual("Added New Item (20) to cargo slot 1,0.", result.Message);
         Assert.AreEqual(3, result.Packets.Count);
         Assert.IsInstanceOfType(result.Packets[0], typeof(DummyCreatePacket));
-        Assert.IsInstanceOfType(result.Packets[1], typeof(InventoryCargoSendAllPacket));
-        Assert.IsInstanceOfType(result.Packets[2], typeof(InventoryAddItemResponsePacket));
+        Assert.IsInstanceOfType(result.Packets[1], typeof(InventoryAddItemResponsePacket));
+        Assert.IsInstanceOfType(result.Packets[2], typeof(InventoryCargoSendAllPacket));
 
         var item = runtime.Inventory.Items.Single(i => i.Cbid == 20);
         Assert.AreEqual(1001, item.Coid);
@@ -34,7 +34,7 @@ public class InventoryCommandServiceTests
         Assert.AreEqual(1, item.Quantity);
         Assert.AreSame(item, result.AddedItem);
 
-        var cargoSnapshot = (InventoryCargoSendAllPacket)result.Packets[1];
+        var cargoSnapshot = (InventoryCargoSendAllPacket)result.Packets[2];
         Assert.AreEqual(InventoryManager.CargoPageCount, cargoSnapshot.InventorySize);
         Assert.AreEqual(1000, cargoSnapshot.Items[0].ItemCoid);
         Assert.AreEqual(0, cargoSnapshot.Items[0].PositionX);
@@ -44,13 +44,85 @@ public class InventoryCommandServiceTests
         Assert.AreEqual(0, cargoSnapshot.Items[1].PositionY);
         Assert.AreEqual(-1, cargoSnapshot.Items[2].ItemCoid);
 
-        var response = (InventoryAddItemResponsePacket)result.Packets[2];
+        var response = (InventoryAddItemResponsePacket)result.Packets[1];
         Assert.AreEqual(1001, response.ItemCoid);
         Assert.AreEqual((byte)1, response.InventoryPositionX);
         Assert.AreEqual((byte)0, response.InventoryPositionY);
         Assert.IsFalse(response.AddToExistingItem);
         Assert.AreEqual(1, response.Quantity);
         Assert.IsTrue(response.WasSuccessful);
+    }
+
+    [TestMethod]
+    public void AddItem_WithQuantity_CreatesStackInSingleSlot()
+    {
+        var runtime = new FakeInventoryRuntime();
+        var service = CreateService(
+            new[] { Entry(20, CloneBaseObjectType.Item, "New Item") },
+            new FakeInventoryItemCreator());
+
+        var result = service.AddItem(runtime, new[] { "/addItem", "20", "2" });
+
+        Assert.AreEqual("Added New Item (20) x2 to cargo slot 0,0.", result.Message);
+        Assert.AreEqual(1, runtime.Inventory.Items.Count);
+
+        var item = runtime.Inventory.Items.Single(i => i.Cbid == 20);
+        Assert.AreEqual(2, item.Quantity);
+        Assert.AreSame(item, result.AddedItem);
+
+        var createPacket = (DummyCreatePacket)result.Packets[0];
+        Assert.AreEqual(2, createPacket.Quantity);
+
+        var response = (InventoryAddItemResponsePacket)result.Packets[1];
+        Assert.IsFalse(response.AddToExistingItem);
+        Assert.AreEqual(2, response.Quantity);
+    }
+
+    [TestMethod]
+    public void AddItem_ByName_WithQuantity_CreatesStackInSingleSlot()
+    {
+        var runtime = new FakeInventoryRuntime();
+        var service = CreateService(
+            new[] { Entry(5123, CloneBaseObjectType.Item, "item_res_n_aliengoo_1") },
+            new FakeInventoryItemCreator());
+
+        var result = service.AddItem(runtime, new[] { "/addItem", "item_res_n_aliengoo_1", "3" });
+
+        Assert.AreEqual("Added item_res_n_aliengoo_1 (5123) x3 to cargo slot 0,0.", result.Message);
+        var item = runtime.Inventory.Items.Single(i => i.Cbid == 5123);
+        Assert.AreEqual(3, item.Quantity);
+    }
+
+    [TestMethod]
+    public void AddItem_WithQuantityThree_PutsFullQuantityOnCreatePacket()
+    {
+        var runtime = new FakeInventoryRuntime();
+        var service = CreateService(
+            new[] { Entry(20, CloneBaseObjectType.Item, "New Item") },
+            new FakeInventoryItemCreator());
+
+        var result = service.AddItem(runtime, new[] { "/addItem", "20", "3" });
+
+        Assert.AreEqual(3, runtime.Inventory.Items.Single().Quantity);
+        var createPacket = (DummyCreatePacket)result.Packets[0];
+        Assert.AreEqual(3, createPacket.Quantity);
+        var response = (InventoryAddItemResponsePacket)result.Packets[1];
+        Assert.IsFalse(response.AddToExistingItem);
+        Assert.AreEqual(3, response.Quantity);
+    }
+
+    [TestMethod]
+    public void AddItem_ByName_IsCaseInsensitive()
+    {
+        var runtime = new FakeInventoryRuntime();
+        var service = CreateService(
+            new[] { Entry(5123, CloneBaseObjectType.Item, "item_res_n_aliengoo_1") },
+            new FakeInventoryItemCreator());
+
+        var result = service.AddItem(runtime, new[] { "/addItem", "ITEM_RES_N_ALIENGOO_1" });
+
+        Assert.IsNotNull(result.AddedItem);
+        Assert.AreEqual(5123, result.AddedItem.Cbid);
     }
 
     [TestMethod]
@@ -65,8 +137,11 @@ public class InventoryCommandServiceTests
             },
             new FakeInventoryItemCreator(unsupportedCbids: new[] { 40 }));
 
-        Assert.AreEqual("Invalid addItem command. Usage: /addItem <cbid>.", service.AddItem(new FakeInventoryRuntime(), new[] { "/addItem" }).Message);
-        Assert.AreEqual("Invalid item id 'abc'. Item id must be a CBID number.", service.AddItem(new FakeInventoryRuntime(), new[] { "/addItem", "abc" }).Message);
+        Assert.AreEqual("Invalid addItem command. Usage: /addItem <cbid|name> [quantity].", service.AddItem(new FakeInventoryRuntime(), new[] { "/addItem" }).Message);
+        Assert.AreEqual("Item name 'abc' was not found.", service.AddItem(new FakeInventoryRuntime(), new[] { "/addItem", "abc" }).Message);
+        Assert.AreEqual("Invalid quantity 'abc'. Quantity must be a positive number.", service.AddItem(new FakeInventoryRuntime(), new[] { "/addItem", "20", "abc" }).Message);
+        Assert.AreEqual("Quantity must be at least 1.", service.AddItem(new FakeInventoryRuntime(), new[] { "/addItem", "20", "0" }).Message);
+        Assert.AreEqual("Item name 'totally_unknown_item' was not found.", service.AddItem(new FakeInventoryRuntime(), new[] { "/addItem", "totally_unknown_item", "2" }).Message);
         Assert.AreEqual("Item CBID 999 was not found.", service.AddItem(new FakeInventoryRuntime(), new[] { "/addItem", "999" }).Message);
         Assert.AreEqual("CBID 30 (Creature) is not an inventory item.", service.AddItem(new FakeInventoryRuntime(), new[] { "/addItem", "30" }).Message);
         Assert.AreEqual("Cannot add item: character or map is not available.", service.AddItem(new FakeInventoryRuntime(canAllocate: false), new[] { "/addItem", "20" }).Message);
@@ -80,7 +155,22 @@ public class InventoryCommandServiceTests
             fullRuntime.Inventory.TryAdd(new CharacterInventoryItem(10000 + i, CloneBaseObjectType.Item, $"Item {i}", 20000 + i, x, y, 1));
         }
 
-        Assert.AreEqual("Cargo inventory is full (312/312).", service.AddItem(fullRuntime, new[] { "/addItem", "20" }).Message);
+        Assert.AreEqual("Cargo inventory is full (312/312 slots used, 312 item(s) loaded). Try /cargoinfo or /clearcargo.", service.AddItem(fullRuntime, new[] { "/addItem", "20" }).Message);
+    }
+
+    [TestMethod]
+    public void AddItem_RejectsAmbiguousName()
+    {
+        var service = CreateService(
+            new[]
+            {
+                Entry(10, CloneBaseObjectType.Item, "duplicate_name"),
+                Entry(11, CloneBaseObjectType.Weapon, "duplicate_name"),
+            },
+            new FakeInventoryItemCreator());
+
+        Assert.AreEqual("Item name 'duplicate_name' is ambiguous (2 matches). Use the CBID instead.",
+            service.AddItem(new FakeInventoryRuntime(), new[] { "/addItem", "duplicate_name" }).Message);
     }
 
     [TestMethod]

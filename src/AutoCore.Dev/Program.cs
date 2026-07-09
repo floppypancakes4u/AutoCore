@@ -13,11 +13,15 @@ public static class Program
         if (args[0].Equals("inventory-drop-live", StringComparison.OrdinalIgnoreCase))
             return await LiveInventoryDropRunner.RunAsync(LiveInventoryDropOptions.Parse(args.Skip(1).ToArray()));
 
+        if (args[0].Equals("export-inventory-catalog", StringComparison.OrdinalIgnoreCase))
+            return InventoryCatalogExportRunner.Run(args.Skip(1).ToArray());
+
         Console.Error.WriteLine("Unknown command.");
         Console.Error.WriteLine("Usage:");
         Console.Error.WriteLine("  AutoCore.Dev inventory-add-live [--character <name>] [--api <url>] [--process <name>] [--items <cbid,cbid>]");
         Console.Error.WriteLine("  AutoCore.Dev inventory-grab-live [--character <name>] [--api <url>] [--process <name>] [--timeout <seconds>] [--breakpoint]");
         Console.Error.WriteLine("  AutoCore.Dev inventory-drop-live [--character <name>] [--api <url>] [--process <name>] [--timeout <seconds>]");
+        Console.Error.WriteLine("  AutoCore.Dev export-inventory-catalog [--game-path <path>] [--output <json-path>]");
         return 2;
     }
 }

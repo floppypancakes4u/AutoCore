@@ -29,5 +29,8 @@ public class InventoryItemCreatorPacketTypeTests
         Assert.AreEqual(
             typeof(CreateSimpleObjectPacket),
             InventoryItemCreator.CreatePacketFor(CloneBaseObjectType.Item).GetType());
+        Assert.IsInstanceOfType(
+            InventoryItemCreator.CreatePacketFor(CloneBaseObjectType.Commodity),
+            typeof(CreateSimpleObjectPacket));
     }
 }

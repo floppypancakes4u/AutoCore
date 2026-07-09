@@ -22,6 +22,11 @@ public sealed class RecordingInventoryPersistence : IInventoryPersistence
     public void DeleteCargo(long characterCoid, long itemCoid) =>
         DeletedItemCoids.Add(itemCoid);
 
+    public List<long> ClearedCharacterCoids { get; } = new();
+
+    public void ClearCargo(long characterCoid) =>
+        ClearedCharacterCoids.Add(characterCoid);
+
     public void EnsureSimpleObject(long itemCoid, byte type, int cbid, int faction = 0, int teamFaction = 0) =>
         EnsuredSimpleObjects.Add((itemCoid, type, cbid));
 

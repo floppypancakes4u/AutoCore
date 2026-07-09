@@ -96,6 +96,31 @@ public class InventoryCatalogTests
         Assert.IsNull(catalog.FindAny(99));
     }
 
+    [TestMethod]
+    public void FindByName_ReturnsCaseInsensitiveMatch()
+    {
+        var catalog = new InventoryCatalog(() => new[] { Entry(5123, CloneBaseObjectType.Item, "item_res_n_aliengoo_1") });
+
+        Assert.AreEqual(5123, catalog.FindByName("item_res_n_aliengoo_1").Cbid);
+        Assert.AreEqual(5123, catalog.FindByName("ITEM_RES_N_ALIENGOO_1").Cbid);
+        Assert.IsNull(catalog.FindByName("missing_item"));
+    }
+
+    [TestMethod]
+    public void FindAllByName_ReturnsEveryMatch()
+    {
+        var catalog = new InventoryCatalog(() => new[]
+        {
+            Entry(10, CloneBaseObjectType.Item, "duplicate_name"),
+            Entry(11, CloneBaseObjectType.Weapon, "duplicate_name"),
+        });
+
+        var matches = catalog.FindAllByName("duplicate_name");
+
+        Assert.AreEqual(2, matches.Count);
+        CollectionAssert.AreEquivalent(new[] { 10, 11 }, matches.Select(m => m.Cbid).ToArray());
+    }
+
     private static InventoryCatalogEntry Entry(int cbid, CloneBaseObjectType type, string name)
     {
         return new InventoryCatalogEntry(cbid, type, name);

@@ -40,6 +40,14 @@ public sealed class ChatCommandService
             case "/setCargo":
                 return SetCargo(character, parts);
 
+            case "/clearcargo":
+            case "/clearCargo":
+                return ClearCargo(character);
+
+            case "/cargoinfo":
+            case "/cargoInfo":
+                return CargoInfo(character);
+
             default:
                 return new ChatCommandExecutionResult(false, string.Empty);
         }
@@ -62,6 +70,7 @@ public sealed class ChatCommandService
 
         character.Inventory.SetCapacity(width, pageCount);
         character.Inventory.SaveCapacity(character.ObjectId.Coid);
+        character.Inventory.ReloadCargo(character.ObjectId.Coid);
 
         IReadOnlyList<BasePacket> packets = new BasePacket[]
         {
@@ -72,5 +81,22 @@ public sealed class ChatCommandService
             true,
             $"Cargo capacity set to {character.Inventory.Width}x{character.Inventory.PageCount} ({character.Inventory.SlotCount} slots).",
             packets);
+    }
+
+    private static ChatCommandExecutionResult ClearCargo(Character character)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        var result = character.Inventory.ClearCargo(character.ObjectId.Coid);
+        return new ChatCommandExecutionResult(true, result.Message, result.Packets);
+    }
+
+    private static ChatCommandExecutionResult CargoInfo(Character character)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        return new ChatCommandExecutionResult(true, character.Inventory.DescribeCargoStatus());
     }
 }

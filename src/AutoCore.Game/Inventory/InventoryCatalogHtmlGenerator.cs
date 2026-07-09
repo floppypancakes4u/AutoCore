@@ -1,0 +1,434 @@
+namespace AutoCore.Game.Inventory;
+
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+public static class InventoryCatalogHtmlGenerator
+{
+    private static readonly JsonSerializerOptions CompactJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
+    public static string GenerateStandalone(InventoryItemExportDocument document)
+    {
+        var embeddedJson = JsonSerializer.Serialize(document, CompactJsonOptions)
+            .Replace("</", "<\\/");
+
+        return Template.Replace("{{CATALOG_JSON}}", embeddedJson);
+    }
+
+    private const string Template = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutoCore Inventory Catalog</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1419;
+      --panel: #171d25;
+      --panel-2: #1f2731;
+      --border: #2d3847;
+      --text: #e8edf3;
+      --muted: #9aa8b8;
+      --accent: #5cc8ff;
+      --accent-2: #7ee787;
+      --warn: #f2cc60;
+      --danger: #ff8b8b;
+      --mono: "Cascadia Code", "Consolas", monospace;
+      --sans: "Segoe UI", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      background: linear-gradient(180deg, #0b1015 0%, var(--bg) 220px);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    header { margin-bottom: 20px; }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.8rem;
+      letter-spacing: 0.02em;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin: 0;
+      line-height: 1.5;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .pill {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    .pill strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: 1.6fr 220px 180px;
+      gap: 12px;
+      margin: 20px 0 14px;
+    }
+
+    input, select, button {
+      font: inherit;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      padding: 10px 12px;
+    }
+
+    input:focus, select:focus, button:focus {
+      outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+      outline-offset: 1px;
+    }
+
+    .status {
+      min-height: 24px;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .status.error { color: var(--danger); }
+
+    .table-shell {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      background: var(--panel);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+
+    thead {
+      background: #121820;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      user-select: none;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    th.sorted-asc::after { content: " ▲"; color: var(--accent); }
+    th.sorted-desc::after { content: " ▼"; color: var(--accent); }
+
+    tbody tr:hover { background: rgba(92, 200, 255, 0.05); }
+
+    .name {
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .unique {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      color: var(--muted);
+      word-break: break-all;
+    }
+
+    .class-tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(126, 231, 135, 0.12);
+      color: var(--accent-2);
+      font-size: 0.82rem;
+      border: 1px solid rgba(126, 231, 135, 0.25);
+    }
+
+    .stack-yes { color: var(--accent-2); }
+    .stack-no { color: var(--warn); }
+
+    .id-col {
+      font-family: var(--mono);
+      font-size: 0.88rem;
+      white-space: nowrap;
+    }
+
+    .empty {
+      padding: 40px;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    @media (max-width: 960px) {
+      .toolbar { grid-template-columns: 1fr; }
+      .table-shell { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>AutoCore Inventory Catalog</h1>
+      <p class="subtitle">
+        Self-contained inventory catalog exported from <code>clonebase.wad</code>.
+        Display names come from client <code>ShortDesc</code> (for example, "Salvaged Pneumatics").
+      </p>
+      <div class="meta" id="meta"></div>
+    </header>
+
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Search display name, unique name, CBID, or class...">
+      <select id="classFilter">
+        <option value="">All classes</option>
+      </select>
+      <select id="stackFilter">
+        <option value="">All stack rules</option>
+        <option value="stackable">Stackable only</option>
+        <option value="single">Single only</option>
+      </select>
+    </div>
+
+    <div class="status" id="status">Loading catalog...</div>
+
+    <div class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th data-sort="displayName">Display Name</th>
+            <th data-sort="className">Class</th>
+            <th data-sort="cbid">CBID</th>
+            <th data-sort="typeId">Type ID</th>
+            <th data-sort="uniqueName">Unique Name</th>
+            <th data-sort="maxStackSize">Max Stack</th>
+            <th data-sort="stackable">Stackable</th>
+            <th data-sort="subType">SubType</th>
+            <th data-sort="commodityGroupType">Commodity Group</th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr><td class="empty" colspan="9">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script id="catalog-data" type="application/json">{{CATALOG_JSON}}</script>
+  <script>
+    const state = {
+      items: [],
+      filtered: [],
+      sortKey: "displayName",
+      sortDir: "asc"
+    };
+
+    const statusEl = document.getElementById("status");
+    const metaEl = document.getElementById("meta");
+    const rowsEl = document.getElementById("rows");
+    const searchEl = document.getElementById("search");
+    const classFilterEl = document.getElementById("classFilter");
+    const stackFilterEl = document.getElementById("stackFilter");
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    function renderMeta(documentData) {
+      metaEl.innerHTML = [
+        `<span class="pill"><strong>${documentData.itemCount.toLocaleString()}</strong> items</span>`,
+        `<span class="pill">Exported <strong>${new Date(documentData.exportedAtUtc).toLocaleString()}</strong></span>`,
+        `<span class="pill">Source <strong>${escapeHtml(documentData.sourcePath)}</strong></span>`,
+        `<span class="pill"><strong>Standalone</strong> single-file catalog</span>`
+      ].join("");
+    }
+
+    function populateClassFilter(items) {
+      const classes = [...new Set(items.map(item => item.className))].sort();
+      for (const className of classes) {
+        const option = document.createElement("option");
+        option.value = className;
+        option.textContent = className;
+        classFilterEl.appendChild(option);
+      }
+    }
+
+    function compareValues(a, b, key) {
+      const left = a[key];
+      const right = b[key];
+
+      if (typeof left === "boolean") {
+        return Number(left) - Number(right);
+      }
+
+      if (typeof left === "number" && typeof right === "number") {
+        return left - right;
+      }
+
+      return String(left).localeCompare(String(right), undefined, { sensitivity: "base" });
+    }
+
+    function applyFilters() {
+      const query = searchEl.value.trim().toLowerCase();
+      const className = classFilterEl.value;
+      const stackRule = stackFilterEl.value;
+
+      state.filtered = state.items.filter(item => {
+        if (className && item.className !== className) {
+          return false;
+        }
+
+        if (stackRule === "stackable" && !item.stackable) {
+          return false;
+        }
+
+        if (stackRule === "single" && item.stackable) {
+          return false;
+        }
+
+        if (!query) {
+          return true;
+        }
+
+        const haystack = [
+          item.displayName,
+          item.uniqueName,
+          item.className,
+          item.cbid,
+          item.typeId,
+          item.subType,
+          item.commodityGroupType
+        ].join(" ").toLowerCase();
+
+        return haystack.includes(query);
+      });
+
+      state.filtered.sort((a, b) => {
+        const result = compareValues(a, b, state.sortKey);
+        return state.sortDir === "asc" ? result : -result;
+      });
+
+      renderRows();
+      statusEl.classList.remove("error");
+      statusEl.textContent = `Showing ${state.filtered.length.toLocaleString()} of ${state.items.length.toLocaleString()} items`;
+    }
+
+    function renderRows() {
+      if (state.filtered.length === 0) {
+        rowsEl.innerHTML = `<tr><td class="empty" colspan="9">No items match the current filters.</td></tr>`;
+        return;
+      }
+
+      rowsEl.innerHTML = state.filtered.map(item => `
+        <tr>
+          <td>
+            <div class="name">${escapeHtml(item.displayName)}</div>
+            ${item.longDescription ? `<div class="unique">${escapeHtml(item.longDescription)}</div>` : ""}
+          </td>
+          <td><span class="class-tag">${escapeHtml(item.className)}</span></td>
+          <td class="id-col">${item.cbid}</td>
+          <td class="id-col">${item.typeId}</td>
+          <td class="unique">${escapeHtml(item.uniqueName)}</td>
+          <td class="id-col">${item.maxStackSize}</td>
+          <td class="${item.stackable ? "stack-yes" : "stack-no"}">${item.stackable ? "Yes" : "No"}</td>
+          <td class="id-col">${item.subType}</td>
+          <td class="id-col">${item.commodityGroupType}</td>
+        </tr>
+      `).join("");
+    }
+
+    function updateSortHeaders() {
+      for (const header of document.querySelectorAll("th[data-sort]")) {
+        header.classList.remove("sorted-asc", "sorted-desc");
+        if (header.dataset.sort === state.sortKey) {
+          header.classList.add(state.sortDir === "asc" ? "sorted-asc" : "sorted-desc");
+        }
+      }
+    }
+
+    function loadCatalog() {
+      try {
+        const documentData = JSON.parse(document.getElementById("catalog-data").textContent);
+        state.items = documentData.items || [];
+        renderMeta(documentData);
+        populateClassFilter(state.items);
+        applyFilters();
+        updateSortHeaders();
+      } catch (error) {
+        statusEl.classList.add("error");
+        statusEl.textContent = `Failed to load embedded catalog data: ${error.message}`;
+        rowsEl.innerHTML = `<tr><td class="empty" colspan="9">Catalog not loaded.</td></tr>`;
+      }
+    }
+
+    searchEl.addEventListener("input", applyFilters);
+    classFilterEl.addEventListener("change", applyFilters);
+    stackFilterEl.addEventListener("change", applyFilters);
+
+    for (const header of document.querySelectorAll("th[data-sort]")) {
+      header.addEventListener("click", () => {
+        const key = header.dataset.sort;
+        if (state.sortKey === key) {
+          state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+        } else {
+          state.sortKey = key;
+          state.sortDir = "asc";
+        }
+        updateSortHeaders();
+        applyFilters();
+      });
+    }
+
+    loadCatalog();
+  </script>
+</body>
+</html>
+""";
+}

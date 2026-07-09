@@ -53,6 +53,21 @@ public sealed class InventoryCatalog
         return GetAllItems().FirstOrDefault(e => e.Cbid == cbid);
     }
 
+    public InventoryCatalogEntry FindByName(string name)
+    {
+        return FindAllByName(name).FirstOrDefault();
+    }
+
+    public IReadOnlyList<InventoryCatalogEntry> FindAllByName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return Array.Empty<InventoryCatalogEntry>();
+
+        return GetAllItems()
+            .Where(e => string.Equals(e.DisplayName, name, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
     public string FormatPage(string pageText)
     {
         if (!TryParsePage(pageText, out var page, out var error))

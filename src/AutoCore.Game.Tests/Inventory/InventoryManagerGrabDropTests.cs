@@ -28,6 +28,22 @@ public class InventoryManagerGrabDropTests
     }
 
     [TestMethod]
+    public void Grab_ExistingStackedCargoItem_UsesRequestedQuantity()
+    {
+        var harness = new InventoryTestHarness();
+        harness.Inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "Stack", 1001, 0, 0, 5));
+
+        var result = harness.Inventory.Grab(
+            InventoryTestHarness.CreateGrabPacket(1001, quantity: 3),
+            harness.Character);
+
+        var response = (InventoryGrabResponsePacket)result.Packets[0];
+        Assert.IsTrue(response.WasSuccessful);
+        Assert.AreEqual(3, response.Quantity);
+        Assert.IsFalse(response.AddToExistingItem);
+    }
+
+    [TestMethod]
     public void Grab_EquippedItem_UnequipsPersistsEquipmentAndSetsPendingDrag()
     {
         var harness = new InventoryTestHarness();

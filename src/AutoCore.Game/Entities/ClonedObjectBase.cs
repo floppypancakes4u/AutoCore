@@ -1,4 +1,4 @@
-﻿namespace AutoCore.Game.Entities;
+namespace AutoCore.Game.Entities;
 
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.Constants;
@@ -261,8 +261,17 @@ public abstract class ClonedObjectBase
             case CloneBaseObjectType.Weapon:
                 return new Weapon();
 
+            // Client CVOGReaction_GiveItemByCbid uses the same SimpleObject allocator
+            // for Item (6) and Commodity (0x1a); other inventory-capable types that
+            // are not specialized equipment also deserialize as SimpleObject.
             case CloneBaseObjectType.Item:
-                // Item types use SimpleObject with GraphicsObjectType.Graphics
+            case CloneBaseObjectType.Commodity:
+            case CloneBaseObjectType.Gadget:
+            case CloneBaseObjectType.TinkeringKit:
+            case CloneBaseObjectType.Accessory:
+            case CloneBaseObjectType.Ornament:
+            case CloneBaseObjectType.RaceItem:
+            case CloneBaseObjectType.Money:
                 return new SimpleObject(GraphicsObjectType.Graphics);
 
             default:

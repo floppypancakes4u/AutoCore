@@ -13,6 +13,8 @@ public interface IInventoryPersistence
 
     void DeleteCargo(long characterCoid, long itemCoid);
 
+    void ClearCargo(long characterCoid);
+
     void EnsureSimpleObject(long itemCoid, byte type, int cbid, int faction = 0, int teamFaction = 0);
 
     void SaveVehicleEquipment(long vehicleCoid, VehicleEquipmentSnapshot snapshot);
