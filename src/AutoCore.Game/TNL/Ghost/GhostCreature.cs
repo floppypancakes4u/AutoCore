@@ -82,7 +82,7 @@ public class GhostCreature : GhostObject
 
         if (stream.WriteFlag((updateMask & StateMask) != 0))
         {
-            stream.WriteBits(8, BitConverter.GetBytes(0)); // AI State
+            stream.WriteBits(8, new byte[] { creature.AiCombatState }); // AI State
         }
 
         if (stream.WriteFlag((updateMask & PositionMask) != 0))

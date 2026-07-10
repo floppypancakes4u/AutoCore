@@ -642,12 +642,12 @@ public class Vehicle : SimpleObject
                 WeaponRear.WriteToPacket(vehiclePacket.CreateWeapons[2]);
             }
 
-            vehiclePacket.CurrentPathId = -1;
-            vehiclePacket.ExtraPathId = 0;
-            vehiclePacket.PatrolDistance = 0.0f;
-            vehiclePacket.PathReversing = false;
-            vehiclePacket.PathIsRoad = false;
-            vehiclePacket.TemplateId = -1;
+            vehiclePacket.CurrentPathId = (int)CoidCurrentPath;
+            vehiclePacket.ExtraPathId = ExtraPathId;
+            vehiclePacket.PatrolDistance = PatrolDistance;
+            vehiclePacket.PathReversing = PathReversing;
+            vehiclePacket.PathIsRoad = PathIsRoad;
+            vehiclePacket.TemplateId = TemplateId;
             vehiclePacket.MurdererCoid = -1L;
             vehiclePacket.WeaponsCBID[0] = WeaponFront?.CBID ?? -1;
             vehiclePacket.WeaponsCBID[1] = WeaponTurret?.CBID ?? -1;

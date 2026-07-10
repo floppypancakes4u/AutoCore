@@ -5,10 +5,17 @@ using TNL.Utils;
 namespace AutoCore.Game.TNL.Ghost;
 
 using AutoCore.Game.Entities;
+using AutoCore.Utils;
 
 public class GhostVehicle : GhostObject
 {
     private static NetClassRepInstance<GhostVehicle> _dynClassRep;
+
+    /// <summary>Live A/B lever for the NPC AI-state wire block (Risk 5). Flip to false to fall
+    /// back to not sending driver AI state if this proves destabilizing in production.</summary>
+    public static bool EnableAiStateWire = true;
+
+    private const int CoidCurrentPathBits = 18;
 
     public const ulong AttributeMask    = 0x0000200000ul;
     public const ulong ClanMask         = 0x0000400000ul;
@@ -113,23 +120,28 @@ public class GhostVehicle : GhostObject
                 stream.WriteBits(32, BitConverter.GetBytes(0)); // AVDNormalSpinDampeningMultiplier
             }
 
-            if (stream.WriteFlag(false)) // TODO
+            if (stream.WriteFlag(parentVehicle.CoidCurrentPath > 0)) // path
             {
-                stream.WriteInt(0, 18); // CoidCurrentPathID
-                stream.WriteBits(32, BitConverter.GetBytes(0)); // ExtraPathId
-                stream.WriteFlag(false); // PathReversing
-                stream.WriteFlag(false); // PathIsRoad
-                stream.WriteBits(32, BitConverter.GetBytes(0)); // PatrolDistance
+                var currentPath = parentVehicle.CoidCurrentPath;
+
+                if (currentPath >= (1 << CoidCurrentPathBits))
+                    Logger.WriteLog(LogType.Error, $"GhostVehicle.PackUpdate: CoidCurrentPath {currentPath} exceeds the {CoidCurrentPathBits}-bit wire field and will be truncated.");
+
+                stream.WriteInt((uint)currentPath, CoidCurrentPathBits); // CoidCurrentPathID
+                stream.Write(parentVehicle.ExtraPathId); // ExtraPathId
+                stream.WriteFlag(parentVehicle.PathReversing); // PathReversing
+                stream.WriteFlag(parentVehicle.PathIsRoad); // PathIsRoad
+                stream.Write(parentVehicle.PatrolDistance); // PatrolDistance
             }
 
-            if (stream.WriteFlag(false)) // TemplateId != -1
+            if (stream.WriteFlag(parentVehicle.TemplateId != -1)) // TemplateId != -1
             {
-                stream.WriteInt(0, 20); // TemplateId
+                stream.WriteInt((uint)parentVehicle.TemplateId, 20); // TemplateId
             }
 
-            if (stream.WriteFlag(false)) // CoidSpawnOwner != -1
+            if (stream.WriteFlag(parentVehicle.SpawnOwnerCoid != -1)) // CoidSpawnOwner != -1
             {
-                stream.WriteInt(0, 20); // CoidSpawnOwner
+                stream.WriteInt((uint)parentVehicle.SpawnOwnerCoid, 20); // CoidSpawnOwner
             }
 
             stream.WriteBits(8, BitConverter.GetBytes(0)); // trick count
@@ -181,7 +193,7 @@ public class GhostVehicle : GhostObject
                     }
 
                     stream.WriteFlag(false); // DoesntCountAsSummon
-                    stream.WriteBits(8, BitConverter.GetBytes(0)); // Level
+                    stream.WriteBits(8, new byte[] { owner.GetAsCreature()?.Level ?? 0 }); // Level (driver level for NPC-driven vehicles)
                     stream.WriteFlag(false); // IsElite
                 }
             }
@@ -287,9 +299,11 @@ public class GhostVehicle : GhostObject
             stream.WriteInt((uint)Math.Max(Parent.GetMaximumHP(), 0), 18);
         }
 
-        if (stream.WriteFlag((updateMask & StateMask) != 0 && false)) // TODO
+        var driverCreature = owner?.GetAsCreature();
+
+        if (stream.WriteFlag((updateMask & StateMask) != 0 && EnableAiStateWire && driverCreature != null))
         {
-            stream.WriteBits(8, BitConverter.GetBytes(0)); // AI State if owner is creature
+            stream.WriteBits(8, new byte[] { driverCreature.AiCombatState }); // AI State if owner is creature
         }
 
         if (stream.WriteFlag((updateMask & PositionMask) != 0))
