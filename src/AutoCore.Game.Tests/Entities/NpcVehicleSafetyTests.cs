@@ -4,9 +4,11 @@ using TNL.Utils;
 
 namespace AutoCore.Game.Tests.Entities;
 
+using System;
 using AutoCore.Database.World.Models;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
+using AutoCore.Game.Npc;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL;
 using AutoCore.Game.TNL.Ghost;
@@ -110,6 +112,33 @@ public class NpcVehicleSafetyTests
         Assert.AreEqual(rotation, creature.Rotation);
         Assert.AreEqual(velocity, creature.Velocity);
         Assert.AreEqual(targetPosition, creature.TargetPosition);
+    }
+
+    [TestMethod]
+    public void Creature_NpcAi_AssignsOnPlainCreature()
+    {
+        var creature = new Creature();
+
+        var state = new NpcAiState();
+        creature.NpcAi = state;
+
+        Assert.AreSame(state, creature.NpcAi);
+    }
+
+    [TestMethod]
+    public void Character_NpcAi_SetNonNull_Throws()
+    {
+        var character = new Character();
+
+        Assert.ThrowsException<InvalidOperationException>(() => character.NpcAi = new NpcAiState());
+    }
+
+    [TestMethod]
+    public void Character_NpcAi_RemainsNullByDefault()
+    {
+        var character = new Character();
+
+        Assert.IsNull(character.NpcAi);
     }
 
     private static SectorMap CreateTestMap(int continentId)

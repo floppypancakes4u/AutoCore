@@ -1,5 +1,6 @@
 ﻿namespace AutoCore.Game.Entities;
 
+using System;
 using System.Linq;
 using System.Text;
 using AutoCore.Game.Constants;
@@ -31,7 +32,18 @@ public class Creature : SimpleObject
     /// Server-side AI runtime state; must remain null for player-controlled <see cref="Character"/>
     /// instances — assign only when `this is not Character`.
     /// </summary>
-    public NpcAiState NpcAi { get; set; }
+    public NpcAiState NpcAi
+    {
+        get => _npcAi;
+        set
+        {
+            if (value != null && this is Character)
+                throw new InvalidOperationException("NpcAi must remain null for player-controlled Character instances.");
+
+            _npcAi = value;
+        }
+    }
+    private NpcAiState _npcAi;
 
     /// <summary>Whether interacting with this NPC can open the mission dialog.</summary>
     public bool IsMissionGiver { get; set; }
