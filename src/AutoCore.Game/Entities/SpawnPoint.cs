@@ -6,6 +6,7 @@ using AutoCore.Game.CloneBases.Specifics;
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
+using AutoCore.Game.Npc;
 using AutoCore.Game.Structures;
 using AutoCore.Utils;
 
@@ -42,9 +43,14 @@ public class SpawnPoint : ClonedObjectBase
         if (spawnList == null)
             return false;
 
-        // TODO: load templates from wad.xml and use them?
         if (spawnList.IsTemplate)
-            return false;
+        {
+            var vehicleTemplate = AssetManager.Instance.GetVehicleTemplate(spawnList.SpawnType);
+            if (vehicleTemplate == null)
+                return false;
+
+            return SpawnTemplateVehicle(vehicleTemplate, spawnList) != null;
+        }
 
         var cloneBase = AssetManager.Instance.GetCloneBase(spawnList.SpawnType);
         if (cloneBase == null)
@@ -57,10 +63,8 @@ public class SpawnPoint : ClonedObjectBase
         }
         else if (cloneBase.Type == CloneBaseObjectType.Vehicle)
         {
-            if (SpawnVehicle(cloneBase.CloneBaseSpecific.CloneBaseId) == null)
+            if (SpawnVehicle(cloneBase.CloneBaseSpecific.CloneBaseId, spawnList) == null)
                 return false;
-
-            // TODO: spawn driver also (driverid in templates)
         }
         else
             Logger.WriteLog(LogType.Error, $"SpawnPoint {Template.COID} wants to spawn object with type {cloneBase.Type}!");
@@ -86,6 +90,59 @@ public class SpawnPoint : ClonedObjectBase
     {
         var calculatedLevel = baseLevel + levelOffset;
         return (byte)Math.Max(1, Math.Min(255, calculatedLevel));
+    }
+
+    /// <summary>
+    /// Resolves the driver CBID for a spawned vehicle: prefer the vehicle-template's explicit
+    /// driver, else fall back to the vehicle clonebase's <c>VehicleSpecific.DefaultDriver</c>.
+    /// </summary>
+    internal static int ResolveDriverCbid(int templateDriverCbid, int defaultDriverCbid)
+    {
+        return templateDriverCbid > 0 ? templateDriverCbid : defaultDriverCbid;
+    }
+
+    /// <summary>
+    /// Applies MapPathCoid/InitialPatrolDistance/ReverseDirection from the spawn-point template
+    /// (and resolved <see cref="MapPathTemplate"/>) onto a spawned combat creature.
+    /// MapPathCoid &lt;= 0 leaves the creature's path fields at their defaults.
+    /// </summary>
+    internal static void ApplySpawnPath(Creature creature, SpawnPointTemplate template, MapPathTemplate path)
+    {
+        ArgumentNullException.ThrowIfNull(creature);
+        ResolveSpawnPath(template, path, out var coid, out var patrol, out var reversing);
+        creature.CoidCurrentPath = coid;
+        creature.PatrolDistance = patrol;
+        creature.PathReversing = reversing;
+    }
+
+    /// <summary>Vehicle counterpart of <see cref="ApplySpawnPath(Creature, SpawnPointTemplate, MapPathTemplate)"/>.</summary>
+    internal static void ApplySpawnPath(Vehicle vehicle, SpawnPointTemplate template, MapPathTemplate path)
+    {
+        ArgumentNullException.ThrowIfNull(vehicle);
+        ResolveSpawnPath(template, path, out var coid, out var patrol, out var reversing);
+        vehicle.CoidCurrentPath = coid;
+        vehicle.PatrolDistance = patrol;
+        vehicle.PathReversing = reversing;
+    }
+
+    private static void ResolveSpawnPath(
+        SpawnPointTemplate template,
+        MapPathTemplate path,
+        out long coid,
+        out float patrol,
+        out bool reversing)
+    {
+        if (template == null || template.MapPathCoid <= 0)
+        {
+            coid = -1;
+            patrol = 0f;
+            reversing = false;
+            return;
+        }
+
+        coid = template.MapPathCoid;
+        patrol = template.InitialPatrolDistance;
+        reversing = path?.ReverseDirection ?? false;
     }
 
     /// <summary>
@@ -162,13 +219,21 @@ public class SpawnPoint : ClonedObjectBase
         creature.Layer = Layer;
         creature.Rotation = Rotation;
         creature.SpawnOwner = ObjectId.Coid;
+
+        // Static/interactive NPCs (IsNPC != 0) don't patrol or run combat AI; combat creatures do.
+        if (cloneBaseCreature != null && cloneBaseCreature.CreatureSpecific.IsNPC == 0)
+        {
+            ApplySpawnPath(creature, Template, ResolveTemplatePath());
+            creature.NpcAi = BuildNpcAi(cloneBaseCreature.CreatureSpecific.AIBehavior, creature.Position);
+        }
+
         creature.SetMap(Map);
         creature.CreateGhost();
 
         return creature;
     }
 
-    private Vehicle SpawnVehicle(int cbid)
+    private Vehicle SpawnVehicle(int cbid, SpawnPointTemplate.SpawnList spawnList)
     {
         var vehicle = new Vehicle();
         vehicle.SetCoid(Map.LocalCoidCounter++, false);
@@ -180,6 +245,130 @@ public class SpawnPoint : ClonedObjectBase
         vehicle.SetMap(Map);
         vehicle.CreateGhost();
 
+        // Raw-CBID spawn lists have no VehicleTemplate row, so the driver can only come from
+        // the vehicle clonebase's own VehicleSpecific.DefaultDriver.
+        var cloneBaseVehicle = vehicle.CloneBaseObject as CloneBaseVehicle;
+        var defaultDriverCbid = cloneBaseVehicle?.VehicleSpecific.DefaultDriver ?? 0;
+        var driver = BuildDriver(0, defaultDriverCbid, spawnList.LevelOffset);
+        if (driver != null)
+        {
+            vehicle.SetOwner(driver);
+            ApplyDriverAi(vehicle, driver);
+        }
+
+        ApplySpawnPath(vehicle, Template, ResolveTemplatePath());
+
         return vehicle;
+    }
+
+    /// <summary>
+    /// Spawns a vehicle from a wad.xml <c>tVehicleTemplate</c> row (spawn-list SpawnType is the
+    /// template id, not a vehicle CBID; see <see cref="SpawnPointTemplate.SpawnList.IsTemplate"/>).
+    /// </summary>
+    private Vehicle SpawnTemplateVehicle(VehicleTemplate template, SpawnPointTemplate.SpawnList spawnList)
+    {
+        var vehicle = new Vehicle();
+        vehicle.SetCoid(Map.LocalCoidCounter++, false);
+        vehicle.LoadCloneBase(template.VehicleCbid);
+        vehicle.SetupCBFields();
+        vehicle.TemplateId = template.Id;
+        vehicle.SpawnOwnerCoid = ObjectId.Coid;
+        vehicle.Layer = Layer;
+        vehicle.Position = Position;
+        vehicle.Rotation = Rotation;
+        vehicle.ApplyTemplateBaseHp(template.BaseHp);
+
+        EquipTemplateItem(vehicle, VehicleEquipmentSlot.WeaponFront, template.WeaponFrontCbid);
+        EquipTemplateItem(vehicle, VehicleEquipmentSlot.WeaponTurret, template.WeaponTurretCbid);
+        EquipTemplateItem(vehicle, VehicleEquipmentSlot.WeaponMelee, template.WeaponMeleeCbid);
+        EquipTemplateItem(vehicle, VehicleEquipmentSlot.Armor, template.ArmorCbid);
+
+        vehicle.SetMap(Map);
+        vehicle.CreateGhost();
+
+        var cloneBaseVehicle = vehicle.CloneBaseObject as CloneBaseVehicle;
+        var defaultDriverCbid = cloneBaseVehicle?.VehicleSpecific.DefaultDriver ?? 0;
+        var driver = BuildDriver(template.DriverCbid, defaultDriverCbid, spawnList.LevelOffset);
+        if (driver != null)
+        {
+            vehicle.SetOwner(driver);
+            ApplyDriverAi(vehicle, driver);
+        }
+
+        ApplySpawnPath(vehicle, Template, ResolveTemplatePath());
+
+        return vehicle;
+    }
+
+    /// <summary>
+    /// Builds the (unmapped, ghostless) driver creature that supplies a vehicle's combat level
+    /// and faction chain (<see cref="ClonedObjectBase.GetIDFaction"/>) — client builds the
+    /// HBAIDriver contract from the vehicle owner's CBID + level (NPC.md §8.5).
+    /// Returns null when no driver CBID is available (template nor clonebase default).
+    /// </summary>
+    private Creature BuildDriver(int templateDriverCbid, int defaultDriverCbid, int levelOffset)
+    {
+        var driverCbid = ResolveDriverCbid(templateDriverCbid, defaultDriverCbid);
+        if (driverCbid <= 0)
+            return null;
+
+        var driver = new Creature();
+        var counter = Map.LocalCoidCounter;
+        AssignMapNpcIdentity(driver, ref counter);
+        Map.LocalCoidCounter = counter;
+        driver.LoadCloneBase(driverCbid);
+        driver.SetupCBFields();
+
+        var baseLevel = (driver.CloneBaseObject as CloneBaseCreature)?.CreatureSpecific.BaseLevel ?? 1;
+        driver.Level = CalculateSpawnLevel(baseLevel, levelOffset);
+        driver.Position = Position;
+        driver.Rotation = Rotation;
+        driver.Layer = Layer;
+
+        return driver;
+    }
+
+    /// <summary>Copies the driver's wad.xml AI behavior onto the vehicle it owns, if any.</summary>
+    private static void ApplyDriverAi(Vehicle vehicle, Creature driver)
+    {
+        var aiId = (driver?.CloneBaseObject as CloneBaseCreature)?.CreatureSpecific.AIBehavior ?? 0;
+        vehicle.NpcAi = BuildNpcAi(aiId, vehicle.Position);
+    }
+
+    /// <summary>Resolves a wad.xml tCreatureAI profile (AIBehavior/AIID) into runtime NPC AI state.</summary>
+    private static NpcAiState BuildNpcAi(int aiBehaviorId, Vector3 homePosition)
+    {
+        if (aiBehaviorId <= 0)
+            return null;
+
+        var profile = AssetManager.Instance.GetCreatureAiProfile(aiBehaviorId);
+        if (profile == null)
+            return null;
+
+        return new NpcAiState { Profile = profile, HomePosition = homePosition };
+    }
+
+    /// <summary>Equips a template weapon/armor CBID into a vehicle slot, if the CBID is set (&gt; 0).</summary>
+    private void EquipTemplateItem(Vehicle vehicle, VehicleEquipmentSlot slot, int cbid)
+    {
+        if (cbid <= 0)
+            return;
+
+        SimpleObject item = slot == VehicleEquipmentSlot.Armor ? new Armor() : new Weapon();
+        item.SetCoid(Map.LocalCoidCounter++, false);
+        item.LoadCloneBase(cbid);
+        item.SetupCBFields();
+
+        vehicle.TryEquipItem(slot, item, out _);
+    }
+
+    /// <summary>Resolves this spawn point's <see cref="SpawnPointTemplate.MapPathCoid"/> on the current map.</summary>
+    private MapPathTemplate ResolveTemplatePath()
+    {
+        if (Template.MapPathCoid <= 0)
+            return null;
+
+        Map.TryGetMapPath(Template.MapPathCoid, out var path);
+        return path;
     }
 }

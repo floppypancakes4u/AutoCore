@@ -128,6 +128,18 @@ public class Vehicle : SimpleObject
         Ghost?.SetMaskBits(GhostObject.PositionMask);
     }
 
+    /// <summary>
+    /// Applies a wad.xml <c>tVehicleTemplate.intBaseHP</c> override at spawn time. No-op for
+    /// non-positive values so callers can pass a template field unconditionally.
+    /// </summary>
+    internal void ApplyTemplateBaseHp(int baseHp)
+    {
+        if (baseHp <= 0)
+            return;
+
+        HP = MaxHP = baseHp;
+    }
+
     public bool TryFindEquippedItem(long coid, out VehicleEquipmentSlot slot, out SimpleObject item)
     {
         if (TryMatchEquippedItem(Armor, VehicleEquipmentSlot.Armor, coid, out slot, out item) ||

@@ -21,6 +21,12 @@ public class SectorMap
     public Dictionary<TFID, Trigger> Triggers { get; } = new();
     public Dictionary<TFID, Reaction> Reactions { get; } = new();
 
+    /// <summary>NPC creatures/vehicles currently on this map with an active <see cref="Npc.NpcAiState"/>.</summary>
+    public List<ClonedObjectBase> NpcAiEntities { get; } = new();
+
+    /// <summary>Live <see cref="Character"/> count on this map, maintained by EnterMap/LeaveMap.</summary>
+    public int PlayerCount { get; private set; }
+
     public SectorMap(int continentId)
     {
         ContinentId = continentId;
@@ -58,6 +64,9 @@ public class SectorMap
         typeof(SectorMap).GetField($"<{nameof(Reactions)}>k__BackingField",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .SetValue(map, new Dictionary<TFID, Reaction>());
+        typeof(SectorMap).GetField($"<{nameof(NpcAiEntities)}>k__BackingField",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(map, new List<ClonedObjectBase>());
 
         map.LocalCoidCounter = mapData.HighestCoid + 1;
         return map;
@@ -147,6 +156,26 @@ public class SectorMap
         packet.WeatherUpdateSize = 0;
     }
 
+    /// <summary>
+    /// Resolves a map path (wad.xml/.fam <c>MapPathTemplate</c>, ObjectTemplate type 70) from the
+    /// header <see cref="MapData.Templates"/> table by COID, e.g. for
+    /// <see cref="SpawnPointTemplate.MapPathCoid"/>.
+    /// </summary>
+    public bool TryGetMapPath(long coid, out MapPathTemplate mapPath)
+    {
+        mapPath = null;
+        if (coid <= 0)
+            return false;
+
+        if (MapData.Templates.TryGetValue(coid, out var template) && template is MapPathTemplate found)
+        {
+            mapPath = found;
+            return true;
+        }
+
+        return false;
+    }
+
     public void EnterMap(ClonedObjectBase clonedObject)
     {
         if (clonedObject is Trigger trigger)
@@ -155,10 +184,27 @@ public class SectorMap
         if (clonedObject is Reaction reaction)
             Reactions.Add(reaction.ObjectId, reaction);
 
+        if (clonedObject is Character)
+            PlayerCount++;
+
+        if (HasNpcAi(clonedObject))
+            NpcAiEntities.Add(clonedObject);
+
         if (Objects.ContainsKey(clonedObject.ObjectId))
             throw new InvalidOperationException("This object is already on the map!");
 
         Objects.Add(clonedObject.ObjectId, clonedObject);
+    }
+
+    /// <summary>True when a Creature/Vehicle carries a live server-side AI state (NPC.md).</summary>
+    private static bool HasNpcAi(ClonedObjectBase clonedObject)
+    {
+        return clonedObject switch
+        {
+            Creature creature => creature.NpcAi != null,
+            Vehicle vehicle => vehicle.NpcAi != null,
+            _ => false
+        };
     }
 
     /// <summary>
@@ -228,6 +274,11 @@ public class SectorMap
 
         if (clonedObject is Reaction reaction)
             Reactions.Remove(reaction.ObjectId);
+
+        if (clonedObject is Character && PlayerCount > 0)
+            PlayerCount--;
+
+        NpcAiEntities.Remove(clonedObject);
 
         if (!Objects.ContainsKey(clonedObject.ObjectId))
             throw new InvalidOperationException("This object is not on the map!");
