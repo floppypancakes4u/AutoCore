@@ -212,7 +212,7 @@ public class GraphicsObject : ClonedObjectBase
         }
     }
 
-    private static void BroadcastDestroy(SectorMap map, Structures.TFID objectId)
+    protected static void BroadcastDestroy(SectorMap map, Structures.TFID objectId)
     {
         var destroyPacket = new DestroyObjectPacket(objectId);
         foreach (var character in map.Objects.Values.OfType<Character>().Where(c => c.OwningConnection != null))

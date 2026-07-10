@@ -157,11 +157,7 @@ public class Creature : SimpleObject
             SetMap(null);
 
             // Broadcast destroy packet to all players in the map so they remove the creature client-side
-            var destroyPacket = new DestroyObjectPacket(creatureObjectId);
-            foreach (var character in map.Objects.Values.OfType<Character>().Where(c => c.OwningConnection != null))
-            {
-                character.OwningConnection.SendGamePacket(destroyPacket);
-            }
+            BroadcastDestroy(map, creatureObjectId);
 
             // Notify killer that death animation packet is missing
             if (killerCharacter?.OwningConnection != null)

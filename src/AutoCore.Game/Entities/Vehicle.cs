@@ -976,18 +976,7 @@ public class Vehicle : SimpleObject
         // Leave the map first so the destroy-broadcast iteration stays consistent.
         SetMap(null);
 
-        var destroyPacket = new DestroyObjectPacket(vehicleObjectId);
-        foreach (var character in map.Objects.Values.OfType<Character>().Where(c => c.OwningConnection != null))
-        {
-            try
-            {
-                character.OwningConnection.SendGamePacket(destroyPacket);
-            }
-            catch
-            {
-                // Never let a single failed send abort the rest of the death broadcast.
-            }
-        }
+        BroadcastDestroy(map, vehicleObjectId);
     }
 
     private void GenerateAndSpawnTemplateLoot(Character killerCharacter)

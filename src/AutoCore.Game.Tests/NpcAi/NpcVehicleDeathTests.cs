@@ -88,6 +88,35 @@ public class NpcVehicleDeathTests
             "template loot must be rolled and spawned; sent=" + string.Join(',', _sent.Select(p => p.Opcode)));
     }
 
+    [TestMethod]
+    public void NpcVehicleDeath_BroadcastSendFailure_DoesNotThrow()
+    {
+        var map = CreateFieldMapWithPlayer();
+
+        var vehicle = new Vehicle();
+        vehicle.SetCoid(VehicleCoid, true);
+        vehicle.Position = new Vector3(15f, 0f, 15f);
+        vehicle.TemplateId = -1; // no template loot; isolate the destroy broadcast
+        vehicle.NpcAi = new NpcAiState();
+        vehicle.InitializeHealthForTests(50);
+        vehicle.SetMap(map);
+
+        try
+        {
+            // Route the destroy broadcast through GraphicsObject.BroadcastDestroy's forced-failure
+            // path; a single failed send must not abort death handling.
+            GraphicsObject.ForceNetworkHelperFailureForTests = true;
+            vehicle.OnDeath(DeathType.Silent);
+        }
+        finally
+        {
+            GraphicsObject.ForceNetworkHelperFailureForTests = false;
+        }
+
+        Assert.IsTrue(vehicle.IsCorpse, "death must still mark the vehicle a corpse despite send failure");
+        Assert.IsNull(map.GetObjectByCoid(VehicleCoid), "dead NPC vehicle must still leave the sector map");
+    }
+
     private static SectorMap CreateFieldMapWithPlayer()
     {
         var continent = new ContinentObject
