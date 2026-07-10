@@ -263,20 +263,10 @@ public class Reaction : ClonedObjectBase
                 return true;
 
             case ReactionType.Death:
-                IncompleteHandlerLog.Warn(
-                    "Reaction.Death",
-                    $"coid={Template.COID} name='{Template.Name}' objs=[{string.Join(',', Template.Objects)}] actOnActivator={Template.ActOnActivator}",
-                    "Death reaction unhandled — map objects not killed/animated server-side (doors/FX often use this)",
-                    "For each Objects COID (or activator): resolve map entity, play death/remove like client CVOGReaction_RemoveObject(..., death=1); ghost DestroyObject if server-owned; keep client 0x206C for visuals.");
-                return true;
+                return HandleDeath(activator);
 
             case ReactionType.Create:
-                IncompleteHandlerLog.Warn(
-                    "Reaction.Create",
-                    $"coid={Template.COID} name='{Template.Name}' objs=[{string.Join(',', Template.Objects)}] nested=[{string.Join(',', Template.Reactions)}]",
-                    "Create does not spawn/activate map templates server-side — inactive props/FX/physics stay missing for authority",
-                    "For each Objects COID: load template from MapData, instantiate/activate (IsActive), place on SectorMap, ghost to clients if needed; then fire nested Reactions. See client CVOGReaction_SpawnObject.");
-                return true;
+                return HandleCreate(activator);
 
             case ReactionType.TransferMap:
                 return HandleTransferMap(activator);
@@ -426,37 +416,189 @@ public class Reaction : ClonedObjectBase
 
     private bool HandleDelete(ClonedObjectBase activator)
     {
-        var map = activator.Map;
+        return ApplyReactionMapRemove(activator, "Delete");
+    }
+
+    /// <summary>
+    /// Create (type 2): spawn map template COIDs that are not yet live (client CVOGReaction_SpawnObject).
+    /// Nested child reactions are fired by <see cref="SectorMap"/> after this returns.
+    /// Only listed COIDs are created — never parents/siblings of a collision blocker.
+    /// </summary>
+    private bool HandleCreate(ClonedObjectBase activator)
+    {
+        var map = activator?.Map;
         if (map == null)
         {
-            Logger.WriteLog(LogType.Debug, $"Delete reaction {Template.COID}: Activator has no map");
+            Logger.WriteLog(LogType.Debug, $"Create reaction {Template.COID}: Activator has no map");
+            return true;
+        }
+
+        foreach (var objectCoid in Template.Objects)
+        {
+            if (map.GetObjectByCoid(objectCoid) != null)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "Create reaction {0}: object {1} already on map — skip",
+                    Template.COID,
+                    objectCoid);
+                continue;
+            }
+
+            if (!map.MapData.Templates.TryGetValue(objectCoid, out var template) || template == null)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "Create reaction {0}: no MapData template for coid={1} (client-side only)",
+                    Template.COID,
+                    objectCoid);
+                continue;
+            }
+
+            ClonedObjectBase obj;
+            try
+            {
+                obj = template.Create();
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLog(LogType.Error,
+                    "Create reaction {0}: template.Create failed for coid={1}: {2}",
+                    Template.COID,
+                    objectCoid,
+                    ex.Message);
+                continue;
+            }
+
+            if (obj == null)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "Create reaction {0}: template.Create returned null for coid={1}",
+                    Template.COID,
+                    objectCoid);
+                continue;
+            }
+
+            if (obj.ObjectId.Coid == 0)
+                obj.SetCoid(template.COID != 0 ? template.COID : objectCoid, false);
+
+            // Mark template active for any load-time IsActive consumers.
+            template.IsActive = true;
+
+            obj.SetMap(map);
+
+            if (obj is SpawnPoint spawnPoint)
+                spawnPoint.Spawn();
+
+            Logger.WriteLog(LogType.Debug,
+                "Create reaction {0}: spawned coid={1} type={2} on map {3}",
+                Template.COID,
+                objectCoid,
+                obj.GetType().Name,
+                map.ContinentId);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Death (type 8): server-side leave-map for listed COIDs only.
+    /// Client death FX / collision / mesh removal is owned by 0x206C (CVOGReaction_RemoveObject).
+    /// Do <b>not</b> send DestroyObject here — that double-frees client objects that 0x206C already
+    /// removes and can wipe whole gate meshes when only a blocker COID was intended.
+    /// </summary>
+    private bool HandleDeath(ClonedObjectBase activator)
+    {
+        return ApplyReactionMapRemove(activator, "Death");
+    }
+
+    /// <summary>
+    /// Shared Delete/Death server authority: drop exactly the listed map COIDs (or activator prop)
+    /// from <see cref="SectorMap"/> without client destroy packets. Never touch player vehicles.
+    /// </summary>
+    private bool ApplyReactionMapRemove(ClonedObjectBase activator, string label)
+    {
+        var map = activator?.Map;
+        if (map == null)
+        {
+            Logger.WriteLog(LogType.Debug, $"{label} reaction {Template.COID}: Activator has no map");
             return true;
         }
 
         if (Template.ActOnActivator)
         {
-            // Delete the activator itself
-            Logger.WriteLog(LogType.Debug, $"Delete reaction {Template.COID}: Removing activator {activator.ObjectId.Coid} from map");
+            if (!CanReactionRemoveFromMap(activator, label, isActivator: true))
+                return true;
+
+            Logger.WriteLog(LogType.Debug,
+                "{0} reaction {1}: removing activator coid={2} from map (no DestroyObject; client 0x206C)",
+                label,
+                Template.COID,
+                activator.ObjectId.Coid);
             activator.SetMap(null);
+            return true;
         }
-        else
+
+        foreach (var objectCoid in Template.Objects)
         {
-            // Delete objects specified in the Objects list
-            foreach (var objectCoid in Template.Objects)
+            var obj = map.GetObjectByCoid(objectCoid);
+            if (obj == null)
             {
-                var obj = map.GetObjectByCoid(objectCoid);
-                if (obj != null)
-                {
-                    Logger.WriteLog(LogType.Debug, $"Delete reaction {Template.COID}: Removing object {objectCoid} from map");
-                    obj.SetMap(null);
-                }
-                else
-                {
-                    // Object not on server - this is often expected as many objects are client-side only
-                    Logger.WriteLog(LogType.Debug, $"Delete reaction {Template.COID}: Object {objectCoid} not found on server (client-side only)");
-                }
+                // Often expected: collision blockers / FX are client-only until Create, or never server-owned.
+                Logger.WriteLog(LogType.Debug,
+                    "{0} reaction {1}: object {2} not found on server (client-side only)",
+                    label,
+                    Template.COID,
+                    objectCoid);
+                continue;
             }
+
+            if (!CanReactionRemoveFromMap(obj, label, isActivator: false))
+                continue;
+
+            Logger.WriteLog(LogType.Debug,
+                "{0} reaction {1}: removing object coid={2} type={3} from map (no DestroyObject; client 0x206C)",
+                label,
+                Template.COID,
+                objectCoid,
+                obj.GetType().Name);
+            obj.SetMap(null);
         }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Guards against deleting player vehicles/characters or reaction/trigger definitions via ActOnActivator.
+    /// Listed Objects COIDs are trusted as map-authored targets (gate blocker, prop, etc.).
+    /// </summary>
+    private bool CanReactionRemoveFromMap(ClonedObjectBase obj, string label, bool isActivator)
+    {
+        if (obj == null)
+            return false;
+
+        if (obj is Vehicle or Character)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "{0} reaction {1}: refusing to remove {2} coid={3}{4}",
+                label,
+                Template.COID,
+                obj.GetType().Name,
+                obj.ObjectId.Coid,
+                isActivator ? " (ActOnActivator)" : "");
+            return false;
+        }
+
+        // Never tear down the reaction entity itself mid-batch via ActOnActivator.
+        if (isActivator && obj is Reaction or Trigger)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "{0} reaction {1}: refusing to remove {2} activator coid={3}",
+                label,
+                Template.COID,
+                obj.GetType().Name,
+                obj.ObjectId.Coid);
+            return false;
+        }
+
         return true;
     }
 
@@ -609,7 +751,7 @@ public class Reaction : ClonedObjectBase
 
                     IncompleteHandlerLog.Warn(
                         "Reaction.SetActiveObjective",
-                        $"coid={Template.COID} mission={mission.Id} objective={objectiveId} seq={objective.Sequence} char={character.Name}",
+                        $"coid={Template.COID} mission={mission.Id} objective={objectiveId} seq={objective.Sequence} charCoid={character.ObjectId.Coid}",
                         "Server updated ActiveObjectiveSequence but did not send ObjectiveState / CompleteDynamicObjective / ConvoyMissionsResponse",
                         "After sequence change: send ObjectiveState (slots/bitmask), refresh journal packet, ensure login persistence of active sequence.");
                 }

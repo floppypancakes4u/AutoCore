@@ -80,15 +80,76 @@ public static class NpcInteractHandler
         if (npcCbid <= 0)
             return;
 
-        var dialogMissions = BuildDialogMissions(character, npcCbid);
+        // Client often advances objectives (0x206C / local UI) before the server — e.g. patrol
+        // done client-side while ActiveObjectiveSequence is still 0. Reconcile from objectiveId
+        // so deliver turn-in and PrepareClientTurnInDialog see the correct active sequence.
+        TryReconcileClientObjectiveHint(conn, character, packet.ObjectiveId, npcCbid);
+
+        var dialogMissions = BuildDialogMissions(character, npcCbid, packet.ObjectiveId);
         if (dialogMissions.Count == 0)
         {
-            Logger.WriteLog(LogType.Debug, "UseObject: no dialog missions for NPC cbid={0}", npcCbid);
+            Logger.WriteLog(LogType.Debug,
+                "UseObject: no dialog missions for NPC cbid={0} objectiveId={1} activeQuests=[{2}]",
+                npcCbid,
+                packet.ObjectiveId,
+                string.Join(',', character.CurrentQuests.Select(q => q.MissionId)));
             return;
         }
 
         PrepareClientTurnInDialog(conn, character, npcCbid, dialogMissions);
         SendNpcMissionDialog(conn, npc.ObjectId, dialogMissions);
+    }
+
+    /// <summary>
+    /// Forward-sync <see cref="CharacterQuest.ActiveObjectiveSequence"/> when the client UseObject
+    /// hint names a later objective on an owned mission related to this NPC.
+    /// </summary>
+    private static void TryReconcileClientObjectiveHint(
+        TNLConnection conn,
+        Character character,
+        int objectiveId,
+        int npcCbid)
+    {
+        if (objectiveId <= 0 || npcCbid <= 0 || character == null)
+            return;
+
+        var mission = AssetManager.Instance.GetMissionByObjectiveId(objectiveId);
+        var objective = AssetManager.Instance.GetObjectiveById(objectiveId);
+        if (mission == null || objective == null)
+            return;
+
+        if (!ObjectiveRelatedToNpc(mission, objective, npcCbid))
+            return;
+
+        var quest = character.CurrentQuests.FirstOrDefault(q => q.MissionId == mission.Id);
+        if (quest == null)
+            return;
+
+        if (objective.Sequence <= quest.ActiveObjectiveSequence)
+            return;
+
+        var oldSeq = quest.ActiveObjectiveSequence;
+        quest.ActiveObjectiveSequence = objective.Sequence;
+
+        if (oldSeq < quest.ObjectiveProgress.Length && oldSeq < quest.ObjectiveMax.Length)
+            quest.ObjectiveProgress[oldSeq] = quest.ObjectiveMax[oldSeq];
+
+        Logger.WriteLog(LogType.Debug,
+            "UseObjectHint: reconciled mission={0} seq {1} -> {2} objective={3} charCoid={4}",
+            mission.Id,
+            oldSeq,
+            objective.Sequence,
+            objectiveId,
+            character.ObjectId.Coid);
+
+        conn?.SendGamePacket(new ObjectiveStatePacket
+        {
+            ObjectiveBitmask = 0u,
+            ObjectiveId = objective.ObjectiveId,
+        });
+
+        TriggerManager.Instance.OnMissionStateChanged(
+            character.CurrentVehicle ?? (ClonedObjectBase)character);
     }
 
     /// <summary>
@@ -249,11 +310,25 @@ public static class NpcInteractHandler
 
         if (!CanOfferMission(character, packet.MissionId, npcCbid))
         {
-            Logger.WriteLog(LogType.Debug,
-                "MissionDialogResponse: mission {0} not offerable for charCoid={1} npcCbid={2}",
-                packet.MissionId,
-                character.ObjectId.Coid,
-                npcCbid);
+            var activeQuest = character.CurrentQuests.FirstOrDefault(q => q.MissionId == packet.MissionId);
+            if (activeQuest != null)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "MissionDialogResponse: turn-in/offer failed for active mission={0} charCoid={1} npcCbid={2} activeSeq={3}",
+                    packet.MissionId,
+                    character.ObjectId.Coid,
+                    npcCbid,
+                    activeQuest.ActiveObjectiveSequence);
+            }
+            else
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "MissionDialogResponse: mission {0} not offerable for charCoid={1} npcCbid={2}",
+                    packet.MissionId,
+                    character.ObjectId.Coid,
+                    npcCbid);
+            }
+
             return;
         }
 
@@ -307,7 +382,7 @@ public static class NpcInteractHandler
         return false;
     }
 
-    private static List<int> BuildDialogMissions(Character character, int npcCbid)
+    private static List<int> BuildDialogMissions(Character character, int npcCbid, int objectiveId = -1)
     {
         var missions = new List<int>();
 
@@ -321,7 +396,11 @@ public static class NpcInteractHandler
         if (missions.Count > 0)
             return missions;
 
-        // 2) In-progress missions given by this NPC (status dialog)
+        // 2) Client objective-id hint (UseObject IDObjective) for an owned mission related to this NPC
+        if (TryAddMissionFromObjectiveHint(character, npcCbid, objectiveId, missions) && missions.Count > 0)
+            return missions;
+
+        // 3) In-progress missions given by this NPC (status dialog)
         foreach (var quest in character.CurrentQuests)
         {
             if (IsMissionNpcGiver(quest.MissionId, npcCbid) && !missions.Contains(quest.MissionId))
@@ -331,7 +410,17 @@ public static class NpcInteractHandler
         if (missions.Count > 0)
             return missions;
 
-        // 3) New offers from this NPC (prereqs / level / not active)
+        // 4) In-progress missions with a remaining deliver to this NPC (status on turn-in NPCs)
+        foreach (var quest in character.CurrentQuests)
+        {
+            if (HasRemainingDeliverToNpc(quest, npcCbid) && !missions.Contains(quest.MissionId))
+                missions.Add(quest.MissionId);
+        }
+
+        if (missions.Count > 0)
+            return missions;
+
+        // 5) New offers from this NPC (prereqs / level / not active)
         foreach (var missionId in GetOfferableMissions(character, npcCbid))
         {
             if (!missions.Contains(missionId))
@@ -339,6 +428,75 @@ public static class NpcInteractHandler
         }
 
         return missions;
+    }
+
+    /// <summary>
+    /// When the client sends a known objective id, open dialog for that mission if the player owns it
+    /// and the objective (or mission giver) relates to this NPC.
+    /// </summary>
+    private static bool TryAddMissionFromObjectiveHint(
+        Character character,
+        int npcCbid,
+        int objectiveId,
+        List<int> missions)
+    {
+        if (objectiveId <= 0 || npcCbid <= 0)
+            return false;
+
+        var mission = AssetManager.Instance.GetMissionByObjectiveId(objectiveId);
+        var objective = AssetManager.Instance.GetObjectiveById(objectiveId);
+        if (mission == null || objective == null)
+            return false;
+
+        if (!character.CurrentQuests.Any(q => q.MissionId == mission.Id))
+            return false;
+
+        if (!ObjectiveRelatedToNpc(mission, objective, npcCbid))
+            return false;
+
+        if (!missions.Contains(mission.Id))
+            missions.Add(mission.Id);
+
+        return true;
+    }
+
+    private static bool ObjectiveRelatedToNpc(Mission mission, MissionObjective objective, int npcCbid)
+    {
+        if (mission.NPC == npcCbid)
+            return true;
+
+        return objective.Requirements
+            .OfType<ObjectiveRequirementDeliver>()
+            .Any(d => d.NPCTargetCompletes && d.NPCTargetCBID == npcCbid);
+    }
+
+    /// <summary>
+    /// True if any objective at or after the active sequence delivers to this NPC.
+    /// Enables status dialog on turn-in NPCs before the deliver sequence is active.
+    /// </summary>
+    private static bool HasRemainingDeliverToNpc(CharacterQuest quest, int npcCbid)
+    {
+        if (npcCbid <= 0)
+            return false;
+
+        var mission = AssetManager.Instance.GetMission(quest.MissionId);
+        if (mission?.Objectives == null)
+            return false;
+
+        foreach (var objective in mission.Objectives.Values)
+        {
+            if (objective.Sequence < quest.ActiveObjectiveSequence)
+                continue;
+
+            if (objective.Requirements
+                .OfType<ObjectiveRequirementDeliver>()
+                .Any(d => d.NPCTargetCompletes && d.NPCTargetCBID == npcCbid))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsMissionNpcGiver(int missionId, int npcCbid)

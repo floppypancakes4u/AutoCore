@@ -1,0 +1,349 @@
+[2026. 07. 09. 21:20:24.829] [Init] Initializing Asset Manager for Both...
+[2026. 07. 09. 21:20:24.837] [Init] Loading WAD file from: C:\Program Files (x86)\NetDevil\Auto Assault\clonebase.wad
+[2026. 07. 09. 21:20:24.960] [Init] Loaded 33 GLM files (skipped 0 failed files) with 143181 file entries!
+[2026. 07. 09. 21:20:25.095] [Init] Loaded 19295 CloneBases!
+[2026. 07. 09. 21:20:25.211] [Init] WorldDBLoader: Loaded 43 LootTables from wad.xml
+[2026. 07. 09. 21:20:25.314] [Init] WorldDBLoader: Loaded 865 VehicleTemplates from wad.xml
+[2026. 07. 09. 21:20:25.430] [Init] WorldDBLoader: Loaded 48 CreatureAiProfiles from wad.xml
+[2026. 07. 09. 21:20:25.511] [Init] Loaded 3018 Missions!
+[2026. 07. 09. 21:20:25.556] [Init] Loaded 4452 Skills!
+[2026. 07. 09. 21:20:25.558] [Init] Loaded 635 Armor prefixes!
+[2026. 07. 09. 21:20:25.560] [Init] Loaded 640 Power Plant prefixes!
+[2026. 07. 09. 21:20:25.580] [Init] Loaded 643 Weapon prefixes!
+[2026. 07. 09. 21:20:25.582] [Init] Loaded 660 Vehicle prefixes!
+[2026. 07. 09. 21:20:25.602] [Init] Loaded 616 Ornament prefixes!
+[2026. 07. 09. 21:20:25.604] [Init] Loaded 628 Race Item prefixes!
+[2026. 07. 09. 21:20:25.604] [Init] WAD loaded successfully. Total CloneBases: 19295
+[2026. 07. 09. 21:20:25.605] [Init] Character CloneBases found: 24
+[2026. 07. 09. 21:20:26.179] [Init] Successfully loaded asset components: WAD, GLM, WorldDB, MapData
+[2026. 07. 09. 21:20:26.180] [Init] Asset Manager has loaded all data!
+[2026. 07. 09. 21:20:26.187] [Init] LootManager: Built item index with 20 type/rarity combinations
+[2026. 07. 09. 21:20:26.188] [Init] LootManager: Loaded 43 loot tables
+[2026. 07. 09. 21:20:26.190] [Init] LootManager: 1434 generatable items indexed
+[2026. 07. 09. 21:20:26.194] [Init]   Armor: 877 items
+[2026. 07. 09. 21:20:26.195] [Init]   Weapon: 458 items
+[2026. 07. 09. 21:20:26.195] [Init]   Vehicle: 96 items
+[2026. 07. 09. 21:20:26.196] [Init]   Item: 3 items
+[2026. 07. 09. 21:20:26.199] [Init]   Loot Table 0 (No Loot): DropChance=0.0%, Rolls=0
+[2026. 07. 09. 21:20:26.199] [Init]   Loot Table 1 (No Loot): DropChance=0.0%, Rolls=0
+[2026. 07. 09. 21:20:26.200] [Init]   Loot Table 2 (R1-R2 Wildlife Weak (removed)): DropChance=0.0%, Rolls=1
+[2026. 07. 09. 21:20:26.200] [Init]   Loot Table 3 (R1-R2 Wildlife): DropChance=2.0%, Rolls=1
+[2026. 07. 09. 21:20:26.200] [Init]   Loot Table 4 (R1-R2 Infantry Weak (removed)): DropChance=0.0%, Rolls=1
+[2026. 07. 09. 21:20:26.687] [Error] LoadCloneBase: Failed to load CloneBase with CBID 23340. The CloneBase may not exist in the loaded game data.
+[2026. 07. 09. 21:20:26.700] [Error] Failed to setup map 626: CloneBase with CBID 23340 not found. Ensure the game data (clonebase.wad) is properly loaded and contains this CBID.
+[2026. 07. 09. 21:20:27.015] [Init] MapManager initialized with 103 maps (1 failed).
+[2026. 07. 09. 21:20:27.024] [Init] Initializing the Auth server...
+[2026. 07. 09. 21:20:27.024] [Init] The Auth server has been initialized!
+[2026. 07. 09. 21:20:27.042] [Network] *** Listening for clients on port 2106
+[2026. 07. 09. 21:20:27.043] [Network] *** Listening for gameservers on port 2107
+[2026. 07. 09. 21:20:27.046] [Init] Setting up the Global server...
+[2026. 07. 09. 21:20:27.047] [Init] Initializing the TNL interface...
+[2026. 07. 09. 21:20:27.051] [Init] Initializing the network...
+[2026. 07. 09. 21:20:27.052] [Init] The Global server has been setup!
+[2026. 07. 09. 21:20:27.063] [Communicator] Connecting to auth server! Address: 127.0.0.1:2107
+[2026. 07. 09. 21:20:27.065] [Network] *** Listening for clients on port 26880
+[2026. 07. 09. 21:20:27.065] [Init] Setting up the Sector server...
+[2026. 07. 09. 21:20:27.066] [Init] Initializing the TNL interface...
+[2026. 07. 09. 21:20:27.066] [Init] Initializing the network...
+[2026. 07. 09. 21:20:27.066] [Init] The Sector server has been setup!
+[2026. 07. 09. 21:20:27.067] [Network] *** Listening for clients on port 27001
+[2026. 07. 09. 21:20:27.070] [Network] Dev control API listening on http://127.0.0.1:27999
+[2026. 07. 09. 21:20:27.078] [Communicator] The Game server (Id: 1, Address: 127.0.0.1:52566, Public Address: 127.0.0.1) has authenticated!
+[2026. 07. 09. 21:20:27.080] [Communicator] Successfully logged in to the Auth server!
+[2026. 07. 09. 21:20:38.235] [Network] *** Client connected from 127.0.0.1:52581
+[2026. 07. 09. 21:20:38.359] [Debug] SetPath reaction 31250: no server-side vehicle targets applied (pathId=31248)
+[2026. 07. 09. 21:20:38.485] [Network] *** Client logged in from 127.0.0.1:52581
+[2026. 07. 09. 21:20:38.603] [Network] ExpectLoginToGlobal: Created login entry for account 4 (admin), expires in 10000ms
+[2026. 07. 09. 21:20:38.641] [Network] Account (admin, 4) was redirected to the server: 1!
+[2026. 07. 09. 21:20:38.776] [Network] ReadConnectRequest: Version mismatch allowed. Expected: 149, Got: 175
+[2026. 07. 09. 21:20:38.780] [Network] ReadConnectRequest: Successfully read connection request. Version: 175, Key: 606077153, PlayerCoid: -1
+[2026. 07. 09. 21:20:38.785] [Network] TNLInterface: Adding connection 0 from 127.0.0.1:61926
+[2026. 07. 09. 21:20:38.787] [Network] Client (0) connected from 127.0.0.1:61926
+[2026. 07. 09. 21:20:38.891] [Network] Incoming Packet: LoginRequest
+[2026. 07. 09. 21:20:38.914] [Network] LoginToGlobal: Successfully authenticated account 4 (admin)
+[2026. 07. 09. 21:20:38.915] [Network] Client (0 -> 4 | admin) authenticated from 127.0.0.1:61926
+[2026. 07. 09. 21:20:39.006] [Network] Character.LoadFromDB: Loaded character Coid 18325, Name from DB: 'Flopss' (Length: 6)
+[2026. 07. 09. 21:20:39.060] [Network] Character.WriteToPacket: Writing Name='Flopss' (Length: 6), Level=1
+[2026. 07. 09. 21:20:39.064] [Network] Outgoing Packet: CreateCharacter
+[2026. 07. 09. 21:20:39.068] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:39.072] [Network] Character.LoadFromDB: Loaded character Coid 18339, Name from DB: 'asdfasdf222' (Length: 11)
+[2026. 07. 09. 21:20:39.077] [Network] Character.WriteToPacket: Writing Name='asdfasdf222' (Length: 11), Level=1
+[2026. 07. 09. 21:20:39.077] [Network] Outgoing Packet: CreateCharacter
+[2026. 07. 09. 21:20:39.077] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:39.079] [Network] Character.LoadFromDB: Loaded character Coid 18346, Name from DB: 'fesh' (Length: 4)
+[2026. 07. 09. 21:20:39.085] [Network] Character.WriteToPacket: Writing Name='fesh' (Length: 4), Level=1
+[2026. 07. 09. 21:20:39.085] [Network] Outgoing Packet: CreateCharacter
+[2026. 07. 09. 21:20:39.086] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:39.088] [Network] Character.LoadFromDB: Loaded character Coid 18353, Name from DB: 'fasdfasdff11' (Length: 12)
+[2026. 07. 09. 21:20:39.094] [Network] Character.WriteToPacket: Writing Name='fasdfasdff11' (Length: 12), Level=1
+[2026. 07. 09. 21:20:39.095] [Network] Outgoing Packet: CreateCharacter
+[2026. 07. 09. 21:20:39.095] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:39.097] [Network] Character.LoadFromDB: Loaded character Coid 18360, Name from DB: 'cakes' (Length: 5)
+[2026. 07. 09. 21:20:39.103] [Network] Character.WriteToPacket: Writing Name='cakes' (Length: 5), Level=1
+[2026. 07. 09. 21:20:39.104] [Network] Outgoing Packet: CreateCharacter
+[2026. 07. 09. 21:20:39.104] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:39.106] [Network] Character.LoadFromDB: Loaded character Coid 18367, Name from DB: 'dfdfdfdf121' (Length: 11)
+[2026. 07. 09. 21:20:39.112] [Network] Character.WriteToPacket: Writing Name='dfdfdfdf121' (Length: 11), Level=1
+[2026. 07. 09. 21:20:39.112] [Network] Outgoing Packet: CreateCharacter
+[2026. 07. 09. 21:20:39.113] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:39.114] [Network] Character.LoadFromDB: Loaded character Coid 18374, Name from DB: 'dfdfdfd222' (Length: 10)
+[2026. 07. 09. 21:20:39.120] [Network] Character.WriteToPacket: Writing Name='dfdfdfd222' (Length: 10), Level=1
+[2026. 07. 09. 21:20:39.121] [Network] Outgoing Packet: CreateCharacter
+[2026. 07. 09. 21:20:39.121] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:39.122] [Network] Outgoing Packet: LoginResponse
+[2026. 07. 09. 21:20:41.628] [Network] Incoming Packet: News
+[2026. 07. 09. 21:20:41.629] [Network] Outgoing Packet: News
+[2026. 07. 09. 21:20:44.422] [Network] Incoming Packet: Login
+[2026. 07. 09. 21:20:44.431] [Network] Character.LoadFromDB: Loaded character Coid 18374, Name from DB: 'dfdfdfd222' (Length: 10)
+[2026. 07. 09. 21:20:44.478] [Network] Character.LoadMissions: coid=18374 active=0 completed=0
+[2026. 07. 09. 21:20:44.495] [Network] Outgoing Packet: LoginAck
+[2026. 07. 09. 21:20:44.496] [Network] Outgoing Packet: TransferToSector
+[2026. 07. 09. 21:20:45.875] [Network] ReadConnectRequest: Successfully read connection request. Version: 175, Key: 606077153, PlayerCoid: 18374
+[2026. 07. 09. 21:20:45.876] [Network] TNLInterface: Adding connection 0 from 127.0.0.1:58385
+[2026. 07. 09. 21:20:45.877] [Network] Client (0) connected from 127.0.0.1:58385
+[2026. 07. 09. 21:20:46.690] [Network] Incoming Packet: TransferFromGlobal
+[2026. 07. 09. 21:20:46.699] [Network] Outgoing Packet: MapInfo
+[2026. 07. 09. 21:20:47.454] [Network] Incoming Packet: TransferFromGlobalStage2
+[2026. 07. 09. 21:20:47.455] [Network] Outgoing Packet: TransferFromGlobalStage3
+[2026. 07. 09. 21:20:48.254] [Network] Incoming Packet: TransferFromGlobalStage3
+[2026. 07. 09. 21:20:48.257] [Network] Character.WriteToPacket: Writing Name='dfdfdfd222' (Length: 10), Level=1
+[2026. 07. 09. 21:20:48.258] [Debug] Character.WriteToPacket: FirstTimeFlags for account 4: 8AC20A69 004180E1 8041004A 00010040
+[2026. 07. 09. 21:20:48.261] [Debug] Character.WriteToPacket: Sending 0 current quests
+[2026. 07. 09. 21:20:48.262] [Network] Outgoing Packet: CreateVehicleExtended
+[2026. 07. 09. 21:20:48.263] [Network] Outgoing Packet: CreateCharacterExtended
+[2026. 07. 09. 21:20:48.266] [Network] Outgoing Packet: InventoryCargoSendAll
+[2026. 07. 09. 21:20:48.267] [Debug] Outgoing InventoryFlow Packet: InventoryCargoSendAll bytes=5000 preview=402000000D000000FFFFFFFFFFFFFFFF0000000000000000FFFFFFFFFFFFFFFF0000000000000000FFFFFFFFFFFFFFFF0000000000000000FFFFFFFFFFFFFFFF0000000000000000FFFFFFFFFFFFFFFF0000000000000000FFFFFFFFFFFFFFFF
+[2026. 07. 09. 21:20:48.270] [Network] Outgoing Packet: UnlockRegion
+[2026. 07. 09. 21:20:48.270] [Network] Outgoing Packet: UnlockRegion
+[2026. 07. 09. 21:20:48.279] [Debug] SectorMap 707: firing PlayerOnLoad trigger 16217 (17 reaction(s)) for activator 18374
+[2026. 07. 09. 21:20:48.284] [Debug] TriggerManager: skip re-entrant fire trigger=16229
+[2026. 07. 09. 21:20:48.285] [Network] Outgoing Packet: GroupReactionCall
+[2026. 07. 09. 21:20:48.286] [Network] Outgoing Packet: GroupReactionCall
+[2026. 07. 09. 21:20:48.289] [Error] INCOMPLETE[Reaction.FailMission] coid=17178 name='l1_failmission_exit' g1=3052 g2=0 g3=0 objs=[] | gap: Fail not applied to CurrentQuests/CompletedMissionIds | TODO: Remove or mark quest failed, send FailMission (0x20B2) if required, clear objective UI, OnMissionStateChanged; honor GenericVar1 mission id if set.
+[2026. 07. 09. 21:20:48.289] [Network] Outgoing Packet: GroupReactionCall
+[2026. 07. 09. 21:20:48.290] [Debug] Mission reaction GiveMission triggered for reaction 14137 mission=554
+[2026. 07. 09. 21:20:48.321] [Debug] GiveMission: tracked mission 554 on server for coid=18374
+[2026. 07. 09. 21:20:48.324] [Debug] TriggerManager: remote condition fire trigger=16234 actor=18374 watchVar=mission
+[2026. 07. 09. 21:20:48.324] [Debug] TriggerManager: skip re-entrant fire trigger=16234
+[2026. 07. 09. 21:20:48.324] [Network] Outgoing Packet: GroupReactionCall
+[2026. 07. 09. 21:20:48.325] [Debug] TriggerManager: skip re-entrant fire trigger=16234
+[2026. 07. 09. 21:20:48.328] [Network] Outgoing Packet: GroupReactionCall
+[2026. 07. 09. 21:20:48.329] [Error] INCOMPLETE[Reaction.Death] coid=16447 name='l1_death_forcollapse_preload' objs=[16444] actOnActivator=False | gap: Death reaction unhandled - map objects not killed/animated server-side (doors/FX often use this) | TODO: For each Objects COID (or activator): resolve map entity, play death/remove like client CVOGReaction_RemoveObject(..., death=1); ghost DestroyObject if server-owned; keep client 0x206C for visuals.
+[2026. 07. 09. 21:20:48.420] [Error] INCOMPLETE[Reaction.Death] coid=17736 name='l0_death_outsidegate' objs=[] actOnActivator=False | gap: Death reaction unhandled - map objects not killed/animated server-side (doors/FX often use this) | TODO: For each Objects COID (or activator): resolve map entity, play death/remove like client CVOGReaction_RemoveObject(..., death=1); ghost DestroyObject if server-owned; keep client 0x206C for visuals.
+[2026. 07. 09. 21:20:48.422] [Debug] RelockContObj reaction 17871: GenericVar1=693, GenericVar3=0
+[2026. 07. 09. 21:20:48.422] [Debug] RelockContObj reaction 17871: Relocking for character dfdfdfd222
+[2026. 07. 09. 21:20:48.424] [Debug] UnlockContObj reaction 17913: GenericVar1=707, GenericVar3=0, Objects=0, ActOnActivator=False
+[2026. 07. 09. 21:20:48.425] [Error] INCOMPLETE[Reaction.UnlockContObj] coid=17913 objectiveIdOrG1=707 g3=0 objs=[] char=dfdfdfd222 | gap: No per-character unlock set - only logs; map/mission gates using unlock state will not open server-side | TODO: Track unlocked objective/container ids on character; gate triggers/conditions; sync client if needed beyond 0x206C.
+[2026. 07. 09. 21:20:48.428] [Debug] UnlockContObj reaction 17913: Unlocking for character dfdfdfd222
+[2026. 07. 09. 21:20:48.428] [Network] Outgoing Packet: GroupReactionCall
+[2026. 07. 09. 21:20:48.434] [Network] CurrencySync login reload: character=18374 credits=0
+[2026. 07. 09. 21:20:48.434] [Debug] Login complete for coid=18374: CollisionTriggersEnabled stays false until first move; map NPCs=98
+[2026. 07. 09. 21:20:48.437] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.437] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195378 cbid=2477 level=2
+[2026. 07. 09. 21:20:48.438] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.438] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195379 cbid=2468 level=2
+[2026. 07. 09. 21:20:48.438] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.438] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195380 cbid=12086 level=2
+[2026. 07. 09. 21:20:48.439] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.439] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195381 cbid=12447 level=2
+[2026. 07. 09. 21:20:48.439] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.440] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195386 cbid=12554 level=2
+[2026. 07. 09. 21:20:48.440] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.441] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195382 cbid=12425 path=17937
+[2026. 07. 09. 21:20:48.441] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.441] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195387 cbid=12448 level=2
+[2026. 07. 09. 21:20:48.441] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.441] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195388 cbid=12472 level=1
+[2026. 07. 09. 21:20:48.442] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.442] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195389 cbid=1989 level=255
+[2026. 07. 09. 21:20:48.442] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.442] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195390 cbid=1986 level=2
+[2026. 07. 09. 21:20:48.443] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.443] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195395 cbid=12508 level=255
+[2026. 07. 09. 21:20:48.443] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.443] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195391 cbid=11840 path=15845
+[2026. 07. 09. 21:20:48.444] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.465] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195401 cbid=6531 level=60
+[2026. 07. 09. 21:20:48.466] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.466] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195396 cbid=15495 path=16539
+[2026. 07. 09. 21:20:48.466] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.467] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195407 cbid=6531 level=60
+[2026. 07. 09. 21:20:48.467] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.467] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195402 cbid=15495 path=16550
+[2026. 07. 09. 21:20:48.467] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.468] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195413 cbid=6531 level=60
+[2026. 07. 09. 21:20:48.468] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.468] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195408 cbid=15495 path=16552
+[2026. 07. 09. 21:20:48.468] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.469] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195419 cbid=6531 level=60
+[2026. 07. 09. 21:20:48.469] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.469] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195414 cbid=15495 path=16547
+[2026. 07. 09. 21:20:48.469] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.470] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195425 cbid=6531 level=60
+[2026. 07. 09. 21:20:48.470] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.470] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195420 cbid=15495 path=16541
+[2026. 07. 09. 21:20:48.470] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.471] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195431 cbid=6531 level=60
+[2026. 07. 09. 21:20:48.471] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.471] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195426 cbid=15495 path=16545
+[2026. 07. 09. 21:20:48.472] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.472] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195437 cbid=6531 level=60
+[2026. 07. 09. 21:20:48.472] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.472] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195432 cbid=15495 path=16544
+[2026. 07. 09. 21:20:48.473] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.473] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195444 cbid=15334 level=58
+[2026. 07. 09. 21:20:48.473] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.473] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195438 cbid=15480 path=16539
+[2026. 07. 09. 21:20:48.473] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.474] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195451 cbid=15334 level=58
+[2026. 07. 09. 21:20:48.474] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.474] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195445 cbid=15480 path=16550
+[2026. 07. 09. 21:20:48.474] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.474] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195458 cbid=15334 level=58
+[2026. 07. 09. 21:20:48.475] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.475] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195452 cbid=15480 path=16552
+[2026. 07. 09. 21:20:48.475] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.475] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195465 cbid=15334 level=58
+[2026. 07. 09. 21:20:48.476] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.476] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195459 cbid=15480 path=16547
+[2026. 07. 09. 21:20:48.476] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.476] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195472 cbid=15334 level=58
+[2026. 07. 09. 21:20:48.476] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.477] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195466 cbid=15480 path=16541
+[2026. 07. 09. 21:20:48.477] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.477] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195479 cbid=15334 level=58
+[2026. 07. 09. 21:20:48.477] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.477] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195473 cbid=15480 path=16545
+[2026. 07. 09. 21:20:48.478] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.478] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195486 cbid=15334 level=58
+[2026. 07. 09. 21:20:48.478] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.478] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195480 cbid=15480 path=16544
+[2026. 07. 09. 21:20:48.479] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.479] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195492 cbid=15332 level=54
+[2026. 07. 09. 21:20:48.479] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.479] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195487 cbid=15478 path=16539
+[2026. 07. 09. 21:20:48.479] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.480] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195498 cbid=15332 level=54
+[2026. 07. 09. 21:20:48.480] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.480] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195493 cbid=15478 path=16550
+[2026. 07. 09. 21:20:48.480] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.480] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195504 cbid=15332 level=54
+[2026. 07. 09. 21:20:48.481] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.481] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195499 cbid=15478 path=16552
+[2026. 07. 09. 21:20:48.481] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.481] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195510 cbid=15332 level=54
+[2026. 07. 09. 21:20:48.481] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.482] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195505 cbid=15478 path=16547
+[2026. 07. 09. 21:20:48.482] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.482] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195516 cbid=15332 level=54
+[2026. 07. 09. 21:20:48.482] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.483] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195511 cbid=15478 path=16541
+[2026. 07. 09. 21:20:48.483] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.483] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195522 cbid=15332 level=54
+[2026. 07. 09. 21:20:48.483] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.483] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195517 cbid=15478 path=16545
+[2026. 07. 09. 21:20:48.483] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.484] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195528 cbid=15332 level=54
+[2026. 07. 09. 21:20:48.484] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.484] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195523 cbid=15478 path=16544
+[2026. 07. 09. 21:20:48.484] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.485] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195534 cbid=9176 level=44
+[2026. 07. 09. 21:20:48.485] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.485] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195529 cbid=15476 path=16539
+[2026. 07. 09. 21:20:48.485] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.486] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195540 cbid=9176 level=44
+[2026. 07. 09. 21:20:48.486] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.486] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195535 cbid=15476 path=16550
+[2026. 07. 09. 21:20:48.487] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.487] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195546 cbid=9176 level=44
+[2026. 07. 09. 21:20:48.487] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.487] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195541 cbid=15476 path=16552
+[2026. 07. 09. 21:20:48.487] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.488] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195552 cbid=9176 level=44
+[2026. 07. 09. 21:20:48.488] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.488] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195547 cbid=15476 path=16547
+[2026. 07. 09. 21:20:48.488] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.489] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195558 cbid=9176 level=44
+[2026. 07. 09. 21:20:48.489] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.489] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195553 cbid=15476 path=16541
+[2026. 07. 09. 21:20:48.489] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.490] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195564 cbid=9176 level=44
+[2026. 07. 09. 21:20:48.490] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.490] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195559 cbid=15476 path=16545
+[2026. 07. 09. 21:20:48.490] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.490] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195570 cbid=9176 level=44
+[2026. 07. 09. 21:20:48.491] [Network] Outgoing Packet: CreateVehicle
+[2026. 07. 09. 21:20:48.491] [Debug] MapNpcGhostCreate: CreateVehicle coid=1342195565 cbid=15476 path=16544
+[2026. 07. 09. 21:20:48.491] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.491] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195571 cbid=12651 level=2
+[2026. 07. 09. 21:20:48.492] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.492] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195572 cbid=12651 level=2
+[2026. 07. 09. 21:20:48.492] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.492] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195573 cbid=12651 level=2
+[2026. 07. 09. 21:20:48.492] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.493] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195574 cbid=12649 level=2
+[2026. 07. 09. 21:20:48.493] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.493] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195575 cbid=12658 level=2
+[2026. 07. 09. 21:20:48.493] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.493] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195576 cbid=12658 level=2
+[2026. 07. 09. 21:20:48.494] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.494] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195577 cbid=12649 level=2
+[2026. 07. 09. 21:20:48.494] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.494] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195578 cbid=12649 level=2
+[2026. 07. 09. 21:20:48.495] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.495] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195579 cbid=12649 level=2
+[2026. 07. 09. 21:20:48.495] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.495] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195580 cbid=12655 level=2
+[2026. 07. 09. 21:20:48.495] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.496] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195581 cbid=626 level=2
+[2026. 07. 09. 21:20:48.496] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.496] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195582 cbid=626 level=2
+[2026. 07. 09. 21:20:48.496] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.496] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195583 cbid=626 level=2
+[2026. 07. 09. 21:20:48.497] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.497] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195584 cbid=626 level=2
+[2026. 07. 09. 21:20:48.497] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.497] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195585 cbid=626 level=2
+[2026. 07. 09. 21:20:48.498] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.498] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195586 cbid=626 level=2
+[2026. 07. 09. 21:20:48.498] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.498] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195587 cbid=626 level=2
+[2026. 07. 09. 21:20:48.498] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.499] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195588 cbid=626 level=2
+[2026. 07. 09. 21:20:48.499] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.499] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195589 cbid=626 level=2
+[2026. 07. 09. 21:20:48.499] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.499] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195590 cbid=626 level=2
+[2026. 07. 09. 21:20:48.500] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.500] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195591 cbid=626 level=2
+[2026. 07. 09. 21:20:48.500] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.500] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195592 cbid=626 level=2
+[2026. 07. 09. 21:20:48.501] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.501] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195593 cbid=626 level=2
+[2026. 07. 09. 21:20:48.501] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.501] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195594 cbid=626 level=2
+[2026. 07. 09. 21:20:48.502] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.502] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195595 cbid=626 level=2
+[2026. 07. 09. 21:20:48.502] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.502] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195596 cbid=626 level=2
+[2026. 07. 09. 21:20:48.502] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.503] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195597 cbid=626 level=2
+[2026. 07. 09. 21:20:48.503] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.503] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195598 cbid=626 level=2
+[2026. 07. 09. 21:20:48.503] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.503] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195599 cbid=626 level=2
+[2026. 07. 09. 21:20:48.503] [Network] Outgoing Packet: CreateCreature
+[2026. 07. 09. 21:20:48.503] [Debug] MapNpcGhostCreate: CreateCreature coid=1342195600 cbid=626 level=2
+[2026. 07. 09. 21:20:53.123] [Debug] SetPath reaction 31251: no server-side vehicle targets applied (pathId=31249)
+[2026. 07. 09. 21:20:57.222] [Network] Incoming Packet: GetIgnored
+[2026. 07. 09. 21:20:57.223] [Network] Incoming Packet: GetEnemies
+[2026. 07. 09. 21:20:57.223] [Network] Incoming Packet: RequestClanInfo
+[2026. 07. 09. 21:20:57.223] [Network] Incoming Packet: Chat
+[2026. 07. 09. 21:20:57.228] [Debug] Conn admin sent chat command: //rejoinchat
+[2026. 07. 09. 21:20:57.228] [Debug] Ignoring client chat control command: //rejoinchat
+[2026. 07. 09. 21:20:57.689] [Debug] CollisionTriggersEnabled after first move charCoid=18374
+[2026. 07. 09. 21:21:35.755] [Debug] SetPath reaction 31251: no server-side vehicle targets applied (pathId=31249)
+[2026. 07. 09. 21:21:43.557] [Debug] SetPath reaction 31250: no server-side vehicle targets applied (pathId=31248)
+[2026. 07. 09. 21:22:16.121] [Debug] SetPath reaction 31251: no server-side vehicle targets applied (pathId=31249)
+[2026. 07. 09. 21:22:19.513] [Debug] CharacterWorldStatePersistence.Save: character=18374 continent=707 pos=(236.587,8.720847,172.701)
+[2026. 07. 09. 21:22:19.540] [Network] Client (0) disconnected from 127.0.0.1:58385. Reason: ReasonRemoteDisconnectPacket, Details: Invalid Packet., Account: 4 (admin)

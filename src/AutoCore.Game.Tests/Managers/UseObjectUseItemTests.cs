@@ -118,7 +118,64 @@ public class UseObjectUseItemTests
         Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
     }
 
-    private static void SeedUseItemMission(int missionId, int objectiveId, long primaryCoid, int primaryCbid)
+    [TestMethod]
+    public void HandleUseObject_UseItem_IncompleteFlags_StillCompletesAndLogs()
+    {
+        // Exercise LogUseItemIncomplete branches (ProgressTime, RepeatCount, destroy, give, chain).
+        SeedUseItemMission(MissionId, ObjectiveId, WorldObjectCoid, primaryCbid: -1, configure: u =>
+        {
+            u.ProgressTime = 5;
+            u.RepeatCount = 3;
+            u.PrimaryDestroy = true;
+            u.SecondaryDestroy = true;
+            u.PrimaryGiveAtStart = true;
+            u.PrimaryCompletedItem = 10;
+            u.CompletedItem = 11;
+            u.CompletedMission = 999;
+        });
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceWorldObject(map, WorldObjectCoid, new Vector3(0, 0, 0));
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        GiveQuest(character, MissionId);
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(WorldObjectCoid, false),
+            ObjectiveId = -1,
+        });
+
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
+        Assert.IsTrue(_sent.OfType<CompleteDynamicObjectivePacket>().Any());
+    }
+
+    [TestMethod]
+    public void HandleUseObject_CompletedQuestInList_SkippedForUseItem()
+    {
+        SeedUseItemMission(MissionId, ObjectiveId, WorldObjectCoid, primaryCbid: -1);
+        var (conn, character, map) = CreatePlayer();
+        PlaceWorldObject(map, WorldObjectCoid, new Vector3(0, 0, 0));
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        GiveQuest(character, MissionId);
+        character.CompletedMissionIds.Add(MissionId);
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(WorldObjectCoid, false),
+            ObjectiveId = ObjectiveId,
+        });
+
+        // Quest remains but completion path skipped (already in CompletedMissionIds).
+        Assert.AreEqual(1, character.CurrentQuests.Count);
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+    }
+
+    private static void SeedUseItemMission(
+        int missionId,
+        int objectiveId,
+        long primaryCoid,
+        int primaryCbid,
+        Action<ObjectiveRequirementUseItem> configure = null)
     {
         var objective = MissionObjective.CreateForTests(objectiveId, 0, missionId, 1);
         var useItem = new ObjectiveRequirementUseItem(objective)
@@ -127,6 +184,7 @@ public class UseObjectUseItemTests
             PrimaryCBID = primaryCbid,
             FirstStateSlot = 0,
         };
+        configure?.Invoke(useItem);
         objective.Requirements.Add(useItem);
         AssetManager.Instance.SetTestMission(Mission.CreateForTests(missionId, objective));
     }

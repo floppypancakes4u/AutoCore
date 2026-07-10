@@ -117,8 +117,9 @@ public class IncompleteHandlerLogTests
     }
 
     [TestMethod]
-    public void Reaction_Create_LogsIncompleteWithTodo()
+    public void Reaction_Create_NoLongerLogsIncomplete()
     {
+        // Missing template COIDs are client-only no-ops; handler is implemented.
         var template = new ReactionTemplate
         {
             Name = "test_create",
@@ -131,18 +132,15 @@ public class IncompleteHandlerLogTests
 
         Assert.IsTrue(reaction.TriggerIfPossible(CreateActivator()));
 
-        Assert.IsTrue(
-            _incomplete.Any(m =>
-                m.Contains("[Reaction.Create]")
-                && m.Contains("16275")
-                && m.Contains("TODO:")
-                && m.Contains("CVOGReaction_SpawnObject")),
-            "Expected Create incomplete log, got: " + string.Join(" | ", _incomplete));
+        Assert.IsFalse(
+            _incomplete.Any(m => m.Contains("[Reaction.Create]")),
+            "Create is implemented — unexpected incomplete: " + string.Join(" | ", _incomplete));
     }
 
     [TestMethod]
-    public void Reaction_Death_LogsIncompleteWithTodo()
+    public void Reaction_Death_NoLongerLogsIncomplete()
     {
+        // Missing object is client-only no-op; handler is implemented.
         var template = new ReactionTemplate
         {
             Name = "test_death",
@@ -154,12 +152,9 @@ public class IncompleteHandlerLogTests
 
         Assert.IsTrue(reaction.TriggerIfPossible(CreateActivator()));
 
-        Assert.IsTrue(
-            _incomplete.Any(m =>
-                m.Contains("[Reaction.Death]")
-                && m.Contains("14120")
-                && m.Contains("TODO:")),
-            "Expected Death incomplete log, got: " + string.Join(" | ", _incomplete));
+        Assert.IsFalse(
+            _incomplete.Any(m => m.Contains("[Reaction.Death]")),
+            "Death is implemented — unexpected incomplete: " + string.Join(" | ", _incomplete));
     }
 
     [TestMethod]

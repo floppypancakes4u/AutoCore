@@ -1,0 +1,194 @@
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+namespace AutoCore.Game.Tests.Entities;
+
+using AutoCore.Database.World.Models;
+using AutoCore.Game.Entities;
+using AutoCore.Game.EntityTemplates;
+using AutoCore.Game.Map;
+using AutoCore.Game.Structures;
+
+/// <summary>
+/// Mission-complete re-eval must not permanently delete interactive NPCs from the shared map
+/// (soft-lock: turn in Rogers, decline follow-up, relog → NPC gone).
+/// </summary>
+[TestClass]
+public class DeleteReactionNpcPreserveTests
+{
+    private const int ContinentId = 707;
+    private const int DeleteReactionCoid = 97001;
+    private const long NpcCoid = 1342195378L;
+
+    [TestMethod]
+    public void HandleDelete_PreservesInteractiveNpcOnMap()
+    {
+        var map = CreateMap();
+        var npc = PlaceNpc(map, NpcCoid);
+        PlaceDeleteReaction(map, DeleteReactionCoid, targetCoid: NpcCoid);
+
+        var activator = new Character();
+        activator.SetCoid(100, true);
+        activator.SetMap(map);
+
+        Assert.IsTrue((map.GetObjectByCoid(DeleteReactionCoid) as Reaction).TriggerIfPossible(activator));
+
+        Assert.IsNotNull(map.GetObjectByCoid(NpcCoid), "Interactive NPC must stay on shared map for re-offer / relog");
+        Assert.IsNotNull(npc.Map);
+    }
+
+    [TestMethod]
+    public void HandleDelete_StillRemovesNonNpcTarget()
+    {
+        var map = CreateMap();
+        var prop = new GraphicsObject(GraphicsObjectType.GraphicsPhysics);
+        prop.SetCoid(88001, false);
+        prop.SetMap(map);
+
+        PlaceDeleteReaction(map, DeleteReactionCoid, targetCoid: 88001);
+        var activator = new Character();
+        activator.SetCoid(101, true);
+        activator.SetMap(map);
+
+        Assert.IsTrue((map.GetObjectByCoid(DeleteReactionCoid) as Reaction).TriggerIfPossible(activator));
+        Assert.IsNull(map.GetObjectByCoid(88001));
+        Assert.IsNull(prop.Map);
+    }
+
+    [TestMethod]
+    public void ShouldPreserveInteractiveNpc_TrueForFlaggedCreature()
+    {
+        var npc = new Creature();
+        npc.ForceInteractiveNpcForTests = true;
+        Assert.IsTrue(Reaction.ShouldPreserveInteractiveNpc(npc));
+
+        var prop = new GraphicsObject(GraphicsObjectType.GraphicsPhysics);
+        Assert.IsFalse(Reaction.ShouldPreserveInteractiveNpc(prop));
+    }
+
+    [TestMethod]
+    public void SpawnPoint_IsSpawnedCreatureMissing_WhenTrackedCoidAbsent()
+    {
+        var map = CreateMap();
+        var spawn = new SpawnPoint(new SpawnPointTemplate { COID = 5001 });
+        spawn.SetCoid(5001, false);
+        spawn.SetMap(map);
+        spawn.SetLastSpawnedCoidForTests(NpcCoid);
+
+        Assert.IsTrue(spawn.IsSpawnedCreatureMissing());
+        Assert.AreEqual(0, map.EnsureInteractiveNpcs()); // EnsureSpawned may no-op without spawn list
+    }
+
+    [TestMethod]
+    public void HandleDelete_RemovesSpawnPoint_CreateRestoresFromTemplate()
+    {
+        // Map 707 gunny: Delete spawn COID then Create replacement. SpawnPoints are not NPCs;
+        // they may be removed, but Create must re-place from MapData so progression is not stuck.
+        var map = CreateMap();
+        const long spawnCoid = 14090L;
+        const long createReactionCoid = 97002;
+
+        var template = new SpawnPointTemplate { COID = (int)spawnCoid };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList
+        {
+            SpawnType = -1,
+            IsTemplate = false,
+        });
+        map.MapData.Templates[spawnCoid] = template;
+
+        var spawn = new SpawnPoint(template);
+        spawn.SetCoid(spawnCoid, false);
+        spawn.SetMap(map);
+
+        PlaceDeleteReaction(map, DeleteReactionCoid, targetCoid: spawnCoid);
+        var activator = new Character();
+        activator.SetCoid(102, true);
+        activator.SetMap(map);
+
+        Assert.IsTrue((map.GetObjectByCoid(DeleteReactionCoid) as Reaction).TriggerIfPossible(activator));
+        Assert.IsNull(map.GetObjectByCoid(spawnCoid));
+
+        var createTpl = new ReactionTemplate
+        {
+            COID = (int)createReactionCoid,
+            ReactionType = ReactionType.Create,
+        };
+        createTpl.Objects.Add(spawnCoid);
+        var createReaction = new Reaction(createTpl);
+        createReaction.SetCoid(createReactionCoid, false);
+        createReaction.SetMap(map);
+
+        Assert.IsTrue(createReaction.TriggerIfPossible(activator));
+        Assert.IsNotNull(map.GetObjectByCoid(spawnCoid) as SpawnPoint);
+    }
+
+    [TestMethod]
+    public void HandleCreate_PlacesMissingSpawnPointFromMapTemplate()
+    {
+        var map = CreateMap();
+        const long createCoid = 14138;
+        const long reactionCoid = 97002;
+
+        var template = new SpawnPointTemplate { COID = (int)createCoid };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList
+        {
+            SpawnType = -1,
+            IsTemplate = false,
+        });
+        map.MapData.Templates[createCoid] = template;
+
+        var createTpl = new ReactionTemplate
+        {
+            COID = (int)reactionCoid,
+            ReactionType = ReactionType.Create,
+            ActOnActivator = false,
+        };
+        createTpl.Objects.Add(createCoid);
+        var createReaction = new Reaction(createTpl);
+        createReaction.SetCoid(reactionCoid, false);
+        createReaction.SetMap(map);
+
+        var activator = new Character();
+        activator.SetCoid(103, true);
+        activator.SetMap(map);
+
+        Assert.IsNull(map.GetObjectByCoid(createCoid));
+        Assert.IsTrue(createReaction.TriggerIfPossible(activator));
+        Assert.IsNotNull(map.GetObjectByCoid(createCoid) as SpawnPoint);
+    }
+
+    private static SectorMap CreateMap()
+    {
+        var continent = new ContinentObject
+        {
+            Id = ContinentId,
+            MapFileName = $"tm_delete_npc_{ContinentId}",
+            DisplayName = "test",
+            IsTown = true,
+            IsPersistent = true,
+        };
+        return SectorMap.CreateForTests(continent, new Vector4(0, 0, 0, 0));
+    }
+
+    private static Creature PlaceNpc(SectorMap map, long coid)
+    {
+        var creature = new Creature();
+        creature.SetCoid(coid, true);
+        creature.ForceInteractiveNpcForTests = true;
+        creature.SetMap(map);
+        return creature;
+    }
+
+    private static void PlaceDeleteReaction(SectorMap map, int reactionCoid, long targetCoid)
+    {
+        var template = new ReactionTemplate
+        {
+            COID = reactionCoid,
+            ReactionType = ReactionType.Delete,
+            ActOnActivator = false,
+        };
+        template.Objects.Add(targetCoid);
+        var reaction = new Reaction(template);
+        reaction.SetCoid(reactionCoid, false);
+        reaction.SetMap(map);
+    }
+}

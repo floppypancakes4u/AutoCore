@@ -189,6 +189,192 @@ public class NpcInteractUseObjectTests
     }
 
     [TestMethod]
+    public void HandleUseObject_InProgressDeliverTargetNpc_NotYetActiveSeq_OpensStatusDialog()
+    {
+        // Giver is OtherNpc; later objective delivers to clicked NPC. Active seq is still 0 (non-deliver).
+        SeedPatrolThenDeliverMission(
+            MissionA,
+            giverNpcCbid: OtherNpcCbid,
+            patrolObjectiveId: ObjectiveA,
+            deliverObjectiveId: ObjectiveB,
+            deliverNpcCbid: NpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+        Assert.AreEqual(0, character.CurrentQuests[0].ActiveObjectiveSequence);
+        _sent.Clear();
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = -1,
+        });
+
+        var dialog = _sent.OfType<NpcMissionDialogPacket>().SingleOrDefault();
+        Assert.IsNotNull(dialog, "Deliver-target NPC should open status dialog before deliver seq is active");
+        CollectionAssert.Contains(dialog.MissionIds, MissionA);
+    }
+
+    [TestMethod]
+    public void HandleUseObject_ObjectiveIdHint_IncludesOwnedMissionForDeliverNpc()
+    {
+        // Still on patrol seq; client sends deliver objective id (Gunny-style UseObject hint).
+        SeedPatrolThenDeliverMission(
+            MissionA,
+            giverNpcCbid: OtherNpcCbid,
+            patrolObjectiveId: ObjectiveA,
+            deliverObjectiveId: ObjectiveB,
+            deliverNpcCbid: NpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+        Assert.AreEqual(0, character.CurrentQuests[0].ActiveObjectiveSequence);
+        _sent.Clear();
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveB,
+        });
+
+        var dialog = _sent.OfType<NpcMissionDialogPacket>().SingleOrDefault();
+        Assert.IsNotNull(dialog, "Owned mission + objectiveId deliver hint should open dialog");
+        CollectionAssert.Contains(dialog.MissionIds, MissionA);
+    }
+
+    [TestMethod]
+    public void HandleUseObject_ObjectiveIdHint_UnknownOrUnowned_DoesNotInventDialog()
+    {
+        SeedPatrolThenDeliverMission(
+            MissionA,
+            giverNpcCbid: OtherNpcCbid,
+            patrolObjectiveId: ObjectiveA,
+            deliverObjectiveId: ObjectiveB,
+            deliverNpcCbid: NpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        // Player does not have MissionA.
+        _sent.Clear();
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveB,
+        });
+
+        Assert.AreEqual(0, _sent.OfType<NpcMissionDialogPacket>().Count(),
+            "Must not invent dialog for missions the character does not have");
+    }
+
+    [TestMethod]
+    public void HandleUseObject_ClientAheadDeliverHint_SyncsActiveSequence()
+    {
+        // Client already on deliver objective; server still on patrol (Guns of the Expansion desync).
+        SeedPatrolThenDeliverMission(
+            MissionA,
+            giverNpcCbid: OtherNpcCbid,
+            patrolObjectiveId: ObjectiveA,
+            deliverObjectiveId: ObjectiveB,
+            deliverNpcCbid: NpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+        Assert.AreEqual(0, character.CurrentQuests[0].ActiveObjectiveSequence);
+        _sent.Clear();
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveB,
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests[0].ActiveObjectiveSequence,
+            "Client-ahead deliver objective hint must forward-sync server sequence");
+        var dialog = _sent.OfType<NpcMissionDialogPacket>().SingleOrDefault();
+        Assert.IsNotNull(dialog);
+        CollectionAssert.Contains(dialog.MissionIds, MissionA);
+        Assert.IsTrue(
+            _sent.OfType<ObjectiveStatePacket>().Any(p => p.ObjectiveId == ObjectiveB),
+            "After reconcile, deliver objective should get ObjectiveState for turn-in prep");
+    }
+
+    [TestMethod]
+    public void HandleMissionDialogResponse_AfterClientAheadHint_CompletesDeliver()
+    {
+        // Live log repro: UseObject objectiveId=deliver, then MissionDialogResponse missionId + accepted=false.
+        SeedPatrolThenDeliverMission(
+            MissionA,
+            giverNpcCbid: OtherNpcCbid,
+            patrolObjectiveId: ObjectiveA,
+            deliverObjectiveId: ObjectiveB,
+            deliverNpcCbid: NpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+        Assert.AreEqual(0, character.CurrentQuests[0].ActiveObjectiveSequence);
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveB,
+        });
+        _sent.Clear();
+
+        NpcInteractHandler.HandleMissionDialogResponse(conn, new MissionDialogResponsePacket
+        {
+            MissionId = MissionA,
+            Accepted = false,
+            MissionGiver = new TFID(NpcCoid, false),
+        });
+
+        Assert.AreEqual(0, character.CurrentQuests.Count, "Deliver turn-in must complete after client-ahead reconcile");
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionA));
+        Assert.IsTrue(_sent.OfType<CompleteDynamicObjectivePacket>().Any());
+        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
+    }
+
+    [TestMethod]
+    public void HandleUseObject_UnrelatedObjectiveHint_DoesNotAdvanceSequence()
+    {
+        SeedPatrolThenDeliverMission(
+            MissionA,
+            giverNpcCbid: OtherNpcCbid,
+            patrolObjectiveId: ObjectiveA,
+            deliverObjectiveId: ObjectiveB,
+            deliverNpcCbid: NpcCbid);
+        // Deliver target is OtherNpc, not the clicked NPC.
+        SeedDeliverMission(MissionB, ObjectiveB + 100, OtherNpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+        // Owned mission B but objective for B's deliver is for OtherNpc — clicked NpcCbid.
+        GiveQuest(character, MissionB);
+        Assert.AreEqual(0, character.CurrentQuests.First(q => q.MissionId == MissionB).ActiveObjectiveSequence);
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveB + 100,
+        });
+
+        Assert.AreEqual(0, character.CurrentQuests.First(q => q.MissionId == MissionB).ActiveObjectiveSequence,
+            "Must not advance sequence for objective unrelated to clicked NPC");
+        Assert.AreEqual(0, character.CurrentQuests.First(q => q.MissionId == MissionA).ActiveObjectiveSequence);
+    }
+
+    [TestMethod]
     public void HandleUseObject_AfterPrereqComplete_OffersNextMission()
     {
         SeedOfferMission(MissionB, NpcCbid, reqMissionId: MissionA, continentId: ContinentId, objectiveId: ObjectiveB);
@@ -478,6 +664,36 @@ public class NpcInteractUseObjectTests
 
         var mission = Mission.CreateForTests(missionId, objective);
         mission.NPC = npcTargetCbid;
+        mission.ReqMissionId = new[] { -1, -1, -1, -1 };
+        AssetManager.Instance.SetTestMission(mission);
+    }
+
+    /// <summary>
+    /// Seq 0 = empty/non-deliver objective (e.g. patrol placeholder); seq 1 = deliver to deliverNpcCbid.
+    /// Giver NPC may differ from deliver target (retail Guns-of-the-Expansion pattern).
+    /// </summary>
+    private static void SeedPatrolThenDeliverMission(
+        int missionId,
+        int giverNpcCbid,
+        int patrolObjectiveId,
+        int deliverObjectiveId,
+        int deliverNpcCbid)
+    {
+        var patrol = MissionObjective.CreateForTests(patrolObjectiveId, 0, missionId, 1);
+        var deliverObj = MissionObjective.CreateForTests(deliverObjectiveId, 1, missionId, 1);
+        deliverObj.Requirements.Add(new ObjectiveRequirementDeliver(deliverObj)
+        {
+            NPCTargetCBID = deliverNpcCbid,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 0,
+            NumToDeliver = 0,
+            RequireItemToComplete = false,
+            ItemCBID = -1,
+        });
+
+        var mission = Mission.CreateForTests(missionId, patrol, deliverObj);
+        mission.NPC = giverNpcCbid;
+        mission.Continent = ContinentId;
         mission.ReqMissionId = new[] { -1, -1, -1, -1 };
         AssetManager.Instance.SetTestMission(mission);
     }

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <!-- Mission runtime scope (see scripts/measure-mission-coverage.ps1). -->
+          <Include>
+            [AutoCore.Game]AutoCore.Game.Managers.NpcInteractHandler|
+            [AutoCore.Game]AutoCore.Game.Managers.MissionKillProgress|
+            [AutoCore.Game]AutoCore.Game.Managers.IncompleteHandlerLog|
+            [AutoCore.Game]AutoCore.Game.Structures.CharacterQuest|
+            [AutoCore.Game]AutoCore.Game.Mission.Requirements*|
+            [AutoCore.Game]AutoCore.Game.Mission.MissionString|
+            [AutoCore.Game]AutoCore.Game.Packets.Sector.UseObjectPacket|
+            [AutoCore.Game]AutoCore.Game.Packets.Sector.AutoPatrolPacket|
+            [AutoCore.Game]AutoCore.Game.Packets.Sector.NpcMissionDialogPacket|
+            [AutoCore.Game]AutoCore.Game.Packets.Sector.MissionDialogResponsePacket|
+            [AutoCore.Game]AutoCore.Game.Packets.Sector.ObjectiveStatePacket|
+            [AutoCore.Game]AutoCore.Game.Packets.Sector.CompleteDynamicObjectivePacket|
+            [AutoCore.Game]AutoCore.Game.Packets.Sector.FailMissionPacket|
+            [AutoCore.Game]AutoCore.Game.Packets.Global.ConvoyMissionsRequestPacket|
+            [AutoCore.Game]AutoCore.Game.Packets.Global.ConvoyMissionsResponsePacket
+          </Include>
+          <Exclude>
+            [AutoCore.Game]AutoCore.Game.Packets.Sector.MissionDialogPacket|
+            [AutoCore.Game]AutoCore.Game.Mission.Mission|
+            [AutoCore.Game]AutoCore.Game.Mission.MissionObjective
+          </Exclude>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

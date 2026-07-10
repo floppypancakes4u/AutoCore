@@ -1,0 +1,190 @@
+using AutoCore.Game.CloneBases;
+using AutoCore.Game.CloneBases.Specifics;
+using AutoCore.Game.Constants;
+using AutoCore.Game.Inventory;
+using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.Tests.Inventory.Fakes;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Runtime.CompilerServices;
+
+namespace AutoCore.Game.Tests.Inventory;
+
+[TestClass]
+public class InventoryStackSplitTests
+{
+    [TestMethod]
+    public void Grab_PartialStack_ReducesSourceCreatesPendingAndSetsSplitWire()
+    {
+        var harness = CreateStackableHarness(cbid: 10, maxStack: 99);
+        InventoryTestMapHelper.AttachMap(harness.Character, localCoidCounter: 5000);
+        harness.Inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "Blood", 1001, 0, 0, 5));
+
+        var result = harness.Inventory.Grab(
+            InventoryTestHarness.CreateGrabPacket(1001, quantity: 2),
+            harness.Character);
+
+        var response = (InventoryGrabResponsePacket)result.Packets[0];
+        Assert.IsTrue(response.WasSuccessful);
+        Assert.IsTrue(response.IsSplit);
+        Assert.AreEqual(2, response.Quantity);
+        Assert.AreEqual(5000, response.SplitCoid);
+        Assert.AreEqual(3, harness.Inventory.FindByCoid(1001)!.Quantity);
+        Assert.IsNull(harness.Inventory.FindByCoid(5000));
+        Assert.IsTrue(harness.Inventory.TryGetPendingCargoDrag(5000, out var pending));
+        Assert.AreEqual(2, pending.Quantity);
+        Assert.AreEqual(10, pending.Cbid);
+        Assert.AreEqual(1, harness.Persistence.Upserted.Count);
+        Assert.AreEqual(3, harness.Persistence.Upserted[0].Item.Quantity);
+        Assert.AreEqual(5001, harness.Character.Map.LocalCoidCounter);
+    }
+
+    [TestMethod]
+    public void Grab_FullStackQuantity_DoesNotSplit()
+    {
+        var harness = CreateStackableHarness(cbid: 10, maxStack: 99);
+        harness.Inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "Blood", 1001, 0, 0, 5));
+
+        var result = harness.Inventory.Grab(
+            InventoryTestHarness.CreateGrabPacket(1001, quantity: 5),
+            harness.Character);
+
+        var response = (InventoryGrabResponsePacket)result.Packets[0];
+        Assert.IsTrue(response.WasSuccessful);
+        Assert.IsFalse(response.IsSplit);
+        Assert.AreEqual(5, response.Quantity);
+        Assert.AreEqual(5, harness.Inventory.FindByCoid(1001)!.Quantity);
+        Assert.AreEqual(0, harness.Persistence.Upserted.Count);
+    }
+
+    [TestMethod]
+    public void Grab_NonStackable_DoesNotSplitEvenWithPartialQuantity()
+    {
+        var harness = new InventoryTestHarness();
+        RegisterStack(harness, cbid: 11, maxStack: 1);
+        harness.Inventory.TryAdd(new CharacterInventoryItem(11, CloneBaseObjectType.Item, "Unique", 2002, 0, 0, 1));
+
+        var result = harness.Inventory.Grab(
+            InventoryTestHarness.CreateGrabPacket(2002, quantity: 1),
+            harness.Character);
+
+        var response = (InventoryGrabResponsePacket)result.Packets[0];
+        Assert.IsFalse(response.IsSplit);
+        Assert.AreEqual(1, harness.Inventory.FindByCoid(2002)!.Quantity);
+    }
+
+    [TestMethod]
+    public void Drop_PendingSplit_OntoEmptySlot_PlacesAndPersists()
+    {
+        var harness = CreateStackableHarness(cbid: 10, maxStack: 99);
+        InventoryTestMapHelper.AttachMap(harness.Character, localCoidCounter: 7000);
+        harness.Inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "Blood", 1001, 0, 0, 5));
+
+        harness.Inventory.Grab(InventoryTestHarness.CreateGrabPacket(1001, quantity: 2), harness.Character);
+
+        var result = harness.Inventory.Drop(
+            InventoryTestHarness.CreateDropPacket(7000, x: 3, y: 1),
+            harness.Character);
+
+        var response = (InventoryDropResponsePacket)result.Packets[0];
+        Assert.IsTrue(response.WasSuccessful);
+        Assert.IsFalse(response.IsConcatenate);
+        var placed = harness.Inventory.FindByCoid(7000);
+        Assert.IsNotNull(placed);
+        Assert.AreEqual(2, placed.Quantity);
+        Assert.AreEqual((byte)3, placed.InventoryPositionX);
+        Assert.AreEqual((byte)1, placed.InventoryPositionY);
+        Assert.IsFalse(harness.Inventory.TryGetPendingCargoDrag(7000, out _));
+        Assert.IsTrue(harness.Persistence.Upserted.Any(u => u.Item.Coid == 7000 && u.Item.Quantity == 2));
+    }
+
+    [TestMethod]
+    public void Drop_PendingSplit_OntoSameCbidStack_Recombines()
+    {
+        var harness = CreateStackableHarness(cbid: 10, maxStack: 99);
+        InventoryTestMapHelper.AttachMap(harness.Character, localCoidCounter: 8000);
+        harness.Inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "Blood", 1001, 0, 0, 5));
+        harness.Inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "Blood", 1002, 2, 0, 4));
+
+        harness.Inventory.Grab(InventoryTestHarness.CreateGrabPacket(1001, quantity: 2), harness.Character);
+
+        var result = harness.Inventory.Drop(
+            InventoryTestHarness.CreateDropPacket(8000, x: 2, y: 0),
+            harness.Character);
+
+        var response = (InventoryDropResponsePacket)result.Packets[0];
+        Assert.IsTrue(response.WasSuccessful);
+        Assert.IsTrue(response.IsConcatenate);
+        Assert.AreEqual(1002, response.SwapCoid);
+        Assert.AreEqual(6, harness.Inventory.FindByCoid(1002)!.Quantity);
+        Assert.IsNull(harness.Inventory.FindByCoid(8000));
+        Assert.IsFalse(harness.Inventory.TryGetPendingCargoDrag(8000, out _));
+        Assert.AreEqual(3, harness.Inventory.FindByCoid(1001)!.Quantity);
+        Assert.IsTrue(harness.Persistence.DeletedItemCoids.Contains(8000) ||
+                      !harness.Persistence.Upserted.Any(u => u.Item.Coid == 8000 && u.Item.Quantity == 2));
+        Assert.IsTrue(harness.Persistence.Upserted.Any(u => u.Item.Coid == 1002 && u.Item.Quantity == 6));
+    }
+
+    [TestMethod]
+    public void Drop_InGridStackOntoSameCbid_RecombinesAndDeletesMover()
+    {
+        var harness = CreateStackableHarness(cbid: 10, maxStack: 99);
+        harness.Inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "Blood", 1001, 0, 0, 3));
+        harness.Inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "Blood", 1002, 2, 0, 4));
+
+        var result = harness.Inventory.Drop(
+            InventoryTestHarness.CreateDropPacket(1001, x: 2, y: 0),
+            harness.Character);
+
+        var response = (InventoryDropResponsePacket)result.Packets[0];
+        Assert.IsTrue(response.WasSuccessful);
+        Assert.IsTrue(response.IsConcatenate);
+        Assert.AreEqual(1002, response.SwapCoid);
+        Assert.AreEqual(7, harness.Inventory.FindByCoid(1002)!.Quantity);
+        Assert.IsNull(harness.Inventory.FindByCoid(1001));
+        Assert.IsTrue(harness.Persistence.DeletedItemCoids.Contains(1001));
+        Assert.IsTrue(harness.Persistence.Upserted.Any(u => u.Item.Coid == 1002 && u.Item.Quantity == 7));
+    }
+
+    [TestMethod]
+    public void Drop_Recombine_RespectsMaxStack_LeavesRemainderPendingOrInGrid()
+    {
+        var harness = CreateStackableHarness(cbid: 10, maxStack: 10);
+        InventoryTestMapHelper.AttachMap(harness.Character, localCoidCounter: 9000);
+        harness.Inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "Blood", 1001, 0, 0, 8));
+        harness.Inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "Blood", 1002, 2, 0, 8));
+
+        harness.Inventory.Grab(InventoryTestHarness.CreateGrabPacket(1001, quantity: 5), harness.Character);
+
+        var result = harness.Inventory.Drop(
+            InventoryTestHarness.CreateDropPacket(9000, x: 2, y: 0),
+            harness.Character);
+
+        var response = (InventoryDropResponsePacket)result.Packets[0];
+        Assert.IsTrue(response.WasSuccessful);
+        Assert.IsTrue(response.IsConcatenate);
+        Assert.AreEqual(10, harness.Inventory.FindByCoid(1002)!.Quantity);
+        // 2 units could not fit — remain as pending drag
+        Assert.IsTrue(harness.Inventory.TryGetPendingCargoDrag(9000, out var pending));
+        Assert.AreEqual(3, pending.Quantity); // 5 - 2 space = 3 left? Wait: space on 8 is 2, so merge 2, remainder 3
+        Assert.AreEqual(3, harness.Inventory.FindByCoid(1001)!.Quantity);
+    }
+
+    private static InventoryTestHarness CreateStackableHarness(int cbid, int maxStack)
+    {
+        var harness = new InventoryTestHarness();
+        RegisterStack(harness, cbid, maxStack);
+        return harness;
+    }
+
+    private static void RegisterStack(InventoryTestHarness harness, int cbid, int maxStack)
+    {
+        var clone = (CloneBaseObject)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseObject));
+        clone.CloneBaseSpecific = new CloneBaseSpecific
+        {
+            Type = (int)CloneBaseObjectType.Item,
+            CloneBaseId = cbid
+        };
+        clone.SimpleObjectSpecific = new SimpleObjectSpecific { StackSize = (ushort)maxStack };
+        harness.CloneBases.Register(cbid, clone);
+    }
+}
