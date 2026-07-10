@@ -25,9 +25,31 @@ public class WireDiagTests
         WireDiag.Enabled = false;
 
         WireDiag.RecordGamePacket("CreateVehicle", coid: 1, bytes: 10, playerCoid: 99);
+        WireDiag.RecordGhostPack("GhostVehicle", coid: 2, bits: 10, mask: 1, initial: true, playerCoid: 99);
 
         Assert.AreEqual(0, WireDiag.Snapshot().Count);
         Assert.AreEqual(0L, WireDiag.CurrentSeq);
+    }
+
+    [TestMethod]
+    public void TryEnableFromEnvironment_AcceptsYesTrueCaseVariants()
+    {
+        var previous = Environment.GetEnvironmentVariable("AUTOCORE_WIRE_DIAG");
+        try
+        {
+            foreach (var token in new[] { "true", "TRUE", "yes", "YES" })
+            {
+                Environment.SetEnvironmentVariable("AUTOCORE_WIRE_DIAG", token);
+                WireDiag.ResetForTests();
+                WireDiag.TryEnableFromEnvironment();
+                Assert.IsTrue(WireDiag.Enabled, $"token {token} should enable");
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("AUTOCORE_WIRE_DIAG", previous);
+            WireDiag.ResetForTests();
+        }
     }
 
     [TestMethod]
@@ -143,11 +165,80 @@ public class WireDiagTests
             WireDiag.ResetForTests();
             WireDiag.TryEnableFromEnvironment();
             Assert.IsFalse(WireDiag.Enabled);
+
+            Environment.SetEnvironmentVariable("AUTOCORE_WIRE_DIAG", null);
+            WireDiag.Enabled = true;
+            WireDiag.TryEnableFromEnvironment();
+            Assert.IsTrue(WireDiag.Enabled, "empty env leaves Enabled unchanged");
         }
         finally
         {
             Environment.SetEnvironmentVariable("AUTOCORE_WIRE_DIAG", previous);
             WireDiag.ResetForTests();
         }
+    }
+
+    [TestMethod]
+    public void MaxRetainedEntries_TrimsOldest()
+    {
+        WireDiag.Enabled = true;
+        WireDiag.MaxRetainedEntries = 3;
+
+        WireDiag.RecordGamePacket("A", 1, 1, 1);
+        WireDiag.RecordGamePacket("B", 2, 1, 1);
+        WireDiag.RecordGamePacket("C", 3, 1, 1);
+        WireDiag.RecordGamePacket("D", 4, 1, 1);
+
+        var snap = WireDiag.Snapshot();
+        Assert.AreEqual(3, snap.Count);
+        Assert.AreEqual("B", snap[0].Name);
+        Assert.AreEqual("D", snap[2].Name);
+    }
+
+    [TestMethod]
+    public void FormatLine_NullEntry_AndGamePacketWithoutBits()
+    {
+        Assert.AreEqual("[WireDiag] (null)", WireDiag.FormatLine(null));
+
+        var line = WireDiag.FormatLine(new WireDiagEntry
+        {
+            Seq = 1,
+            Kind = WireDiagKind.GamePacket,
+            Name = "CreateVehicle",
+            Coid = 9,
+            Bits = -1,
+            Bytes = 10,
+            Mask = 0,
+            Initial = false,
+            PlayerCoid = 1,
+            HexPreview = "AA",
+        });
+        StringAssert.Contains(line, "bytes=10");
+        StringAssert.Contains(line, "hex=AA");
+        Assert.IsFalse(line.Contains("bits="));
+    }
+
+    [TestMethod]
+    public void Record_NullName_UsesQuestionMark()
+    {
+        WireDiag.Enabled = true;
+        WireDiag.RecordGamePacket(null, 1, 1, 1);
+        WireDiag.RecordGhostPack(null, 2, 1, 0, true, 1);
+        var snap = WireDiag.Snapshot();
+        Assert.AreEqual("?", snap[0].Name);
+        Assert.AreEqual("?", snap[1].Name);
+    }
+
+    [TestMethod]
+    public void GhostPartial_RateLimit_IsPerCoid()
+    {
+        WireDiag.Enabled = true;
+        WireDiag.MaxPartialGhostPacksPerCoid = 1;
+
+        WireDiag.RecordGhostPack("G", coid: 1, bits: 1, mask: 1, initial: false, playerCoid: 1);
+        WireDiag.RecordGhostPack("G", coid: 1, bits: 2, mask: 1, initial: false, playerCoid: 1); // dropped
+        WireDiag.RecordGhostPack("G", coid: 2, bits: 3, mask: 1, initial: false, playerCoid: 1); // other coid ok
+
+        Assert.AreEqual(2, WireDiag.Snapshot().Count);
     }
 }

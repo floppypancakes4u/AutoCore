@@ -106,40 +106,14 @@ public class GhostVehicle : GhostObject
 
             stream.Write(parentVehicle.Trim);
 
-            if (stream.WriteFlag(false)) // SpeedAdd != 1.0f
-            {
-                stream.WriteBits(32, BitConverter.GetBytes(0)); // SpeedAdd
-            }
-
-            if (stream.WriteFlag(false)) // BrakesMaxTorqueFrontMultiplier != 1.0f
-            {
-                stream.WriteBits(32, BitConverter.GetBytes(0)); // BrakesMaxTorqueFrontMultiplier
-            }
-
-            if (stream.WriteFlag(false)) // BrakesMaxTorqueRearAdjustMultiplier != 1.0f
-            {
-                stream.WriteBits(32, BitConverter.GetBytes(0)); // BrakesMaxTorqueRearAdjustMultiplier
-            }
-
-            if (stream.WriteFlag(false)) // SteeringMaxAngleMultiplier != 1.0f
-            {
-                stream.WriteBits(32, BitConverter.GetBytes(0)); // SteeringMaxAngleMultiplier
-            }
-
-            if (stream.WriteFlag(false)) // SteeringFullSpeedLimitMultiplier != 1.0f
-            {
-                stream.WriteBits(32, BitConverter.GetBytes(0)); // SteeringFullSpeedLimitMultiplier
-            }
-
-            if (stream.WriteFlag(false)) // AVDCollisionSpinDampeningMultiplier != 1.0f
-            {
-                stream.WriteBits(32, BitConverter.GetBytes(0)); // AVDCollisionSpinDampeningMultiplier
-            }
-
-            if (stream.WriteFlag(false)) // AVDNormalSpinDampeningMultiplier != 1.0f
-            {
-                stream.WriteBits(32, BitConverter.GetBytes(0)); // AVDNormalSpinDampeningMultiplier
-            }
+            // Optional multiplier bodies are not wired yet — always flag false (client uses defaults).
+            stream.WriteFlag(false); // SpeedAdd == 1.0f
+            stream.WriteFlag(false); // BrakesMaxTorqueFrontMultiplier == 1.0f
+            stream.WriteFlag(false); // BrakesMaxTorqueRearAdjustMultiplier == 1.0f
+            stream.WriteFlag(false); // SteeringMaxAngleMultiplier == 1.0f
+            stream.WriteFlag(false); // SteeringFullSpeedLimitMultiplier == 1.0f
+            stream.WriteFlag(false); // AVDCollisionSpinDampeningMultiplier == 1.0f
+            stream.WriteFlag(false); // AVDNormalSpinDampeningMultiplier == 1.0f
 
             if (stream.WriteFlag(packPath)) // path
             {
@@ -165,10 +139,7 @@ public class GhostVehicle : GhostObject
                 stream.WriteInt((uint)parentVehicle.SpawnOwnerCoid, 20); // CoidSpawnOwner
             }
 
-            stream.WriteBits(8, BitConverter.GetBytes(0)); // trick count
-
-            for (var i = 0; i < 0; ++i)
-                stream.WriteBits(16, BitConverter.GetBytes(0)); // trick id
+            stream.WriteBits(8, BitConverter.GetBytes(0)); // trick count (no trick ids when zero)
 
             stream.WriteFlag(false); // IsTrailer
 
@@ -198,20 +169,11 @@ public class GhostVehicle : GhostObject
                 }
                 else
                 {
-                    if (stream.WriteFlag(false)) // EnhancementID != -1
-                        stream.WriteInt(0, 20); // EnhancementID
-
-                    if (stream.WriteFlag(false)) // CoidOnUseTrigger != -1
-                        stream.WriteInt(0, 20); // CoidOnUseTrigger
-
-                    if (stream.WriteFlag(false)) // CoidOnUseReaction != -1
-                        stream.WriteInt(0, 20); // CoidOnUseReaction
-
-                    if (stream.WriteFlag(false)) // CreatureSummoner coid != -1
-                    {
-                        stream.WriteBits(64, BitConverter.GetBytes((long)0)); // CreatureSummoner coid
-                        stream.WriteFlag(false); // CreatureSummoner coid global
-                    }
+                    // Optional creature-owner fields not wired yet — always flag false.
+                    stream.WriteFlag(false); // EnhancementID == -1
+                    stream.WriteFlag(false); // CoidOnUseTrigger == -1
+                    stream.WriteFlag(false); // CoidOnUseReaction == -1
+                    stream.WriteFlag(false); // CreatureSummoner coid == -1
 
                     stream.WriteFlag(false); // DoesntCountAsSummon
                     stream.WriteBits(8, new byte[] { owner.GetAsCreature()?.Level ?? 0 }); // Level (driver level for NPC-driven vehicles)
@@ -225,9 +187,7 @@ public class GhostVehicle : GhostObject
         {
             if (stream.WriteFlag((updateMask & SkillsMask) != 0))
             {
-                if (stream.WriteFlag(false)) // Has Owner Skills
-                    PackSkills(stream, owner);
-
+                stream.WriteFlag(false); // Has Owner Skills (not wired yet)
                 PackSkills(stream, parentVehicle);
             }
         }
@@ -269,17 +229,9 @@ public class GhostVehicle : GhostObject
             stream.WriteInt(characterOwner.GMLevel, 4);
         }
 
-        if (stream.WriteFlag((updateMask & ClanMask) != 0 && false)) // TODO
-        {
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // ClanId
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // ClanRank
-            stream.WriteString("", 51); // ClanName
-        }
-
-        if (stream.WriteFlag((updateMask & PetCBIDMask) != 0 && false)) // TODO
-        {
-            stream.WriteBits(16, BitConverter.GetBytes(0)); // Pet CBID
-        }
+        // Clan / pet CBID payloads not wired yet — always flag false to hold the wire slot.
+        stream.WriteFlag(false); // ClanMask TODO
+        stream.WriteFlag(false); // PetCBIDMask TODO
 
         if (stream.WriteFlag((updateMask & MurdererMask) != 0)) // TODO
         {

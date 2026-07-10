@@ -128,6 +128,65 @@ public class GlobalVehicleScopeTests
             "Ghost lever off must skip ObjectInScope after create");
     }
 
+    [TestMethod]
+    public void IsLocalPlayerVehicle_TrueOnlyForCurrentVehicle()
+    {
+        var local = new Vehicle();
+        local.SetCoid(1, true);
+        var other = new Vehicle();
+        other.SetCoid(2, true);
+        var self = new Character();
+        self.SetCurrentVehicleForTests(local);
+
+        Assert.IsTrue(SectorMap.IsLocalPlayerVehicle(local, self));
+        Assert.IsFalse(SectorMap.IsLocalPlayerVehicle(other, self));
+        Assert.IsFalse(SectorMap.IsLocalPlayerVehicle(local, null));
+        Assert.IsFalse(SectorMap.IsLocalPlayerVehicle(null, self));
+    }
+
+    [TestMethod]
+    public void PerformScopeQuery_ScopeGlobalVehiclesFalse_StillScopesLocalPlayerVehicle()
+    {
+        const int vehicleCbid = 650_003;
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid);
+
+        var map = CreateFieldMap();
+        var localVehicle = new Vehicle { Position = new Vector3(0, 0, 0) };
+        localVehicle.SetCoid(MapNpcIdentity.CoidBase + 99, true);
+        localVehicle.LoadCloneBase(vehicleCbid);
+        localVehicle.SetupCBFields();
+        localVehicle.SetMap(map);
+        localVehicle.CreateGhost();
+
+        var npc = new Vehicle { Position = new Vector3(10, 0, 0) };
+        npc.SetCoid(MapNpcIdentity.CoidBase + 100, true);
+        npc.LoadCloneBase(vehicleCbid);
+        npc.SetupCBFields();
+        npc.SetMap(map);
+        npc.CreateGhost();
+
+        var self = new Character { Position = new Vector3(0, 0, 0) };
+        self.SetCurrentVehicleForTests(localVehicle);
+
+        // Put both into selected scope buffer
+        var selected = (List<ClonedObjectBase>)typeof(SectorMap)
+            .GetField("_scopeSelected", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(map)!;
+        selected.Add(localVehicle);
+        selected.Add(npc);
+
+        var connection = new TNLConnection();
+        connection.SetGhostFrom(true);
+        connection.ActivateGhosting();
+
+        SectorMap.ScopeGlobalVehicles = false;
+        map.PerformScopeQuery(null, self, connection);
+
+        Assert.IsNotNull(localVehicle.Ghost.GetFirstObjectRef(),
+            "Local player vehicle must remain scopable when ScopeGlobalVehicles is false");
+        Assert.IsNull(npc.Ghost.GetFirstObjectRef(), "Foreign NPC must be skipped");
+    }
+
     private static (SectorMap Map, Vehicle Npc, Character Self, TNLConnection Connection, List<BasePacket> Packets)
         ArrangeScopedNpc()
     {
