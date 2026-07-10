@@ -5,6 +5,7 @@ using AutoCore.Game.Constants;
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
+using AutoCore.Game.Npc;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Utils;
@@ -285,6 +286,12 @@ public class Reaction : ClonedObjectBase
 
             case ReactionType.ResetTrigger:
                 return HandleResetTrigger(activator);
+
+            case ReactionType.SetPath:
+                return HandleSetPath(activator);
+
+            case ReactionType.SetPatrolDistance:
+                return HandleSetPatrolDistance(activator);
 
             default:
                 IncompleteHandlerLog.Warn(
@@ -1113,6 +1120,126 @@ public class Reaction : ClonedObjectBase
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// SetPath (type 43): pathCoid = GenericVar1. &lt;= 0 clears the path (CoidCurrentPath = -1);
+    /// otherwise assigns the path and reads PathReversing from the resolved MapPathTemplate
+    /// (false when the path coid is unknown to this map), and resets the NpcAi follower
+    /// index/direction so the NPC restarts the new path from its beginning. PatrolDistance is
+    /// left untouched either way. Target resolution matches HandleCreate: ActOnActivator ->
+    /// activator, else Objects COIDs -> map.GetObjectByCoid; a Character target resolves to its
+    /// CurrentVehicle.
+    /// </summary>
+    private bool HandleSetPath(ClonedObjectBase activator)
+    {
+        var map = activator?.Map;
+        if (map == null)
+            return true;
+
+        var pathCoid = Template.GenericVar1;
+        var hasPath = pathCoid > 0;
+        var reversing = hasPath && map.TryGetMapPath(pathCoid, out var mapPath) && mapPath.ReverseDirection;
+
+        ForEachSetPathTarget(activator, map, target => ApplySetPath(target, pathCoid, hasPath, reversing));
+        return true;
+    }
+
+    /// <summary>
+    /// SetPatrolDistance (type 44): reads logic var[GenericVar1] via the character's
+    /// EnsureLogicVariables store (same pattern as HandleVariableSet) and writes it to the
+    /// resolved target's PatrolDistance. CoidCurrentPath is left untouched.
+    /// </summary>
+    private bool HandleSetPatrolDistance(ClonedObjectBase activator)
+    {
+        var map = activator?.Map;
+        if (map == null)
+            return true;
+
+        var character = GetCharacterFromActivator(activator);
+        var store = character?.EnsureLogicVariables();
+        if (store == null)
+            return true;
+
+        var value = store.Get(Template.GenericVar1);
+
+        ForEachSetPathTarget(activator, map, target => ApplySetPatrolDistance(target, value));
+        return true;
+    }
+
+    /// <summary>
+    /// Shared SetPath/SetPatrolDistance target enumeration: ActOnActivator -> activator, else
+    /// Objects COIDs -> map.GetObjectByCoid. A Character target/activator resolves to its
+    /// CurrentVehicle (client dispatch §2.5).
+    /// </summary>
+    private void ForEachSetPathTarget(ClonedObjectBase activator, SectorMap map, Action<ClonedObjectBase> apply)
+    {
+        if (Template.ActOnActivator)
+        {
+            apply(ResolveNpcPathTarget(activator));
+            return;
+        }
+
+        foreach (var objectCoid in Template.Objects)
+        {
+            var obj = map.GetObjectByCoid(objectCoid);
+            if (obj == null)
+                continue;
+
+            apply(ResolveNpcPathTarget(obj));
+        }
+    }
+
+    private static ClonedObjectBase ResolveNpcPathTarget(ClonedObjectBase obj)
+    {
+        return obj?.GetAsCharacter() is Character character ? character.CurrentVehicle : obj;
+    }
+
+    private static void ApplySetPath(ClonedObjectBase target, int pathCoid, bool hasPath, bool reversing)
+    {
+        switch (target)
+        {
+            case Vehicle vehicle:
+                vehicle.CoidCurrentPath = hasPath ? pathCoid : -1;
+                if (hasPath)
+                {
+                    vehicle.PathReversing = reversing;
+                    ResetNpcPathFollower(vehicle.NpcAi);
+                }
+                break;
+
+            case Creature creature:
+                creature.CoidCurrentPath = hasPath ? pathCoid : -1;
+                if (hasPath)
+                {
+                    creature.PathReversing = reversing;
+                    ResetNpcPathFollower(creature.NpcAi);
+                }
+                break;
+        }
+    }
+
+    private static void ResetNpcPathFollower(NpcAiState npcAi)
+    {
+        if (npcAi == null)
+            return;
+
+        npcAi.PathIndex = -1;
+        npcAi.PathDirection = 1;
+    }
+
+    private static void ApplySetPatrolDistance(ClonedObjectBase target, float value)
+    {
+        switch (target)
+        {
+            case Vehicle vehicle:
+                vehicle.PatrolDistance = value;
+                break;
+
+            case Creature creature:
+                creature.PatrolDistance = value;
+                break;
+        }
     }
 
     public override int GetCurrentHP() => 1;
