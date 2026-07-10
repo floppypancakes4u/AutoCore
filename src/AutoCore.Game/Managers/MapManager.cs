@@ -74,6 +74,22 @@ public class MapManager : Singleton<MapManager>
             map.Grid.RebucketSweep();
     }
 
+    /// <summary>
+    /// Advances server-side NPC AI (idle-patrol path following) once per sector tick. Only maps
+    /// with live players are ticked — empty continents have no observers to sync poses to.
+    /// Called on the sector main loop inside the interface lock, so it never races packet handlers.
+    /// </summary>
+    /// <param name="nowMs"><see cref="Environment.TickCount64"/> timestamp for this tick.</param>
+    /// <param name="deltaSeconds">Elapsed time since the previous tick, in seconds.</param>
+    public void TickNpcs(long nowMs, float deltaSeconds)
+    {
+        foreach (var map in SectorMaps.Values)
+        {
+            if (map.PlayerCount > 0)
+                Npc.NpcTicker.Tick(map, nowMs, deltaSeconds);
+        }
+    }
+
     private void SetupMap(int continentId)
     {
         if (SectorMaps.ContainsKey(continentId))

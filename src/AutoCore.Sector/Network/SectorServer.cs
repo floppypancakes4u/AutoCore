@@ -81,6 +81,10 @@ public partial class SectorServer : BaseServer, ILoopable
                 combatEntries.Add((coid, () => conn?.CurrentCharacter?.CurrentVehicle?.ProcessCombatIfFiring()));
             }
             SectorCombatTick.ProcessAll(combatEntries);
+
+            // Server-side NPC AI tick (idle-patrol path following). Runs after combat inside the
+            // same lock so it never mutates maps concurrently with packet handlers or Pulse().
+            MapManager.Instance.TickNpcs(Environment.TickCount64, delta / 1000f);
         }
     }
 
