@@ -345,15 +345,12 @@ public class SectorMap
                 _scopeMissionGivers.Add(entity);
         }
 
-        var players = new List<ClonedObjectBase>(Players.Count);
-        foreach (var player in Players)
-            players.Add(player);
-
+        // List<Character> flows in as IReadOnlyList<ClonedObjectBase> via covariance — no copy.
         InterestSelector.Select(
             self,
             center,
             ContinentObject.IsTown,
-            players,
+            Players,
             _scopeMissionGivers,
             _scopeNearby,
             entity => entity.Ghost != null && entity.Ghost.IsGhostedTo(connection),
