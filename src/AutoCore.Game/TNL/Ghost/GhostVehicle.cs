@@ -299,7 +299,7 @@ public class GhostVehicle : GhostObject
             stream.WriteInt((uint)Math.Max(Parent.GetMaximumHP(), 0), 18);
         }
 
-        var driverCreature = owner?.GetAsCreature();
+        var driverCreature = owner?.GetAsCharacter() == null ? owner?.GetAsCreature() : null;
 
         if (stream.WriteFlag((updateMask & StateMask) != 0 && EnableAiStateWire && driverCreature != null))
         {

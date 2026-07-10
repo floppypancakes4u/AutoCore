@@ -148,6 +148,21 @@ public class GhostVehicleWireTests
     }
 
     [TestMethod]
+    public void PackUpdate_StateMask_CharacterOwner_FlagFalse()
+    {
+        var vehicle = CreateVehicleWithMap(9112);
+        var driver = new Character();
+        driver.SetCoid(9113, false);
+
+        vehicle.SetOwner(driver);
+
+        var stream = PackUpdateNonInitial(vehicle, GhostVehicle.StateMask);
+        SkipNonInitialFlagsBeforeStateMask(stream);
+
+        Assert.IsFalse(stream.ReadFlag(), "StateMask flag must stay false for a Character (player) owner, even though Character inherits GetAsCreature()");
+    }
+
+    [TestMethod]
     public void PackUpdate_StateMask_LeverDisabled_FlagFalse()
     {
         var vehicle = CreateVehicleWithMap(9110);
