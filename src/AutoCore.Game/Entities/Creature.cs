@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Npc;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL.Ghost;
@@ -18,6 +19,24 @@ public class Creature : SimpleObject
     public long SpawnOwner { get; set; }
     public byte Level { get; set; } = 1;
 
+    #region NPC AI fields (NPC.md)
+    /// <summary>Ghost AI state byte sent under the creature StateMask (see HBAICombatState).</summary>
+    public byte AiCombatState { get; set; }
+
+    public long CoidCurrentPath { get; set; } = -1;
+    public float PatrolDistance { get; set; }
+    public bool PathReversing { get; set; }
+
+    /// <summary>
+    /// Server-side AI runtime state; must remain null for player-controlled <see cref="Character"/>
+    /// instances — assign only when `this is not Character`.
+    /// </summary>
+    public NpcAiState NpcAi { get; set; }
+
+    /// <summary>Whether interacting with this NPC can open the mission dialog.</summary>
+    public bool IsMissionGiver { get; set; }
+    #endregion
+
     public Creature()
         : base(GraphicsObjectType.GraphicsPhysics)
     {
@@ -25,6 +44,20 @@ public class Creature : SimpleObject
 
     public override Creature GetAsCreature() => this;
     public override Creature GetSuperCreature() => this;
+
+    /// <summary>
+    /// Applies a server-authoritative pose/velocity/target update (NPC movement tick) and marks
+    /// the ghost's PositionMask dirty. Safe to call before the ghost exists.
+    /// </summary>
+    public void ApplyServerMove(Vector3 position, Quaternion rotation, Vector3 velocity, Vector3 targetPosition)
+    {
+        Position = position;
+        Rotation = rotation;
+        Velocity = velocity;
+        TargetPosition = targetPosition;
+
+        Ghost?.SetMaskBits(GhostObject.PositionMask);
+    }
 
     public virtual byte GetLevel() => Level;
 

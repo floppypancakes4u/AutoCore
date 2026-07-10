@@ -13,6 +13,7 @@ using AutoCore.Game.Constants;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
+using AutoCore.Game.Npc;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL.Ghost;
@@ -23,10 +24,25 @@ public class Vehicle : SimpleObject
     #region Properties
     #region Database Vehicle Data
     private VehicleData DBData { get; set; }
-    public string Name => DBData.Name;
-    public uint PrimaryColor => DBData.PrimaryColor;
-    public uint SecondaryColor => DBData.SecondaryColor;
-    public byte Trim => DBData.Trim;
+
+    // NPC vehicles have no DB row (no owning character); fall back to defaults rather than NPE.
+    public string Name => DBData?.Name ?? string.Empty;
+    public uint PrimaryColor => DBData?.PrimaryColor ?? 0u;
+    public uint SecondaryColor => DBData?.SecondaryColor ?? 0u;
+    public byte Trim => DBData?.Trim ?? (byte)0;
+    #endregion
+
+    #region NPC path / AI fields (NPC.md)
+    public long CoidCurrentPath { get; set; } = -1;
+    public int ExtraPathId { get; set; } = -1;
+    public float PatrolDistance { get; set; }
+    public bool PathReversing { get; set; }
+    public bool PathIsRoad { get; set; }
+    public int TemplateId { get; set; } = -1;
+    public long SpawnOwnerCoid { get; set; } = -1;
+
+    /// <summary>Server-side AI runtime state; null for player vehicles.</summary>
+    public NpcAiState NpcAi { get; set; }
     #endregion
 
     public Armor Armor { get; private set; }
@@ -97,6 +113,20 @@ public class Vehicle : SimpleObject
     }
 
     public override Vehicle GetAsVehicle() => this;
+
+    /// <summary>
+    /// Applies a server-authoritative pose/velocity update (NPC movement tick) and marks the
+    /// ghost's PositionMask dirty so it reaches observers on the next update. Safe to call
+    /// before the ghost exists.
+    /// </summary>
+    public void ApplyServerMove(Vector3 position, Quaternion rotation, Vector3 velocity)
+    {
+        Position = position;
+        Rotation = rotation;
+        Velocity = velocity;
+
+        Ghost?.SetMaskBits(GhostObject.PositionMask);
+    }
 
     public bool TryFindEquippedItem(long coid, out VehicleEquipmentSlot slot, out SimpleObject item)
     {
@@ -515,14 +545,14 @@ public class Vehicle : SimpleObject
 
         if (packet is CreateVehiclePacket vehiclePacket)
         {
-            vehiclePacket.CoidCurrentOwner = DBData.CharacterCoid;
+            vehiclePacket.CoidCurrentOwner = DBData?.CharacterCoid ?? 0;
             vehiclePacket.CoidSpawnOwner = -1;
 
             for (var i = 0; i < 8; ++i)
                 vehiclePacket.Tricks[i] = -1;
 
-            vehiclePacket.PrimaryColor = DBData.PrimaryColor;
-            vehiclePacket.SecondaryColor = DBData.SecondaryColor;
+            vehiclePacket.PrimaryColor = PrimaryColor;
+            vehiclePacket.SecondaryColor = SecondaryColor;
             vehiclePacket.ArmorAdd = 0;
             vehiclePacket.PowerMaxAdd = 0;
             vehiclePacket.HeatMaxAdd = 0;
@@ -544,7 +574,7 @@ public class Vehicle : SimpleObject
             vehiclePacket.IsTrailer = false;
             vehiclePacket.IsInventory = false;
             vehiclePacket.IsActive = Map != null && !Map.MapData.ContinentObject.IsTown;
-            vehiclePacket.Trim = DBData.Trim;
+            vehiclePacket.Trim = Trim;
 
             if (Ornament != null)
             {
@@ -610,7 +640,7 @@ public class Vehicle : SimpleObject
             vehiclePacket.WeaponsCBID[0] = WeaponFront?.CBID ?? -1;
             vehiclePacket.WeaponsCBID[1] = WeaponTurret?.CBID ?? -1;
             vehiclePacket.WeaponsCBID[2] = WeaponRear?.CBID ?? -1;
-            vehiclePacket.Name = DBData.Name;
+            vehiclePacket.Name = Name;
         }
     }
 
