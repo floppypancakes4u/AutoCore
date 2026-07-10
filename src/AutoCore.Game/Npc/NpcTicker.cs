@@ -12,8 +12,11 @@ using AutoCore.Game.Map;
 /// </summary>
 public static class NpcTicker
 {
-    /// <summary>Fallback patrol speed (u/s) when the driver/creature clonebase has none.</summary>
-    private const float DefaultSpeed = 12f;
+    /// <summary>Fallback patrol speed (u/s) for vehicles (and their drivers) when the clonebase has none.</summary>
+    private const float DefaultVehicleSpeed = 12f;
+
+    /// <summary>Fallback patrol speed (u/s) for foot creatures when the clonebase has none.</summary>
+    private const float DefaultFootSpeed = 2.5f;
 
     public static void Tick(SectorMap map, long nowMs, float dt)
     {
@@ -76,8 +79,9 @@ public static class NpcTicker
             _ => null,
         };
 
+        var fallback = entity is Vehicle ? DefaultVehicleSpeed : DefaultFootSpeed;
         var speed = (source?.CloneBaseObject as CloneBaseCreature)?.CreatureSpecific.Speed ?? 0f;
-        return speed > 0f ? speed : DefaultSpeed;
+        return speed > 0f ? speed : fallback;
     }
 
     private static void ApplyMove(ClonedObjectBase entity, PathStepResult result)
