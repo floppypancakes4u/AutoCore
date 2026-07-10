@@ -27,6 +27,9 @@ public class SectorMap
     /// <summary>Live <see cref="Character"/> count on this map, maintained by EnterMap/LeaveMap.</summary>
     public int PlayerCount { get; private set; }
 
+    /// <summary>XZ spatial index of the map's entities, maintained by EnterMap/LeaveMap.</summary>
+    public SpatialHashGrid Grid { get; private set; } = new();
+
     public SectorMap(int continentId)
     {
         ContinentId = continentId;
@@ -67,6 +70,9 @@ public class SectorMap
         typeof(SectorMap).GetField($"<{nameof(NpcAiEntities)}>k__BackingField",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .SetValue(map, new List<ClonedObjectBase>());
+        typeof(SectorMap).GetField($"<{nameof(Grid)}>k__BackingField",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(map, new SpatialHashGrid());
 
         map.LocalCoidCounter = mapData.HighestCoid + 1;
         return map;
@@ -190,6 +196,8 @@ public class SectorMap
         if (HasNpcAi(clonedObject))
             NpcAiEntities.Add(clonedObject);
 
+        Grid.Add(clonedObject);
+
         if (Objects.ContainsKey(clonedObject.ObjectId))
             throw new InvalidOperationException("This object is already on the map!");
 
@@ -279,6 +287,8 @@ public class SectorMap
             PlayerCount--;
 
         NpcAiEntities.Remove(clonedObject);
+
+        Grid.Remove(clonedObject);
 
         if (!Objects.ContainsKey(clonedObject.ObjectId))
             throw new InvalidOperationException("This object is not on the map!");
