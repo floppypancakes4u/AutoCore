@@ -4,6 +4,7 @@ using AutoCore.Game.CloneBases;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
+using AutoCore.Game.Structures;
 
 /// <summary>
 /// Adapter that drives the pure <see cref="NpcPathFollower"/> over a map's live NPC AI entities.
@@ -44,6 +45,10 @@ public static class NpcTicker
             if (!map.TryGetMapPath(GetPathCoid(entity), out var path) || path.Points.Count == 0)
                 continue;
 
+            // Captured before WaitUntilMs is overwritten below: true exactly when this tick took
+            // NpcPathFollower.Step's hold-in-place branch (nowMs still short of the wait deadline).
+            var wasHolding = nowMs < npcAi.WaitUntilMs;
+
             var result = NpcPathFollower.Step(
                 entity.Position, path, npcAi.PathIndex, npcAi.PathDirection,
                 npcAi.WaitUntilMs, nowMs, ResolveSpeed(entity), dt);
@@ -52,7 +57,13 @@ public static class NpcTicker
             npcAi.PathDirection = result.NewDirection;
             npcAi.WaitUntilMs = result.WaitUntilMs;
 
-            ApplyMove(entity, result);
+            // A holding/waiting NPC whose position didn't change this tick has nothing new to
+            // broadcast — applying the move anyway would dirty PositionMask and re-send pose to
+            // every scoped client for no reason. Ticks that actually arrive (and snap onto the
+            // waypoint) are never "holding" per the check above, so arrival snapping still applies
+            // even when the NPC happened to already be sitting on the waypoint.
+            if (!wasHolding || !PositionsEqual(result.NewPosition, entity.Position))
+                ApplyMove(entity, result);
 
             if (result.FireReactionCoid > 0)
                 map.TriggerReactions(entity, new List<long> { result.FireReactionCoid });
@@ -72,6 +83,9 @@ public static class NpcTicker
         Creature creature => creature.CoidCurrentPath,
         _ => -1L,
     };
+
+    /// <summary>True when both positions are exactly equal on all three axes.</summary>
+    private static bool PositionsEqual(Vector3 a, Vector3 b) => a.X == b.X && a.Y == b.Y && a.Z == b.Z;
 
     /// <summary>
     /// Movement speed from the driver (vehicles) or the creature itself; falls back to

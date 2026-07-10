@@ -372,7 +372,11 @@ public class SpawnPoint : ClonedObjectBase
         item.LoadCloneBase(cbid);
         item.SetupCBFields();
 
-        vehicle.TryEquipItem(slot, item, out _);
+        if (!vehicle.TryEquipItem(slot, item, out _))
+        {
+            Logger.WriteLog(LogType.Error,
+                $"SpawnPoint {Template.COID}: template vehicle (TemplateId={vehicle.TemplateId}) failed to equip slot={slot} itemCbid={cbid}");
+        }
     }
 
     /// <summary>Resolves this spawn point's <see cref="SpawnPointTemplate.MapPathCoid"/> on the current map.</summary>

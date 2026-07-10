@@ -1,4 +1,5 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using TNL.Entities;
 
 namespace AutoCore.Game.Tests.NpcAi;
 
@@ -11,6 +12,8 @@ using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
 using AutoCore.Game.Npc;
 using AutoCore.Game.Structures;
+using AutoCore.Game.TNL;
+using AutoCore.Game.TNL.Ghost;
 
 /// <summary>
 /// Stage 8: <see cref="NpcTicker"/> drives idle-patrol NPCs over their path and fires arrival
@@ -92,6 +95,88 @@ public class NpcTickerTests
 
         Assert.AreEqual(corpseStart, corpse.Position, "corpses must not be moved by the patrol tick");
         Assert.AreEqual(engagedStart, engaged.Position, "non-IdlePatrol NPCs must not be moved by the patrol tick");
+    }
+
+    [TestMethod]
+    public void NpcTicker_WaitingNpc_DoesNotDirtyPositionMask()
+    {
+        var map = CreateMap();
+
+        var patrolPath = SeedMapPath(map, PatrolPathCoid, reverse: false);
+        patrolPath.Points.Add(new MapPathTemplate.MapPathPoint
+        {
+            Position = new Vector3(20f, 0f, 20f),
+            AcceptDistance = 2f,
+        });
+
+        // Already dwelling (WaitUntilMs is in the future) — not yet at the deadline, so the path
+        // stepper holds in place. This tick must not re-broadcast a pose that did not change.
+        var start = new Vector3(5f, 0f, 5f);
+        var patrol = PlaceNpcVehicle(map, PatrolVehicleCoid, start, npcAi: true);
+        patrol.CoidCurrentPath = PatrolPathCoid;
+        patrol.NpcAi.CombatState = HBAICombatState.IdlePatrol;
+        patrol.NpcAi.WaitUntilMs = 20_000L;
+
+        var connection = new TNLConnection();
+        connection.SetGhostFrom(true);
+        connection.SetGhostTo(false);
+
+        patrol.CreateGhost();
+        connection.ActivateGhosting();
+        connection.ObjectLocalScopeAlways(patrol.Ghost);
+
+        var ghostInfo = patrol.Ghost.GetFirstObjectRef();
+        Assert.IsNotNull(ghostInfo, "expected the patrol vehicle ghost to be scoped");
+        ghostInfo.UpdateMask = 0; // clear the "everything dirty" state ObjectInScope seeds
+
+        NpcTicker.Tick(map, nowMs: 10_000, dt: 0.1f);
+        NetObject.CollapseDirtyList();
+
+        Assert.AreEqual(start, patrol.Position, "a waiting NPC must not move");
+        Assert.AreEqual(0ul, ghostInfo.UpdateMask & GhostObject.PositionMask,
+            "a waiting/holding NPC whose pose did not change must not dirty PositionMask");
+    }
+
+    [TestMethod]
+    public void NpcTicker_ArrivalTick_StillDirtiesPositionMaskAndSnaps()
+    {
+        var map = CreateMap();
+
+        var patrolPath = SeedMapPath(map, PatrolPathCoid, reverse: false);
+        patrolPath.Points.Add(new MapPathTemplate.MapPathPoint
+        {
+            Position = new Vector3(20f, 0f, 20f),
+            AcceptDistance = 2f,
+            WaitTime = 1000,
+        });
+
+        // Placed exactly on the waypoint, so NewPosition == current Position on this tick even
+        // though it is a genuine arrival (not a hold) — the position-equality early-out must not
+        // suppress this case.
+        var start = new Vector3(20f, 0f, 20f);
+        var patrol = PlaceNpcVehicle(map, PatrolVehicleCoid, start, npcAi: true);
+        patrol.CoidCurrentPath = PatrolPathCoid;
+        patrol.NpcAi.CombatState = HBAICombatState.IdlePatrol;
+
+        var connection = new TNLConnection();
+        connection.SetGhostFrom(true);
+        connection.SetGhostTo(false);
+
+        patrol.CreateGhost();
+        connection.ActivateGhosting();
+        connection.ObjectLocalScopeAlways(patrol.Ghost);
+
+        var ghostInfo = patrol.Ghost.GetFirstObjectRef();
+        Assert.IsNotNull(ghostInfo, "expected the patrol vehicle ghost to be scoped");
+        ghostInfo.UpdateMask = 0; // clear the "everything dirty" state ObjectInScope seeds
+
+        NpcTicker.Tick(map, nowMs: 10_000, dt: 0.1f);
+        NetObject.CollapseDirtyList();
+
+        Assert.AreEqual(start, patrol.Position, "arrival snaps onto the waypoint position");
+        Assert.AreEqual(10_000L + 1000L, patrol.NpcAi.WaitUntilMs, "arrival sets the wait deadline");
+        Assert.AreEqual(GhostObject.PositionMask, ghostInfo.UpdateMask & GhostObject.PositionMask,
+            "an arrival tick must still dirty PositionMask even though position was already on the waypoint");
     }
 
     private static SectorMap CreateMap()

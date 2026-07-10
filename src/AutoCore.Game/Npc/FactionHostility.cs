@@ -8,7 +8,10 @@ namespace AutoCore.Game.Npc;
 ///   <item>&gt;= 3 are NPC factions — aggressive toward any real faction that is not themselves.</item>
 ///   <item>-1 (unset) and -100 (neutral) never aggro, in either direction.</item>
 /// </list>
-/// Pending RE refinement (NPC.md Risk 2); the heuristic below matches observed retail behavior.
+/// RE-confirmed (NPC.md §12.2, Stage 12 closure of Risk 2): decompiling the retail
+/// <c>CVOGHBAIBase_FindTargetToAttack</c> (<c>00639210</c>) faction filter — which walks the owner
+/// chain via <c>FUN_00512440</c> to the root object's relation id and treats <c>-100</c> as a
+/// never-aggro sentinel — confirms the heuristic below matches retail behavior exactly.
 /// </summary>
 public static class FactionHostility
 {

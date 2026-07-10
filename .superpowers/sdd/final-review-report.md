@@ -117,3 +117,91 @@ references on long-lived NPC ghosts).
   Zero new failures relative to the `2435f8e` baseline.
 - Each behavior fix verified RED-before-GREEN by temporarily reverting the fix and observing the new
   test fail, then restoring.
+
+---
+
+## Pre-merge minors fix (2026-07-10)
+
+Four minor triage items from the final whole-branch review, applied on top of `d0e7058`.
+
+### Item 1 — `SpawnPoint.EquipTemplateItem` swallowed equip failures
+
+**Problem.** `vehicle.TryEquipItem(slot, item, out _)` in `SpawnPoint.cs` discarded its `bool`
+result. A bad template weapon/armor CBID (e.g. a slot mismatch caught by
+`AssignEquipmentSlot`) failed silently — undiagnosable on a live server.
+
+**Fix.** `src/AutoCore.Game/Entities/SpawnPoint.cs` (`EquipTemplateItem`, ~line 375): on a `false`
+return, `Logger.WriteLog(LogType.Error, ...)` naming the spawn point COID (`Template.COID`), the
+vehicle template id (`vehicle.TemplateId`), the slot, and the item CBID. No `Warning` level exists
+in this repo's `LogType`, per the review note, so `Error` is used (matches the file's existing
+`Logger.WriteLog(LogType.Error, ...)` convention at line ~219).
+
+**Tests.** Log-only change; no new test. Ran the focused `SpawnPoint*` tests — all green (part of
+the 62/62 focused run below).
+
+### Item 2 — `NpcTicker` re-broadcast pose for stationary waiting/holding NPCs
+
+**Problem.** `NpcTicker.Tick` called `ApplyMove` (→ `ApplyServerMove` → `Ghost.SetMaskBits(PositionMask)`)
+unconditionally every ~100ms tick, even for NPCs holding at a waypoint (`nowMs < WaitUntilMs`,
+`NpcPathFollower.Step`'s hold branch, which returns `NewPosition` unchanged). This dirtied
+`PositionMask` and re-sent an unchanged pose to every scoped client on every tick of every dwell.
+
+**Fix (TDD).** `src/AutoCore.Game/Npc/NpcTicker.cs` (`Tick`, ~line 47-65): capture
+`wasHolding = nowMs < npcAi.WaitUntilMs` **before** `npcAi.WaitUntilMs` is overwritten with the
+step result, then only call `ApplyMove` when `!wasHolding || !PositionsEqual(result.NewPosition,
+entity.Position)`. A new private `PositionsEqual` helper does exact per-axis `Vector3` comparison.
+Because `wasHolding` is computed from the pre-tick deadline, an arrival tick (which just advanced
+past the old deadline) is never treated as "holding," so arrival snapping still applies even in the
+edge case where the NPC was already sitting exactly on the waypoint before arriving.
+
+**RED evidence.** Added `NpcTicker_WaitingNpc_DoesNotDirtyPositionMask` to
+`src/AutoCore.Game.Tests/NpcAi/NpcTickerTests.cs` — places a vehicle NPC with `WaitUntilMs` in the
+future, scopes a real `TNLConnection`/`GhostInfo` (same seam as `NpcVehicleSafetyTests
+.Vehicle_ApplyServerMove_SetsPoseAndPositionMask` / `NpcCombatAiTests.StateChange_Sets...`), clears
+`UpdateMask`, ticks, and asserts `UpdateMask & GhostObject.PositionMask == 0`. Run against the
+unmodified `NpcTicker.Tick`: **failed** — `Assert.AreEqual failed. Expected:<0>. Actual:<2>`
+(`PositionMask` was dirtied). Also added a positive-control test,
+`NpcTicker_ArrivalTick_StillDirtiesPositionMaskAndSnaps`, which places the NPC exactly on the
+waypoint (so `NewPosition == Position` even though it is a genuine arrival, not a hold) and asserts
+the mask **is** dirtied and `WaitUntilMs` advances — this test passed both before and after the fix,
+confirming the guard's `wasHolding` gate (not raw position equality alone) is what protects arrival
+snapping.
+
+After the fix: both new tests pass, plus all pre-existing `NpcTickerTests` and
+`NpcFootFollowerTests` (which exercise the same `ApplyMove` path for foot creatures) remain green.
+
+### Item 3 — dangling `<see cref="DefaultSpeed"/>` in `NpcTicker.cs`
+
+**Investigated, no change needed.** Grepped the full repo (`grep -rin "defaultspeed"`) for any
+remaining reference to the old `DefaultSpeed` constant named in the review. Zero hits in source.
+`ResolveSpeed`'s XML doc at `NpcTicker.cs` already crefs `DefaultVehicleSpeed` / `DefaultFootSpeed`
+correctly — the split (Stage 9, commit `1cd84c6`) already updated the doc comment at the time the
+constant was split. The review finding appears to predate that fix, or was based on a stale
+snapshot; the file at `d0e7058` has no dangling cref. Left the file's doc comments untouched for
+this item.
+
+### Item 4 — `FactionHostility.cs` "Pending RE refinement" comment was stale
+
+**Problem.** The class doc still said "Pending RE refinement (NPC.md Risk 2)" even though Stage 12's
+RE closure (`docs/NPC.md` §12.2, committed on this branch) directly decompiled the retail faction
+filter and confirmed the server heuristic matches exactly.
+
+**Fix.** `src/AutoCore.Game/Npc/FactionHostility.cs` (class doc, ~line 11): replaced the "Pending RE
+refinement" line with a confirmation citing `CVOGHBAIBase_FindTargetToAttack` (`00639210`) and its
+owner-chain-walk helper `FUN_00512440`, and the `-100` never-aggro sentinel, per `docs/NPC.md` §12.2.
+Comment-only; `docs/NPC.md` itself was left untouched (out of scope — only the four listed items were
+in scope for this pass).
+
+**Tests.** Comment-only change; `FactionHostilityTests` (part of the focused run below) stayed green
+unchanged.
+
+### Test evidence
+
+- Focused run (`--filter "FullyQualifiedName~NpcAi|FullyQualifiedName~SpawnPoint"`): **62/62 green**
+  (includes the 2 new `NpcTickerTests` cases).
+- Full solution (`dotnet test src/AutoCore.sln`): Utils 14/14, Sector 5/5, Game **878 passed** / 1
+  skipped / **2 failed** — the same pre-existing, out-of-scope `ReactionBoostTests
+  .Boost_ActOnActivator_SucceedsWithoutUnhandled` and `.Boost_EmptyObjects_SucceedsWithoutUnhandled`.
+  Zero new failures relative to `d0e7058`.
+- Item 2's new test confirmed RED (failing for the expected reason — `PositionMask` dirtied when it
+  shouldn't be) before the fix, then GREEN after.
