@@ -14,6 +14,21 @@ using AutoCore.Utils;
 
 public class SectorMap
 {
+    /// <summary>
+    /// Isolation lever: when false, foreign global vehicles are neither CreateVehicle'd nor ObjectInScope'd.
+    /// Local player vehicle is unaffected.
+    /// </summary>
+    public static bool ScopeGlobalVehicles { get; set; } = true;
+
+    /// <summary>Isolation lever: when false, skip CreateVehicle for foreign global vehicles (still may ghost).</summary>
+    public static bool ScopeGlobalVehicleCreate { get; set; } = true;
+
+    /// <summary>Isolation lever: when false, send CreateVehicle but skip ObjectInScope for foreign globals.</summary>
+    public static bool ScopeGlobalVehicleGhost { get; set; } = true;
+
+    /// <summary>Isolation lever: when false, skip sending GroupReactionCall (0x206C) after reactions run.</summary>
+    public static bool SendGroupReactionCall { get; set; } = true;
+
     public int ContinentId { get; }
     public long LocalCoidCounter { get; set; }
     public MapData MapData { get; private set; }
@@ -359,9 +374,42 @@ public class SectorMap
         foreach (var entity in _scopeSelected)
         {
             var ghost = entity.Ghost;
-            if (ghost != null)
-                connection.ObjectInScope(ghost);
+            if (ghost == null)
+                continue;
+
+            var foreignGlobalVehicle = entity is Vehicle vehicleEntity
+                && entity.ObjectId.Global
+                && !IsLocalPlayerVehicle(vehicleEntity, self);
+
+            if (foreignGlobalVehicle && !ScopeGlobalVehicles)
+                continue;
+
+            // Global game objects must exist in the client's object table before the TNL ghost
+            // proxy attaches to them. SendGamePacket queues a guaranteed-ordered RPC event, and
+            // GhostConnection writes queued events before ghost updates in the same packet.
+            if (foreignGlobalVehicle
+                && ScopeGlobalVehicleCreate
+                && connection is TNL.TNLConnection gameConnection
+                && !ghost.IsGhostedTo(connection))
+            {
+                var createPacket = new CreateVehiclePacket();
+                ((Vehicle)entity).WriteToPacket(createPacket);
+                gameConnection.SendGamePacket(createPacket);
+            }
+
+            if (foreignGlobalVehicle && !ScopeGlobalVehicleGhost)
+                continue;
+
+            connection.ObjectInScope(ghost);
         }
+    }
+
+    /// <summary>True when <paramref name="vehicle"/> is the scoping character's current vehicle.</summary>
+    internal static bool IsLocalPlayerVehicle(Vehicle vehicle, Character self)
+    {
+        if (vehicle == null || self == null)
+            return false;
+        return ReferenceEquals(vehicle, self.CurrentVehicle);
     }
 
     public void TriggerReactions(ClonedObjectBase activator, List<long> reactions)
@@ -424,7 +472,7 @@ public class SectorMap
         // Vehicle activators must resolve to owning character; empty batches skip send.
         // skipOpcode: true — client bitstream parser (0x6374F0) reads RPC payload from byte 0
         // as entry count; opcode is carried by TNL RPC type (same as MapInfoPacket).
-        if (clientPacket.Count > 0)
+        if (SendGroupReactionCall && clientPacket.Count > 0)
         {
             var character = ResolveCharacter(activator);
             character?.OwningConnection?.SendGamePacket(clientPacket, skipOpcode: true);
@@ -436,7 +484,7 @@ public class SectorMap
             TriggerReactionsInternal(activator, childReactions, depth + 1);
         }
 
-        if (broadcastPacket is not null && broadcastPacket.Count > 0)
+        if (SendGroupReactionCall && broadcastPacket is not null && broadcastPacket.Count > 0)
         {
             var exclude = ResolveCharacter(activator);
             foreach (var character in Objects.Values.OfType<Character>())

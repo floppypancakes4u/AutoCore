@@ -35,6 +35,7 @@ public class PerPlayerLoadMissionGrantTests
         _sent.Clear();
         TNLConnection.TestPacketSink = (_, packet) => _sent.Add(packet);
         AssetManager.Instance.ClearTestMissions();
+        SectorMap.SendGroupReactionCall = true;
     }
 
     [TestCleanup]
@@ -42,6 +43,7 @@ public class PerPlayerLoadMissionGrantTests
     {
         TNLConnection.TestPacketSink = null;
         AssetManager.Instance.ClearTestMissions();
+        SectorMap.SendGroupReactionCall = true;
         _sent.Clear();
     }
 
@@ -153,6 +155,19 @@ public class PerPlayerLoadMissionGrantTests
         map.TriggerReactions(vehicle, new List<long> { 500 });
 
         Assert.AreEqual(1, _sent.OfType<GroupReactionCallPacket>().Count());
+    }
+
+    [TestMethod]
+    public void TriggerReactions_SendGroupReactionCallFalse_SkipsPacket()
+    {
+        var (character, vehicle, map) = CreatePlayer();
+        PlaceReaction(map, 502, ReactionType.Activate, genericVar1: 0);
+        SectorMap.SendGroupReactionCall = false;
+
+        map.TriggerReactions(vehicle, new List<long> { 502 });
+
+        Assert.AreEqual(0, _sent.OfType<GroupReactionCallPacket>().Count(),
+            "Isolation lever must suppress 0x206C while still running reaction handlers");
     }
 
     [TestMethod]

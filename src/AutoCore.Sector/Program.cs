@@ -5,6 +5,7 @@ namespace AutoCore.Sector;
 using AutoCore.Database.Char;
 using AutoCore.Database.World;
 using AutoCore.Game.Constants;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Managers;
 using AutoCore.Sector.Config;
 using AutoCore.Sector.Network;
@@ -35,6 +36,8 @@ public class Program : ExitableProgram
 
         Server.InitConsole();
         Server.Setup(config);
+
+        WireIsolationLevers.ApplyFromEnvironmentAndConfigFiles();
 
         if (!AssetManager.Instance.Initialize(config.GamePath, ServerType.Sector, false))
         {

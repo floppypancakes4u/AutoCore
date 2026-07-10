@@ -64,6 +64,8 @@ public class Program : ExitableProgram
             Logger.WriteLog(LogType.Error, "MapManager initialization failed. Continuing anyway.");
         }
 
+        AutoCore.Game.Diagnostics.WireIsolationLevers.ApplyFromEnvironmentAndConfigFiles();
+
         AuthServer.Setup(authConfig);
         if (!AuthServer.Start())
         {

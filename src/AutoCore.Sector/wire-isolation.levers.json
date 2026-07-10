@@ -1,0 +1,11 @@
+{
+  "WireDiag": true,
+  "ScopeGlobalVehicles": true,
+  "ScopeGlobalVehicleCreate": true,
+  "ScopeGlobalVehicleGhost": true,
+  "SendGroupReactionCall": true,
+  "EnableAiStateWire": true,
+  "EnablePathWire": true,
+  "EnableOwnerWire": true,
+  "EnableTemplateSpawnWire": true
+}

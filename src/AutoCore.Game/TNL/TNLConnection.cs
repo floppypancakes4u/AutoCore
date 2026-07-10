@@ -11,6 +11,7 @@ namespace AutoCore.Game.TNL;
 
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.Constants;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Extensions;
 using AutoCore.Game.Inventory;
@@ -83,6 +84,16 @@ public partial class TNLConnection : GhostConnection
 
         if (TestPacketSink != null)
         {
+            if (WireDiag.Enabled)
+            {
+                // Tests often short-circuit before payload serialization; still record identity.
+                WireDiag.RecordGamePacket(
+                    packet.Opcode.ToString(),
+                    coid: CurrentCharacter?.ObjectId.Coid ?? GetPlayerCOID(),
+                    bytes: -1,
+                    playerCoid: CurrentCharacter?.ObjectId.Coid ?? GetPlayerCOID());
+            }
+
             TestPacketSink(this, packet);
             return;
         }
@@ -104,6 +115,24 @@ public partial class TNLConnection : GhostConnection
             stream.SetLength(stream.Position);
 
             arr = stream.ToArray();
+        }
+
+        if (WireDiag.Enabled)
+        {
+            var previewLen = Math.Min(arr.Length, 48);
+            var hex = previewLen > 0 ? Convert.ToHexString(arr.AsSpan(0, previewLen)) : null;
+            long objectCoid = 0;
+            if (packet is AutoCore.Game.Packets.Sector.CreateVehiclePacket cv)
+                objectCoid = cv.ObjectId.Coid;
+            else if (packet is AutoCore.Game.Packets.Sector.CreateSimpleObjectPacket so)
+                objectCoid = so.ObjectId.Coid;
+
+            WireDiag.RecordGamePacket(
+                packet.Opcode.ToString(),
+                coid: objectCoid != 0 ? objectCoid : (CurrentCharacter?.ObjectId.Coid ?? GetPlayerCOID()),
+                bytes: arr.Length,
+                playerCoid: CurrentCharacter?.ObjectId.Coid ?? GetPlayerCOID(),
+                hexPreview: hex);
         }
 
         if (packet.Opcode == GameOpcode.InventoryGrabResponse)

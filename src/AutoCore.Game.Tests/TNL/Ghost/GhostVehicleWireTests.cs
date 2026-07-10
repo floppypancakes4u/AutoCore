@@ -1,10 +1,13 @@
+using System.Reflection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using TNL.Entities;
 using TNL.Utils;
 
 namespace AutoCore.Game.Tests.TNL.Ghost;
 
+using AutoCore.Database.Char.Models;
 using AutoCore.Database.World.Models;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
 using AutoCore.Game.Structures;
@@ -22,6 +25,10 @@ public class GhostVehicleWireTests
     {
         NetObject.PIsInitialUpdate = false;
         GhostVehicle.EnableAiStateWire = true;
+        GhostVehicle.EnablePathWire = true;
+        GhostVehicle.EnableOwnerWire = true;
+        GhostVehicle.EnableTemplateSpawnWire = true;
+        WireDiag.ResetForTests();
     }
 
     [TestMethod]
@@ -56,6 +63,58 @@ public class GhostVehicleWireTests
         SkipToPathBlock(stream);
 
         Assert.IsFalse(stream.ReadFlag(), "path flag must be false when CoidCurrentPath <= 0");
+    }
+
+    [TestMethod]
+    public void PackInitial_GlobalMapNpcIdentity_PreservesHeaderAndPose()
+    {
+        const long coid = MapNpcIdentity.CoidBase + 18_228;
+        var vehicle = CreateVehicleWithMap(coid);
+        vehicle.Position = new Vector3(337.3073f, 2.349889f, 1845.08f);
+        vehicle.Rotation = new Quaternion(0f, 0.00005f, 0f, 1f);
+
+        var stream = PackInitial(vehicle, GhostObject.InitialMask | GhostObject.PositionMask);
+
+        stream.Read(out long packedCoid);
+        Assert.AreEqual(coid, packedCoid);
+        Assert.IsTrue(stream.ReadFlag(), "map NPC vehicle identity must remain global on the wire");
+
+        stream.ReadInt(20); // CBID
+        stream.ReadInt(18); // MaxHP
+        stream.ReadInt(16); // faction
+        stream.ReadInt(16); // bare faction
+        stream.Read(out uint _); // primary color
+        stream.Read(out uint _); // secondary color
+        stream.ReadFlag(); // IsActive
+        stream.Read(out byte _); // Trim
+        for (var i = 0; i < 7; ++i)
+            Assert.IsFalse(stream.ReadFlag()); // optional multipliers
+        Assert.IsFalse(stream.ReadFlag()); // path
+        Assert.IsFalse(stream.ReadFlag()); // template
+        Assert.IsFalse(stream.ReadFlag()); // spawn owner
+        Assert.AreEqual(0u, stream.ReadInt(8)); // trick count
+        Assert.IsFalse(stream.ReadFlag()); // trailer
+        Assert.IsFalse(stream.ReadFlag()); // owner
+
+        for (var i = 0; i < 14; ++i)
+            Assert.IsFalse(stream.ReadFlag(), $"unexpected update block before position at index {i}");
+
+        Assert.IsTrue(stream.ReadFlag(), "PositionMask");
+        stream.Read(out float x);
+        stream.Read(out float y);
+        stream.Read(out float z);
+        stream.Read(out float qx);
+        stream.Read(out float qy);
+        stream.Read(out float qz);
+        stream.Read(out float qw);
+
+        Assert.AreEqual(vehicle.Position.X, x);
+        Assert.AreEqual(vehicle.Position.Y, y);
+        Assert.AreEqual(vehicle.Position.Z, z);
+        Assert.AreEqual(vehicle.Rotation.X, qx);
+        Assert.AreEqual(vehicle.Rotation.Y, qy);
+        Assert.AreEqual(vehicle.Rotation.Z, qz);
+        Assert.AreEqual(vehicle.Rotation.W, qw);
     }
 
     [TestMethod]
@@ -179,6 +238,184 @@ public class GhostVehicleWireTests
         Assert.IsFalse(stream.ReadFlag(), "EnableAiStateWire = false must suppress the AI-state block");
     }
 
+    /// <summary>
+    /// Client AV at 0x005F8FED writes owner+0x12A (GM nibble). Never pack GM/AI without a
+    /// client-visible owner object — applies game-wide, not map-specific.
+    /// </summary>
+    [TestMethod]
+    public void PackInitial_OwnerWireOff_SuppressesGmAndAiEvenWhenOwnerExistsServerSide()
+    {
+        var vehicle = CreateVehicleWithMap(9120);
+        var character = CreateTestCharacter(9121);
+        character.GMLevel = 3;
+        vehicle.SetOwner(character);
+
+        var creatureVehicle = CreateVehicleWithMap(9122);
+        var creature = new Creature();
+        creature.SetCoid(9123, false);
+        creature.AiCombatState = 2;
+        creatureVehicle.SetOwner(creature);
+
+        GhostVehicle.EnableOwnerWire = false;
+
+        // Character-owned: GM would otherwise pack from superCharacter.
+        var gmStream = PackInitial(vehicle, GhostObject.InitialMask | GhostVehicle.GMMask);
+        SkipToMaskSectionAfterInitialBody(gmStream, ownerPacked: false);
+        SkipEquipmentMaskFlags(gmStream);
+        Assert.IsFalse(gmStream.ReadFlag(), "GM must not pack without client owner (owner wire off)");
+
+        // Creature-owned: AI would otherwise pack from driverCreature.
+        var aiStream = PackInitial(creatureVehicle, GhostObject.InitialMask | GhostVehicle.StateMask);
+        SkipToMaskSectionAfterInitialBody(aiStream, ownerPacked: false);
+        SkipEquipmentMaskFlags(aiStream);
+        Assert.IsFalse(aiStream.ReadFlag()); // GM
+        Assert.IsFalse(aiStream.ReadFlag()); // Clan
+        Assert.IsFalse(aiStream.ReadFlag()); // Pet
+        Assert.IsFalse(aiStream.ReadFlag()); // Murderer
+        Assert.IsFalse(aiStream.ReadFlag()); // Health
+        Assert.IsFalse(aiStream.ReadFlag()); // HealthMax
+        Assert.IsFalse(aiStream.ReadFlag(), "AI StateMask must not pack without client owner");
+    }
+
+    [TestMethod]
+    public void PackInitial_CharacterOwnerPacked_AllowsGmBlock()
+    {
+        var vehicle = CreateVehicleWithMap(9124);
+        var character = CreateTestCharacter(9125);
+        character.GMLevel = 2;
+        vehicle.SetOwner(character);
+
+        var stream = PackInitial(vehicle, GhostObject.InitialMask | GhostVehicle.GMMask);
+        SkipToMaskSectionAfterInitialBody(stream, ownerPacked: true);
+        SkipEquipmentMaskFlags(stream);
+
+        Assert.IsTrue(stream.ReadFlag(), "GM packs when character owner was on the wire");
+        Assert.AreEqual(2u, stream.ReadInt(4));
+    }
+
+    [TestMethod]
+    public void PackInitial_CreatureOwnerPacked_AllowsAiStateBlock()
+    {
+        var vehicle = CreateVehicleWithMap(9126);
+        var creature = new Creature();
+        creature.SetCoid(9127, false);
+        creature.AiCombatState = 1;
+        vehicle.SetOwner(creature);
+
+        var stream = PackInitial(vehicle, GhostObject.InitialMask | GhostVehicle.StateMask);
+        SkipToMaskSectionAfterInitialBody(stream, ownerPacked: true);
+        SkipEquipmentMaskFlags(stream);
+        Assert.IsFalse(stream.ReadFlag()); // GM
+        Assert.IsFalse(stream.ReadFlag()); // Clan
+        Assert.IsFalse(stream.ReadFlag()); // Pet
+        Assert.IsFalse(stream.ReadFlag()); // Murderer
+        Assert.IsFalse(stream.ReadFlag()); // Health
+        Assert.IsFalse(stream.ReadFlag()); // HealthMax
+        Assert.IsTrue(stream.ReadFlag(), "AI packs when creature owner was on the wire");
+        stream.Read(out byte state);
+        Assert.AreEqual((byte)1, state);
+    }
+
+    [TestMethod]
+    public void PackInitial_WithEquipmentMask_DoesNotEmitHardpointPayload()
+    {
+        // CreateVehicle already embeds hardpoints; initial ghost must not re-send them.
+        var vehicle = CreateVehicleWithMap(9130);
+        var armor = new Armor();
+        armor.SetCoid(9131, false);
+        vehicle.TryEquipItem(VehicleEquipmentSlot.Armor, armor, out _);
+
+        var stream = PackInitial(vehicle, GhostObject.InitialMask | GhostVehicle.ChangeArmor | GhostVehicle.FrontWeaponMask);
+        SkipToMaskSectionAfterInitialBody(stream, ownerPacked: false);
+        // All seven equipment lead flags false even though ChangeArmor / FrontWeapon were in the mask.
+        SkipEquipmentMaskFlags(stream);
+    }
+
+    [TestMethod]
+    public void PackUpdate_NonInitial_WithWeapon_EmitsHardpointPayload()
+    {
+        var vehicle = CreateVehicleWithMap(9132);
+        var weapon = new Weapon();
+        weapon.SetCoid(9133, false);
+        Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.WeaponFront, weapon, out _));
+
+        var stream = PackUpdateNonInitial(vehicle, GhostVehicle.FrontWeaponMask);
+        // non-initial: skills flag first
+        Assert.IsFalse(stream.ReadFlag()); // SkillsMask not set
+        Assert.IsFalse(stream.ReadFlag()); // WheelSet
+        Assert.IsTrue(stream.ReadFlag(), "FrontWeapon mask on non-initial");
+        Assert.IsTrue(stream.ReadFlag(), "weapon present");
+        stream.ReadInt(20); // CBID
+        stream.Read(out long coid);
+        Assert.AreEqual(9133L, coid);
+        stream.ReadFlag(); // global
+    }
+
+    [TestMethod]
+    public void PackInitial_EnablePathWireFalse_OmitsPathBlock()
+    {
+        var vehicle = CreateVehicleWithMap(9114);
+        vehicle.CoidCurrentPath = 555;
+        vehicle.ExtraPathId = 7;
+        GhostVehicle.EnablePathWire = false;
+
+        var stream = PackInitial(vehicle);
+        SkipToPathBlock(stream);
+
+        Assert.IsFalse(stream.ReadFlag(), "EnablePathWire=false must force path flag false");
+    }
+
+    [TestMethod]
+    public void PackInitial_EnableOwnerWireFalse_OmitsOwnerBlock()
+    {
+        var vehicle = CreateVehicleWithMap(9115);
+        var driver = new Creature();
+        driver.SetCoid(9116, false);
+        vehicle.SetOwner(driver);
+        GhostVehicle.EnableOwnerWire = false;
+
+        var stream = PackInitial(vehicle);
+        SkipToPathBlock(stream);
+        Assert.IsFalse(stream.ReadFlag()); // path
+        Assert.IsFalse(stream.ReadFlag()); // template
+        Assert.IsFalse(stream.ReadFlag()); // spawn
+        stream.ReadInt(8); // tricks
+        Assert.IsFalse(stream.ReadFlag()); // trailer
+        Assert.IsFalse(stream.ReadFlag(), "EnableOwnerWire=false must force owner flag false");
+    }
+
+    [TestMethod]
+    public void PackInitial_EnableTemplateSpawnWireFalse_OmitsTemplateAndSpawn()
+    {
+        var vehicle = CreateVehicleWithMap(9117);
+        vehicle.TemplateId = 42;
+        vehicle.SpawnOwnerCoid = 99;
+        GhostVehicle.EnableTemplateSpawnWire = false;
+
+        var stream = PackInitial(vehicle);
+        SkipToPathBlock(stream);
+        Assert.IsFalse(stream.ReadFlag()); // path
+        Assert.IsFalse(stream.ReadFlag(), "template suppressed");
+        Assert.IsFalse(stream.ReadFlag(), "spawn owner suppressed");
+    }
+
+    [TestMethod]
+    public void PackInitial_WireDiagEnabled_RecordsGhostPackWithWouldPackDetail()
+    {
+        WireDiag.Enabled = true;
+        var vehicle = CreateVehicleWithMap(9118);
+        vehicle.CoidCurrentPath = 12;
+        GhostVehicle.EnablePathWire = false;
+
+        PackInitial(vehicle);
+
+        var entry = WireDiag.Snapshot().Single();
+        Assert.AreEqual(WireDiagKind.GhostPack, entry.Kind);
+        Assert.AreEqual("GhostVehicle", entry.Name);
+        Assert.IsTrue(entry.Initial);
+        StringAssert.Contains(entry.Detail, "path=0/1");
+    }
+
     private static Vehicle CreateVehicleWithMap(long coid)
     {
         var map = CreateTestMap((int)coid);
@@ -187,6 +424,23 @@ public class GhostVehicleWireTests
         vehicle.SetMap(map);
         vehicle.CreateGhost();
         return vehicle;
+    }
+
+    private static Character CreateTestCharacter(long coid)
+    {
+        var character = new Character();
+        character.SetCoid(coid, true);
+        // Name/body ids come from private DBData — attach a minimal row for ghost pack strings.
+        var dbData = new CharacterData
+        {
+            Coid = coid,
+            Name = "Tester",
+            Level = 1,
+        };
+        typeof(Character)
+            .GetProperty("DBData", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(character, dbData);
+        return character;
     }
 
     private static SectorMap CreateTestMap(int continentId)
@@ -203,11 +457,11 @@ public class GhostVehicleWireTests
         return SectorMap.CreateForTests(continent, new Vector4(0, 0, 0, 0));
     }
 
-    private static BitStream PackInitial(Vehicle vehicle)
+    private static BitStream PackInitial(Vehicle vehicle, ulong updateMask = GhostObject.InitialMask)
     {
         var stream = new BitStream(new byte[4096], 4096);
         NetObject.PIsInitialUpdate = true;
-        vehicle.Ghost.PackUpdate(null, GhostObject.InitialMask, stream);
+        vehicle.Ghost.PackUpdate(null, updateMask, stream);
         stream.SetBitPosition(0);
         return stream;
     }
@@ -246,5 +500,57 @@ public class GhostVehicleWireTests
     {
         for (var i = 0; i < 14; ++i)
             stream.ReadFlag();
+    }
+
+    /// <summary>
+    /// After initial body (common through trailer/owner), mask section starts at equipment flags.
+    /// </summary>
+    private static void SkipToMaskSectionAfterInitialBody(BitStream stream, bool ownerPacked)
+    {
+        SkipToPathBlock(stream);
+        Assert.IsFalse(stream.ReadFlag()); // path (tests that use this leave path empty)
+        Assert.IsFalse(stream.ReadFlag()); // template
+        Assert.IsFalse(stream.ReadFlag()); // spawn
+        Assert.AreEqual(0u, stream.ReadInt(8)); // tricks
+        Assert.IsFalse(stream.ReadFlag()); // trailer
+        if (ownerPacked)
+        {
+            Assert.IsTrue(stream.ReadFlag()); // owner present
+            stream.Read(out long _); // coid
+            stream.ReadFlag(); // global
+            stream.ReadInt(20); // CBID
+            var isCharacter = stream.ReadFlag();
+            if (isCharacter)
+            {
+                stream.ReadString(out string _); // name
+                stream.ReadString(out string _); // clan
+                stream.Read(out byte _); // level
+                stream.ReadFlag(); // possess
+                stream.ReadString(out string _); // vehicle name
+                for (var i = 0; i < 8; ++i)
+                    stream.ReadInt(16);
+            }
+            else
+            {
+                Assert.IsFalse(stream.ReadFlag()); // enhancement
+                Assert.IsFalse(stream.ReadFlag()); // on-use trigger
+                Assert.IsFalse(stream.ReadFlag()); // on-use reaction
+                Assert.IsFalse(stream.ReadFlag()); // summoner
+                Assert.IsFalse(stream.ReadFlag()); // doesnt count summon
+                stream.ReadInt(8); // level
+                Assert.IsFalse(stream.ReadFlag()); // elite
+            }
+        }
+        else
+        {
+            Assert.IsFalse(stream.ReadFlag()); // owner
+        }
+    }
+
+    /// <summary>Seven equipment mask lead flags (all false when those masks are not set).</summary>
+    private static void SkipEquipmentMaskFlags(BitStream stream)
+    {
+        for (var i = 0; i < 7; ++i)
+            Assert.IsFalse(stream.ReadFlag());
     }
 }

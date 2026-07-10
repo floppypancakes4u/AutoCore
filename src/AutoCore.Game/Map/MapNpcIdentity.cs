@@ -3,9 +3,9 @@ namespace AutoCore.Game.Map;
 using AutoCore.Game.Structures;
 
 /// <summary>
-/// COID policy for server-spawned map NPCs (creatures/vehicles from spawn points).
-/// Prevents retail client crash at GhostCreature apply (0x005D262A) caused by
-/// attaching a ghost to a client-local map object with the same local TFID.
+/// COID policy for all server-spawned, map-visible NPCs (creatures and vehicles).
+/// Prevents retail client crashes caused by attaching a server ghost to a client-local
+/// map object with the same TFID.
 /// </summary>
 public static class MapNpcIdentity
 {

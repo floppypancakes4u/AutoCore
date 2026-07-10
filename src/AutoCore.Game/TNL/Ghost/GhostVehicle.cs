@@ -4,7 +4,9 @@ using TNL.Utils;
 
 namespace AutoCore.Game.TNL.Ghost;
 
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
+using AutoCore.Game.TNL;
 using AutoCore.Utils;
 
 public class GhostVehicle : GhostObject
@@ -14,6 +16,15 @@ public class GhostVehicle : GhostObject
     /// <summary>Live A/B lever for the NPC AI-state wire block (Risk 5). Flip to false to fall
     /// back to not sending driver AI state if this proves destabilizing in production.</summary>
     public static bool EnableAiStateWire = true;
+
+    /// <summary>Isolation lever: when false, always omit the optional path block (flag false).</summary>
+    public static bool EnablePathWire = true;
+
+    /// <summary>Isolation lever: when false, always omit the CurrentOwner block (flag false).</summary>
+    public static bool EnableOwnerWire = true;
+
+    /// <summary>Isolation lever: when false, force TemplateId and SpawnOwner flags false.</summary>
+    public static bool EnableTemplateSpawnWire = true;
 
     private const int CoidCurrentPathBits = 18;
 
@@ -69,10 +80,20 @@ public class GhostVehicle : GhostObject
             throw new Exception("Missing parent for GhostVehicle!");
 
         var ret = 0ul;
+        var startBits = stream.GetBitPosition();
+        var isInitial = PIsInitialUpdate;
 
         var parentVehicle = Parent.GetAsVehicle();
-        var superCharacter = Parent.GetSuperCharacter(false);
         var owner = parentVehicle.Owner;
+
+        var wouldPackPath = parentVehicle.CoidCurrentPath > 0;
+        var wouldPackOwner = owner != null;
+        var wouldPackTemplate = parentVehicle.TemplateId != -1;
+        var wouldPackSpawnOwner = parentVehicle.SpawnOwnerCoid != -1;
+        var packPath = EnablePathWire && wouldPackPath;
+        var packOwner = EnableOwnerWire && wouldPackOwner;
+        var packTemplate = EnableTemplateSpawnWire && wouldPackTemplate;
+        var packSpawnOwner = EnableTemplateSpawnWire && wouldPackSpawnOwner;
 
         if (PIsInitialUpdate)
         {
@@ -120,7 +141,7 @@ public class GhostVehicle : GhostObject
                 stream.WriteBits(32, BitConverter.GetBytes(0)); // AVDNormalSpinDampeningMultiplier
             }
 
-            if (stream.WriteFlag(parentVehicle.CoidCurrentPath > 0)) // path
+            if (stream.WriteFlag(packPath)) // path
             {
                 var currentPath = parentVehicle.CoidCurrentPath;
 
@@ -134,12 +155,12 @@ public class GhostVehicle : GhostObject
                 stream.Write(parentVehicle.PatrolDistance); // PatrolDistance
             }
 
-            if (stream.WriteFlag(parentVehicle.TemplateId != -1)) // TemplateId != -1
+            if (stream.WriteFlag(packTemplate)) // TemplateId != -1
             {
                 stream.WriteInt((uint)parentVehicle.TemplateId, 20); // TemplateId
             }
 
-            if (stream.WriteFlag(parentVehicle.SpawnOwnerCoid != -1)) // CoidSpawnOwner != -1
+            if (stream.WriteFlag(packSpawnOwner)) // CoidSpawnOwner != -1
             {
                 stream.WriteInt((uint)parentVehicle.SpawnOwnerCoid, 20); // CoidSpawnOwner
             }
@@ -151,29 +172,29 @@ public class GhostVehicle : GhostObject
 
             stream.WriteFlag(false); // IsTrailer
 
-            if (stream.WriteFlag(owner != null)) // CurrentOwner
+            if (stream.WriteFlag(packOwner)) // CurrentOwner
             {
                 stream.Write(owner.ObjectId.Coid); // CurrentOwner coid
                 stream.WriteFlag(owner.ObjectId.Global); // CurrentOwner global
                 stream.WriteInt((uint)owner.CBID, 20); // CurrentOwner CBID
 
-                var characterOwner = owner.GetAsCharacter();
+                var ownerAsCharacter = owner.GetAsCharacter();
 
-                if (stream.WriteFlag(characterOwner != null))
+                if (stream.WriteFlag(ownerAsCharacter != null))
                 {
-                    stream.WriteString(characterOwner.Name, 17);
-                    stream.WriteString(characterOwner.ClanName, 51);
-                    stream.Write(characterOwner.Level);
+                    stream.WriteString(ownerAsCharacter.Name, 17);
+                    stream.WriteString(ownerAsCharacter.ClanName, 51);
+                    stream.Write(ownerAsCharacter.Level);
                     stream.WriteFlag(false); // IsPossessingCreature
                     stream.WriteString(parentVehicle.Name, 33);
-                    stream.WriteInt((uint)characterOwner.HeadId, 16);
-                    stream.WriteInt((uint)characterOwner.BodyId, 16);
-                    stream.WriteInt((uint)characterOwner.HeadDetail1, 16);
-                    stream.WriteInt((uint)characterOwner.HeadDetail2, 16);
-                    stream.WriteInt((uint)characterOwner.MouthId, 16);
-                    stream.WriteInt((uint)characterOwner.EyesId, 16);
-                    stream.WriteInt((uint)characterOwner.HelmetId, 16);
-                    stream.WriteInt((uint)characterOwner.HairId, 16);
+                    stream.WriteInt((uint)ownerAsCharacter.HeadId, 16);
+                    stream.WriteInt((uint)ownerAsCharacter.BodyId, 16);
+                    stream.WriteInt((uint)ownerAsCharacter.HeadDetail1, 16);
+                    stream.WriteInt((uint)ownerAsCharacter.HeadDetail2, 16);
+                    stream.WriteInt((uint)ownerAsCharacter.MouthId, 16);
+                    stream.WriteInt((uint)ownerAsCharacter.EyesId, 16);
+                    stream.WriteInt((uint)ownerAsCharacter.HelmetId, 16);
+                    stream.WriteInt((uint)ownerAsCharacter.HairId, 16);
                 }
                 else
                 {
@@ -211,64 +232,41 @@ public class GhostVehicle : GhostObject
             }
         }
 
-        if (stream.WriteFlag((updateMask & WheelSetMask) != 0) && stream.WriteFlag(parentVehicle.WheelSet != null))
-        {
-            stream.WriteInt((uint)parentVehicle.WheelSet.CBID, 20);
-            stream.Write(parentVehicle.WheelSet.ObjectId.Coid);
-            stream.WriteFlag(parentVehicle.WheelSet.ObjectId.Global);
-        }
+        // CreateVehicle / CreateVehicleExtended already embed full equipment for global vehicles.
+        // Client initial-ghost equipment path (DAT_00d1798c != 0) differs from the delta path and
+        // re-sending hardpoints on the first ghost update has been tied to stream desync /
+        // Invalid Packet after scoped NPC create. Skip equipment payloads on initial; deltas still pack.
+        var packEquipment = !isInitial;
 
-        if (stream.WriteFlag((updateMask & FrontWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponFront != null))
-        {
-            stream.WriteInt((uint)parentVehicle.WeaponFront.CBID, 20);
-            stream.Write(parentVehicle.WeaponFront.ObjectId.Coid);
-            stream.WriteFlag(parentVehicle.WeaponFront.ObjectId.Global);
-        }
+        PackHardpoint(stream, packEquipment && (updateMask & WheelSetMask) != 0, parentVehicle.WheelSet);
+        PackHardpoint(stream, packEquipment && (updateMask & FrontWeaponMask) != 0, parentVehicle.WeaponFront);
+        PackHardpoint(stream, packEquipment && (updateMask & TurretWeaponMask) != 0, parentVehicle.WeaponTurret);
+        PackHardpoint(stream, packEquipment && (updateMask & RearWeaponMask) != 0, parentVehicle.WeaponRear);
+        PackHardpoint(stream, packEquipment && (updateMask & MeleeWeaponMask) != 0, parentVehicle.WeaponMelee);
+        PackHardpoint(stream, packEquipment && (updateMask & OrnamentMask) != 0, parentVehicle.Ornament);
 
-        if (stream.WriteFlag((updateMask & TurretWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponTurret != null))
-        {
-            stream.WriteInt((uint)parentVehicle.WeaponTurret.CBID, 20);
-            stream.Write(parentVehicle.WeaponTurret.ObjectId.Coid);
-            stream.WriteFlag(parentVehicle.WeaponTurret.ObjectId.Global);
-        }
-
-        if (stream.WriteFlag((updateMask & RearWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponRear != null))
-        {
-            stream.WriteInt((uint)parentVehicle.WeaponRear.CBID, 20);
-            stream.Write(parentVehicle.WeaponRear.ObjectId.Coid);
-            stream.WriteFlag(parentVehicle.WeaponRear.ObjectId.Global);
-        }
-
-        if (stream.WriteFlag((updateMask & MeleeWeaponMask) != 0) && stream.WriteFlag(parentVehicle.WeaponMelee != null))
-        {
-            stream.WriteInt((uint)parentVehicle.WeaponMelee.CBID, 20);
-            stream.Write(parentVehicle.WeaponMelee.ObjectId.Coid);
-            stream.WriteFlag(parentVehicle.WeaponMelee.ObjectId.Global);
-        }
-
-        if (stream.WriteFlag((updateMask & OrnamentMask) != 0) && stream.WriteFlag(parentVehicle.Ornament != null))
-        {
-            stream.WriteInt((uint)parentVehicle.Ornament.CBID, 20);
-            stream.Write(parentVehicle.Ornament.ObjectId.Coid);
-            stream.WriteFlag(parentVehicle.Ornament.ObjectId.Global);
-        }
-
-        if (stream.WriteFlag((updateMask & ChangeArmor) != 0) && stream.WriteFlag(parentVehicle.Armor != null)) // TODO
+        if (stream.WriteFlag(packEquipment && (updateMask & ChangeArmor) != 0) && stream.WriteFlag(parentVehicle.Armor != null))
         {
             stream.WriteInt((uint)parentVehicle.Armor.CBID, 20);
             stream.Write(parentVehicle.Armor.ObjectId.Coid);
             stream.WriteFlag(parentVehicle.Armor.ObjectId.Global);
-            stream.Write(parentVehicle.Armor.CloneBaseArmor.ArmorSpecific.Resistances.Damage[0]);
-            stream.Write(parentVehicle.Armor.CloneBaseArmor.ArmorSpecific.Resistances.Damage[1]);
-            stream.Write(parentVehicle.Armor.CloneBaseArmor.ArmorSpecific.Resistances.Damage[2]);
-            stream.Write(parentVehicle.Armor.CloneBaseArmor.ArmorSpecific.Resistances.Damage[3]);
-            stream.Write(parentVehicle.Armor.CloneBaseArmor.ArmorSpecific.Resistances.Damage[4]);
-            stream.Write(parentVehicle.Armor.CloneBaseArmor.ArmorSpecific.Resistances.Damage[5]);
+            // Client reads six 16-bit resistances (not floats) — DamageSpecific is short[6].
+            var resists = parentVehicle.Armor.CloneBaseArmor?.ArmorSpecific.Resistances.Damage;
+            for (var i = 0; i < 6; ++i)
+                stream.Write(resists != null && i < resists.Length ? resists[i] : (short)0);
         }
 
-        if (stream.WriteFlag((updateMask & GMMask) != 0 && superCharacter != null))
+        // Client VehicleNet_UnpackGhostVehicle applies GM (4 bits → owner+0x12A) and AI state
+        // (8 bits → owner+0x127) with no null check. Packing these without a client-side owner
+        // object is an access violation (e.g. 0x005F8FED). Game-wide rule: only pack when the
+        // owner block is on the wire for this initial, or owner already exists for deltas.
+        var characterOwner = owner?.GetAsCharacter();
+        var driverCreature = characterOwner == null ? owner?.GetAsCreature() : null;
+        var clientHasOwner = isInitial ? packOwner : wouldPackOwner;
+
+        if (stream.WriteFlag((updateMask & GMMask) != 0 && characterOwner != null && clientHasOwner))
         {
-            stream.WriteInt(superCharacter.GMLevel, 4);
+            stream.WriteInt(characterOwner.GMLevel, 4);
         }
 
         if (stream.WriteFlag((updateMask & ClanMask) != 0 && false)) // TODO
@@ -299,9 +297,7 @@ public class GhostVehicle : GhostObject
             stream.WriteInt((uint)Math.Max(Parent.GetMaximumHP(), 0), 18);
         }
 
-        var driverCreature = owner?.GetAsCharacter() == null ? owner?.GetAsCreature() : null;
-
-        if (stream.WriteFlag((updateMask & StateMask) != 0 && EnableAiStateWire && driverCreature != null))
+        if (stream.WriteFlag((updateMask & StateMask) != 0 && EnableAiStateWire && driverCreature != null && clientHasOwner))
         {
             stream.WriteBits(8, new byte[] { driverCreature.AiCombatState }); // AI State if owner is creature
         }
@@ -348,7 +344,7 @@ public class GhostVehicle : GhostObject
             }
         }
 
-        if (stream.WriteFlag(superCharacter != null && (updateMask & AttributeMask) != 0))
+        if (stream.WriteFlag(characterOwner != null && clientHasOwner && (updateMask & AttributeMask) != 0))
         {
             stream.WriteBits(32, BitConverter.GetBytes(0)); // AttribCombat
             stream.WriteBits(32, BitConverter.GetBytes(0)); // AttribPerception
@@ -381,7 +377,40 @@ public class GhostVehicle : GhostObject
             stream.WriteFlag(false); // GivesToken
         }
 
+        if (WireDiag.Enabled)
+        {
+            var playerCoid = 0L;
+            if (connection is TNLConnection tnl)
+                playerCoid = tnl.CurrentCharacter?.ObjectId.Coid ?? tnl.GetPlayerCOID();
+
+            var bits = (int)(stream.GetBitPosition() - startBits);
+            WireDiag.RecordGhostPack(
+                name: "GhostVehicle",
+                coid: Parent.ObjectId.Coid,
+                bits: bits,
+                mask: updateMask,
+                initial: isInitial,
+                playerCoid: playerCoid,
+                detail: $"path={(packPath ? 1 : 0)}/{(wouldPackPath ? 1 : 0)} owner={(packOwner ? 1 : 0)}/{(wouldPackOwner ? 1 : 0)} " +
+                        $"tmpl={(packTemplate ? 1 : 0)}/{(wouldPackTemplate ? 1 : 0)} spawn={(packSpawnOwner ? 1 : 0)}/{(wouldPackSpawnOwner ? 1 : 0)} " +
+                        $"clientOwner={(clientHasOwner ? 1 : 0)} equip={(packEquipment ? 1 : 0)} " +
+                        $"aiWire={(EnableAiStateWire ? 1 : 0)} global={(Parent.ObjectId.Global ? 1 : 0)}");
+        }
+
         return ret;
+    }
+
+    /// <summary>
+    /// Wheel/weapon/ornament hardpoint: mask flag, then present flag + CBID20 + coid64 + global.
+    /// </summary>
+    private static void PackHardpoint(BitStream stream, bool maskSet, ClonedObjectBase item)
+    {
+        if (stream.WriteFlag(maskSet) && stream.WriteFlag(item != null))
+        {
+            stream.WriteInt((uint)item.CBID, 20);
+            stream.Write(item.ObjectId.Coid);
+            stream.WriteFlag(item.ObjectId.Global);
+        }
     }
 
 }

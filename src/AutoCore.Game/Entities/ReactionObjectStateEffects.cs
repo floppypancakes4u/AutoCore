@@ -20,12 +20,12 @@ public static class ReactionObjectStateEffects
         foreach (var target in EnumerateTargets(template, activator))
         {
             target.SetInvincible(invincible);
-            Logger.WriteLog(LogType.Debug,
-                "{0} reaction {1}: object {2} IsInvincible={3}",
-                invincible ? "MakeInvincible" : "MakeNotInvincible",
-                template.COID,
-                target.ObjectId.Coid,
-                invincible);
+            //Logger.WriteLog(LogType.Debug,
+            //    "{0} reaction {1}: object {2} IsInvincible={3}",
+            //    invincible ? "MakeInvincible" : "MakeNotInvincible",
+            //    template.COID,
+            //    target.ObjectId.Coid,
+            //    invincible);
         }
 
         return true;

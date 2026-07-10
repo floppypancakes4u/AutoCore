@@ -147,6 +147,9 @@ public class SpawnPointTemplateSpawnTests
         var vehicle = map.NpcAiEntities.OfType<Vehicle>().SingleOrDefault();
         Assert.IsNotNull(vehicle, "Raw-CBID vehicle spawn with a driver AI must register in NpcAiEntities");
         Assert.IsNotNull(vehicle.NpcAi);
+        Assert.IsTrue(vehicle.ObjectId.Global, "Spawned vehicles must not occupy the client-local map-object namespace");
+        Assert.IsTrue(MapNpcIdentity.IsMapNpcIdentity(vehicle.ObjectId));
+        Assert.IsFalse(MapNpcIdentity.IsUnsafeLocalSpawnCoid(vehicle.ObjectId, mapHighestCoid: 0));
     }
 
     [TestMethod]
@@ -191,6 +194,68 @@ public class SpawnPointTemplateSpawnTests
         var vehicle = map.NpcAiEntities.OfType<Vehicle>().SingleOrDefault();
         Assert.IsNotNull(vehicle, "Template vehicle spawn with a driver AI must register in NpcAiEntities");
         Assert.IsNotNull(vehicle.NpcAi);
+        Assert.IsTrue(vehicle.ObjectId.Global, "Template-spawned vehicles must use the map-NPC identity namespace");
+        Assert.IsTrue(MapNpcIdentity.IsMapNpcIdentity(vehicle.ObjectId));
+        Assert.IsFalse(MapNpcIdentity.IsUnsafeLocalSpawnCoid(vehicle.ObjectId, mapHighestCoid: 0));
+    }
+
+    [TestMethod]
+    public void Spawn_RawVehicleAtArkBayCollisionCoid_UsesGlobalHighRangeIdentity()
+    {
+        const long arkBayHighestCoid = 18_097;
+        const long crashingLocalCoid = 18_228;
+        const int vehicleCbid = 630_001;
+
+        var map = CreateTestMap(707);
+        map.LocalCoidCounter = crashingLocalCoid;
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid);
+
+        var template = new SpawnPointTemplate { COID = 16_770 };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList
+        {
+            SpawnType = vehicleCbid,
+            IsTemplate = false,
+        });
+
+        var spawnPoint = new SpawnPoint(template);
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var vehicle = map.Objects.Values.OfType<Vehicle>().Single();
+        Assert.AreNotEqual(crashingLocalCoid, vehicle.ObjectId.Coid);
+        Assert.AreEqual(MapNpcIdentity.CoidBase + crashingLocalCoid, vehicle.ObjectId.Coid);
+        Assert.IsTrue(vehicle.ObjectId.Global);
+        Assert.IsTrue(vehicle.ObjectId.Coid >= MapNpcIdentity.CoidBase);
+        Assert.IsFalse(MapNpcIdentity.IsUnsafeLocalSpawnCoid(vehicle.ObjectId, arkBayHighestCoid));
+    }
+
+    [TestMethod]
+    public void Spawn_TwoRawVehicles_AllocatesDistinctSequentialMapNpcIdentities()
+    {
+        const int vehicleCbid = 640_001;
+        var map = CreateTestMap(9105);
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid);
+
+        var template = new SpawnPointTemplate { COID = 14_503 };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList
+        {
+            SpawnType = vehicleCbid,
+            IsTemplate = false,
+        });
+
+        var spawnPoint = new SpawnPoint(template);
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var vehicles = map.Objects.Values.OfType<Vehicle>().OrderBy(v => v.ObjectId.Coid).ToList();
+        Assert.AreEqual(2, vehicles.Count);
+        Assert.IsTrue(vehicles.All(v => MapNpcIdentity.IsMapNpcIdentity(v.ObjectId)));
+        Assert.AreEqual(vehicles[0].ObjectId.Coid + 1, vehicles[1].ObjectId.Coid);
     }
 
     private static SectorMap CreateTestMap(int continentId)

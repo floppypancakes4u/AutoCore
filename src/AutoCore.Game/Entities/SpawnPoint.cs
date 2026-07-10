@@ -73,14 +73,14 @@ public class SpawnPoint : ClonedObjectBase
     }
 
     /// <summary>
-    /// Applies map-NPC COID policy (global + high range) used by <see cref="SpawnCreature"/>.
-    /// Exposed for regression tests of the 0x005D262A crash fix.
+    /// Applies the map-NPC COID policy (global + high range) to spawned creatures and vehicles.
+    /// Exposed for regression tests of client-local map-object identity collisions.
     /// </summary>
-    internal static void AssignMapNpcIdentity(Creature creature, ref long localCoidCounter)
+    internal static void AssignMapNpcIdentity(ClonedObjectBase npc, ref long localCoidCounter)
     {
-        ArgumentNullException.ThrowIfNull(creature);
+        ArgumentNullException.ThrowIfNull(npc);
         var objectId = MapNpcIdentity.AllocateCoid(ref localCoidCounter);
-        creature.SetCoid(objectId.Coid, objectId.Global);
+        npc.SetCoid(objectId.Coid, objectId.Global);
     }
 
     /// <summary>
@@ -240,7 +240,9 @@ public class SpawnPoint : ClonedObjectBase
     private Vehicle SpawnVehicle(int cbid, SpawnPointTemplate.SpawnList spawnList)
     {
         var vehicle = new Vehicle();
-        vehicle.SetCoid(Map.LocalCoidCounter++, false);
+        var counter = Map.LocalCoidCounter;
+        AssignMapNpcIdentity(vehicle, ref counter);
+        Map.LocalCoidCounter = counter;
         vehicle.LoadCloneBase(cbid);
         vehicle.SetupCBFields();
         vehicle.Layer = Layer;
@@ -275,7 +277,9 @@ public class SpawnPoint : ClonedObjectBase
     private Vehicle SpawnTemplateVehicle(VehicleTemplate template, SpawnPointTemplate.SpawnList spawnList)
     {
         var vehicle = new Vehicle();
-        vehicle.SetCoid(Map.LocalCoidCounter++, false);
+        var counter = Map.LocalCoidCounter;
+        AssignMapNpcIdentity(vehicle, ref counter);
+        Map.LocalCoidCounter = counter;
         vehicle.LoadCloneBase(template.VehicleCbid);
         vehicle.SetupCBFields();
         vehicle.TemplateId = template.Id;
