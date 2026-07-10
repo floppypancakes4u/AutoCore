@@ -387,10 +387,16 @@ public class SectorMap
             // Global game objects must exist in the client's object table before the TNL ghost
             // proxy attaches to them. SendGamePacket queues a guaranteed-ordered RPC event, and
             // GhostConnection writes queued events before ghost updates in the same packet.
+            //
+            // The create is once-per-connection-per-map-session (TryMarkGlobalVehicleCreateSent),
+            // NOT gated on current ghost presence: a guaranteed CreateVehicle persists in the client
+            // table across TNL ghost-kill/re-scope cycles with no DestroyObject, so re-sending it
+            // when a player re-enters the scope radius would duplicate an object the client still
+            // holds ('Invalid Packet' / double-object). The session set is cleared on ResetGhosting.
             if (foreignGlobalVehicle
                 && ScopeGlobalVehicleCreate
                 && connection is TNL.TNLConnection gameConnection
-                && !ghost.IsGhostedTo(connection))
+                && gameConnection.TryMarkGlobalVehicleCreateSent(entity.ObjectId.Coid))
             {
                 var createPacket = new CreateVehiclePacket();
                 ((Vehicle)entity).WriteToPacket(createPacket);

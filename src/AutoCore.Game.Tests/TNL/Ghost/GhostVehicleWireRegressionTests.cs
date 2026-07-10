@@ -329,6 +329,9 @@ public class GhostVehicleWireRegressionTests
         driver.AiCombatState = 4;
         vehicle.SetOwner(driver);
 
+        // Owner block sent at initial → delta AI state gating is satisfied.
+        PackInitial(vehicle);
+
         GhostVehicle.EnableAiStateWire = true;
         var stream = PackUpdateNonInitial(vehicle, GhostVehicle.StateMask);
         Assert.IsFalse(stream.ReadFlag()); // Skills
@@ -636,6 +639,9 @@ public class GhostVehicleWireRegressionTests
         var character = CreateTestCharacter(20_063);
         vehicle.SetOwner(character);
 
+        // Owner block sent at initial → delta attribute gating is satisfied.
+        PackInitial(vehicle);
+
         var stream = PackUpdateNonInitial(vehicle, GhostVehicle.AttributeMask);
         // through Target (17 flags), then Attribute
         for (var i = 0; i < 17; ++i)
@@ -652,6 +658,9 @@ public class GhostVehicleWireRegressionTests
         var character = CreateTestCharacter(20_065);
         character.GMLevel = 4;
         vehicle.SetOwner(character);
+
+        // Owner block sent at initial → delta GM gating is satisfied.
+        PackInitial(vehicle);
 
         var stream = PackUpdateNonInitial(vehicle, GhostVehicle.GMMask);
         Assert.IsFalse(stream.ReadFlag()); // Skills

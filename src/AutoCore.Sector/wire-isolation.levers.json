@@ -1,5 +1,5 @@
 {
-  "WireDiag": true,
+  "WireDiag": false,
   "ScopeGlobalVehicles": true,
   "ScopeGlobalVehicleCreate": true,
   "ScopeGlobalVehicleGhost": true,

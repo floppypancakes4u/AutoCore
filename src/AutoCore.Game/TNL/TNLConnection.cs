@@ -30,6 +30,18 @@ public partial class TNLConnection : GhostConnection
     private long PlayerCoid { get; set; }
     private ushort FragmentCounter { get; set; } = 1;
 
+    /// <summary>
+    /// Coids of foreign global vehicles for which an in-world <c>CreateVehicle</c> has already been
+    /// sent this map session. A guaranteed-ordered CreateVehicle plants the object in the client's
+    /// table for the whole session; TNL later ghost-kills and re-scopes it without any DestroyObject,
+    /// so scope must send the create at most once per coid per session. Otherwise driving past the
+    /// scope-drop radius and back delivers a duplicate in-world create for an object the client still
+    /// holds — the duplicate-create / 'Invalid Packet' failure class. Cleared by
+    /// <see cref="ResetGhosting"/> (map transfer), which is exactly when the client discards its
+    /// local object table (rpcEndGhosting → DeleteLocalGhosts).
+    /// </summary>
+    private readonly HashSet<long> _globalVehicleCreatesSent = new();
+
     public Account Account { get; set; }
     public Character CurrentCharacter { get; set; }
 
@@ -44,6 +56,20 @@ public partial class TNLConnection : GhostConnection
     private SFragmentData FragmentGuaranteed { get; } = new();
     private SFragmentData FragmentNonGuaranteed { get; } = new();
     private SFragmentData FragmentGuaranteedOrdered { get; } = new();
+
+    /// <summary>
+    /// Records that a foreign global-vehicle <c>CreateVehicle</c> is being sent for <paramref name="coid"/>
+    /// this map session. Returns <c>true</c> the first time (caller should send the create), <c>false</c>
+    /// on repeat scopes so the create is never duplicated for an object the client still holds.
+    /// </summary>
+    public bool TryMarkGlobalVehicleCreateSent(long coid) => _globalVehicleCreatesSent.Add(coid);
+
+    /// <summary>
+    /// Forgets which foreign global-vehicle creates were sent. Called when the client discards its
+    /// local object table on a map transfer (see <see cref="EnsureGhostsAndScopeAfterMapTransfer"/>),
+    /// so the next map session legitimately re-sends creates.
+    /// </summary>
+    internal void ClearGlobalVehicleCreateTracking() => _globalVehicleCreatesSent.Clear();
 
     public new static void RegisterNetClassReps()
     {

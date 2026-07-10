@@ -135,6 +135,11 @@ public partial class TNLConnection
         if (character.CurrentVehicle == null)
             throw new InvalidOperationException("Cannot re-establish ghosting without a current vehicle.");
 
+        // The preceding ResetGhosting told the client to delete its local ghosts (rpcEndGhosting),
+        // discarding every foreign global-vehicle object we created on the old map. Forget the sent
+        // set so the new map's scope queries re-send creates instead of suppressing them as dupes.
+        ClearGlobalVehicleCreateTracking();
+
         // Ensure NetObjects exist (no-op if already created before the transfer).
         character.CreateGhost();
         character.CurrentVehicle.CreateGhost();

@@ -91,6 +91,74 @@ public class GlobalVehicleScopeTests
     }
 
     [TestMethod]
+    public void PerformScopeQuery_DropThenReScope_DoesNotResendCreate()
+    {
+        const int vehicleCbid = 650_004;
+        const long vehicleCoid = MapNpcIdentity.CoidBase + 18_140;
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid);
+
+        var map = CreateFieldMap();
+        var npcVehicle = new Vehicle
+        {
+            Position = new Vector3(25f, 2.349889f, 0f),
+            Rotation = new Quaternion(0f, 0.00005f, 0f, 1f),
+        };
+        npcVehicle.SetCoid(vehicleCoid, true);
+        npcVehicle.LoadCloneBase(vehicleCbid);
+        npcVehicle.SetupCBFields();
+        npcVehicle.SetMap(map);
+        npcVehicle.CreateGhost();
+
+        var self = new Character { Position = new Vector3(0f, 0f, 0f) };
+        self.SetCurrentVehicleForTests(new Vehicle { Position = self.Position });
+
+        var connection = new TNLConnection();
+        connection.SetGhostFrom(true);
+        connection.ActivateGhosting();
+
+        var packets = new List<BasePacket>();
+        TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);
+
+        // First scope: create is sent and the ghost is registered.
+        map.PerformScopeQuery(null, self, connection);
+        Assert.AreEqual(1, packets.OfType<CreateVehiclePacket>().Count(), "first scope sends the create");
+        var ghostInfo = npcVehicle.Ghost.GetFirstObjectRef();
+        Assert.IsNotNull(ghostInfo, "vehicle ghost must be scoped after the first query");
+
+        // Player drives past the drop radius: TNL kills the ghost (no DestroyObject is ever sent, so
+        // the client still holds the created object). IsGhostedTo now reports not-ghosted.
+        connection.DetachObject(ghostInfo);
+        Assert.IsFalse(npcVehicle.Ghost.IsGhostedTo(connection),
+            "detaching must drop the ghost so the re-scope path is exercised");
+
+        // Player returns into scope: the ghost re-registers, but the create must NOT be re-sent —
+        // the client still holds the object from the first create (duplicate-create regression).
+        map.PerformScopeQuery(null, self, connection);
+
+        Assert.AreEqual(1, packets.OfType<CreateVehiclePacket>().Count(),
+            "a drop/re-add scope cycle must not deliver a duplicate CreateVehicle for an object the client still holds");
+        Assert.IsNotNull(npcVehicle.Ghost.GetFirstObjectRef(), "ghost must be re-scoped after re-entry");
+    }
+
+    [TestMethod]
+    public void PerformScopeQuery_AfterMapTransfer_ResendsCreateForNewMapSession()
+    {
+        var (map, npcVehicle, self, connection, packets) = ArrangeScopedNpc();
+
+        map.PerformScopeQuery(null, self, connection);
+        Assert.AreEqual(1, packets.OfType<CreateVehiclePacket>().Count(), "first session sends the create");
+
+        // Map transfer tears down ghosting; the client discards its local object table, so the next
+        // map session legitimately needs the create again.
+        connection.ResetGhosting();
+        connection.EnsureGhostsAndScopeAfterMapTransfer(self);
+
+        map.PerformScopeQuery(null, self, connection);
+        Assert.AreEqual(2, packets.OfType<CreateVehiclePacket>().Count(),
+            "a fresh map session must clear the sent-create tracking so the create is re-sent");
+    }
+
+    [TestMethod]
     public void PerformScopeQuery_ScopeGlobalVehiclesFalse_SkipsCreateAndGhost()
     {
         var (map, npcVehicle, self, connection, packets) = ArrangeScopedNpc();

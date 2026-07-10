@@ -28,6 +28,17 @@ public class GhostVehicle : GhostObject
 
     private const int CoidCurrentPathBits = 18;
 
+    /// <summary>
+    /// Latched at each initial pack: was the CurrentOwner block actually written on THIS ghost's
+    /// most recent initial update? Delta packs gate owner-applied bytes (GM nibble → owner+0x12A,
+    /// AI state → owner+0x127, attribute payload) on this latch instead of recomputing from the
+    /// current lever/owner state. Recomputing lets a live <c>wire set EnableOwnerWire false</c>
+    /// during ghost create (owner block omitted), then a flip back to true, write owner bytes to a
+    /// client whose vehicle has no owner object — the null-owner access violation (0x005F8FED) the
+    /// PackUpdate delta comment warns about.
+    /// </summary>
+    private bool _ownerSentAtInitial;
+
     public const ulong AttributeMask    = 0x0000200000ul;
     public const ulong ClanMask         = 0x0000400000ul;
     public const ulong PetCBIDMask      = 0x0001000000ul;
@@ -143,6 +154,10 @@ public class GhostVehicle : GhostObject
 
             stream.WriteFlag(false); // IsTrailer
 
+            // Latch whether this client's initial carried the owner block; deltas read this to
+            // decide if owner-applied bytes are safe to write (see field doc / Risk-5 lever notes).
+            _ownerSentAtInitial = packOwner;
+
             if (stream.WriteFlag(packOwner)) // CurrentOwner
             {
                 stream.Write(owner.ObjectId.Coid); // CurrentOwner coid
@@ -222,7 +237,10 @@ public class GhostVehicle : GhostObject
         // owner block is on the wire for this initial, or owner already exists for deltas.
         var characterOwner = owner?.GetAsCharacter();
         var driverCreature = characterOwner == null ? owner?.GetAsCreature() : null;
-        var clientHasOwner = isInitial ? packOwner : wouldPackOwner;
+        // On a delta, "does the client have an owner object" is answered by what THIS ghost sent at
+        // its initial pack (_ownerSentAtInitial), NOT by whether an owner exists server-side right
+        // now — the latter would write owner bytes to a client that never received the owner block.
+        var clientHasOwner = isInitial ? packOwner : _ownerSentAtInitial;
 
         if (stream.WriteFlag((updateMask & GMMask) != 0 && characterOwner != null && clientHasOwner))
         {

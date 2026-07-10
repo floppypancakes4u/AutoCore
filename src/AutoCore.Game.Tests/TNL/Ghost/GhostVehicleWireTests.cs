@@ -187,12 +187,64 @@ public class GhostVehicleWireTests
         driver.AiCombatState = 3;
         vehicle.SetOwner(driver);
 
+        // Owner block was sent at this client's initial, so delta AI state is safe to write.
+        PackInitial(vehicle);
+
         var stream = PackUpdateNonInitial(vehicle, GhostVehicle.StateMask);
         SkipNonInitialFlagsBeforeStateMask(stream);
 
         Assert.IsTrue(stream.ReadFlag(), "StateMask flag must be set when a driver creature is present");
         stream.Read(out byte state);
         Assert.AreEqual((byte)3, state);
+    }
+
+    /// <summary>
+    /// Regression for the null-owner AV (0x005F8FED): if a delta's owner gating recomputed from the
+    /// current lever/owner state instead of what THIS client received at its initial, a live
+    /// <c>wire set EnableOwnerWire false</c> during ghost create followed by a flip back to true would
+    /// write GM/AI/attribute bytes to a client whose vehicle has no owner object. The latch must keep
+    /// those blocks suppressed.
+    /// </summary>
+    [TestMethod]
+    public void PackDelta_AfterOwnerWireOffInitial_SuppressesGmEvenAfterLeverFlipsBackOn()
+    {
+        var vehicle = CreateVehicleWithMap(9140);
+        var character = CreateTestCharacter(9141);
+        character.GMLevel = 3;
+        vehicle.SetOwner(character);
+
+        // Initial packed with the owner block suppressed: the client never receives an owner object.
+        GhostVehicle.EnableOwnerWire = false;
+        PackInitial(vehicle, GhostObject.InitialMask | GhostVehicle.GMMask);
+
+        // Lever flipped back on; owner exists server-side, but this client still lacks the object.
+        GhostVehicle.EnableOwnerWire = true;
+        var stream = PackUpdateNonInitial(vehicle, GhostVehicle.GMMask);
+
+        Assert.IsFalse(stream.ReadFlag()); // Skills
+        for (var i = 0; i < 7; ++i)
+            Assert.IsFalse(stream.ReadFlag()); // equipment
+        Assert.IsFalse(stream.ReadFlag(),
+            "GM must stay suppressed on delta: the owner block was never sent to this client at initial");
+    }
+
+    [TestMethod]
+    public void PackDelta_AfterOwnerSentAtInitial_PacksGm()
+    {
+        var vehicle = CreateVehicleWithMap(9142);
+        var character = CreateTestCharacter(9143);
+        character.GMLevel = 5;
+        vehicle.SetOwner(character);
+
+        // Owner block sent at initial (default lever on) → delta GM is legitimate.
+        PackInitial(vehicle, GhostObject.InitialMask | GhostVehicle.GMMask);
+
+        var stream = PackUpdateNonInitial(vehicle, GhostVehicle.GMMask);
+        Assert.IsFalse(stream.ReadFlag()); // Skills
+        for (var i = 0; i < 7; ++i)
+            Assert.IsFalse(stream.ReadFlag()); // equipment
+        Assert.IsTrue(stream.ReadFlag(), "GM packs on delta when the owner block was sent at initial");
+        Assert.AreEqual(5u, stream.ReadInt(4));
     }
 
     [TestMethod]
