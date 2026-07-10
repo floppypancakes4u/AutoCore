@@ -24,6 +24,7 @@ public class AssetManager : Singleton<AssetManager>
     /// <summary>Unit-test NPC data overrides (checked before wad.xml data).</summary>
     private Dictionary<int, VehicleTemplate> _testVehicleTemplates;
     private Dictionary<int, CreatureAiProfile> _testCreatureAiProfiles;
+    private Dictionary<int, LootTable> _testLootTables;
 
     public string GamePath { get; private set; }
     public ServerType ServerType { get; private set; }
@@ -544,6 +545,9 @@ public class AssetManager : Singleton<AssetManager>
 
     public LootTable GetLootTable(int lootTableId)
     {
+        if (_testLootTables != null && _testLootTables.TryGetValue(lootTableId, out var testTable))
+            return testTable;
+
         if (WorldDBLoader.LootTables == null)
             return null;
 
@@ -599,10 +603,20 @@ public class AssetManager : Singleton<AssetManager>
             _testCreatureAiProfiles[profile.AiId] = profile;
     }
 
+    internal void SetTestLootTables(IEnumerable<LootTable> tables)
+    {
+        if (tables is null)
+            return;
+        _testLootTables ??= new Dictionary<int, LootTable>();
+        foreach (var table in tables)
+            _testLootTables[table.Id] = table;
+    }
+
     internal void ClearTestNpcData()
     {
         _testVehicleTemplates = null;
         _testCreatureAiProfiles = null;
+        _testLootTables = null;
     }
 
     public IEnumerable<LootTable> GetAllLootTables()

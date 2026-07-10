@@ -47,6 +47,31 @@ public class LootManager : Singleton<LootManager>
         _initialized = true;
     }
 
+    /// <summary>
+    /// Test seam: registers a single generatable item into the index and marks the manager
+    /// initialized, so loot generation can be exercised without loading the WAD item catalog.
+    /// </summary>
+    internal void SeedGeneratableItemForTests(CloneBaseObjectType type, short rarity, int cbid, short requiredLevel)
+    {
+        _itemIndex ??= new Dictionary<(CloneBaseObjectType type, short rarity), List<GeneratableItem>>();
+        var key = (type, rarity);
+        if (!_itemIndex.TryGetValue(key, out var list))
+        {
+            list = new List<GeneratableItem>();
+            _itemIndex[key] = list;
+        }
+
+        list.Add(new GeneratableItem { CBID = cbid, RequiredLevel = requiredLevel, Name = "test" });
+        _initialized = true;
+    }
+
+    /// <summary>Test seam: clears the item index / initialized flag so tests don't leak state.</summary>
+    internal void ResetForTests()
+    {
+        _itemIndex = null;
+        _initialized = false;
+    }
+
     private void BuildItemIndex()
     {
         _itemIndex = new Dictionary<(CloneBaseObjectType type, short rarity), List<GeneratableItem>>();
@@ -223,6 +248,41 @@ public class LootManager : Singleton<LootManager>
         if (lootItems.Count > 0)
         {
             Logger.WriteLog(LogType.Debug, $"LootManager.GenerateLoot: Generated {lootItems.Count} items for creature {creature.ObjectId.Coid} from loot table {lootTableId} ({lootTable.Name})");
+        }
+
+        return lootItems;
+    }
+
+    /// <summary>
+    /// Generates loot for a killed NPC vehicle from its <c>tVehicleTemplate</c> loot columns
+    /// (LootTableId / LootChance / LootRolls) rather than a creature clonebase. LootChance 0 drops
+    /// nothing; otherwise <paramref name="lootRolls"/> items are rolled from the table.
+    /// </summary>
+    public List<int> GenerateLoot(int lootTableId, byte lootChance, byte lootRolls, byte level)
+    {
+        var lootItems = new List<int>();
+
+        if (!_initialized)
+        {
+            Logger.WriteLog(LogType.Error, "LootManager.GenerateLoot(template): LootManager not initialized!");
+            return lootItems;
+        }
+
+        if (lootChance == 0 || lootRolls == 0)
+            return lootItems;
+
+        var lootTable = AssetManager.Instance.GetLootTable(lootTableId);
+        if (lootTable == null)
+        {
+            Logger.WriteLog(LogType.Debug, $"LootManager.GenerateLoot(template): No loot table {lootTableId} found");
+            return lootItems;
+        }
+
+        for (var roll = 0; roll < lootRolls; roll++)
+        {
+            var item = GenerateSingleItem(lootTable, level);
+            if (item.HasValue)
+                lootItems.Add(item.Value);
         }
 
         return lootItems;

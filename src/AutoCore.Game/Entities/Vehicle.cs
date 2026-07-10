@@ -73,22 +73,35 @@ public class Vehicle : SimpleObject
     // Broadcast freeform floaters use a different list (game+0xAC0) and do not reliably render.
     private static readonly Dictionary<long, long> _lastCombatMsgByAttackerMs = new();
 
-    [ExcludeFromCodeCoverage]
-    private static void TrySendDamagePacket(
+    /// <summary>Clears the per-attacker damage-packet throttle so tests don't leak state across runs.</summary>
+    internal static void ClearCombatThrottleForTests() => _lastCombatMsgByAttackerMs.Clear();
+
+    // NPC attackers have no OwningConnection, so a victim-only send is required for the hit to be
+    // visible to the player being shot. Deliver to both the attacker's and the victim's connections
+    // (deduped), rate-limited by the ATTACKER VEHICLE COID so multiple weapons don't spam floaters.
+    internal static void TrySendDamagePacket(
         Character? attacker,
+        ClonedObjectBase victim,
         TFID source,
-        TFID target,
         int actualDamage,
         DamagePacket.DamageEntryFlags flags = default)
     {
         try
         {
-            var conn = attacker?.OwningConnection;
-            if (conn == null)
+            var connections = new List<TNL.TNLConnection>(2);
+            var attackerConn = attacker?.OwningConnection;
+            if (attackerConn != null)
+                connections.Add(attackerConn);
+
+            var victimConn = victim?.GetSuperCharacter(false)?.OwningConnection;
+            if (victimConn != null && !ReferenceEquals(victimConn, attackerConn))
+                connections.Add(victimConn);
+
+            if (connections.Count == 0)
                 return;
 
             var now = Environment.TickCount64;
-            var key = attacker?.ObjectId.Coid ?? 0;
+            var key = source?.Coid ?? 0; // attacker vehicle COID
             if (key != 0)
             {
                 if (_lastCombatMsgByAttackerMs.TryGetValue(key, out var last) && now - last < 100)
@@ -96,9 +109,12 @@ public class Vehicle : SimpleObject
                 _lastCombatMsgByAttackerMs[key] = now;
             }
 
-            var packet = new DamagePacket { Source = source ?? new TFID() };
-            packet.AddHit(target ?? new TFID(), actualDamage, flags);
-            conn.SendGamePacket(packet, skipOpcode: true);
+            foreach (var conn in connections)
+            {
+                var packet = new DamagePacket { Source = source ?? new TFID() };
+                packet.AddHit(victim?.ObjectId ?? new TFID(), actualDamage, flags);
+                conn.SendGamePacket(packet, skipOpcode: true);
+            }
         }
         catch
         {
@@ -919,7 +935,7 @@ public class Vehicle : SimpleObject
         else
         {
             // Non-zero amount required for client combat-text / local HP apply (FUN_00812A60).
-            TrySendDamagePacket(attackerChar, ObjectId, Target.ObjectId, actualDamage);
+            TrySendDamagePacket(attackerChar, Target, ObjectId, actualDamage);
         }
 
         if (Target.GetCurrentHP() <= 0)
@@ -927,5 +943,88 @@ public class Vehicle : SimpleObject
             Target.SetMurderer(this);
             Target.OnDeath(DeathType.Silent);
         }
+    }
+
+    /// <summary>
+    /// NPC-vehicle death: roll <c>tVehicleTemplate</c> loot, leave the map, and broadcast a destroy
+    /// so clients remove the wreck (mirrors <see cref="Creature.OnDeath"/>). Player vehicles keep the
+    /// base behavior (corpse state only; no map removal).
+    /// </summary>
+    public override void OnDeath(DeathType deathType)
+    {
+        if (NpcAi == null)
+        {
+            base.OnDeath(deathType);
+            return;
+        }
+
+        // base sets corpse/HealthMask and credits the kill objective; SimpleObject's
+        // RemoveFromMapOnDeath=false means it does NOT remove the vehicle — we do that below.
+        base.OnDeath(deathType);
+
+        var vehicleObjectId = ObjectId;
+        var map = Map;
+        if (map == null)
+            return;
+
+        Character killerCharacter = null;
+        if (Murderer.Coid > 0)
+            killerCharacter = ObjectManager.Instance.GetObject(Murderer)?.GetSuperCharacter(false);
+
+        GenerateAndSpawnTemplateLoot(killerCharacter);
+
+        // Leave the map first so the destroy-broadcast iteration stays consistent.
+        SetMap(null);
+
+        var destroyPacket = new DestroyObjectPacket(vehicleObjectId);
+        foreach (var character in map.Objects.Values.OfType<Character>().Where(c => c.OwningConnection != null))
+        {
+            try
+            {
+                character.OwningConnection.SendGamePacket(destroyPacket);
+            }
+            catch
+            {
+                // Never let a single failed send abort the rest of the death broadcast.
+            }
+        }
+    }
+
+    private void GenerateAndSpawnTemplateLoot(Character killerCharacter)
+    {
+        if (TemplateId < 0)
+            return;
+
+        var template = AssetManager.Instance.GetVehicleTemplate(TemplateId);
+        if (template == null)
+            return;
+
+        var level = Owner?.GetAsCreature()?.GetLevel() ?? 1;
+        var lootItems = LootManager.Instance.GenerateLoot(
+            template.LootTableId, template.LootChance, template.LootRolls, level);
+        if (lootItems.Count == 0)
+            return;
+
+        var random = new Random();
+        foreach (var cbid in lootItems)
+        {
+            // Equipment can't be ground-picked by the client, so auto-loot it to the killer when known.
+            if (LootManager.Instance.RequiresAutoLoot(cbid) && killerCharacter != null)
+                LootManager.Instance.AutoLootItem(cbid, killerCharacter);
+            else
+                SpawnLootOnGround(cbid, random);
+        }
+    }
+
+    private void SpawnLootOnGround(int cbid, Random random)
+    {
+        var angle = (float)(random.NextDouble() * 2.0 * Math.PI);
+        var distance = 1.0f + (float)random.NextDouble(); // 1-2 units
+        var lootPosition = new Vector3(
+            Position.X + (float)(Math.Cos(angle) * distance),
+            Position.Y,
+            Position.Z + (float)(Math.Sin(angle) * distance));
+
+        LootManager.Instance.SpawnLootItem(cbid, lootPosition, Rotation, Map);
     }
 }

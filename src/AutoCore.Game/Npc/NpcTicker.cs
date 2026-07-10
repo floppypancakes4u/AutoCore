@@ -13,10 +13,10 @@ using AutoCore.Game.Map;
 public static class NpcTicker
 {
     /// <summary>Fallback patrol speed (u/s) for vehicles (and their drivers) when the clonebase has none.</summary>
-    private const float DefaultVehicleSpeed = 12f;
+    internal const float DefaultVehicleSpeed = 12f;
 
     /// <summary>Fallback patrol speed (u/s) for foot creatures when the clonebase has none.</summary>
-    private const float DefaultFootSpeed = 2.5f;
+    internal const float DefaultFootSpeed = 2.5f;
 
     public static void Tick(SectorMap map, long nowMs, float dt)
     {
@@ -31,7 +31,14 @@ public static class NpcTicker
                 continue;
 
             var npcAi = GetNpcAi(entity);
-            if (npcAi == null || npcAi.CombatState != HBAICombatState.IdlePatrol)
+            if (npcAi == null)
+                continue;
+
+            // Combat brain first: aggro scan (idle), pursue/fire (engage/combat), leash home.
+            NpcCombatAi.Tick(map, entity, nowMs, dt);
+
+            // Path patrol only drives a genuinely idle NPC that isn't already walking home.
+            if (npcAi.CombatState != HBAICombatState.IdlePatrol || npcAi.ReturningHome)
                 continue;
 
             if (!map.TryGetMapPath(GetPathCoid(entity), out var path) || path.Points.Count == 0)
@@ -68,9 +75,10 @@ public static class NpcTicker
 
     /// <summary>
     /// Movement speed from the driver (vehicles) or the creature itself; falls back to
-    /// <see cref="DefaultSpeed"/> when no clonebase speed is available.
+    /// <see cref="DefaultVehicleSpeed"/> / <see cref="DefaultFootSpeed"/> when no clonebase speed
+    /// is available.
     /// </summary>
-    private static float ResolveSpeed(ClonedObjectBase entity)
+    internal static float ResolveSpeed(ClonedObjectBase entity)
     {
         var source = entity switch
         {

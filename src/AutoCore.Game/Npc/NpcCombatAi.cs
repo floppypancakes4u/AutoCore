@@ -1,0 +1,363 @@
+namespace AutoCore.Game.Npc;
+
+using System.Collections.Generic;
+using AutoCore.Game.CloneBases;
+using AutoCore.Game.CloneBases.Specifics;
+using AutoCore.Game.Constants;
+using AutoCore.Game.Entities;
+using AutoCore.Game.Map;
+using AutoCore.Game.Structures;
+using AutoCore.Game.TNL.Ghost;
+
+/// <summary>
+/// Server-side combat brain for a single NPC vehicle/creature (client parity
+/// <c>CVOGHBAIDriver_DoLogic</c>, NPC.md §10). Mirrors the retail state machine:
+/// <list type="bullet">
+///   <item><b>IdlePatrol</b> — throttled aggro scan of the spatial grid; on a hostile hit, latch
+///   the target and enter Engage. Steers home while <see cref="NpcAiState.ReturningHome"/> is set.</item>
+///   <item><b>Engage</b> — close toward weapon range; after the profile's flee/engage timer, drop
+///   into Combat (flee evaluation is Stage 11).</item>
+///   <item><b>Combat</b> — pursue when out of range, otherwise raise the firing bit for the equipped
+///   weapon and reuse the player combat pipeline (<see cref="Vehicle.ProcessCombatIfFiring"/>).</item>
+/// </list>
+/// The aggro scan is throttled to <see cref="ScanIntervalMs"/> (staggered by coid); pursuit
+/// movement runs every tick. Faction decisions funnel through <see cref="FactionHostility"/>.
+/// </summary>
+public static class NpcCombatAi
+{
+    /// <summary>Minimum leash radius (world units) regardless of the NPC's patrol distance.</summary>
+    internal const float LeashRadius = 80f;
+
+    /// <summary>Aggro scan cadence per NPC (ms); staggered across NPCs by coid.</summary>
+    internal const long ScanIntervalMs = 500;
+
+    /// <summary>Fallback aggro radius when neither clonebase vision/hearing nor a help range exists.</summary>
+    internal const float DefaultAggroRange = 50f;
+
+    /// <summary>Engage closes to this fraction of the weapon's max range before opening fire.</summary>
+    private const float EngageCloseFactor = 0.8f;
+
+    /// <summary>Distance (world units) at which a returning NPC is considered "home" and resumes patrol.</summary>
+    private const float ResumePathRadius = 5f;
+
+    private static readonly List<ClonedObjectBase> ScanBuffer = new();
+
+    /// <summary>Advances one NPC's combat AI for this tick. No-op for non-NPC/corpse entities.</summary>
+    public static void Tick(SectorMap map, ClonedObjectBase entity, long nowMs, float dt)
+    {
+        if (map == null || entity == null || entity.IsCorpse)
+            return;
+
+        var npcAi = GetNpcAi(entity);
+        if (npcAi == null)
+            return;
+
+        switch (npcAi.CombatState)
+        {
+            case HBAICombatState.IdlePatrol:
+                TickIdle(map, entity, npcAi, nowMs, dt);
+                break;
+            case HBAICombatState.Engage:
+                TickEngage(entity, npcAi, nowMs, dt);
+                break;
+            case HBAICombatState.Combat:
+                TickCombat(entity, npcAi, nowMs, dt);
+                break;
+        }
+    }
+
+    private static void TickIdle(SectorMap map, ClonedObjectBase entity, NpcAiState npcAi, long nowMs, float dt)
+    {
+        // Walk back to the anchor before re-scanning, to avoid oscillating on a target that leashed us.
+        if (npcAi.ReturningHome)
+        {
+            if (entity.Position.Dist(npcAi.HomePosition) <= ResumePathRadius)
+                npcAi.ReturningHome = false;
+            else
+            {
+                SteerToward(entity, npcAi.HomePosition, NpcTicker.ResolveSpeed(entity), dt);
+                return;
+            }
+        }
+
+        // Combat AI only engages on field maps — towns are safe zones.
+        if (map.MapData.ContinentObject.IsTown)
+            return;
+
+        if (!AggroScanDue(entity, npcAi, nowMs))
+            return;
+        StampScan(entity, npcAi, nowMs);
+
+        var target = AcquireTarget(map, entity);
+        if (target == null)
+            return;
+
+        entity.SetTargetObject(target);
+        npcAi.EngageStartedMs = nowMs;
+        npcAi.HelpCalled = false;
+        SetCombatState(entity, HBAICombatState.Engage);
+    }
+
+    private static void TickEngage(ClonedObjectBase entity, NpcAiState npcAi, long nowMs, float dt)
+    {
+        if (TargetLost(entity) || TryLeash(entity, npcAi))
+            return;
+
+        var target = entity.Target;
+        var (_, weapon) = SelectFiringWeapon(entity);
+        var rangeMax = WeaponRangeMax(weapon);
+        var desired = rangeMax > 0f ? rangeMax * EngageCloseFactor : 0f;
+
+        if (entity.Position.Dist(target.Position) > desired)
+            SteerToward(entity, target.Position, NpcTicker.ResolveSpeed(entity), dt);
+
+        // After the profile's flee/engage timer, commit to Combat (flee evaluation lands in Stage 11).
+        var timerMs = npcAi.Profile?.ValFleeOrEngageTimerMs ?? 0f;
+        if (nowMs - npcAi.EngageStartedMs >= (long)timerMs)
+            SetCombatState(entity, HBAICombatState.Combat);
+    }
+
+    private static void TickCombat(ClonedObjectBase entity, NpcAiState npcAi, long nowMs, float dt)
+    {
+        if (TargetLost(entity) || TryLeash(entity, npcAi))
+            return;
+
+        var target = entity.Target;
+        var (bit, weapon) = SelectFiringWeapon(entity);
+        var rangeMax = WeaponRangeMax(weapon);
+        var dist = entity.Position.Dist(target.Position);
+        var inRange = rangeMax <= 0f || dist <= rangeMax;
+
+        if (entity is Vehicle vehicle && weapon != null && inRange)
+        {
+            vehicle.SetTargetObject(target);
+            vehicle.Firing = bit;
+            vehicle.ProcessCombatIfFiring();
+            return;
+        }
+
+        // Out of range (or a non-firing creature): cease fire and pursue.
+        CeaseFire(entity);
+        SteerToward(entity, target.Position, NpcTicker.ResolveSpeed(entity), dt);
+    }
+
+    /// <summary>True when the current target is gone/dead; resets the NPC to a homing IdlePatrol.</summary>
+    private static bool TargetLost(ClonedObjectBase entity)
+    {
+        var target = entity.Target;
+        if (target != null && !target.IsCorpse && target.Map != null)
+            return false;
+
+        Disengage(entity, GetNpcAi(entity));
+        return true;
+    }
+
+    /// <summary>
+    /// Drops the target and returns home when the NPC has been dragged past its leash radius
+    /// (max of its patrol distance and <see cref="LeashRadius"/>), mirroring client 005d6e80.
+    /// </summary>
+    private static bool TryLeash(ClonedObjectBase entity, NpcAiState npcAi)
+    {
+        var leash = System.Math.Max(GetPatrolDistance(entity), LeashRadius);
+        if (entity.Position.Dist(npcAi.HomePosition) <= leash)
+            return false;
+
+        Disengage(entity, npcAi);
+        return true;
+    }
+
+    private static void Disengage(ClonedObjectBase entity, NpcAiState npcAi)
+    {
+        CeaseFire(entity);
+        entity.SetTargetObject(null);
+        if (npcAi != null)
+            npcAi.ReturningHome = true;
+        SetCombatState(entity, HBAICombatState.IdlePatrol);
+    }
+
+    private static void CeaseFire(ClonedObjectBase entity)
+    {
+        if (entity is Vehicle vehicle)
+            vehicle.Firing = 0;
+    }
+
+    /// <summary>Finds the nearest hostile, targetable candidate within the NPC's aggro radius.</summary>
+    private static ClonedObjectBase AcquireTarget(SectorMap map, ClonedObjectBase entity)
+    {
+        var range = ResolveAggroRange(entity, GetNpcAi(entity));
+        map.Grid.QueryRadius(entity.Position, range, ScanBuffer);
+
+        var myFaction = entity.GetIDFaction();
+        ClonedObjectBase best = null;
+        var bestSq = float.MaxValue;
+
+        foreach (var candidate in ScanBuffer)
+        {
+            if (ReferenceEquals(candidate, entity) || candidate.IsCorpse || candidate.IsInvincible)
+                continue;
+            if (!IsAggroCandidate(candidate))
+                continue;
+            if (!FactionHostility.IsHostile(myFaction, candidate.GetIDFaction()))
+                continue;
+
+            var sq = entity.Position.DistSq(candidate.Position);
+            if (sq < bestSq)
+            {
+                bestSq = sq;
+                best = candidate;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>Candidates are connected player vehicles or other live NPC AI entities.</summary>
+    private static bool IsAggroCandidate(ClonedObjectBase candidate)
+    {
+        if (candidate is Vehicle vehicle && vehicle.GetSuperCharacter(false)?.OwningConnection != null)
+            return true;
+
+        return GetNpcAi(candidate) != null;
+    }
+
+    /// <summary>
+    /// Aggro radius = max(vision, hearing) from the driver (vehicles) or the creature's own
+    /// clonebase; falls back to the AI profile's help range, then <see cref="DefaultAggroRange"/>.
+    /// </summary>
+    private static float ResolveAggroRange(ClonedObjectBase entity, NpcAiState npcAi)
+    {
+        var spec = ResolveCreatureSpecific(entity);
+        var senses = spec != null ? System.Math.Max(spec.VisionRange, spec.HearingRange) : 0f;
+        if (senses > 0f)
+            return senses;
+
+        var help = npcAi?.Profile?.ValHelpRange ?? 0f;
+        return help > 0f ? help : DefaultAggroRange;
+    }
+
+    private static CreatureSpecific ResolveCreatureSpecific(ClonedObjectBase entity)
+    {
+        var source = entity switch
+        {
+            Vehicle vehicle => vehicle.Owner?.GetAsCreature(),
+            Creature creature => creature,
+            _ => null,
+        };
+
+        return (source?.CloneBaseObject as CloneBaseCreature)?.CreatureSpecific;
+    }
+
+    /// <summary>Firing bit + weapon for the highest-priority equipped slot (front, then turret, then rear).</summary>
+    private static (byte Bit, Weapon Weapon) SelectFiringWeapon(ClonedObjectBase entity)
+    {
+        if (entity is not Vehicle vehicle)
+            return (0, null);
+
+        if (vehicle.WeaponFront != null)
+            return (1, vehicle.WeaponFront);
+        if (vehicle.WeaponTurret != null)
+            return (2, vehicle.WeaponTurret);
+        if (vehicle.WeaponRear != null)
+            return (4, vehicle.WeaponRear);
+
+        return (0, null);
+    }
+
+    private static float WeaponRangeMax(Weapon weapon)
+    {
+        return weapon?.CloneBaseWeapon?.WeaponSpecific.RangeMax ?? 0f;
+    }
+
+    private static float GetPatrolDistance(ClonedObjectBase entity) => entity switch
+    {
+        Vehicle vehicle => vehicle.PatrolDistance,
+        Creature creature => creature.PatrolDistance,
+        _ => 0f,
+    };
+
+    /// <summary>Steers <paramref name="entity"/> toward <paramref name="targetPos"/> by one tick's travel.</summary>
+    private static void SteerToward(ClonedObjectBase entity, Vector3 targetPos, float speed, float dt)
+    {
+        if (speed <= 0f || dt <= 0f)
+            return;
+
+        var dx = targetPos.X - entity.Position.X;
+        var dz = targetPos.Z - entity.Position.Z;
+        var dist = (float)System.Math.Sqrt((dx * dx) + (dz * dz));
+        if (dist <= 0f)
+            return;
+
+        var step = System.Math.Min(speed * dt, dist);
+        var inv = 1f / dist;
+        var newPos = new Vector3(
+            entity.Position.X + (dx * inv * step),
+            entity.Position.Y,
+            entity.Position.Z + (dz * inv * step));
+        var velocity = new Vector3(dx * inv * speed, 0f, dz * inv * speed);
+        var rotation = YawQuaternion(dx, dz);
+
+        switch (entity)
+        {
+            case Vehicle vehicle:
+                vehicle.ApplyServerMove(newPos, rotation, velocity);
+                break;
+            case Creature creature:
+                creature.ApplyServerMove(newPos, rotation, velocity, newPos);
+                break;
+        }
+    }
+
+    private static Quaternion YawQuaternion(float dx, float dz)
+    {
+        var yaw = (float)System.Math.Atan2(dx, dz);
+        var half = yaw * 0.5f;
+        return new Quaternion(0f, (float)System.Math.Sin(half), 0f, (float)System.Math.Cos(half));
+    }
+
+    private static bool AggroScanDue(ClonedObjectBase entity, NpcAiState npcAi, long nowMs)
+    {
+        return nowMs - npcAi.LastAggroScanMs >= ScanIntervalMs;
+    }
+
+    /// <summary>
+    /// Records a completed scan, offsetting the stored timestamp by <c>coid % ScanIntervalMs</c> so
+    /// NPCs that first tick on the same frame re-scan on staggered frames afterward.
+    /// </summary>
+    private static void StampScan(ClonedObjectBase entity, NpcAiState npcAi, long nowMs)
+    {
+        npcAi.LastAggroScanMs = nowMs - (entity.ObjectId.Coid % ScanIntervalMs);
+    }
+
+    /// <summary>
+    /// Sets the combat state and dirties the wire state field: the vehicle StateMask (its byte lives
+    /// on the driver creature) or the creature StateMask. See <see cref="HBAICombatState"/>.
+    /// </summary>
+    internal static void SetCombatState(ClonedObjectBase entity, HBAICombatState state)
+    {
+        var npcAi = GetNpcAi(entity);
+        if (npcAi == null)
+            return;
+
+        npcAi.CombatState = state;
+
+        switch (entity)
+        {
+            case Vehicle vehicle:
+                vehicle.Ghost?.SetMaskBits(GhostVehicle.StateMask);
+                if (vehicle.Owner?.GetAsCreature() is Creature driver)
+                    driver.AiCombatState = (byte)state;
+                break;
+            case Creature creature:
+                creature.Ghost?.SetMaskBits(GhostCreature.StateMask);
+                creature.AiCombatState = (byte)state;
+                break;
+        }
+    }
+
+    private static NpcAiState GetNpcAi(ClonedObjectBase entity) => entity switch
+    {
+        Vehicle vehicle => vehicle.NpcAi,
+        Creature creature => creature.NpcAi,
+        _ => null,
+    };
+}
