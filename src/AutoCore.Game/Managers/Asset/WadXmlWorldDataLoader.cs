@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Xml.Linq;
 using AutoCore.Database.World.Models;
 using AutoCore.Game.Constants;
+using AutoCore.Game.Structures;
 using AutoCore.Utils;
 
 public static class WadXmlWorldDataLoader
@@ -235,6 +236,80 @@ public static class WadXmlWorldDataLoader
             };
 
             dict[id] = lootTable;
+        }
+
+        return dict;
+    }
+
+    public static IDictionary<int, VehicleTemplate> LoadVehicleTemplates(string wadXmlPath)
+    {
+        var doc = XDocument.Load(wadXmlPath);
+        var section = doc.Descendants("tVehicleTemplate").FirstOrDefault();
+        if (section == null)
+            return new Dictionary<int, VehicleTemplate>();
+
+        var dict = new Dictionary<int, VehicleTemplate>();
+
+        foreach (var row in section.Elements("row"))
+        {
+            var id = GetInt(row, "IDVehicleTemplate", defaultValue: -1);
+            if (id < 0)
+                continue;
+
+            var template = new VehicleTemplate
+            {
+                Id = id,
+                VehicleCbid = GetInt(row, "CBIDVehicle", defaultValue: -1),
+                DriverCbid = GetInt(row, "CBIDDriver", defaultValue: -1),
+                WeaponTurretCbid = GetInt(row, "CBIDWeaponTurret", defaultValue: -1),
+                WeaponFrontCbid = GetInt(row, "CBIDWeaponFront", defaultValue: -1),
+                ArmorCbid = GetInt(row, "CBIDArmor", defaultValue: -1),
+                WeaponMeleeCbid = GetInt(row, "CBIDWeaponMelee", defaultValue: -1),
+                WeaponDropCbid = GetInt(row, "CBIDWeaponDrop", defaultValue: -1),
+                BaseLevel = (short)GetInt(row, "sinBaseLevel", defaultValue: 0),
+                BaseHp = GetInt(row, "intBaseHP", defaultValue: 0),
+                LootChance = (byte)Math.Clamp(GetInt(row, "tinLootChance", defaultValue: 0), 0, byte.MaxValue),
+                LootRolls = (byte)Math.Clamp(GetInt(row, "tinLootRolls", defaultValue: 0), 0, byte.MaxValue),
+                LootTableId = GetInt(row, "intLootTableID", defaultValue: -1),
+                Skill1 = GetInt(row, "IDSkill1", defaultValue: -1),
+                SkillRank1 = (byte)Math.Clamp(GetInt(row, "tinSkillRank1", defaultValue: 0), 0, byte.MaxValue),
+                Description = GetString(row, "strDescription") ?? string.Empty,
+                ShortDesc = GetString(row, "strShortDesc") ?? string.Empty,
+            };
+
+            dict[id] = template;
+        }
+
+        return dict;
+    }
+
+    public static IDictionary<int, CreatureAiProfile> LoadCreatureAiProfiles(string wadXmlPath)
+    {
+        var doc = XDocument.Load(wadXmlPath);
+        var section = doc.Descendants("tCreatureAI").FirstOrDefault();
+        if (section == null)
+            return new Dictionary<int, CreatureAiProfile>();
+
+        var dict = new Dictionary<int, CreatureAiProfile>();
+
+        foreach (var row in section.Elements("row"))
+        {
+            var aiId = GetInt(row, "AIID", defaultValue: -1);
+            if (aiId < 0)
+                continue;
+
+            var aiCode = GetInt(row, "AICode", defaultValue: 0);
+            var profile = new CreatureAiProfile
+            {
+                AiId = aiId,
+                AiCode = Enum.IsDefined(typeof(HBAICode), aiCode) ? (HBAICode)aiCode : HBAICode.Default,
+                DescInternal = GetString(row, "strDescInternal") ?? string.Empty,
+            };
+
+            for (var i = 0; i < profile.Vals.Length; i++)
+                profile.Vals[i] = GetFloat(row, $"val{i + 1}", defaultValue: 0);
+
+            dict[aiId] = profile;
         }
 
         return dict;

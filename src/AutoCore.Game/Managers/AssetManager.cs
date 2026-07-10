@@ -6,6 +6,7 @@ using AutoCore.Game.CloneBases;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Managers.Asset;
 using AutoCore.Game.Map;
+using AutoCore.Game.Structures;
 using AutoCore.Utils;
 using AutoCore.Utils.Memory;
 
@@ -19,6 +20,10 @@ public class AssetManager : Singleton<AssetManager>
 
     /// <summary>Unit-test mission overrides (checked before WAD).</summary>
     private Dictionary<int, Mission.Mission> _testMissions;
+
+    /// <summary>Unit-test NPC data overrides (checked before wad.xml data).</summary>
+    private Dictionary<int, VehicleTemplate> _testVehicleTemplates;
+    private Dictionary<int, CreatureAiProfile> _testCreatureAiProfiles;
 
     public string GamePath { get; private set; }
     public ServerType ServerType { get; private set; }
@@ -546,6 +551,58 @@ public class AssetManager : Singleton<AssetManager>
             return result;
 
         return null;
+    }
+
+    public VehicleTemplate GetVehicleTemplate(int vehicleTemplateId)
+    {
+        if (_testVehicleTemplates != null && _testVehicleTemplates.TryGetValue(vehicleTemplateId, out var testTemplate))
+            return testTemplate;
+
+        if (WorldDBLoader.VehicleTemplates == null)
+            return null;
+
+        if (WorldDBLoader.VehicleTemplates.TryGetValue(vehicleTemplateId, out var result))
+            return result;
+
+        return null;
+    }
+
+    public CreatureAiProfile GetCreatureAiProfile(int aiId)
+    {
+        if (_testCreatureAiProfiles != null && _testCreatureAiProfiles.TryGetValue(aiId, out var testProfile))
+            return testProfile;
+
+        if (WorldDBLoader.CreatureAiProfiles == null)
+            return null;
+
+        if (WorldDBLoader.CreatureAiProfiles.TryGetValue(aiId, out var result))
+            return result;
+
+        return null;
+    }
+
+    internal void SetTestVehicleTemplates(IEnumerable<VehicleTemplate> templates)
+    {
+        if (templates is null)
+            return;
+        _testVehicleTemplates ??= new Dictionary<int, VehicleTemplate>();
+        foreach (var template in templates)
+            _testVehicleTemplates[template.Id] = template;
+    }
+
+    internal void SetTestCreatureAiProfiles(IEnumerable<CreatureAiProfile> profiles)
+    {
+        if (profiles is null)
+            return;
+        _testCreatureAiProfiles ??= new Dictionary<int, CreatureAiProfile>();
+        foreach (var profile in profiles)
+            _testCreatureAiProfiles[profile.AiId] = profile;
+    }
+
+    internal void ClearTestNpcData()
+    {
+        _testVehicleTemplates = null;
+        _testCreatureAiProfiles = null;
     }
 
     public IEnumerable<LootTable> GetAllLootTables()

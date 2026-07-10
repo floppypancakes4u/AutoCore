@@ -3,6 +3,7 @@
 using AutoCore.Database.World;
 using AutoCore.Database.World.Models;
 using AutoCore.Game.Constants;
+using AutoCore.Game.Structures;
 using AutoCore.Utils;
 
 public class WorldDBLoader
@@ -12,6 +13,10 @@ public class WorldDBLoader
     public IDictionary<int, ContinentObject> ContinentObjects { get; set; }
     public IDictionary<byte, ExperienceLevel> ExperienceLevels { get; set; }
     public IDictionary<int, LootTable> LootTables { get; set; }
+
+    // wad.xml-only tables (no World DB equivalent).
+    public IDictionary<int, VehicleTemplate> VehicleTemplates { get; set; }
+    public IDictionary<int, CreatureAiProfile> CreatureAiProfiles { get; set; }
 
     public bool Load()
     {
@@ -72,6 +77,18 @@ public class WorldDBLoader
                     {
                         LootTables = WadXmlWorldDataLoader.LoadLootTables(wadXmlPath);
                         Logger.WriteLog(LogType.Initialize, $"WorldDBLoader: Loaded {LootTables.Count} LootTables from wad.xml");
+                    }
+
+                    if (VehicleTemplates == null || VehicleTemplates.Count == 0)
+                    {
+                        VehicleTemplates = WadXmlWorldDataLoader.LoadVehicleTemplates(wadXmlPath);
+                        Logger.WriteLog(LogType.Initialize, $"WorldDBLoader: Loaded {VehicleTemplates.Count} VehicleTemplates from wad.xml");
+                    }
+
+                    if (CreatureAiProfiles == null || CreatureAiProfiles.Count == 0)
+                    {
+                        CreatureAiProfiles = WadXmlWorldDataLoader.LoadCreatureAiProfiles(wadXmlPath);
+                        Logger.WriteLog(LogType.Initialize, $"WorldDBLoader: Loaded {CreatureAiProfiles.Count} CreatureAiProfiles from wad.xml");
                     }
                 }
             }
