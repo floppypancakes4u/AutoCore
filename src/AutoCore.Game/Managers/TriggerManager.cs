@@ -73,6 +73,7 @@ public class TriggerManager : Singleton<TriggerManager>
                 return;
 
             trigger.FireCount++;
+            LogPlayerTrigger(activator, trigger);
             activator.Map.TriggerReactions(activator, trigger.Template.Reactions);
         }
         finally
@@ -230,6 +231,21 @@ public class TriggerManager : Singleton<TriggerManager>
                 watchVarId?.ToString() ?? "mission");
             FireTriggerReactions(activator, trigger);
         }
+    }
+
+    private static void LogPlayerTrigger(ClonedObjectBase activator, Trigger trigger)
+    {
+        var character = activator.GetAsCharacter() ?? activator.GetSuperCharacter(false);
+        if (character == null)
+            return;
+
+        Logger.WriteLog(LogType.Debug,
+            "Player trigger occurred: playerCoid={0} activatorCoid={1} trigger={2} name='{3}' reactions=[{4}]",
+            character.ObjectId.Coid,
+            activator.ObjectId.Coid,
+            trigger.ObjectId.Coid,
+            trigger.Template.Name ?? string.Empty,
+            string.Join(',', trigger.Template.Reactions));
     }
 
     public void ClearTriggersFor(long objectCoid)

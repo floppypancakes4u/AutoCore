@@ -223,6 +223,45 @@ public class LogicVariableAndTriggerCoverageTests
     }
 
     [TestMethod]
+    public void Trigger_TriggerIfPossible_PlayerActivator_LogsTriggerOccurrence()
+    {
+        var (character, vehicle, map) = CreatePlayer();
+
+        var tpl = new TriggerTemplate
+        {
+            COID = 305,
+            Name = "direct_trigger_log",
+            TargetType = TriggerTargetType.Players,
+            Scale = 20f,
+            ActivationCount = -1,
+        };
+        var trigger = new Trigger(tpl);
+        trigger.SetCoid(305, false);
+        trigger.Position = new Vector3(0, 0, 0);
+        trigger.Scale = 20f;
+        trigger.SetMap(map);
+        vehicle.Position = new Vector3(0, 0, 0);
+
+        using var writer = new StringWriter();
+        var originalOut = Console.Out;
+        Console.SetOut(writer);
+        try
+        {
+            Assert.IsTrue(trigger.TriggerIfPossible(vehicle));
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+
+        var output = writer.ToString();
+        Assert.IsTrue(output.Contains("Player trigger occurred"));
+        Assert.IsTrue(output.Contains("trigger=305"));
+        Assert.IsTrue(output.Contains("playerCoid=150"));
+        Assert.IsTrue(output.Contains("activatorCoid=151"));
+    }
+
+    [TestMethod]
     public void TriggerManager_ActivationCountZero_DoesNotFire()
     {
         var (character, vehicle, map) = CreatePlayer();
@@ -261,6 +300,44 @@ public class LogicVariableAndTriggerCoverageTests
         TriggerManager.Instance.FireTriggerReactions(vehicle, trigger);
         TriggerManager.Instance.FireTriggerReactions(vehicle, trigger);
         Assert.AreEqual(1, trigger.FireCount);
+    }
+
+    [TestMethod]
+    public void TriggerManager_FireTriggerReactions_PlayerActivator_LogsTriggerOccurrence()
+    {
+        var (character, vehicle, map) = CreatePlayer();
+        var tpl = new TriggerTemplate
+        {
+            COID = 505,
+            Name = "managed_trigger_log",
+            TargetType = TriggerTargetType.Players,
+            Scale = 10f,
+            ActivationCount = -1,
+        };
+        var trigger = new Trigger(tpl);
+        trigger.SetCoid(505, false);
+        trigger.Position = new Vector3(0, 0, 0);
+        trigger.Scale = 10f;
+        trigger.SetMap(map);
+        vehicle.Position = new Vector3(0, 0, 0);
+
+        using var writer = new StringWriter();
+        var originalOut = Console.Out;
+        Console.SetOut(writer);
+        try
+        {
+            TriggerManager.Instance.FireTriggerReactions(vehicle, trigger);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+
+        var output = writer.ToString();
+        Assert.IsTrue(output.Contains("Player trigger occurred"));
+        Assert.IsTrue(output.Contains("trigger=505"));
+        Assert.IsTrue(output.Contains("playerCoid=150"));
+        Assert.IsTrue(output.Contains("activatorCoid=151"));
     }
 
     [TestMethod]

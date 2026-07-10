@@ -169,6 +169,15 @@ public class Reaction : ClonedObjectBase
         if (!CanTrigger(activator))
             return false;
 
+        var triggered = TriggerCore(activator);
+        if (triggered)
+            LogPlayerReaction(activator);
+
+        return triggered;
+    }
+
+    private bool TriggerCore(ClonedObjectBase activator)
+    {
         switch (Template.ReactionType)
         {
             case ReactionType.Activate:
@@ -285,6 +294,21 @@ public class Reaction : ClonedObjectBase
                     "Implement TriggerIfPossible case or confirm pure-client via 0x206C; document in reaction topic extraction.");
                 return true;
         }
+    }
+
+    private void LogPlayerReaction(ClonedObjectBase activator)
+    {
+        var character = GetCharacterFromActivator(activator);
+        if (character == null)
+            return;
+
+        Logger.WriteLog(LogType.Debug,
+            "Player reaction occurred: playerCoid={0} activatorCoid={1} reaction={2} type={3} name='{4}'",
+            character.ObjectId.Coid,
+            activator.ObjectId.Coid,
+            ObjectId.Coid,
+            Template.ReactionType,
+            Template.Name ?? string.Empty);
     }
 
     private void LogMissionReactionStub(string handler, string gap, string todo)

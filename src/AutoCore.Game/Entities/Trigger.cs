@@ -2,6 +2,7 @@
 
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Structures;
+using AutoCore.Utils;
 
 public enum TriggerTargetType
 {
@@ -94,9 +95,25 @@ public class Trigger : GraphicsObject
         if (!CanTrigger(clonedObject))
             return false;
 
+        LogPlayerTrigger(clonedObject);
         clonedObject.Map.TriggerReactions(clonedObject, Template.Reactions);
 
         return true;
+    }
+
+    private void LogPlayerTrigger(ClonedObjectBase activator)
+    {
+        var character = activator.GetAsCharacter() ?? activator.GetSuperCharacter(false);
+        if (character == null)
+            return;
+
+        Logger.WriteLog(LogType.Debug,
+            "Player trigger occurred: playerCoid={0} activatorCoid={1} trigger={2} name='{3}' reactions=[{4}]",
+            character.ObjectId.Coid,
+            activator.ObjectId.Coid,
+            ObjectId.Coid,
+            Template.Name ?? string.Empty,
+            string.Join(',', Template.Reactions));
     }
 }
 

@@ -156,6 +156,32 @@ public class PerPlayerLoadMissionGrantTests
     }
 
     [TestMethod]
+    public void TriggerReactions_PlayerActivator_LogsReactionOccurrence()
+    {
+        var (character, vehicle, map) = CreatePlayer();
+        PlaceReaction(map, 501, ReactionType.Activate, genericVar1: 0);
+
+        using var writer = new StringWriter();
+        var originalOut = Console.Out;
+        Console.SetOut(writer);
+        try
+        {
+            map.TriggerReactions(vehicle, new List<long> { 501 });
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+
+        var output = writer.ToString();
+        Assert.IsTrue(output.Contains("Player reaction occurred"));
+        Assert.IsTrue(output.Contains("reaction=501"));
+        Assert.IsTrue(output.Contains("type=Activate"));
+        Assert.IsTrue(output.Contains("playerCoid=150"));
+        Assert.IsTrue(output.Contains("activatorCoid=151"));
+    }
+
+    [TestMethod]
     public void SetActiveObjective_UpdatesSequenceWhenQuestPresent()
     {
         SeedMission(MissionId, (ObjectiveId, 0, 1));
