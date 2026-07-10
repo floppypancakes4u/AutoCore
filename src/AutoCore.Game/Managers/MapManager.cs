@@ -63,6 +63,17 @@ public class MapManager : Singleton<MapManager>
         return true;
     }
 
+    /// <summary>
+    /// Re-homes any entity whose Position drifted into a new grid cell since the last tick, across
+    /// every loaded map. Called once per sector main-loop tick before ghosting so interest queries
+    /// see current positions even when a writer forgot to go through EnterMap/LeaveMap.
+    /// </summary>
+    public void RebucketAllGrids()
+    {
+        foreach (var map in SectorMaps.Values)
+            map.Grid.RebucketSweep();
+    }
+
     private void SetupMap(int continentId)
     {
         if (SectorMaps.ContainsKey(continentId))
@@ -168,7 +179,7 @@ public class MapManager : Singleton<MapManager>
             connection.ResetGhosting();
 
             // Move server-side state onto the destination map before restarting ghosting,
-            // so scope queries (ObjectsInRange) see the new continent's entities.
+            // so scope queries (PerformScopeQuery) see the new continent's entities.
             character.SetMap(map);
             character.Position = map.MapData.EntryPoint.ToVector3();
             character.Rotation = Quaternion.Default;

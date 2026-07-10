@@ -21,13 +21,32 @@ public static class NpcInteractHandler
     private const float MaxInteractDistance = 30f;
 
     private static Dictionary<int, List<int>> _missionsByNpc;
+    private static HashSet<int> _missionGiverCbids;
     private static readonly object IndexLock = new();
 
     /// <summary>Called when test missions or WAD mission set changes.</summary>
     internal static void InvalidateMissionIndex()
     {
         lock (IndexLock)
+        {
             _missionsByNpc = null;
+            _missionGiverCbids = null;
+        }
+    }
+
+    /// <summary>
+    /// True when an NPC CBID is involved in any mission as either the giver (<see cref="Mission.NPC"/>)
+    /// or a deliver-objective turn-in target (<see cref="ObjectiveRequirementDeliver.NPCTargetCBID"/>).
+    /// Data-driven from the mission set — no hardcoded ids. Used to flag interactive NPCs at spawn
+    /// so interest management can grant them an extended scope radius.
+    /// </summary>
+    public static bool IsMissionGiverCbid(int cbid)
+    {
+        if (cbid <= 0)
+            return false;
+
+        EnsureMissionIndex();
+        return _missionGiverCbids != null && _missionGiverCbids.Contains(cbid);
     }
 
     public static void HandleUseObject(TNLConnection conn, UseObjectPacket packet)
@@ -576,25 +595,49 @@ public static class NpcInteractHandler
                 return;
 
             var index = new Dictionary<int, List<int>>();
+            var giverCbids = new HashSet<int>();
             foreach (var mission in AssetManager.Instance.GetAllMissions())
             {
-                if (mission == null || mission.NPC <= 0)
+                if (mission == null)
                     continue;
 
-                if (!index.TryGetValue(mission.NPC, out var list))
+                if (mission.NPC > 0)
                 {
-                    list = new List<int>();
-                    index[mission.NPC] = list;
+                    if (!index.TryGetValue(mission.NPC, out var list))
+                    {
+                        list = new List<int>();
+                        index[mission.NPC] = list;
+                    }
+
+                    if (!list.Contains(mission.Id))
+                        list.Add(mission.Id);
+
+                    giverCbids.Add(mission.NPC);
                 }
 
-                if (!list.Contains(mission.Id))
-                    list.Add(mission.Id);
+                // Deliver turn-in NPCs are also interactive mission givers for scope purposes.
+                if (mission.Objectives == null)
+                    continue;
+
+                foreach (var objective in mission.Objectives.Values)
+                {
+                    if (objective?.Requirements == null)
+                        continue;
+
+                    foreach (var requirement in objective.Requirements.OfType<ObjectiveRequirementDeliver>())
+                    {
+                        if (requirement.NPCTargetCompletes && requirement.NPCTargetCBID > 0)
+                            giverCbids.Add(requirement.NPCTargetCBID);
+                    }
+                }
             }
 
             _missionsByNpc = index;
+            _missionGiverCbids = giverCbids;
             Logger.WriteLog(LogType.Debug,
-                "NpcInteract: mission index built for {0} NPC keys",
-                index.Count);
+                "NpcInteract: mission index built for {0} NPC keys ({1} mission-giver CBIDs)",
+                index.Count,
+                giverCbids.Count);
         }
     }
 

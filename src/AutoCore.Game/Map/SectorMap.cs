@@ -1,6 +1,7 @@
 ﻿namespace AutoCore.Game.Map;
 
 using System.Linq;
+using global::TNL.Entities;
 using AutoCore.Database.World.Models;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
@@ -26,6 +27,9 @@ public class SectorMap
 
     /// <summary>Live <see cref="Character"/> count on this map, maintained by EnterMap/LeaveMap.</summary>
     public int PlayerCount { get; private set; }
+
+    /// <summary>Live players on this map, maintained by EnterMap/LeaveMap. Tier-1 scope: always ghosted.</summary>
+    public List<Character> Players { get; } = new();
 
     /// <summary>XZ spatial index of the map's entities, maintained by EnterMap/LeaveMap.</summary>
     public SpatialHashGrid Grid { get; private set; } = new();
@@ -70,6 +74,9 @@ public class SectorMap
         typeof(SectorMap).GetField($"<{nameof(NpcAiEntities)}>k__BackingField",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .SetValue(map, new List<ClonedObjectBase>());
+        typeof(SectorMap).GetField($"<{nameof(Players)}>k__BackingField",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(map, new List<Character>());
         typeof(SectorMap).GetField($"<{nameof(Grid)}>k__BackingField",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .SetValue(map, new SpatialHashGrid());
@@ -190,8 +197,11 @@ public class SectorMap
         if (clonedObject is Reaction reaction)
             Reactions.Add(reaction.ObjectId, reaction);
 
-        if (clonedObject is Character)
+        if (clonedObject is Character character)
+        {
             PlayerCount++;
+            Players.Add(character);
+        }
 
         if (HasNpcAi(clonedObject))
             NpcAiEntities.Add(clonedObject);
@@ -283,8 +293,12 @@ public class SectorMap
         if (clonedObject is Reaction reaction)
             Reactions.Remove(reaction.ObjectId);
 
-        if (clonedObject is Character && PlayerCount > 0)
-            PlayerCount--;
+        if (clonedObject is Character character)
+        {
+            if (PlayerCount > 0)
+                PlayerCount--;
+            Players.Remove(character);
+        }
 
         NpcAiEntities.Remove(clonedObject);
 
@@ -299,26 +313,58 @@ public class SectorMap
         TriggerManager.Instance.ClearTriggersFor(clonedObject.ObjectId.Coid);
     }
 
-    public IEnumerable<GhostObject> ObjectsInRange(GhostObject scopeObject)
+    // Reusable per-map scratch buffers for the scope query. The scope query runs per connection per
+    // packet (>=100ms) and is single-threaded on the sector main loop, so sharing these avoids
+    // per-call allocations. NOT thread-safe by design.
+    private readonly List<ClonedObjectBase> _scopeNearby = new();
+    private readonly List<ClonedObjectBase> _scopeMissionGivers = new();
+    private readonly List<ClonedObjectBase> _scopeSelected = new();
+
+    /// <summary>
+    /// Distance/tier based interest management for one connection (replaces the old scope-everything
+    /// <c>ObjectsInRange</c> full scan). Gathers players (Tier 1), nearby mission givers (Tier 2) and
+    /// other nearby entities (Tier 3) from the spatial grid, runs <see cref="InterestSelector"/>, and
+    /// puts the winners into scope. Hysteresis memory comes from TNL's own ghost bookkeeping via
+    /// <see cref="GhostObject.IsGhostedTo"/>.
+    /// </summary>
+    public void PerformScopeQuery(GhostObject scopeObject, Character self, GhostConnection connection)
     {
-        // TODO: proper space partitioning, select entities based on distance!
+        ArgumentNullException.ThrowIfNull(self);
+        ArgumentNullException.ThrowIfNull(connection);
 
-        return Objects.Select(p => p.Value.Ghost).Where(g =>
+        var center = self.CurrentVehicle?.Position ?? self.Position;
+
+        // One grid pull covers both tiers; mission givers may sit out to the extended drop radius.
+        var queryRadius = Math.Max(InterestSelector.BaseScopeDropRadius, InterestSelector.MissionGiverDropRadius);
+        Grid.QueryRadius(center, queryRadius, _scopeNearby);
+
+        _scopeMissionGivers.Clear();
+        foreach (var entity in _scopeNearby)
         {
-            if (g == null)
-                return false;
+            if (entity is Creature { IsMissionGiver: true } and not Character)
+                _scopeMissionGivers.Add(entity);
+        }
 
-            if (g == scopeObject) // Let itself (GhostCharacter) be in scope
-                return true;
+        var players = new List<ClonedObjectBase>(Players.Count);
+        foreach (var player in Players)
+            players.Add(player);
 
-            if (g is GhostVehicle && MapData.ContinentObject.IsTown)
-                return false;
+        InterestSelector.Select(
+            self,
+            center,
+            ContinentObject.IsTown,
+            players,
+            _scopeMissionGivers,
+            _scopeNearby,
+            entity => entity.Ghost != null && entity.Ghost.IsGhostedTo(connection),
+            _scopeSelected);
 
-            if (g is GhostCharacter && !MapData.ContinentObject.IsTown)
-                return false;
-
-            return true;
-        });
+        foreach (var entity in _scopeSelected)
+        {
+            var ghost = entity.Ghost;
+            if (ghost != null)
+                connection.ObjectInScope(ghost);
+        }
     }
 
     public void TriggerReactions(ClonedObjectBase activator, List<long> reactions)

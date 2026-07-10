@@ -197,6 +197,10 @@ public class SpawnPoint : ClonedObjectBase
         creature.LoadCloneBase(cbid);
         creature.SetupCBFields();
 
+        // Flag mission-relevant NPCs once at spawn so interest management can grant them the
+        // extended scope radius (data-driven from the mission set; no hardcoded ids).
+        creature.IsMissionGiver = NpcInteractHandler.IsMissionGiverCbid(cbid);
+
         var cloneBaseCreature = creature.CloneBaseObject as CloneBaseCreature;
         if (cloneBaseCreature != null)
         {

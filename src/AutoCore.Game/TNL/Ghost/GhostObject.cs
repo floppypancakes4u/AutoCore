@@ -1,10 +1,12 @@
 ﻿using TNL.Entities;
+using TNL.Structures;
 using TNL.Types;
 using TNL.Utils;
 
 namespace AutoCore.Game.TNL.Ghost;
 
 using AutoCore.Game.Entities;
+using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
 
 public enum GhostType
@@ -80,25 +82,61 @@ public class GhostObject : NetObject
 
     public override float GetUpdatePriority(NetObject scopeObject, ulong updateMask, int updateSkips)
     {
-        /*if (Parent == null || !(scopeObject is GhostObject) || (scopeObject as GhostObject).Parent == null)
-            return updateSkips * 0.02f;
+        // The scope object itself is always maximally important.
+        if (ReferenceEquals(this, scopeObject))
+            return 1.0f;
 
-        var otherParent = (scopeObject as GhostObject).Parent;
+        var viewer = (scopeObject as GhostObject)?.Parent;
 
-        if (otherParent.GetTargetObject() != Parent && otherParent != Parent && otherParent != Parent.Owner && (Parent.GetAsCreature() == null ||
-                (Parent.GetAsCreature().GetSummonOwner() != otherParent.GetTFID())))
+        // The viewer's current target stays pinned regardless of distance.
+        if (Parent != null && viewer != null && ReferenceEquals(viewer.Target, Parent))
+            return 1.0f;
+
+        if (Parent == null || viewer == null)
+            return updateSkips * 0.01f;
+
+        // Players update most often, then mission givers, then everything else.
+        var typeWeight = Parent switch
         {
-            var otherAvPos = otherParent.GetAvatarPosition();
-            var thisAvPos = Parent.GetAvatarPosition();
+            Character => 0.5f,
+            Creature { IsMissionGiver: true } => 0.3f,
+            _ => 0.15f
+        };
 
-            var val = (float)Math.Sqrt((otherAvPos.X - thisAvPos.X) * (otherAvPos.X - thisAvPos.X) + (otherAvPos.Y - thisAvPos.Y) * (otherAvPos.Y - thisAvPos.Y));
-            return UpdatePriorityScalar *
-                    (((1.0F -
-                        (val / ((otherParent.GetMap().GetNumberOfTerrainGridsPerObjectGrid() * 100.0F) * 1.2F))) *
-                        0.5F) + (updateSkips * 0.001F));
-        }*/
+        var dx = viewer.Position.X - Parent.Position.X;
+        var dz = viewer.Position.Z - Parent.Position.Z;
+        var distance = (float)Math.Sqrt((dx * dx) + (dz * dz));
 
-        return 1.0f;
+        var falloff = Math.Clamp(1.0f - (distance / InterestSelector.BaseScopeDropRadius), 0.0f, 1.0f);
+        return (typeWeight * falloff) + (updateSkips * 0.01f);
+    }
+
+    /// <summary>
+    /// True when this object currently has a live ghost on <paramref name="connection"/>, walking the
+    /// <see cref="NetObject.GetFirstObjectRef"/> chain (C++ TNL parity). A ghost pending teardown
+    /// (<see cref="GhostInfoFlags.KillGhost"/>/<see cref="GhostInfoFlags.KillingGhost"/>) counts as
+    /// not ghosted. This is the hysteresis memory used by <see cref="AutoCore.Game.Map.InterestSelector"/>;
+    /// it survives ResetGhosting because it reads TNL's own bookkeeping rather than a parallel set.
+    /// </summary>
+    public bool IsGhostedTo(GhostConnection connection)
+    {
+        if (connection == null)
+            return false;
+
+        const uint killing = (uint)(GhostInfoFlags.KillGhost | GhostInfoFlags.KillingGhost);
+
+        for (var walk = GetFirstObjectRef(); walk != null; walk = walk.NextObjectRef)
+        {
+            if (walk.Connection != connection)
+                continue;
+
+            if ((walk.Flags & killing) != 0U)
+                continue;
+
+            return true;
+        }
+
+        return false;
     }
 
     public void PackCommon(BitStream stream)

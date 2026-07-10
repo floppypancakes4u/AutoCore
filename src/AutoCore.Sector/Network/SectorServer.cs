@@ -64,6 +64,10 @@ public partial class SectorServer : BaseServer, ILoopable
             if (Interface == null)
                 return;
 
+            // Refresh spatial-grid cells for entities that moved since the last tick before any
+            // scope queries run inside Pulse(), so interest management sees current positions.
+            MapManager.Instance.RebucketAllGrids();
+
             Interface.Pulse();
 
             // Server-side combat tick: decouple firing from VehicleMoved packet arrival rate.
