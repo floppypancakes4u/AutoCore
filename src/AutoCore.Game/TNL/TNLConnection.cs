@@ -32,6 +32,14 @@ public partial class TNLConnection : GhostConnection
     public Account Account { get; set; }
     public Character CurrentCharacter { get; set; }
 
+    /// <summary>
+    /// When set (unit tests), world-state logout persistence uses this instead of the EF singleton.
+    /// </summary>
+    internal static ICharacterWorldStatePersistence WorldStatePersistenceForTests { get; set; }
+
+    private static ICharacterWorldStatePersistence WorldStatePersistence =>
+        WorldStatePersistenceForTests ?? CharacterWorldStatePersistence.Instance;
+
     private SFragmentData FragmentGuaranteed { get; } = new();
     private SFragmentData FragmentNonGuaranteed { get; } = new();
     private SFragmentData FragmentGuaranteedOrdered { get; } = new();
@@ -604,22 +612,66 @@ public partial class TNLConnection : GhostConnection
 
     public override void OnConnectionTerminated(TerminationReason reason, string reasonString)
     {
-        if (CurrentCharacter != null)
-        {
-            // SS-04: drop ownership before teardown so chat/send paths cannot use a dead connection.
-            CurrentCharacter.SetOwningConnection(null);
-            CurrentCharacter.SetMap(null);
-            CurrentCharacter.CurrentVehicle.SetMap(null);
-            CurrentCharacter.ClearGhost();
-            CurrentCharacter.CurrentVehicle.ClearGhost();
-            // Drop living entities from the global registry before clearing the connection
-            // binding so reconnect loads a fresh character/vehicle (SS-03).
-            ObjectManager.Instance.UnregisterCharacterSession(CurrentCharacter);
-            CurrentCharacter = null;
-        }
+        EndCharacterSession();
 
         var accountInfo = Account != null ? $"Account: {Account.Id} ({Account.Name})" : "Not authenticated";
-        Logger.WriteLog(LogType.Network, $"Client ({PlayerCoid}) disconnected from {GetNetAddressString()}. Reason: {reason}, Details: {reasonString}, {accountInfo}");
+        var address = SafeNetAddressString();
+        Logger.WriteLog(LogType.Network, $"Client ({PlayerCoid}) disconnected from {address}. Reason: {reason}, Details: {reasonString}, {accountInfo}");
+    }
+
+    /// <summary>Net address for logging; unit tests may construct connections without a bound address.</summary>
+    private string SafeNetAddressString()
+    {
+        try
+        {
+            return GetNetAddressString() ?? "unknown";
+        }
+        catch
+        {
+            return "unknown";
+        }
+    }
+
+    /// <summary>
+    /// Sector (owning) disconnect: persist map/pose, then tear down session (SS-03/SS-04).
+    /// Global (non-owning) disconnect: only drop this connection's CurrentCharacter reference.
+    /// </summary>
+    internal void EndCharacterSession()
+    {
+        if (CurrentCharacter == null)
+            return;
+
+        var character = CurrentCharacter;
+        var ownsSession = character.OwningConnection == null
+            || ReferenceEquals(character.OwningConnection, this);
+
+        if (!ownsSession)
+        {
+            CurrentCharacter = null;
+            return;
+        }
+
+        // Persist before SetMap(null) so Map.ContinentId is still available.
+        try
+        {
+            CharacterWorldStatePersistence.PersistFromCharacter(character, WorldStatePersistence);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                $"EndCharacterSession: failed to persist world state for coid {character.ObjectId.Coid}: {ex.Message}");
+        }
+
+        // SS-04: drop ownership before teardown so chat/send paths cannot use a dead connection.
+        character.SetOwningConnection(null);
+        character.SetMap(null);
+        character.CurrentVehicle?.SetMap(null);
+        character.ClearGhost();
+        character.CurrentVehicle?.ClearGhost();
+        // Drop living entities from the global registry before clearing the connection
+        // binding so reconnect loads a fresh character/vehicle (SS-03).
+        ObjectManager.Instance.UnregisterCharacterSession(character);
+        CurrentCharacter = null;
     }
 
     public override void PrepareWritePacket()

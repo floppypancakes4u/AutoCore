@@ -18,8 +18,15 @@ public class SimpleObject : GraphicsObject
     protected short MaxGadgets { get; set; }
     protected int TeamFaction { get; set; }
     protected int Quantity { get; set; }
-    protected int HP { get; set; }
-    protected int MaxHP { get; set; }
+    // HP / MaxHP inherited from GraphicsObject (mutable combat fields).
+
+    /// <inheritdoc />
+    /// Inventory / vehicle / creature entities do not use the map-prop destroy-on-death path.
+    protected override bool RemoveFromMapOnDeath => false;
+
+    /// <inheritdoc />
+    /// Vehicles/creatures manage their own ghost lifecycle (not map-prop combat ghosting).
+    protected override bool GhostWhenDamagable => false;
     protected int ItemTemplateId { get; set; }
     protected byte InventoryPositionX { get; set; }
     protected byte InventoryPositionY { get; set; }

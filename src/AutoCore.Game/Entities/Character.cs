@@ -192,6 +192,18 @@ public partial class Character : Creature
         };
     }
 
+    internal void SetLastTownIdForTests(int lastTownId)
+    {
+        if (DBData != null)
+            DBData.LastTownId = lastTownId;
+    }
+
+    internal float GetDbPositionXForTests() => DBData?.PositionX ?? float.NaN;
+    internal float GetDbPositionYForTests() => DBData?.PositionY ?? float.NaN;
+    internal float GetDbPositionZForTests() => DBData?.PositionZ ?? float.NaN;
+    internal float GetDbRotationXForTests() => DBData?.RotationX ?? float.NaN;
+    internal float GetDbRotationWForTests() => DBData?.RotationW ?? float.NaN;
+
     public override Character GetAsCharacter() => this;
     public override Character GetSuperCharacter(bool includeSummons) => this;
 
@@ -327,5 +339,57 @@ public partial class Character : Creature
         CurrentVehicle.EnterMap(map, position);
 
         // TODO: save? new DB system? how to do it properly?
+    }
+
+    /// <summary>
+    /// Copies live continent + pose into attached <see cref="CharacterData"/> / vehicle rows.
+    /// Prefer vehicle pose when a current vehicle exists (authoritative while driving).
+    /// Does not open a DB context — caller persists via <see cref="Managers.CharacterWorldStatePersistence"/>.
+    /// </summary>
+    /// <returns>Snapshot for persistence, or null when no DB row is attached.</returns>
+    public CharacterWorldStateSnapshot? CaptureWorldStateToDb()
+    {
+        if (DBData == null)
+            return null;
+
+        if (Map != null)
+            DBData.LastTownId = Map.ContinentId;
+
+        Vector3 posePosition;
+        Quaternion poseRotation;
+        long vehicleCoid = -1;
+
+        if (CurrentVehicle != null)
+        {
+            posePosition = CurrentVehicle.Position;
+            poseRotation = CurrentVehicle.Rotation;
+            vehicleCoid = CurrentVehicle.ObjectId.Coid;
+            CurrentVehicle.CaptureWorldStateToDb(posePosition, poseRotation);
+        }
+        else
+        {
+            posePosition = Position;
+            poseRotation = Rotation;
+        }
+
+        DBData.PositionX = posePosition.X;
+        DBData.PositionY = posePosition.Y;
+        DBData.PositionZ = posePosition.Z;
+        DBData.RotationX = poseRotation.X;
+        DBData.RotationY = poseRotation.Y;
+        DBData.RotationZ = poseRotation.Z;
+        DBData.RotationW = poseRotation.W;
+
+        return new CharacterWorldStateSnapshot(
+            DBData.Coid,
+            DBData.LastTownId,
+            posePosition.X,
+            posePosition.Y,
+            posePosition.Z,
+            poseRotation.X,
+            poseRotation.Y,
+            poseRotation.Z,
+            poseRotation.W,
+            vehicleCoid);
     }
 }

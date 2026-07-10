@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <Include>
+            [AutoCore.Game]AutoCore.Game.Managers.CharacterWorldStatePersistence|
+            [AutoCore.Game]AutoCore.Game.Managers.ICharacterWorldStatePersistence|
+            [AutoCore.Game]AutoCore.Game.Structures.CharacterWorldStateSnapshot|
+            [AutoCore.Game]AutoCore.Game.Entities.Character|
+            [AutoCore.Game]AutoCore.Game.Entities.Vehicle|
+            [AutoCore.Game]AutoCore.Game.Managers.MapManager|
+            [AutoCore.Game]AutoCore.Game.TNL.TNLConnection
+          </Include>
+          <ExcludeByAttribute>ExcludeFromCodeCoverage</ExcludeByAttribute>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

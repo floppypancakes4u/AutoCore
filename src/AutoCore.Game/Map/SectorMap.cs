@@ -79,12 +79,9 @@ public class SectorMap
             obj.Layer = template.Value.Layer;
             obj.SetMap(this);
 
-            // TODO: do we need ghosts of local objects at all?
-            if (template.Value is GraphicsObjectTemplate)
-            {
-                // TODO: most likely not all object will need a ghost!
-                //obj.CreateGhost();
-            }
+            // Do NOT CreateGhost for all GraphicsObjects here — flooding the ghost table
+            // with every map prop exhausts client ghost slots and NPCs stop appearing.
+            // Combat props get ghosts lazily via MakeNotInvincible / first TakeDamage.
 
             if (obj is SpawnPoint sp)
             {

@@ -46,15 +46,16 @@ public static class NpcInteractHandler
         if (targetCoid <= 0)
             return;
 
+        // Prefer live object; fall back to map template pose for client-only world objects.
         var targetObj = character.Map.GetObjectByCoid(targetCoid);
-        if (targetObj == null)
+        if (!TryGetWorldPosition(character.Map, targetCoid, out var targetPos))
         {
-            Logger.WriteLog(LogType.Debug, "UseObject: no object for coid {0}", targetCoid);
+            Logger.WriteLog(LogType.Debug, "UseObject: no object/template for coid {0}", targetCoid);
             return;
         }
 
         var playerPos = character.CurrentVehicle?.Position ?? character.Position;
-        if (playerPos.DistSq(targetObj.Position) > MaxInteractDistance * MaxInteractDistance)
+        if (playerPos.DistSq(targetPos) > MaxInteractDistance * MaxInteractDistance)
         {
             Logger.WriteLog(LogType.Debug,
                 "UseObject: rejected out of range charCoid={0} target={1}",
@@ -63,9 +64,15 @@ public static class NpcInteractHandler
             return;
         }
 
+        // World-object interact (use-item / use-object objectives) before NPC dialog.
+        if (TryCompleteUseItemObjective(conn, character, targetCoid, packet.ObjectiveId))
+            return;
+
         if (targetObj is not Creature npc || !IsNpc(npc))
         {
-            Logger.WriteLog(LogType.Debug, "UseObject: target {0} is not an NPC", targetCoid);
+            Logger.WriteLog(LogType.Debug,
+                "UseObject: target {0} is not an NPC and no matching use-item objective",
+                targetCoid);
             return;
         }
 
@@ -82,6 +89,134 @@ public static class NpcInteractHandler
 
         PrepareClientTurnInDialog(conn, character, npcCbid, dialogMissions);
         SendNpcMissionDialog(conn, npc.ObjectId, dialogMissions);
+    }
+
+    /// <summary>
+    /// Active UseItem requirement: match target by PrimaryCOID and/or PrimaryCBID (and optional
+    /// packet objective id). Advances or completes the objective (same path as AutoPatrol).
+    /// ProgressTime channeling is deferred — immediate complete for now.
+    /// </summary>
+    private static bool TryCompleteUseItemObjective(
+        TNLConnection conn,
+        Character character,
+        long targetCoid,
+        int packetObjectiveId)
+    {
+        foreach (var quest in character.CurrentQuests.ToList())
+        {
+            if (character.CompletedMissionIds.Contains(quest.MissionId))
+                continue;
+
+            var mission = AssetManager.Instance.GetMission(quest.MissionId);
+            if (mission == null
+                || !mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var objective))
+            {
+                continue;
+            }
+
+            var useItem = objective.Requirements.OfType<ObjectiveRequirementUseItem>().FirstOrDefault();
+            if (useItem == null)
+                continue;
+
+            // Optional client hint: UseObject carries matching objective id when known.
+            if (packetObjectiveId > 0 && packetObjectiveId != objective.ObjectiveId)
+                continue;
+
+            if (!UseItemMatchesTarget(character.Map, useItem, targetCoid))
+                continue;
+
+            Logger.WriteLog(LogType.Debug,
+                "UseObject: use-item mission={0} seq={1} objective={2} target={3}",
+                quest.MissionId,
+                quest.ActiveObjectiveSequence,
+                objective.ObjectiveId,
+                targetCoid);
+
+            LogUseItemIncomplete(useItem, quest, objective, targetCoid);
+            AdvanceOrCompleteObjective(conn, character, quest, mission, objective, source: "UseItem");
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void LogUseItemIncomplete(
+        ObjectiveRequirementUseItem useItem,
+        CharacterQuest quest,
+        MissionObjective objective,
+        long targetCoid)
+    {
+        var context =
+            $"mission={quest.MissionId} seq={quest.ActiveObjectiveSequence} objective={objective.ObjectiveId} target={targetCoid}";
+
+        if (useItem.ProgressTime > 0)
+        {
+            IncompleteHandlerLog.Warn(
+                "UseItem",
+                context,
+                $"ProgressTime={useItem.ProgressTime} ignored — interact completes immediately (no channeling/interrupt)",
+                "Implement server-side channel timer + ProgressInterruptable; send progress UI; complete only after ProgressTime.");
+        }
+
+        if (useItem.RepeatCount > 1)
+        {
+            IncompleteHandlerLog.Warn(
+                "UseItem",
+                context,
+                $"RepeatCount={useItem.RepeatCount} ignored — single interact finishes the whole objective",
+                "Track uses in ObjectiveProgress[FirstStateSlot]; complete only when count reaches RepeatCount; emit ObjectiveState slots.");
+        }
+
+        if (useItem.PrimaryDestroy || useItem.SecondaryDestroy)
+        {
+            IncompleteHandlerLog.Warn(
+                "UseItem",
+                context,
+                "PrimaryDestroy/SecondaryDestroy not applied — no inventory/world item removal",
+                "Remove or consume matching inventory/world items when the use succeeds.");
+        }
+
+        if (useItem.PrimaryGiveAtStart || useItem.SecondaryGiveAtStart
+            || useItem.PrimaryCompletedItem > 0 || useItem.CompletedItem > 0)
+        {
+            IncompleteHandlerLog.Warn(
+                "UseItem",
+                context,
+                "Give/completed item fields ignored — no item grant on use or objective complete",
+                "Grant PrimaryCompletedItem/CompletedItem (and start items) via inventory service when use completes.");
+        }
+
+        if (useItem.CompletedMission > 0)
+        {
+            IncompleteHandlerLog.Warn(
+                "UseItem",
+                context,
+                $"CompletedMission={useItem.CompletedMission} not auto-granted",
+                "On use-item objective complete, grant/chain CompletedMission through MissionManager.");
+        }
+    }
+
+    private static bool UseItemMatchesTarget(SectorMap map, ObjectiveRequirementUseItem useItem, long targetCoid)
+    {
+        if (useItem.PrimaryItem > 0 && useItem.PrimaryItem == targetCoid)
+            return true;
+
+        if (useItem.PrimaryCBID > 0 && MapObjectHasCbid(map, targetCoid, useItem.PrimaryCBID))
+            return true;
+
+        return false;
+    }
+
+    private static bool MapObjectHasCbid(SectorMap map, long coid, int cbid)
+    {
+        var live = map.GetObjectByCoid(coid);
+        if (live != null)
+            return live.CBID == cbid;
+
+        if (map.MapData.Templates.TryGetValue(coid, out var template))
+            return template.CBID == cbid;
+
+        return false;
     }
 
     public static void HandleMissionDialogResponse(TNLConnection conn, MissionDialogResponsePacket packet)
@@ -442,6 +577,27 @@ public static class NpcInteractHandler
         var objective = GetActiveObjective(quest);
         var objectiveId = objective?.ObjectiveId ?? 0;
 
+        var mission = AssetManager.Instance.GetMission(missionId);
+        var hasLaterObjectives = mission?.Objectives.Values.Any(o =>
+            objective != null && o.Sequence > quest.ActiveObjectiveSequence) == true;
+
+        if (hasLaterObjectives)
+        {
+            IncompleteHandlerLog.Warn(
+                "DeliverTurnIn",
+                $"mission={missionId} objective={objectiveId} npcCbid={npcCbid} seq={quest.ActiveObjectiveSequence}",
+                "Deliver turn-in removes the entire quest even though later objective sequences exist",
+                "Use AdvanceOrCompleteObjective (shared path): advance sequence when not final; only remove quest + CompletedMissionIds on last objective; apply rewards once.");
+        }
+        else
+        {
+            IncompleteHandlerLog.Warn(
+                "DeliverTurnIn",
+                $"mission={missionId} objective={objectiveId} npcCbid={npcCbid}",
+                "Deliver complete bypasses AdvanceOrCompleteObjective — no shared reward/persist/ObjectiveState path",
+                "Route deliver completion through MissionManager/AdvanceOrCompleteObjective for one generic complete pipeline.");
+        }
+
         character.CurrentQuests.Remove(quest);
         character.CompletedMissionIds.Add(missionId);
 
@@ -524,8 +680,80 @@ public static class NpcInteractHandler
             if (vehicle.Position.DistSq(targetPos) > radius * radius)
                 continue;
 
-            AdvanceOrCompleteObjective(conn, character, quest, mission, objective);
+            LogPatrolIncomplete(patrol, quest, objective, targetCoid);
+            AdvanceOrCompleteObjective(conn, character, quest, mission, objective, source: "AutoPatrol");
             return;
+        }
+    }
+
+    private static int CountPatrolTargets(ObjectiveRequirementPatrol patrol)
+    {
+        var count = Math.Max(patrol.TargetCount, 0);
+        if (count == 0)
+        {
+            for (var i = 0; i < patrol.GenericTargets.Length; i++)
+            {
+                if (patrol.GenericTargets[i] > 0)
+                    count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static void LogPatrolIncomplete(
+        ObjectiveRequirementPatrol patrol,
+        CharacterQuest quest,
+        MissionObjective objective,
+        long targetCoid)
+    {
+        var listed = CountPatrolTargets(patrol);
+        var context =
+            $"mission={quest.MissionId} seq={quest.ActiveObjectiveSequence} objective={objective.ObjectiveId} target={targetCoid} listedTargets={listed}";
+
+        if (listed > 1)
+        {
+            IncompleteHandlerLog.Warn(
+                "AutoPatrol",
+                context,
+                "Multi-waypoint patrol: any listed target currently completes the entire objective (no per-point progress)",
+                "Track visited GenericTargets (Sequential order if Sequential=true); only AdvanceOrComplete when all points (or current lap) are done; update ObjectiveState slots/bitmask per FirstStateSlot.");
+        }
+
+        if (patrol.Laps > 1)
+        {
+            IncompleteHandlerLog.Warn(
+                "AutoPatrol",
+                context,
+                $"Laps={patrol.Laps} ignored — single pass completes the objective",
+                "Maintain lap counter on CharacterQuest progress; require Laps full circuits before complete.");
+        }
+
+        if (patrol.Sequential && listed > 1)
+        {
+            IncompleteHandlerLog.Warn(
+                "AutoPatrol",
+                context,
+                "Sequential=true ignored — targets may be hit in any order",
+                "Enforce GenericTargets order; reject or ignore out-of-order AutoPatrol until previous COID cleared.");
+        }
+
+        if (patrol.AutoFail)
+        {
+            IncompleteHandlerLog.Warn(
+                "AutoPatrol",
+                context,
+                $"AutoFail=true (distance={patrol.AutoFailDistance}) not monitored",
+                "On movement/tick, fail mission or objective when player leaves AutoFailDistance from active route.");
+        }
+
+        if (patrol.ContinentId > 0)
+        {
+            IncompleteHandlerLog.Warn(
+                "AutoPatrol",
+                context,
+                $"ContinentCBID={patrol.ContinentId} not validated against current map",
+                "Reject AutoPatrol progress when character map continent does not match requirement ContinentId.");
         }
     }
 
@@ -568,15 +796,38 @@ public static class NpcInteractHandler
     /// Finish the current objective: advance to the next sequence, or complete the mission.
     /// Sends CompleteDynamicObjective so the client retargets UI / waypoints.
     /// </summary>
-    private static void AdvanceOrCompleteObjective(
+    /// <summary>Shared objective advance/complete path (UseItem, AutoPatrol, Kill, …).</summary>
+    internal static void AdvanceOrCompleteObjective(
         TNLConnection conn,
         Character character,
         CharacterQuest quest,
         Mission mission,
-        MissionObjective objective)
+        MissionObjective objective,
+        string source = "Objective")
     {
         var seq = quest.ActiveObjectiveSequence;
         var hasNext = mission.Objectives.Values.Any(o => o.Sequence > seq);
+        var context =
+            $"source={source} mission={quest.MissionId} seq={seq} objective={objective.ObjectiveId} xp={objective.XP} credits={objective.Credits}";
+
+        // Multi-requirement / multi-count objectives: we finish the whole objective in one call.
+        if (objective.Requirements.Count > 1)
+        {
+            IncompleteHandlerLog.Warn(
+                "AdvanceOrCompleteObjective",
+                context,
+                $"Requirements.Count={objective.Requirements.Count} — all requirements treated as satisfied without evaluation",
+                "Evaluate each requirement type to completion; only advance when every requirement (or CompleteCount) is met.");
+        }
+
+        if (objective.CompleteCount > 1)
+        {
+            IncompleteHandlerLog.Warn(
+                "AdvanceOrCompleteObjective",
+                context,
+                $"CompleteCount={objective.CompleteCount} ignored — single event finishes the objective",
+                "Increment ObjectiveProgress[seq] per event; emit ObjectiveState; complete only at CompleteCount.");
+        }
 
         conn.SendGamePacket(new CompleteDynamicObjectivePacket
         {
@@ -594,7 +845,8 @@ public static class NpcInteractHandler
                 quest.ObjectiveProgress[seq] = quest.ObjectiveMax[seq];
 
             Logger.WriteLog(LogType.Debug,
-                "AutoPatrol: advanced mission={0} seq {1} -> {2} objective={3}",
+                "{0}: advanced mission={1} seq {2} -> {3} objective={4}",
+                source,
                 quest.MissionId,
                 seq,
                 nextSeq,
@@ -603,11 +855,26 @@ public static class NpcInteractHandler
             var nextObjective = GetActiveObjective(quest);
             if (nextObjective != null)
             {
+                IncompleteHandlerLog.Warn(
+                    "AdvanceOrCompleteObjective",
+                    context + $" nextObjective={nextObjective.ObjectiveId}",
+                    "ObjectiveState sent with Bitmask=0 and SlotProgress all 0 — client partial progress/UI may be wrong",
+                    "Build bitmask + FirstStateSlot floats from active requirement progress; map ObjectiveId correctly for client hash lookup.");
+
                 conn.SendGamePacket(new ObjectiveStatePacket
                 {
                     ObjectiveBitmask = 0u,
                     ObjectiveId = nextObjective.ObjectiveId,
                 });
+            }
+
+            if (objective.XP != 0 || objective.Credits != 0 || objective.SkillPoints != 0 || objective.AttribPoints != 0)
+            {
+                IncompleteHandlerLog.Warn(
+                    "AdvanceOrCompleteObjective",
+                    context,
+                    "Per-objective XP/credits/skill/attrib rewards not applied on advance",
+                    "Apply MissionObjective reward fields (and mission-level rewards on final complete) via character economy APIs.");
             }
 
             PushJournalMissionList(conn, character);
@@ -620,16 +887,23 @@ public static class NpcInteractHandler
         character.CompletedMissionIds.Add(quest.MissionId);
 
         Logger.WriteLog(LogType.Debug,
-            "AutoPatrol: completed mission={0} objective={1}",
+            "{0}: completed mission={1} objective={2}",
+            source,
             quest.MissionId,
             objective.ObjectiveId);
+
+        IncompleteHandlerLog.Warn(
+            "AdvanceOrCompleteObjective",
+            context,
+            "Mission complete: no XP/credits/items/medals applied; quest state not persisted to DB",
+            "On final objective: grant mission rewards (client CompleteObjective path), inventory rewards, persist CurrentQuests/CompletedMissionIds, send FailMission/complete UI packets as needed.");
 
         PushJournalMissionList(conn, character);
         TriggerManager.Instance.OnMissionStateChanged(
             character.CurrentVehicle ?? (ClonedObjectBase)character);
     }
 
-    private static void PushJournalMissionList(TNLConnection conn, Character character)
+    internal static void PushJournalMissionList(TNLConnection conn, Character character)
     {
         conn.SendGamePacket(new ConvoyMissionsResponsePacket
         {
@@ -659,4 +933,5 @@ public static class NpcInteractHandler
         // Unit tests / objects without loaded clonebase: CBID override implies interactable NPC.
         return creature.CBID > 0;
     }
+
 }

@@ -184,6 +184,15 @@ public class Reaction : ClonedObjectBase
             case ReactionType.Delete:
                 return HandleDelete(activator);
 
+            case ReactionType.MakeInvincible:
+                return ReactionObjectStateEffects.ApplyInvincible(Template, activator, invincible: true);
+
+            case ReactionType.MakeNotInvincbile:
+                return ReactionObjectStateEffects.ApplyInvincible(Template, activator, invincible: false);
+
+            case ReactionType.SetFactionFromVar:
+                return ReactionObjectStateEffects.ApplyFactionFromVar(Template, activator);
+
             case ReactionType.VariableSet:
             case ReactionType.VariableSetRandom:
                 return HandleVariableSet(activator);
@@ -207,10 +216,25 @@ public class Reaction : ClonedObjectBase
                 return HandleGiveMission(activator);
 
             case ReactionType.CompleteObjective:
+                LogMissionReactionStub(
+                    "Reaction.CompleteObjective",
+                    "No server quest advance — client may finish via 0x206C only",
+                    "Call shared MissionManager/AdvanceOrCompleteObjective using GenericVar1 (objective id) or active quest; send CompleteDynamicObjective + ObjectiveState + rewards; OnMissionStateChanged.");
+                return true;
+
             case ReactionType.FailMission:
+                LogMissionReactionStub(
+                    "Reaction.FailMission",
+                    "Fail not applied to CurrentQuests/CompletedMissionIds",
+                    "Remove or mark quest failed, send FailMission (0x20B2) if required, clear objective UI, OnMissionStateChanged; honor GenericVar1 mission id if set.");
+                return true;
+
             case ReactionType.AddMissionString:
             case ReactionType.DelMissionString:
-                Logger.WriteLog(LogType.Debug, $"Mission reaction {Template.ReactionType} triggered for reaction {Template.COID}");
+                LogMissionReactionStub(
+                    $"Reaction.{Template.ReactionType}",
+                    "Mission string list not tracked server-side",
+                    "Track mission strings on character if anything gates on them; otherwise document pure-client via 0x206C and stop treating as server mission progress.");
                 return true;
 
             case ReactionType.GiveMissionDialog:
@@ -222,25 +246,36 @@ public class Reaction : ClonedObjectBase
             case ReactionType.SetMapDynamicWaypoint:
             case ReactionType.RemoveMapWaypoint:
             case ReactionType.RemoveMapDynamicWaypoint:
-                // Waypoint reactions are client-side
+                // Waypoint reactions are client-side via 0x206C (high volume — no per-fire spam).
                 return true;
 
             case ReactionType.Text:
             case ReactionType.ClientText:
             case ReactionType.SetStatusText:
             case ReactionType.RemoveText:
-                // Text/UI reactions are client-side
+                // Text/UI — client via 0x206C; no per-fire spam (high volume).
                 return true;
 
             case ReactionType.SetProgressBar:
             case ReactionType.RemoveProgressBar:
             case ReactionType.ProgressBar:
-                // Progress bar reactions are client-side
+                // Progress bar — client via 0x206C.
+                return true;
+
+            case ReactionType.Death:
+                IncompleteHandlerLog.Warn(
+                    "Reaction.Death",
+                    $"coid={Template.COID} name='{Template.Name}' objs=[{string.Join(',', Template.Objects)}] actOnActivator={Template.ActOnActivator}",
+                    "Death reaction unhandled — map objects not killed/animated server-side (doors/FX often use this)",
+                    "For each Objects COID (or activator): resolve map entity, play death/remove like client CVOGReaction_RemoveObject(..., death=1); ghost DestroyObject if server-owned; keep client 0x206C for visuals.");
                 return true;
 
             case ReactionType.Create:
-                // Object creation - needs server-side implementation
-                Logger.WriteLog(LogType.Debug, $"Create reaction triggered for reaction {Template.COID} - not yet fully implemented");
+                IncompleteHandlerLog.Warn(
+                    "Reaction.Create",
+                    $"coid={Template.COID} name='{Template.Name}' objs=[{string.Join(',', Template.Objects)}] nested=[{string.Join(',', Template.Reactions)}]",
+                    "Create does not spawn/activate map templates server-side — inactive props/FX/physics stay missing for authority",
+                    "For each Objects COID: load template from MapData, instantiate/activate (IsActive), place on SectorMap, ghost to clients if needed; then fire nested Reactions. See client CVOGReaction_SpawnObject.");
                 return true;
 
             case ReactionType.TransferMap:
@@ -253,9 +288,22 @@ public class Reaction : ClonedObjectBase
                 return HandleResetTrigger(activator);
 
             default:
-                Logger.WriteLog(LogType.Error, $"Unhandled reaction type: {Template.ReactionType} for reaction {Template.COID}!");
+                IncompleteHandlerLog.Warn(
+                    "Reaction.Unhandled",
+                    $"coid={Template.COID} name='{Template.Name}' type={Template.ReactionType} ({(byte)Template.ReactionType}) g1={Template.GenericVar1} g2={Template.GenericVar2} g3={Template.GenericVar3} objs=[{string.Join(',', Template.Objects)}]",
+                    "No server handler for this ReactionType",
+                    "Implement TriggerIfPossible case or confirm pure-client via 0x206C; document in reaction topic extraction.");
                 return true;
         }
+    }
+
+    private void LogMissionReactionStub(string handler, string gap, string todo)
+    {
+        IncompleteHandlerLog.Warn(
+            handler,
+            $"coid={Template.COID} name='{Template.Name}' g1={Template.GenericVar1} g2={Template.GenericVar2} g3={Template.GenericVar3} objs=[{string.Join(',', Template.Objects)}]",
+            gap,
+            todo);
     }
 
     private bool HandleGiveMissionDialog(ClonedObjectBase activator)
@@ -435,10 +483,15 @@ public class Reaction : ClonedObjectBase
 
         Logger.WriteLog(LogType.Debug, $"UnlockContObj reaction {Template.COID}: GenericVar1={objectiveId}, GenericVar3={Template.GenericVar3}, Objects={Template.Objects.Count}, ActOnActivator={Template.ActOnActivator}");
 
+        IncompleteHandlerLog.Warn(
+            "Reaction.UnlockContObj",
+            $"coid={Template.COID} objectiveIdOrG1={objectiveId} g3={Template.GenericVar3} objs=[{string.Join(',', Template.Objects)}] char={character?.Name ?? "(null)"}",
+            "No per-character unlock set — only logs; map/mission gates using unlock state will not open server-side",
+            "Track unlocked objective/container ids on character; gate triggers/conditions; sync client if needed beyond 0x206C.");
+
         if (character != null)
         {
             Logger.WriteLog(LogType.Debug, $"UnlockContObj reaction {Template.COID}: Unlocking for character {character.Name}");
-            // TODO: Track unlocked objectives per character when mission system is implemented
         }
 
         if (Template.Objects.Count > 0)
@@ -553,15 +606,30 @@ public class Reaction : ClonedObjectBase
                 {
                     quest.ActiveObjectiveSequence = objective.Sequence;
                     TriggerManager.Instance.OnMissionStateChanged(character.CurrentVehicle ?? (ClonedObjectBase)character);
+
+                    IncompleteHandlerLog.Warn(
+                        "Reaction.SetActiveObjective",
+                        $"coid={Template.COID} mission={mission.Id} objective={objectiveId} seq={objective.Sequence} char={character.Name}",
+                        "Server updated ActiveObjectiveSequence but did not send ObjectiveState / CompleteDynamicObjective / ConvoyMissionsResponse",
+                        "After sequence change: send ObjectiveState (slots/bitmask), refresh journal packet, ensure login persistence of active sequence.");
                 }
                 else
                 {
-                    Logger.WriteLog(LogType.Debug,
-                        "SetActiveObjective reaction {0}: mission {1} not granted yet — 0x206C only",
-                        Template.COID,
-                        mission.Id);
+                    IncompleteHandlerLog.Warn(
+                        "Reaction.SetActiveObjective",
+                        $"coid={Template.COID} mission={mission.Id} objective={objectiveId}",
+                        "Mission not in CurrentQuests — sequence not tracked; relies on client 0x206C only",
+                        "Grant mission first or set active only when quest is present; optional auto-grant if design requires.");
                 }
             }
+        }
+        else if (character == null)
+        {
+            IncompleteHandlerLog.Warn(
+                "Reaction.SetActiveObjective",
+                $"coid={Template.COID} objective={objectiveId}",
+                "No character from activator — cannot update quest state",
+                "Resolve vehicle→character like GetSuperCharacter before applying.");
         }
 
         return true;

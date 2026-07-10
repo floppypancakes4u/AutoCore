@@ -168,8 +168,9 @@ public sealed class InventoryPersistence : IInventoryPersistence
         var character = context.Characters.FirstOrDefault(c => c.Coid == characterCoid);
         if (character == null)
         {
-            Logger.WriteLog(LogType.Error, $"SaveCredits: character {characterCoid} not found");
-            return;
+            // Fail loud so /currency surfaces a failure instead of silently dropping balance.
+            throw new InvalidOperationException(
+                $"SaveCredits: character {characterCoid} not found; balance not saved");
         }
 
         character.Credits = credits;

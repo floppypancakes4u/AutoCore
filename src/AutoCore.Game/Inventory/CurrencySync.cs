@@ -37,23 +37,52 @@ public static class CurrencySync
     }
 
     /// <summary>
-    /// Build CharacterLevel absolute restore when the character has a non-zero balance.
-    /// Returns null when there is nothing to restore (avoids a no-op packet).
+    /// Build the CharacterLevel absolute packet used by both <c>/currency</c> and login restore.
+    /// This is the only client-facing absolute money update path (0x2017).
     /// </summary>
-    public static CharacterLevelPacket TryCreateLoginRestorePacket(Character character)
+    public static CharacterLevelPacket CreateAbsoluteCurrencyPacket(Character character, long absoluteCredits)
     {
         if (character == null)
             throw new ArgumentNullException(nameof(character));
-
-        if (character.Credits == 0L)
-            return null;
 
         return new CharacterLevelPacket
         {
             CharacterId = character.ObjectId,
             Level = character.Level,
-            Currency = character.Credits
+            Currency = absoluteCredits
         };
+    }
+
+    /// <summary>
+    /// Build CharacterLevel absolute restore when the character has a non-zero balance.
+    /// When <paramref name="persistence"/> is provided, reloads the authoritative balance from
+    /// storage first (same ledger /currency writes) so login never depends on a stale in-memory value.
+    /// Returns null when there is nothing to restore (avoids a no-op packet).
+    /// </summary>
+    public static CharacterLevelPacket TryCreateLoginRestorePacket(
+        Character character,
+        IInventoryPersistence persistence = null)
+    {
+        if (character == null)
+            throw new ArgumentNullException(nameof(character));
+
+        if (persistence != null)
+        {
+            var coid = ResolveCharacterCoid(character);
+            if (coid > 0)
+            {
+                var loaded = persistence.LoadCredits(coid);
+                character.SetCredits(loaded);
+                Logger.WriteLog(
+                    LogType.Network,
+                    $"CurrencySync login reload: character={coid} credits={loaded}");
+            }
+        }
+
+        if (character.Credits == 0L)
+            return null;
+
+        return CreateAbsoluteCurrencyPacket(character, character.Credits);
     }
 
     /// <summary>
@@ -96,12 +125,7 @@ public static class CurrencySync
         {
             var absolute = CharacterLevelPacket.BuildCurrency(globes, bars, scrip, clink);
             character.Inventory.SetCreditsAbsolute(character, absolute);
-            var packet = new CharacterLevelPacket
-            {
-                CharacterId = character.ObjectId,
-                Level = character.Level,
-                Currency = absolute
-            };
+            var packet = CreateAbsoluteCurrencyPacket(character, absolute);
 
             return new CommandResult
             {
@@ -194,8 +218,7 @@ public static class CurrencySync
             return;
         }
 
-        // TFID defaults Coid to -1; only positive server coids are valid character keys.
-        var coid = character?.ObjectId?.Coid ?? 0;
+        var coid = ResolveCharacterCoid(character);
         if (coid <= 0)
         {
             Logger.WriteLog(LogType.Error, $"PersistCredits: character coid is invalid ({coid}); balance not saved");
@@ -203,6 +226,13 @@ public static class CurrencySync
         }
 
         persistence.SaveCredits(coid, credits);
-        Logger.WriteLog(LogType.Debug, $"PersistCredits: character={coid} credits={credits}");
+        Logger.WriteLog(LogType.Network, $"PersistCredits: character={coid} credits={credits}");
+    }
+
+    /// <summary>Positive character row key for the char DB, or 0 when unavailable.</summary>
+    private static long ResolveCharacterCoid(Character character)
+    {
+        // TFID defaults Coid to -1; only positive server coids are valid character keys.
+        return character?.ObjectId?.Coid > 0 ? character.ObjectId.Coid : 0;
     }
 }

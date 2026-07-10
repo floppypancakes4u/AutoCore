@@ -1,3 +1,4 @@
+using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Packets.Sector;
@@ -45,6 +46,58 @@ public class CurrencySyncTests
         var packet = CurrencySync.TryCreateLoginRestorePacket(character);
 
         Assert.IsNotNull(packet);
+        Assert.AreEqual(character.ObjectId, packet.CharacterId);
+        Assert.AreEqual(character.Level, packet.Level);
+        Assert.AreEqual(1_002_003_004L, packet.Currency);
+    }
+
+    [TestMethod]
+    public void LoginRestore_MatchesCurrencyCommandPacket_SameAbsoluteBalance()
+    {
+        // Login must do the same client update as /currency: CharacterLevel absolute set.
+        var persistence = new RecordingInventoryPersistence();
+        var inventory = new InventoryManager(persistence);
+        var character = CreateCharacter(coid: 42, startingCredits: 0, inventory);
+
+        var command = CurrencySync.TryApplyCurrencyCommand(
+            character,
+            new[] { "/currency", "1", "2", "3", "4" });
+        Assert.IsTrue(command.Success);
+        Assert.IsNotNull(command.Packet);
+
+        // Simulate relog: in-memory balance may be stale; authoritative value is in persistence.
+        character.SetCredits(0);
+        persistence.CreditsToLoad = command.Absolute;
+
+        var restore = CurrencySync.TryCreateLoginRestorePacket(character, persistence);
+        Assert.IsNotNull(restore);
+        Assert.AreEqual(command.Packet.Opcode, restore.Opcode);
+        Assert.AreEqual(command.Packet.CharacterId, restore.CharacterId);
+        Assert.AreEqual(command.Packet.Level, restore.Level);
+        Assert.AreEqual(command.Packet.Currency, restore.Currency);
+        Assert.AreEqual(command.Absolute, character.Credits);
+    }
+
+    [TestMethod]
+    public void TryCreateLoginRestorePacket_WithPersistence_ReloadsAuthoritativeBalance()
+    {
+        var persistence = new RecordingInventoryPersistence { CreditsToLoad = 9_008_007_006L };
+        var character = CreateCharacter(coid: 99, startingCredits: 0);
+
+        var packet = CurrencySync.TryCreateLoginRestorePacket(character, persistence);
+
+        Assert.IsNotNull(packet);
+        Assert.AreEqual(9_008_007_006L, packet.Currency);
+        Assert.AreEqual(9_008_007_006L, character.Credits);
+    }
+
+    [TestMethod]
+    public void CreateAbsoluteCurrencyPacket_MatchesCurrencyCommandFields()
+    {
+        var character = CreateCharacter(coid: 7, startingCredits: 500);
+        var packet = CurrencySync.CreateAbsoluteCurrencyPacket(character, 1_002_003_004L);
+
+        Assert.AreEqual(GameOpcode.CharacterLevel, packet.Opcode);
         Assert.AreEqual(character.ObjectId, packet.CharacterId);
         Assert.AreEqual(character.Level, packet.Level);
         Assert.AreEqual(1_002_003_004L, packet.Currency);

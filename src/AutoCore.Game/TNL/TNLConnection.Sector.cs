@@ -162,11 +162,6 @@ public partial class TNLConnection
         SendGamePacket(charPacket);
         SendGamePacket(InventoryPacketFactory.CreateCargoSendAll(character.Inventory));
 
-        // CreateCharacterExtended.Credits stay 0 (login-safe). Restore via CharacterLevel.
-        var currencyRestore = CurrencySync.TryCreateLoginRestorePacket(character);
-        if (currencyRestore != null)
-            SendGamePacket(currencyRestore);
-
         // CreateCharacterExtended hash-inserts continents without per-bit UI notify.
         // UnlockRegion (sent twice) forces client apply + map fog refresh.
         ExplorationManager.Instance.SyncExplorationAfterLogin(character);
@@ -174,6 +169,20 @@ public partial class TNLConnection
         // Fire map PerPlayerLoad trigger (if findable) with CHARACTER activator after create
         // packets so 0x206C GiveMission can seed client mission state.
         character.Map?.FireOnLoadPlayerMissions(character);
+
+        // CreateCharacterExtended.Credits stay 0 (login-safe). Restore absolute money the same
+        // way /currency does (CharacterLevel 0x2017), after create so the client object exists.
+        // Reload from DB so restore always uses the ledger /currency persists.
+        var currencyRestore = CurrencySync.TryCreateLoginRestorePacket(
+            character,
+            InventoryPersistence.Instance);
+        if (currencyRestore != null)
+        {
+            Logger.WriteLog(
+                LogType.Network,
+                $"Login currency restore: character={character.ObjectId.Coid} credits={currencyRestore.Currency}");
+            SendGamePacket(currencyRestore);
+        }
     }
 
     private void SendInventoryLoginObjectPackets(Character character)

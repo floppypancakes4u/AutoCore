@@ -177,6 +177,9 @@ public class MapManager : Singleton<MapManager>
             character.CurrentVehicle.Position = character.Position;
             character.CurrentVehicle.Rotation = character.Rotation;
 
+            // Keep LastTownId + pose DBData current so logout/relogin resumes on this map.
+            character.CaptureWorldStateToDb();
+
             connection.SendGamePacket(mapInfoPacket, skipOpcode: true);
 
             // Restart ghosting, re-scope self/vehicle, and re-send create packets.

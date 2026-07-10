@@ -16,6 +16,7 @@ using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL.Ghost;
+using AutoCore.Utils;
 
 public class Vehicle : SimpleObject
 {
@@ -628,6 +629,37 @@ public class Vehicle : SimpleObject
         DBData.RotationW = Rotation.W;
     }
 
+    /// <summary>
+    /// Writes pose into attached <see cref="VehicleData"/>. No DB I/O.
+    /// </summary>
+    public void CaptureWorldStateToDb(Vector3 position, Quaternion rotation)
+    {
+        if (DBData == null)
+            return;
+
+        DBData.PositionX = position.X;
+        DBData.PositionY = position.Y;
+        DBData.PositionZ = position.Z;
+        DBData.RotationX = rotation.X;
+        DBData.RotationY = rotation.Y;
+        DBData.RotationZ = rotation.Z;
+        DBData.RotationW = rotation.W;
+    }
+
+    internal void AttachTestDataForTests(string name = "TestVehicle")
+    {
+        DBData = new VehicleData
+        {
+            Coid = ObjectId.Coid,
+            Name = name
+        };
+    }
+
+    internal float GetDbPositionXForTests() => DBData?.PositionX ?? float.NaN;
+    internal float GetDbPositionZForTests() => DBData?.PositionZ ?? float.NaN;
+    internal float GetDbRotationYForTests() => DBData?.RotationY ?? float.NaN;
+    internal float GetDbRotationWForTests() => DBData?.RotationW ?? float.NaN;
+
     [ExcludeFromCodeCoverage]
     public void HandleMovement(VehicleMovedPacket packet)
     {
@@ -827,8 +859,26 @@ public class Vehicle : SimpleObject
         var damage = (int)MathF.Round(Math.Max(1, totalPreMit) * scalar * dmgBonus);
 
 
+        var hpBefore = Target.GetCurrentHP();
         var actualDamage = Target.TakeDamage(damage);
-        TrySendDamagePacket(attackerChar, ObjectId, Target.ObjectId, actualDamage);
+
+        if (actualDamage <= 0)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "Combat: TakeDamage returned 0 for {0} coid={1} inv={2} corpse={3} hp={4}/{5} rolled={6}",
+                Target.GetType().Name,
+                Target.ObjectId.Coid,
+                Target.IsInvincible,
+                Target.IsCorpse,
+                hpBefore,
+                Target.GetMaximumHP(),
+                damage);
+        }
+        else
+        {
+            // Non-zero amount required for client combat-text / local HP apply (FUN_00812A60).
+            TrySendDamagePacket(attackerChar, ObjectId, Target.ObjectId, actualDamage);
+        }
 
         if (Target.GetCurrentHP() <= 0)
         {

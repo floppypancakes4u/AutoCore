@@ -97,9 +97,12 @@ public class MapTransferPreconditionsTests
 
         var character = new Character();
         character.SetCoid(300, true);
+        character.AttachTestDataForTests();
+        character.SetLastTownIdForTests(1);
         character.SetOwningConnection(connection);
         character.SetCurrentVehicleForTests(new Vehicle());
         character.CurrentVehicle.SetCoid(301, true);
+        character.CurrentVehicle.AttachTestDataForTests();
 
         var continent = new ContinentObject
         {
@@ -127,6 +130,11 @@ public class MapTransferPreconditionsTests
             Assert.AreEqual(10f, character.Position.X);
             Assert.AreEqual(20f, character.Position.Y);
             Assert.AreEqual(30f, character.Position.Z);
+            Assert.AreEqual(693, character.LastTownId,
+                "Transfer must update LastTownId so logout resumes on destination map.");
+            Assert.AreEqual(10f, character.GetDbPositionXForTests());
+            Assert.AreEqual(20f, character.GetDbPositionYForTests());
+            Assert.AreEqual(30f, character.GetDbPositionZForTests());
             Assert.IsNotNull(character.Ghost);
             Assert.IsNotNull(character.CurrentVehicle.Ghost);
             Assert.AreSame(character.Ghost, connection.GetScopeObject());

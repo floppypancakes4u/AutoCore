@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <!-- Scoped to modules changed for invincible/faction, map-prop combat, kill progress -->
+          <Include>
+            [AutoCore.Game]AutoCore.Game.Entities.GraphicsObject|[AutoCore.Game]AutoCore.Game.Entities.ReactionObjectStateEffects|[AutoCore.Game]AutoCore.Game.Managers.MissionKillProgress
+          </Include>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

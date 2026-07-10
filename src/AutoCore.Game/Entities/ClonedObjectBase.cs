@@ -84,6 +84,26 @@ public abstract class ClonedObjectBase
     public bool IsCorpse { get; protected set; }
     //public bool IsActive { get; protected set; }
     public bool IsInvincible { get; protected set; }
+
+    /// <summary>
+    /// Runtime invincible flag (map reactions MakeInvincible / MakeNotInvincible).
+    /// Client applies via 0x206C; server must match for combat authority.
+    /// Clearing invincible also ensures the object can be ghosted for HP sync.
+    /// </summary>
+    public void SetInvincible(bool invincible)
+    {
+        IsInvincible = invincible;
+        if (!invincible)
+            OnBecameDamagable();
+    }
+
+    /// <summary>
+    /// Called when an object transitions to a state where combat can damage it.
+    /// Map props override to create/scope ghosts so HealthMask reaches clients.
+    /// </summary>
+    protected virtual void OnBecameDamagable()
+    {
+    }
     //public bool IsChampion { get; protected set; }
     //public bool CanRespawn { get; protected set; }
     //public bool Enabled { get; protected set; }
@@ -163,6 +183,13 @@ public abstract class ClonedObjectBase
         RequiredTech = CloneBaseObject.SimpleObjectSpecific.RequiredTech;
         RequiredTheory = CloneBaseObject.SimpleObjectSpecific.RequiredTheory;
         UsesLeft = CloneBaseObject.SimpleObjectSpecific.MaxUses;
+
+        OnCloneBaseLoaded();
+    }
+
+    /// <summary>Hook for subclasses that need mutable runtime state from clonebase (e.g. HP).</summary>
+    protected virtual void OnCloneBaseLoaded()
+    {
     }
 
     public void SetCoid(long coid, bool global)
@@ -225,6 +252,19 @@ public abstract class ClonedObjectBase
 
         IsCorpse = true;
         DeathType = deathType;
+
+        // Credit kill objectives for the murderer's character (map props, NPCs, vehicles).
+        try
+        {
+            Managers.MissionKillProgress.NotifyObjectKilled(this);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "NotifyObjectKilled failed for coid={0}: {1}",
+                ObjectId.Coid,
+                ex.Message);
+        }
     }
 
     /// <summary>
