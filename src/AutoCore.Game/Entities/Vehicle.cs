@@ -918,7 +918,7 @@ public class Vehicle : SimpleObject
 
 
         var hpBefore = Target.GetCurrentHP();
-        var actualDamage = Target.TakeDamage(damage);
+        var actualDamage = Target.TakeDamage(damage, this);
 
         if (actualDamage <= 0)
         {

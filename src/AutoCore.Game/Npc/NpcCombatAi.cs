@@ -16,9 +16,10 @@ using AutoCore.Game.TNL.Ghost;
 ///   <item><b>IdlePatrol</b> — throttled aggro scan of the spatial grid; on a hostile hit, latch
 ///   the target and enter Engage. Steers home while <see cref="NpcAiState.ReturningHome"/> is set.</item>
 ///   <item><b>Engage</b> — close toward weapon range; after the profile's flee/engage timer, drop
-///   into Combat (flee evaluation is Stage 11).</item>
+///   into Combat. Also the wire state used while fleeing (client circling visual).</item>
 ///   <item><b>Combat</b> — pursue when out of range, otherwise raise the firing bit for the equipped
-///   weapon and reuse the player combat pipeline (<see cref="Vehicle.ProcessCombatIfFiring"/>).</item>
+///   weapon and reuse the player combat pipeline (<see cref="Vehicle.ProcessCombatIfFiring"/>). Once
+///   HP drops to the profile's flee band the NPC breaks off and runs home (val1–val4).</item>
 /// </list>
 /// The aggro scan is throttled to <see cref="ScanIntervalMs"/> (staggered by coid); pursuit
 /// movement runs every tick. Faction decisions funnel through <see cref="FactionHostility"/>.
@@ -42,6 +43,17 @@ public static class NpcCombatAi
 
     private static readonly List<ClonedObjectBase> ScanBuffer = new();
 
+    /// <summary>
+    /// Uniform [0,1) source for the call-for-help roll. Injected so tests are deterministic;
+    /// defaults to the shared thread-safe RNG.
+    /// </summary>
+    internal static System.Func<float> Rng = DefaultRng;
+
+    private static float DefaultRng() => System.Random.Shared.NextSingle();
+
+    /// <summary>Restores the default RNG between tests.</summary>
+    internal static void ResetRngForTests() => Rng = DefaultRng;
+
     /// <summary>Advances one NPC's combat AI for this tick. No-op for non-NPC/corpse entities.</summary>
     public static void Tick(SectorMap map, ClonedObjectBase entity, long nowMs, float dt)
     {
@@ -50,6 +62,11 @@ public static class NpcCombatAi
 
         var npcAi = GetNpcAi(entity);
         if (npcAi == null)
+            return;
+
+        // Flee lifecycle runs ahead of the state switch: while the latch holds we run home; at
+        // expiry we either re-engage (recovered ≥ val4) or re-extend the latch and keep fleeing.
+        if (npcAi.FleeUntilMs > 0 && TickFleeLifecycle(entity, npcAi, nowMs, dt))
             return;
 
         switch (npcAi.CombatState)
@@ -96,6 +113,7 @@ public static class NpcCombatAi
         npcAi.EngageStartedMs = nowMs;
         npcAi.HelpCalled = false;
         SetCombatState(entity, HBAICombatState.Engage);
+        TryCallForHelp(entity, npcAi, target, nowMs);
     }
 
     private static void TickEngage(ClonedObjectBase entity, NpcAiState npcAi, long nowMs, float dt)
@@ -111,7 +129,7 @@ public static class NpcCombatAi
         if (entity.Position.Dist(target.Position) > desired)
             SteerToward(entity, target.Position, NpcTicker.ResolveSpeed(entity), dt);
 
-        // After the profile's flee/engage timer, commit to Combat (flee evaluation lands in Stage 11).
+        // After the profile's flee/engage timer, commit to Combat (where flee evaluation runs).
         var timerMs = npcAi.Profile?.ValFleeOrEngageTimerMs ?? 0f;
         if (nowMs - npcAi.EngageStartedMs >= (long)timerMs)
             SetCombatState(entity, HBAICombatState.Combat);
@@ -121,6 +139,13 @@ public static class NpcCombatAi
     {
         if (TargetLost(entity) || TryLeash(entity, npcAi))
             return;
+
+        // Wounded past the flee band: break off and run home (the timer already elapsed to reach Combat).
+        if (ShouldFlee(entity, npcAi))
+        {
+            EnterFlee(entity, npcAi, nowMs);
+            return;
+        }
 
         var target = entity.Target;
         var (bit, weapon) = SelectFiringWeapon(entity);
@@ -171,7 +196,10 @@ public static class NpcCombatAi
         CeaseFire(entity);
         entity.SetTargetObject(null);
         if (npcAi != null)
+        {
             npcAi.ReturningHome = true;
+            npcAi.FleeUntilMs = 0;
+        }
         SetCombatState(entity, HBAICombatState.IdlePatrol);
     }
 
@@ -179,6 +207,150 @@ public static class NpcCombatAi
     {
         if (entity is Vehicle vehicle)
             vehicle.Firing = 0;
+    }
+
+    // ----- flee (val1–val4) -----------------------------------------------------------------
+
+    /// <summary>
+    /// Runs the flee latch each tick before the state switch. Returns <c>true</c> when it fully
+    /// handled the tick (caller returns): while <see cref="NpcAiState.FleeUntilMs"/> holds the NPC
+    /// runs home; on expiry it re-engages if recovered to <c>val4</c> (returns <c>false</c> so the
+    /// Combat branch runs) or re-extends the latch and keeps fleeing. Zero-val profiles never enter
+    /// this path because <see cref="EnterFlee"/> is gated by the single <see cref="ShouldFlee"/>
+    /// predicate.
+    /// </summary>
+    private static bool TickFleeLifecycle(ClonedObjectBase entity, NpcAiState npcAi, long nowMs, float dt)
+    {
+        if (nowMs < npcAi.FleeUntilMs)
+        {
+            TickFlee(entity, npcAi, dt);
+            return true;
+        }
+
+        var reengage = npcAi.Profile?.ValReengageThreshold ?? 0f;
+        if (HpRatio(entity) >= reengage)
+        {
+            npcAi.FleeUntilMs = 0;
+            SetCombatState(entity, HBAICombatState.Combat);
+            return false;
+        }
+
+        npcAi.FleeUntilMs = nowMs + (long)(npcAi.Profile?.ValFleeOrEngageTimerMs ?? 0f);
+        TickFlee(entity, npcAi, dt);
+        return true;
+    }
+
+    /// <summary>
+    /// Single flee predicate (NPC.md Risk 8): flee once HP has dropped to the profile's flee band,
+    /// taken as the larger of the secondary (val2) and primary (val3) bands. Retail "never flee"
+    /// rows zero val1–3, giving a 0 threshold that a live NPC's positive HP ratio never meets.
+    /// </summary>
+    private static bool ShouldFlee(ClonedObjectBase entity, NpcAiState npcAi)
+    {
+        var profile = npcAi.Profile;
+        if (profile == null)
+            return false;
+
+        var threshold = System.Math.Max(profile.ValFleeHpSecondary, profile.ValFleeHpOrChance);
+        return HpRatio(entity) <= threshold;
+    }
+
+    /// <summary>Latches the flee timer, ceases fire, and pins the wire state to Engage (client circling).</summary>
+    private static void EnterFlee(ClonedObjectBase entity, NpcAiState npcAi, long nowMs)
+    {
+        npcAi.FleeUntilMs = nowMs + (long)(npcAi.Profile?.ValFleeOrEngageTimerMs ?? 0f);
+        CeaseFire(entity);
+        SetCombatState(entity, HBAICombatState.Engage);
+    }
+
+    /// <summary>Guns silent, run back toward the home anchor.</summary>
+    private static void TickFlee(ClonedObjectBase entity, NpcAiState npcAi, float dt)
+    {
+        CeaseFire(entity);
+        SteerToward(entity, npcAi.HomePosition, NpcTicker.ResolveSpeed(entity), dt);
+    }
+
+    /// <summary>Current-to-maximum HP ratio; 1.0 when max HP is unknown (never forces a flee).</summary>
+    private static float HpRatio(ClonedObjectBase entity)
+    {
+        var max = entity.GetMaximumHP();
+        return max > 0 ? (float)entity.GetCurrentHP() / max : 1f;
+    }
+
+    // ----- damage aggro + call-for-help (val5–val7) -----------------------------------------
+
+    /// <summary>
+    /// Hook fired when <paramref name="entity"/> takes real damage from <paramref name="attacker"/>
+    /// (<see cref="Entities.ClonedObjectBase.TakeDamage(int, Entities.ClonedObjectBase)"/>). An idle
+    /// NPC latches onto its attacker immediately, bypassing the vision scan (aggro-list parity), and
+    /// either path attempts a one-time call for help.
+    /// </summary>
+    internal static void OnDamaged(ClonedObjectBase entity, ClonedObjectBase attacker)
+    {
+        if (entity == null || attacker == null || entity.IsCorpse)
+            return;
+
+        var npcAi = GetNpcAi(entity);
+        if (npcAi == null)
+            return;
+
+        var nowMs = System.Environment.TickCount64;
+
+        if (npcAi.CombatState == HBAICombatState.IdlePatrol && entity.Target == null)
+        {
+            entity.SetTargetObject(attacker);
+            npcAi.EngageStartedMs = nowMs;
+            npcAi.ReturningHome = false;
+            npcAi.HelpCalled = false;
+            SetCombatState(entity, HBAICombatState.Engage);
+        }
+
+        TryCallForHelp(entity, npcAi, attacker, nowMs);
+    }
+
+    /// <summary>
+    /// Once per engagement, rolls <c>val6</c> against the profile's help chance and, on success,
+    /// spreads server-authoritative aggro (target + Engage) to same-faction idle NPCs within
+    /// <c>val7</c>. Returns without touching <see cref="NpcAiState.HelpCalled"/> when help is disabled
+    /// so a help-off profile never consumes its single roll; no help packet is emitted (NPC.md defers
+    /// the client shout).
+    /// </summary>
+    private static void TryCallForHelp(ClonedObjectBase entity, NpcAiState npcAi, ClonedObjectBase attacker, long nowMs)
+    {
+        if (npcAi.HelpCalled || attacker == null)
+            return;
+
+        var profile = npcAi.Profile;
+        if (profile == null || profile.ValHelpEnabled <= 0f || profile.ValHelpRange <= 0f)
+            return;
+
+        var map = entity.Map;
+        if (map == null)
+            return;
+
+        npcAi.HelpCalled = true; // consume the one roll whether or not it lands
+        if (Rng() >= profile.ValHelpChance)
+            return;
+
+        var myFaction = entity.GetIDFaction();
+        map.Grid.QueryRadius(entity.Position, profile.ValHelpRange, ScanBuffer);
+
+        foreach (var ally in ScanBuffer)
+        {
+            if (ReferenceEquals(ally, entity) || ally.IsCorpse)
+                continue;
+            if (ally.GetIDFaction() != myFaction)
+                continue;
+
+            var allyAi = GetNpcAi(ally);
+            if (allyAi == null || allyAi.CombatState != HBAICombatState.IdlePatrol || ally.Target != null)
+                continue;
+
+            ally.SetTargetObject(attacker);
+            allyAi.EngageStartedMs = nowMs;
+            allyAi.HelpCalled = false;
+            SetCombatState(ally, HBAICombatState.Engage);
+        }
     }
 
     /// <summary>Finds the nearest hostile, targetable candidate within the NPC's aggro radius.</summary>

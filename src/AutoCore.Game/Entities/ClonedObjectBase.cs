@@ -131,6 +131,19 @@ public abstract class ClonedObjectBase
         return 0;
     }
 
+    /// <summary>
+    /// Applies damage and, when it actually lands from a known attacker, notifies the NPC combat
+    /// brain so an idle NPC latches onto its attacker and may call for help (Stage 11). Delegates
+    /// the HP math to the virtual <see cref="TakeDamage(int)"/> override.
+    /// </summary>
+    public int TakeDamage(int damage, ClonedObjectBase attacker)
+    {
+        var actual = TakeDamage(damage);
+        if (actual > 0 && attacker != null)
+            Npc.NpcCombatAi.OnDamaged(this, attacker);
+        return actual;
+    }
+
     public virtual Character GetAsCharacter() => null;
     public virtual Creature GetAsCreature() => null;
     public virtual Vehicle GetAsVehicle() => null;
