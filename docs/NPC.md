@@ -1,24 +1,32 @@
 # NPC / AI / Vehicle Driving — Research Inventory
 
-**Status:** Research / RE / design inventory. **Phase A server code reimplemented** (2026-07-09). Phases B–D / combat AI remain unreimplemented after the full code revert.
+**Status:** Research / RE / design inventory **plus** the as-built record for the `feature/npc-ai`
+branch. All four phases (A–D) are implemented **server-side** on this branch; the sections below
+describe both the retail client design (RE) and the AutoCore server code that consumes it.
 
 **Binary:** `autoassault.exe` (Ghidra)  
 **Related docs:** [TRIGGER_SYSTEM](../Documentation/TRIGGER_SYSTEM.md), [NPC_SPAWN_HEIGHT](../Documentation/NPC_SPAWN_HEIGHT.md), [auto-patrol](topic-extractions/auto-patrol.md)
 
-### Implementation status (2026-07-09)
+### Implementation status (2026-07-10, `feature/npc-ai`)
 
-**Design rule:** handlers are **data-driven and mission-agnostic**. No mission, continent, or named NPC is special-cased.
+**Design rule:** every handler is **data-driven and mission-agnostic**. No mission, continent, or
+named NPC is special-cased anywhere. Behaviour is driven only by map spawn fields, clonebase rows,
+`tVehicleTemplate`, `tCreatureAI`, and reaction templates.
 
-| Phase | Piece | Status |
-|------:|-------|--------|
-| A | `tVehicleTemplate` load + template/CBID spawn + driver + path on create/ghost | **Restored** |
-| B | `SetPath` / `SetPatrolDistance` reactions | Not restored (docs only) |
-| C | Server path follower (pose + point reactions + wait) | Not restored (docs only) |
-| C | Full combat AI (aggro/pursue/fire) | Not restored (docs only) |
-| D | Ghidra renames + RE notes for HBAI/path | RE notes retained (§10) |
-| — | val1–val20 profile semantics | Documented §10.7 |
+| Phase | Piece | Status | Key server code |
+|------:|-------|--------|-----------------|
+| A | `tVehicleTemplate` load + template/CBID spawn + driver + path/patrol on create & ghost | **Implemented** | `VehicleTemplate.cs`, `WadXmlWorldDataLoader.LoadVehicleTemplates`, `SpawnPoint.cs`, `Vehicle.cs`, `GhostVehicle.cs` |
+| B | `SetPath` (43) / `SetPatrolDistance` (44) reactions | **Implemented** | `Reaction.cs` |
+| C | Server path follower — vehicles **and** foot creatures (pose + point reactions + `WaitTime` dwell) | **Implemented** | `Npc/NpcPathFollower.cs`, `Npc/NpcTicker.cs` |
+| C | Server combat AI (aggro scan / engage / pursue / fire / leash / flee / call-for-help) | **Implemented** | `Npc/NpcCombatAi.cs`, `Npc/NpcAiState.cs`, `Npc/FactionHostility.cs` |
+| D | Interest management (spatial hash + tiered scope + priority) | **Implemented** | `Map/SpatialHashGrid.cs`, `Map/InterestSelector.cs`, `TNL/Ghost/GhostObject.cs` |
+| D | Ghidra renames + RE closure notes for HBAI/path | **Complete** (§10, §12) |  |
+| — | `tCreatureAI` val1–val20 profile semantics | Documented §10.7 / §12.5 | `Structures/CreatureAiProfile.cs` |
 
-**Phase A key code:** `VehicleTemplate.cs`, `WadXmlWorldDataLoader.LoadVehicleTemplates`, `AssetManager.GetVehicleTemplate`, `SpawnPoint.cs` (template/CBID + driver + equip + path), `Vehicle` path state + create fields, `GhostVehicle` path block when assigned.
+**What is deliberately NOT on the server:** the client still owns the fine physics simulation
+(`CVOGHBAIDriver::DoLogic` steering math, weapon-geometry fire masks, skill VFX). The server holds
+authoritative pose along map paths, faction/HP, aggro/leash/flee state, and the firing bit; the
+client renders. Call-for-help spreads aggro server-side but emits no client "shout" packet yet.
 
 ---
 
@@ -29,7 +37,12 @@
 | **Retail client** | **Yes** — full **HBAI** stack, including `CVOGHBAIDriver` | Map paths, waypoints, SpecialEvent Path, reactions SetPath / SetPatrolDistance |
 | **AutoCore server** | Path follower + combat AI (aggro/leash/fire); spawn path/driver; SetPath/SetPatrol | Triggers/reactions, interact NPCs, mission patrol notify, SpecialEvent respawn/teleport |
 
-**Practical implication for AutoCore:** Driving behavior is designed to run **on the client** once a creature/vehicle is created with HBAI attached and path/patrol fields set. The private server already parses map path geometry and spawn path links but never feeds them into create/ghost, never spawns drivers, and never implements path reactions. A high-leverage first step is **plumbing** (path id + patrol distance + driver), not reimplementing DoLogic on the server.
+**Practical implication for AutoCore:** the client's HBAI renders driving once a creature/vehicle is
+created with HBAI attached and path/patrol fields set. On `feature/npc-ai` the server now does the
+plumbing (spawns drivers, feeds path id + patrol distance + AI state into create/ghost, handles the
+path reactions) **and** runs an authoritative server-side path follower + combat brain, rather than
+reimplementing the client's `DoLogic` steering math. The client still owns fine physics and weapon
+presentation; the server owns pose along paths, faction/HP, and aggro/flee state (§5, §12, §13).
 
 ---
 
@@ -249,7 +262,14 @@ When optional path flag is set, client reads:
 
 If flag clear → current path id forced to **`-1`**.
 
-AutoCore `GhostVehicle` packs this block only when `WriteFlag(false)` — **never sent**. Create packet always writes `CurrentPathId = -1`, `PatrolDistance = 0`.
+**RE confirmed (§12.3):** the current path id is read as an **18-bit unsigned int** (`BitStream_readInt(0x12)`),
+zero-extended — not sign-extended. The `-1` sentinel is carried by the *absence* of the block
+(presence flag clear), never by an all-ones 18-bit value.
+
+AutoCore `GhostVehicle` now **sends** this block whenever a path is assigned, writing the current
+path id with the same 18-bit width (`CoidCurrentPathBits = 18`), then the 32-bit extra path id, the
+`PathReversing` / `PathIsRoad` flags, and the 32-bit `PatrolDistance` float — matching the client
+unpack field-for-field.
 
 ### 2.7 Special events
 
@@ -295,41 +315,37 @@ AutoCore loads these; **no server code consumes them for AI**.
 | MapPath type | `CloneBaseObjectType.MapPath = 62` | Factory in `ObjectTemplate` |
 | Spawn path link | `SpawnPointTemplate.MapPathCoid`, `InitialPatrolDistance` | **Applied at spawn (Phase A)** |
 | Vehicle path on create | `CreateVehiclePacket`, `Vehicle.WriteToPacket` | **Writes assigned path state** |
-| Ghost path + AI state | `GhostVehicle.cs`, `GhostCreature.cs` | **Path block when assigned**; AI state still zeros |
-| AI clonebase fields | `CreatureSpecific` | Loaded only |
+| Ghost path + AI state | `GhostVehicle.cs`, `GhostCreature.cs` | **Path block when assigned + AI combat-state byte** |
+| AI clonebase fields | `CreatureSpecific`, `CreatureAiProfile` | Loaded **and consumed** by `NpcCombatAi` |
 | Default driver | `VehicleSpecific.DefaultDriver` | **Used when template driver missing** |
-| Reaction enums | `ReactionType.SetPath/SetPatrolDistance/Path` | Unhandled stubs (Phase B not restored) |
+| Reaction handlers | `ReactionType.SetPath/SetPatrolDistance` | **Handled** (Phase B); `Path` (77) still stubbed |
 | Triggers / map events | `TriggerManager`, `SectorMap`, docs | **Working** event scripting |
 | SpecialEvent | `SpecialEventPacket` | Respawn/teleport only |
 | Mission patrol | `ObjectiveRequirementPatrol`, `AutoPatrol` | Player mission waypoints, not NPC drive |
 | NPC interact | `NpcInteractHandler` | Dialog / use-object |
 | Static NPC height | `SpawnPoint.ApplyStaticNpcSpawnHeight` | IsNPC placement; combat relies on client AI snap |
 
-### 4.2 Phase A done / still open
+### 4.2 Implemented on `feature/npc-ai` (Phases A–D)
 
-**Done (Phase A):**
-- `tVehicleTemplate` load from `wad.xml`
-- Template and CBID vehicle spawn with driver, equipment, path/patrol
-- Create + ghost path fields when path is assigned
-- Driver level on non-character ghost owner
+- `tVehicleTemplate` load from `wad.xml`; template and CBID vehicle spawn with driver, equipment,
+  path/patrol; driver level on non-character ghost owner.
+- Create + ghost path block **written** when a path is assigned (18-bit id, §12.3); the AI
+  combat-state byte is packed under `StateMask`.
+- `SetPath` / `SetPatrolDistance` reaction handlers (Phase B).
+- Server path follower for vehicles **and** foot creatures, plus `WaitTime` dwell and arrival
+  reactions (`NpcTicker` / `NpcPathFollower`).
+- Server combat brain: aggro scan, engage/pursue/fire, leash home, flee (val1–val4),
+  call-for-help aggro spread (val5–val7) (`NpcCombatAi`).
+- Interest management: spatial hash, tiered scope selection, update-priority formula (§13).
 
-**Still open (not Phase A):**
-```csharp
-// GhostVehicle AI State mask still disabled
-if (stream.WriteFlag((updateMask & StateMask) != 0 && false))
+### 4.3 Still absent
 
-// SetPath / SetPatrolDistance reactions unhandled (Phase B)
-// No server path follower tick (Phase C)
-// No combat AI for map spawns (Phase C)
-// No SpecialEventType for Path
-```
-
-### 4.3 Absent (post–Phase A)
-
-- No `HBAI` / AI controller / path-follower service on sector tick (client still owns DoLogic)
-- No `SetPath` / `SetPatrolDistance` server handlers
-- No combat AI for map spawns (player vehicle combat only)
-- No `SpecialEventType` for Path
+- Client-owned fine physics/steering & weapon VFX (by design — server stays authoritative on pose,
+  faction/HP, aggro/flee state, firing bit).
+- Skill casting from clonebase skill sets (client `FUN_005d1280`).
+- Mid-session path ghost updates (non-initial mask for path id / patrol).
+- Call-for-help "shout" packet (aggro already spreads server-side).
+- `SpecialEventType` for `Path`; reaction type `Path` (77).
 
 ---
 
@@ -378,35 +394,34 @@ Server still needs to:
 
 Ordered by leverage vs effort. **All phases stay mission-agnostic** — driven only by map spawn fields, clonebase, `tVehicleTemplate`, and reaction templates.
 
-### Phase A — Make client HBAI actually engage (minimal) — **done for vehicles**
+### Phase A — Make client HBAI actually engage (minimal) — **done**
 
 1. **Spawn driver** from `tVehicleTemplate.CBIDDriver` or `VehicleSpecific.DefaultDriver`; set as vehicle owner.
 2. **Apply spawn path** from every `SpawnPointTemplate` (`MapPathCoid`, `InitialPatrolDistance`, reverse from `MapPathTemplate`).
 3. Ghost/create path + owner bits so client `CVOGHBAIDriver` can run.
-4. Still open in A-adjacent work: creature-only path/waypoint plumbing if foot NPCs need the same fields.
 
-### Phase B — Scripted path control — **done (vehicles)**
+### Phase B — Scripted path control — **done**
 
 1. **`ReactionType.SetPath` (43):** `GenericVar1` = path COID (≤0 clears). Targets via `ActOnActivator` / `Objects`. Applies to vehicles (or character → current vehicle). Reverse from `MapPathTemplate`. Preserves patrol distance. Still returns success so **0x206C** delivers client apply.
 2. **`ReactionType.SetPatrolDistance` (44):** patrol = logic var[`GenericVar1`] (same pattern as client map-variable lookup). Preserves path id.
 3. Path-point reactions fire from the Phase C follower on arrival; mid-session path ghost mask still initial-only.
 
-### Phase C — Server path follower — **done (path pose only)**
+### Phase C — Server path follower + combat — **done (vehicles and foot creatures)**
 
 | Item | Detail |
 |------|--------|
 | Tick | `SectorServer.MainLoop` → `MapManager.TickNpcPathVehicles(delta)` every 100 ms |
-| Scope | Map NPC vehicles with assigned path, non-corpse, **not** player-owned |
-| Motion | Move toward current `MapPathTemplate` point at clonebase-scaled speed (default 12 u/s) |
-| Arrival | Snap to point, optional `WaitTime`, fire `ReactionCoid` via `SectorMap.TriggerReactions` |
+| Scope | Map NPC `Vehicle` **and** `Creature` in `IdlePatrol` with an assigned path, non-corpse |
+| Motion | Move toward current `MapPathTemplate` point at clonebase speed (fallback 12 u/s vehicle, 2.5 u/s foot) |
+| Arrival | Snap to point, `WaitTime` dwell in **ms** (see 12.1), fire `ReactionCoid` via `SectorMap.TriggerReactions` |
 | Advance | Wrap or ping-pong when `PathReversing` / template `ReverseDirection` |
-| Ghost | `PositionMask` dirty on pose change |
-| Combat | `NpcVehicleCombatAi` — faction aggro, leash, pursue into range, fire via `ProcessCombatIfFiring`; pauses path while not IdlePatrol |
-| **Out of scope** | Full skill tables / call-for-help packets; foot-creature path follower |
+| Ghost | Position/state masks dirtied on pose / combat-state change |
+| Combat | `NpcCombatAi` faction aggro scan, engage, leash home, pursue, fire via `ProcessCombatIfFiring`, flee (val1-val4), call-for-help (val5-val7); pauses patrol while not `IdlePatrol` |
+| **Out of scope** | Skill casting from clonebase skill sets; client call-for-help shout packet |
 
-### Phase D — RE cleanup (Ghidra) — **done**
+### Phase D — RE closure (Ghidra) + interest management — **done**
 
-See **§10** for renamed symbols, AI state notes, and open questions.
+See **§10** for renamed symbols and AI-state notes, **§12** for the five RE closures (WaitTime, faction, 18-bit path id, creature pose-only, flee HP-band), and **§13** for interest management.
 
 ---
 
@@ -458,9 +473,13 @@ See **§10** for renamed symbols, AI state notes, and open questions.
 1. ~~HBAI factory from IDAIBehavior~~ — **closed** (§10.2).
 2. ~~AI state byte~~ — **closed** (§10.3).
 3. ~~Waypoint patrol layout~~ — **closed** (§10.4).
-4. **Foot-creature path** create/ghost wire fields (vehicles done).
-5. **Driver as CurrentOwner** — must map NPC drivers always ghost as vehicle owner for client DoLogic (implemented on spawn; verify live).
-6. **Character vs Mine** RTTI split when both use ctor `0063d0b0`.
+4. ~~Foot-creature path follower~~ — **closed**: `NpcTicker` drives both `Vehicle` and `Creature`; the creature create/ghost path (`CVOGCreature_PostCreateFromPacket`) is **pose-only** (§12.4), so foot NPCs patrol via the server follower rather than a wire path block.
+5. ~~WaitTime units~~ — **closed** (§12.1): ms.
+6. ~~Faction "wrong relation" filter~~ — **closed** (§12.2): matches `FactionHostility`.
+7. ~~18-bit path id widening~~ — **closed** (§12.3): zero-extended 18-bit, `-1` via absence flag.
+8. ~~Flee HP-band semantics~~ — **closed** (§12.5): deterministic `hpRatio <= band` gate.
+9. **Driver as CurrentOwner** — NPC drivers must always ghost as the vehicle owner for the client to build `CVOGHBAIDriver` (implemented on spawn; **verify live**).
+10. **Character vs Mine** RTTI split when both use ctor `0063d0b0` (does not affect server behaviour).
 
 ---
 
@@ -469,10 +488,10 @@ See **§10** for renamed symbols, AI state notes, and open questions.
 **Is there already code that handles AI/NPC controllers for driving NPC vehicles, and/or scripted events/NPCs/AI?**
 
 - **Yes on the retail client:** complete HBAI system with `CVOGHBAIDriver`, path following (`CVOGMapPath` / `CVOGWaypoint`), combat pursue/fire, and reactions `SetPath` / `SetPatrolDistance`.
-- **AutoCore Phase A–C (vehicles):** generic spawn (template/CBID + driver + path), SetPath/SetPatrolDistance, **server path follower** for multiplayer pose — **no per-mission code**.
+- **AutoCore `feature/npc-ai` (Phases A–D):** generic spawn (template/CBID + driver + path), `SetPath` / `SetPatrolDistance`, a **server path follower** for vehicles and foot creatures, a **server combat brain** (aggro / engage / pursue / fire / leash / flee / call-for-help), and **interest management** (spatial hash + tiered scope + update priority) — **no per-mission code**.
 - **Still missing:** see §11 remaining optional work.
 
-**Strategy:** client HBAI for combat; server path follower for shared pose authority along map paths.
+**Strategy:** server holds authoritative pose along map paths plus faction/HP/aggro/flee state and the firing bit; the client's HBAI renders the fine steering and weapon presentation.
 
 ---
 
@@ -593,7 +612,10 @@ From `CVOGWaypoint_InitFromSpawn` (`005d5580`):
 | 8–20 | `GetVal(7..19)` | Unused in recovered DoLogic; empty in most retail rows |
 
 **Never flee** profiles zero val1–val3. **No help** profiles zero val5–val7.  
-Server combat AI uses vision/hearing from clonebase and help range as vision fallback; **flee timers and call-for-help networking are not implemented yet** (vals are loaded for that next step).
+The server combat AI (`NpcCombatAi`) now consumes val1–val7: flee band from val2/val3, re-engage from
+val4, flee/engage timer from val1, and call-for-help from val5–val7 (§12.5). vals 8–20 remain loaded
+but unused (empty in most retail rows). The call-for-help **spreads aggro server-side** but does not
+yet emit the client "shout" packet.
 
 ---
 
@@ -601,14 +623,143 @@ Server combat AI uses vision/hearing from clonebase and help range as vision fal
 
 Ordered by likely impact:
 
-1. **Combat AI depth** — flee (val1–val4), call-for-help (val5–val7), skill cast from clonebase skill sets.
-2. **Foot-creature path follower** — Phase C for walking NPCs.
-3. **Mid-session path ghost updates** — non-initial mask for path id / patrol.
+1. **Skill casting** — cast from clonebase skill sets (client `FUN_005d1280` / `CVOGReaction_CastSkillOnTarget`); the server flee/help loop is in, skills are not.
+2. **Mid-session path ghost updates** — non-initial mask for path id / patrol.
+3. **Call-for-help shout packet** — client-facing help notification (aggro already spreads server-side).
 4. **SpecialEvent Path type** — client cutscene paths.
 5. **Reaction type Path (77)** — named path UI (not SetPath 43).
 6. **Character vs Mine ctor** — RTTI split at `0063d0b0`.
-7. **Live validation** — path + combat in multiplayer.
+7. **Live validation** — path + combat + interest scope in multiplayer.
 
 ---
 
-*Last updated: 2026-07-09 — combat AI + val1–val7 semantics.*
+## 12. Phase D — RE closure (2026-07-10)
+
+Five open Risk items were re-checked directly in Ghidra against the open `autoassault.exe`. Every
+finding **confirms** the current server behaviour; **no code change was required**. Evidence is the
+decompiled pseudocode / disassembly of the anchor functions in §7.
+
+### 12.1 `MapPathPoint.WaitTime` units — **milliseconds**
+
+- The point struct stride is **0x20**; `WaitTime` is an `int32` at point **+0x18** (`Position` 0x00–0x08,
+  `AcceptDistance` +0x0c, `ReactionCoid` +0x10/+0x14, `WaitTime` +0x18, 4-byte pad +0x1c) — matching
+  AutoCore `MapPathTemplate.MapPathPoint`.
+- `CVOGMapPath_AdvanceAndSteer` (`005df950`) reads only `[0..3]` (pose + accept radius) and `[4..5]`
+  (`ReactionCoid`). It **never reads `+0x18`** — the dwell is applied by the waypoint/heartbeat caller,
+  not by the advance step.
+- Every timer in the AI/path stack uses the global tick counter `DAT_00b041cc`, which is
+  **millisecond-scaled** (the engage timer `val1` is documented as ms with values like 8000; the
+  path-follow interpolation in `FUN_005ce990` scales `DAT_00b041cc` deltas by speed constants). There
+  is no seconds→ms conversion anywhere on the path.
+- **Server:** `NpcPathFollower.Step` computes `WaitUntilMs = nowMs + point.WaitTime`, i.e. treats the
+  raw value as ms. **Consistent with the client ms tick base — correct, no change.**
+
+### 12.2 Faction "wrong relation" filter — **matches `FactionHostility`**
+
+- `CVOGHBAIBase_FindTargetToAttack` (`00639210`) filters each candidate through `FUN_00512440`.
+- `FUN_00512440` walks the **owner chain** (`+0xac` → parent, repeatedly) up to the root object and
+  returns the root's relation/faction id at **`+0x10`**. The value **`-100`** is the never-aggro
+  sentinel: `if (relation == -100) skip`. The self object's class byte at `+0x278` also gates
+  (values `2` and `3` short-circuit).
+- This lines up with the server heuristic in `FactionHostility`: **`-1` (unset) / `-100` (neutral)
+  never aggro**; player races (0/1/2) never mutually aggro; NPC factions (>= 3) aggro any distinct
+  real faction. The binary's `-100` sentinel is the load-bearing match. **No change.**
+  *(Note: `FactionHostility.cs` still carries a "Pending RE refinement (NPC.md Risk 2)" caveat in its
+  XML doc — now resolved by this section; left untouched to keep this a docs-only stage.)*
+
+### 12.3 Ghost path id — **18-bit, zero-extended**
+
+- `VehicleNet_UnpackGhostVehicle` (`005f7720`): the path block reads the current path id via
+  `BitStream_readInt` with a bit-count of **`0x12` (18)** — disassembly at the call site is
+  `PUSH 0x12 / CALL BitStream_readInt`. `BitStream_readInt(n)` reads `n` bits and masks to `n` bits
+  (**zero-extend**, not sign-extend), storing to vehicle `+0xd28` (field `0x34a`).
+- The rest of the block: extra path id `readBits(0x20)` → `+0xd2c`; `PathReversing` flag; `PathIsRoad`
+  flag; `PatrolDistance` `readBits(0x20)` as float → `+0xd30`. The `-1` "no path" sentinel is conveyed
+  by the **presence flag being clear** (then `+0xd28` is forced to `0xffffffff`), never by an
+  18-bit all-ones value.
+- **Server:** `GhostVehicle` writes the path id with `CoidCurrentPathBits = 18` and the same field
+  order. **Matches the client field-for-field — correct, no change.**
+
+### 12.4 Creature create-from-packet — **pose-only, no path/waypoint fields**
+
+- `CVOGCreature_PostCreateFromPacket` (`004c5c30`) reads the packet **owner COID** at `param_2+0xf8/+0xfc`
+  (used to attach a driver creature to a vehicle owner) — **not** a path or waypoint id.
+- When the owner is invalid (`-1`) it attaches HBAI via creature vtable `+0xc0`, building the AI node
+  from the creature's **own current pose** (`param_1-0x2d8..-0x2cc`) with a path id argument of
+  `0xffffffff` (**-1**). No path/waypoint block is unpacked for foot creatures.
+- **Server:** foot NPCs are treated as pose-only (no wire path block); their patrol is driven by the
+  server-side `NpcTicker`/`NpcPathFollower` instead. **Consistent — no change.**
+
+### 12.5 Flee / help semantics — **deterministic HP-band gate**
+
+- `CVOGHBAIDriver_DoLogic` (`005d7750`) branches on the combat-state byte at owner `+0x26c`
+  (0 idle / 1 engage / else combat) and reads the profile table (`piVar4`) as ordered floats:
+  `[5]` (+0x14) engage/flee **timer** (ms, `val1`), `[6]` (+0x18) re-engage HP threshold, `[7]` (+0x1c)
+  flee HP band, `[8]` (+0x20) flee chance `/(encounterCount+1)`, `[10]` (+0x28) skill HP band.
+- The HP ratio is `vtable+0x1b0 (current HP) / vtable+0x1ac (max HP)`, and each transition is a hard
+  `hpRatio <= threshold` **band** check, optionally ANDed with a random roll (`CVOGReaction_RandomUnitScalar`).
+- **Server** (`NpcCombatAi`) takes the deterministic HP-band and drops the client's extra random roll:
+  - flee when `hpRatio <= max(val2, val3)` (`ShouldFlee`);
+  - while fleeing, run home for `val1` ms; on expiry re-engage if `hpRatio >= val4`, else re-extend;
+  - wire state pinned to `Engage` during flee (client renders circling);
+  - call-for-help: one roll of `val6` per engagement (gated by `val5` enable and `val7` range),
+    spreading target+Engage to same-faction idle NPCs within `val7`.
+- The deterministic HP-band interpretation is confirmed; the server simplification (no per-tick random)
+  is intentional and documented. **No change.**
+
+---
+
+## 13. Interest management (Phase D)
+
+Scope selection (which entities each connection ghosts) and per-object update priority are
+data-driven and mission-agnostic. Three cooperating pieces:
+
+### 13.1 Spatial hash — `Map/SpatialHashGrid.cs`
+
+- Uniform hash over the **XZ plane**, **cell size `128f`**. Keeps aggro-radius queries (~60 u) to
+  at most ~4 cells and scope queries (400+ u) to ~49 cells versus a full map scan.
+- `QueryRadius(center, radius, buffer)` returns every tracked entity within `radius` (XZ distance).
+- Triggers, reactions, and spawn points are never bucketed. `RebucketSweep()` re-homes any entity
+  whose position drifted into a new cell — one O(N) pass per main-loop tick, so the grid is immune to
+  writers that forget `EnterMap`/`LeaveMap`.
+
+### 13.2 Tiered scope selection — `Map/InterestSelector.cs`
+
+Pure policy (unit-tested without a TNL connection). Tiers, highest priority first:
+
+| Tier | Members | Add radius | Drop radius (hysteresis) |
+|-----:|---------|-----------:|-------------------------:|
+| 0 | The scope object itself | always | always |
+| 1 | Players (characters) | always | always |
+| 2 | Mission givers | **800** (`MissionGiverAddRadius`) | **920** (`MissionGiverDropRadius`) |
+| 3 | Everything else nearby | **400** (`BaseScopeAddRadius`) | **460** (`BaseScopeDropRadius`) |
+
+- **Hysteresis:** an entity already ghosted (`isGhosted` predicate, backed by TNL's own bookkeeping) is
+  retained out to the *drop* radius; a new entity is only added inside the *add* radius. This prevents
+  scope flicker at the boundary.
+- **Soft cap / budget `ScopeSoftCap = 700`:** already-kept ghosts consume budget **before** any new
+  adds, so a nearer new NPC can never displace an already-visible one. Within each group, entities are
+  taken **nearest-first**.
+- **Town/field filter** (mirrors the retired `ObjectsInRange`): vehicles are hidden in towns,
+  characters are hidden in the field; the scope object itself always passes.
+
+### 13.3 Update priority — `TNL/Ghost/GhostObject.GetUpdatePriority`
+
+Per-object float priority the ghost manager uses to order packet space each frame:
+
+```
+if (this == scopeObject)                 -> 1.0            // self, always max
+if (viewer.Target == Parent)             -> 1.0            // current target pinned
+if (Parent == null || viewer == null)    -> updateSkips * 0.01
+else                                     -> typeWeight * falloff + updateSkips * 0.01
+```
+
+- `typeWeight`: **Character 0.5** > **mission-giver Creature 0.3** > **everything else 0.15**
+  (players update most often, then mission givers, then the rest).
+- `falloff = clamp(1 - distance / BaseScopeDropRadius(460), 0, 1)` — linear XZ-distance decay.
+- `updateSkips * 0.01` is starvation protection: an object skipped many frames climbs the queue so it
+  eventually updates regardless of distance/type.
+
+---
+
+*Last updated: 2026-07-10 — Phase D RE closure (WaitTime ms, faction, 18-bit path id, creature pose-only, flee HP-band) + interest-management section; status truthed-up to the as-built `feature/npc-ai` branch.*
