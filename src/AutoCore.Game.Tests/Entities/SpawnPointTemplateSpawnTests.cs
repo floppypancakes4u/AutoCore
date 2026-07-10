@@ -2,12 +2,14 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace AutoCore.Game.Tests.Entities;
 
+using System.Linq;
 using AutoCore.Database.World.Models;
 using AutoCore.Game.Entities;
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
 using AutoCore.Game.Structures;
+using AutoCore.Game.Tests.Inventory.Fakes;
 
 [TestClass]
 public class SpawnPointTemplateSpawnTests
@@ -16,12 +18,14 @@ public class SpawnPointTemplateSpawnTests
     public void TestInitialize()
     {
         AssetManager.Instance.ClearTestNpcData();
+        AssetManagerTestHelper.ClearRegisteredCloneBases();
     }
 
     [TestCleanup]
     public void TestCleanup()
     {
         AssetManager.Instance.ClearTestNpcData();
+        AssetManagerTestHelper.ClearRegisteredCloneBases();
     }
 
     [TestMethod]
@@ -109,6 +113,84 @@ public class SpawnPointTemplateSpawnTests
         creature.SetMap(null);
 
         Assert.IsFalse(map.NpcAiEntities.Contains(creature));
+    }
+
+    [TestMethod]
+    public void Spawn_RawVehicleWithDriverAi_RegistersVehicleInNpcAiEntities()
+    {
+        var map = CreateTestMap(9103);
+
+        const int vehicleCbid = 610_001;
+        const int driverCbid = 610_002;
+        const int aiBehaviorId = 610_003;
+
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid, defaultDriverCbid: driverCbid);
+        AssetManagerTestHelper.RegisterCreatureCloneBase(driverCbid, aiBehaviorId: aiBehaviorId, baseLevel: 5);
+        AssetManager.Instance.SetTestCreatureAiProfiles(new[]
+        {
+            new CreatureAiProfile { AiId = aiBehaviorId }
+        });
+
+        var template = new SpawnPointTemplate { COID = 14_501 };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList
+        {
+            SpawnType = vehicleCbid,
+            IsTemplate = false,
+        });
+
+        var spawnPoint = new SpawnPoint(template);
+        spawnPoint.SetCoid(14_501, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var vehicle = map.NpcAiEntities.OfType<Vehicle>().SingleOrDefault();
+        Assert.IsNotNull(vehicle, "Raw-CBID vehicle spawn with a driver AI must register in NpcAiEntities");
+        Assert.IsNotNull(vehicle.NpcAi);
+    }
+
+    [TestMethod]
+    public void Spawn_TemplateVehicleWithDriverAi_RegistersVehicleInNpcAiEntities()
+    {
+        var map = CreateTestMap(9104);
+
+        const int vehicleCbid = 620_001;
+        const int driverCbid = 620_002;
+        const int aiBehaviorId = 620_003;
+        const int templateId = 620_004;
+
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid);
+        AssetManagerTestHelper.RegisterCreatureCloneBase(driverCbid, aiBehaviorId: aiBehaviorId, baseLevel: 5);
+        AssetManager.Instance.SetTestCreatureAiProfiles(new[]
+        {
+            new CreatureAiProfile { AiId = aiBehaviorId }
+        });
+        AssetManager.Instance.SetTestVehicleTemplates(new[]
+        {
+            new VehicleTemplate
+            {
+                Id = templateId,
+                VehicleCbid = vehicleCbid,
+                DriverCbid = driverCbid,
+            }
+        });
+
+        var template = new SpawnPointTemplate { COID = 14_502 };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList
+        {
+            SpawnType = templateId,
+            IsTemplate = true,
+        });
+
+        var spawnPoint = new SpawnPoint(template);
+        spawnPoint.SetCoid(14_502, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var vehicle = map.NpcAiEntities.OfType<Vehicle>().SingleOrDefault();
+        Assert.IsNotNull(vehicle, "Template vehicle spawn with a driver AI must register in NpcAiEntities");
+        Assert.IsNotNull(vehicle.NpcAi);
     }
 
     private static SectorMap CreateTestMap(int continentId)

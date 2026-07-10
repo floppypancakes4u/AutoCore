@@ -242,8 +242,6 @@ public class SpawnPoint : ClonedObjectBase
         vehicle.Layer = Layer;
         vehicle.Position = Position;
         vehicle.Rotation = Rotation;
-        vehicle.SetMap(Map);
-        vehicle.CreateGhost();
 
         // Raw-CBID spawn lists have no VehicleTemplate row, so the driver can only come from
         // the vehicle clonebase's own VehicleSpecific.DefaultDriver.
@@ -257,6 +255,11 @@ public class SpawnPoint : ClonedObjectBase
         }
 
         ApplySpawnPath(vehicle, Template, ResolveTemplatePath());
+
+        // vehicle.NpcAi (set above via ApplyDriverAi, if any) must be assigned before SetMap so
+        // EnterMap's HasNpcAi check sees it and registers the vehicle in Map.NpcAiEntities.
+        vehicle.SetMap(Map);
+        vehicle.CreateGhost();
 
         return vehicle;
     }
@@ -283,9 +286,6 @@ public class SpawnPoint : ClonedObjectBase
         EquipTemplateItem(vehicle, VehicleEquipmentSlot.WeaponMelee, template.WeaponMeleeCbid);
         EquipTemplateItem(vehicle, VehicleEquipmentSlot.Armor, template.ArmorCbid);
 
-        vehicle.SetMap(Map);
-        vehicle.CreateGhost();
-
         var cloneBaseVehicle = vehicle.CloneBaseObject as CloneBaseVehicle;
         var defaultDriverCbid = cloneBaseVehicle?.VehicleSpecific.DefaultDriver ?? 0;
         var driver = BuildDriver(template.DriverCbid, defaultDriverCbid, spawnList.LevelOffset);
@@ -296,6 +296,11 @@ public class SpawnPoint : ClonedObjectBase
         }
 
         ApplySpawnPath(vehicle, Template, ResolveTemplatePath());
+
+        // vehicle.NpcAi (set above via ApplyDriverAi, if any) must be assigned before SetMap so
+        // EnterMap's HasNpcAi check sees it and registers the vehicle in Map.NpcAiEntities.
+        vehicle.SetMap(Map);
+        vehicle.CreateGhost();
 
         return vehicle;
     }
