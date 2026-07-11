@@ -6,6 +6,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(EnforceMissionCoverage)' == 'true'">
+    <CollectCoverage>true</CollectCoverage>
+    <CoverletOutputFormat>json</CoverletOutputFormat>
+    <CoverletOutput>TestResults/mission-coverage/coverage.json</CoverletOutput>
+    <Include>[AutoCore.Game]AutoCore.Game.Mission.*%2c[AutoCore.Game]AutoCore.Game.Structures.CharacterQuest%2c[AutoCore.Game]AutoCore.Game.Managers.MissionPersistence*%2c[AutoCore.Game]AutoCore.Game.Entities.Character.Missions</Include>
+    <Threshold>95</Threshold>
+    <ThresholdType>line</ThresholdType>
+    <ThresholdStat>total</ThresholdStat>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="MSTest.TestAdapter" Version="3.6.1" />

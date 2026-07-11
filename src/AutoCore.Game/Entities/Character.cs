@@ -238,6 +238,8 @@ public partial class Character : Creature
         {
             var cargoItems = InventoryPersistence.Instance.LoadCargo(coid);
             Inventory.LoadItems(cargoItems);
+
+            LoadMissions(context);
         }
 
         // TODO: set up stuff, fields, baseclasses, etc
@@ -301,7 +303,8 @@ public partial class Character : Creature
 
         if (packet is CreateCharacterExtendedPacket extendedCharPacket)
         {
-            extendedCharPacket.NumCompletedQuests = 0;
+            extendedCharPacket.CompletedMissionIds = CompletedMissionIds.ToList();
+            extendedCharPacket.NumCompletedQuests = extendedCharPacket.CompletedMissionIds.Count;
             extendedCharPacket.NumCurrentQuests = CurrentQuests.Count;
             extendedCharPacket.CurrentQuests = CurrentQuests;
             extendedCharPacket.NumAchievements = 0;
@@ -315,7 +318,9 @@ public partial class Character : Creature
             WriteFirstTimeFlags(extendedCharPacket);
             WriteExploration(extendedCharPacket);
 
-            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Debug, $"Character.WriteToPacket: Sending {CurrentQuests.Count} current quests");
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Debug,
+                $"Character.WriteToPacket: coid={ObjectId.Coid} sending {CurrentQuests.Count} current quests [{string.Join(",", CurrentQuests.Select(q => q.MissionId))}], "
+                + $"{extendedCharPacket.NumCompletedQuests} completed [{string.Join(",", extendedCharPacket.CompletedMissionIds)}]");
         }
     }
 

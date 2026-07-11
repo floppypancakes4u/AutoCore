@@ -6,11 +6,39 @@ using AutoCore.Database.Char.Models;
 
 public class CharContext : DbContext
 {
+    private static readonly string[] MissionCompatibilityMigrationSql =
+    {
+        """
+        INSERT IGNORE INTO `character_mission_completed` (`CharacterCoid`, `MissionId`)
+        SELECT `CharacterCoid`, `MissionId` FROM `character_completed_mission`
+        """,
+        """
+        INSERT IGNORE INTO `character_mission`
+            (`CharacterCoid`, `MissionId`, `ActiveObjectiveSequence`, `State`, `ObjectiveProgress`)
+        SELECT legacy.`CharacterCoid`, legacy.`MissionId`, legacy.`ActiveObjectiveSequence`,
+               legacy.`State`, legacy.`ObjectiveProgress`
+        FROM `character_quest` legacy
+        LEFT JOIN `character_mission_completed` completed
+          ON completed.`CharacterCoid` = legacy.`CharacterCoid`
+         AND completed.`MissionId` = legacy.`MissionId`
+        WHERE completed.`MissionId` IS NULL
+        """,
+        """
+        DELETE active
+        FROM `character_mission` active
+        INNER JOIN `character_mission_completed` completed
+          ON completed.`CharacterCoid` = active.`CharacterCoid`
+         AND completed.`MissionId` = active.`MissionId`
+        """,
+    };
+
     public static string ConnectionString { get; private set; }
 
     public DbSet<Account> Accounts { get; set; }
     public DbSet<CharacterData> Characters { get; set; }
     public DbSet<CharacterExploration> CharacterExplorations { get; set; }
+    public DbSet<CharacterQuestData> CharacterQuests { get; set; }
+    public DbSet<CharacterCompletedMissionData> CharacterCompletedMissions { get; set; }
     public DbSet<CharacterSocial> CharacterSocials { get; set; }
     public DbSet<CharacterInventoryData> CharacterInventories { get; set; }
     public DbSet<VehicleData> Vehicles { get; set; }
@@ -39,6 +67,7 @@ public class CharContext : DbContext
         context.Database.EnsureCreated();
         context.EnsureInventorySchema();
         context.EnsureCharacterEconomySchema();
+        context.EnsureMissionSchema();
     }
 
     /// <summary>
@@ -87,6 +116,35 @@ public class CharContext : DbContext
             """);
     }
 
+    /// <summary>
+    /// Adds mission-persistence tables to existing character DBs. Safe to call repeatedly.
+    /// </summary>
+    public void EnsureMissionSchema()
+    {
+        TryExecute("""
+            CREATE TABLE IF NOT EXISTS `character_mission` (
+                `CharacterCoid` BIGINT NOT NULL,
+                `MissionId` INT NOT NULL,
+                `ActiveObjectiveSequence` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+                `State` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+                `ObjectiveProgress` LONGBLOB NULL,
+                PRIMARY KEY (`CharacterCoid`, `MissionId`),
+                KEY `IX_character_mission_CharacterCoid` (`CharacterCoid`)
+            )
+            """);
+        TryExecute("""
+            CREATE TABLE IF NOT EXISTS `character_mission_completed` (
+                `CharacterCoid` BIGINT NOT NULL,
+                `MissionId` INT NOT NULL,
+                PRIMARY KEY (`CharacterCoid`, `MissionId`),
+                KEY `IX_character_mission_completed_CharacterCoid` (`CharacterCoid`)
+            )
+            """);
+
+        foreach (var sql in MissionCompatibilityMigrationSql)
+            TryExecute(sql);
+    }
+
     private void TryExecute(string sql)
     {
         try
@@ -106,6 +164,8 @@ public class CharContext : DbContext
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.Entity<CharacterExploration>().HasKey(ce => new { ce.CharacterCoid, ce.ContinentId });
+        modelBuilder.Entity<CharacterQuestData>().HasKey(cq => new { cq.CharacterCoid, cq.MissionId });
+        modelBuilder.Entity<CharacterCompletedMissionData>().HasKey(cm => new { cm.CharacterCoid, cm.MissionId });
         modelBuilder.Entity<CharacterSocial>().HasKey(cs => new { cs.CharacterCoid, cs.TargetCoid });
         modelBuilder.Entity<ClanMember>().HasKey(cm => new { cm.ClanId, cm.CharacterCoid });
         modelBuilder.Entity<CharacterInventoryData>()

@@ -24,6 +24,7 @@ public class CreateCharacterExtendedPacket : CreateCharacterPacket
 
     public int NumCompletedQuests { get; set; }
     public int NumCurrentQuests { get; set; }
+    public List<int> CompletedMissionIds { get; set; } = new();
     public List<CharacterQuest> CurrentQuests { get; set; } = new();
     public short NumAchievements { get; set; }
     public short NumDisciplines { get; set; }
@@ -146,8 +147,10 @@ public class CreateCharacterExtendedPacket : CreateCharacterPacket
 
         if (NumCompletedQuests > 0)
         {
-            // TODO: write completed quests (int id[])
-            writer.WriteZeros(4 * NumCompletedQuests);
+            // Completed-mission id array (int32[]); client inserts each into its completed hash
+            // (CVOGCharacter_ApplyCreateFromPacket @0x00535174). Drives prereq/repeatable gating.
+            for (var i = 0; i < NumCompletedQuests; ++i)
+                writer.Write(i < CompletedMissionIds.Count ? CompletedMissionIds[i] : 0);
         }
 
         if (NumAchievements > 0)

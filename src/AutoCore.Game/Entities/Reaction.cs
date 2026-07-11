@@ -727,18 +727,34 @@ public class Reaction : ClonedObjectBase
         if (character == null)
             return true;
 
+        // Return false on decline so SectorMap.TriggerReactions does NOT broadcast a GiveMission
+        // 0x206C to the client. On relog the map PerPlayerLoad trigger re-fires this reaction; if we
+        // returned true the client would re-add an already-owned/completed mission as active even
+        // though the server keeps it completed-only (create-packet state), desyncing the journal.
         if (character.CurrentQuests.Any(q => q.MissionId == missionId))
         {
             Logger.WriteLog(LogType.Debug,
-                "GiveMission: mission {0} already tracked for coid={1}",
+                "GiveMission: mission {0} already tracked for coid={1}; not re-sending",
                 missionId,
                 character.ObjectId.Coid);
-            return true;
+            return false;
+        }
+
+        // Do not re-grant a completed non-repeatable mission (mirrors NpcInteractHandler.CanOfferMission).
+        if (character.CompletedMissionIds.Contains(missionId)
+            && AssetManager.Instance.GetMission(missionId)?.IsRepeatable == 0)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "GiveMission: mission {0} already completed (non-repeatable) for coid={1}; skipping re-grant",
+                missionId,
+                character.ObjectId.Coid);
+            return false;
         }
 
         var quest = new CharacterQuest(missionId, 0);
         quest.PopulateFromAssets();
         character.CurrentQuests.Add(quest);
+        MissionPersistence.Instance.OnQuestChanged(character, quest);
         Logger.WriteLog(LogType.Debug,
             "GiveMission: tracked mission {0} on server for coid={1}",
             missionId,
@@ -778,6 +794,7 @@ public class Reaction : ClonedObjectBase
                 if (quest != null)
                 {
                     quest.ActiveObjectiveSequence = objective.Sequence;
+                    MissionPersistence.Instance.OnQuestChanged(character, quest);
                     TriggerManager.Instance.OnMissionStateChanged(character.CurrentVehicle ?? (ClonedObjectBase)character);
 
                     IncompleteHandlerLog.Warn(

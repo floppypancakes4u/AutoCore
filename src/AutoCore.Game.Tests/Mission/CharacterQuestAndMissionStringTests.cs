@@ -16,13 +16,13 @@ public class CharacterQuestAndMissionStringTests
     public void TearDown() => AssetManager.Instance.ClearTestMissions();
 
     [TestMethod]
-    public void CharacterQuest_Write_SerializesProgressSlots()
+    public void CharacterQuest_Write_SerializesVerifiedClientSavedStateLayout()
     {
+        var objective = MissionObjective.CreateForTests(5541, 1, 554, 2);
+        AssetManager.Instance.SetTestMission(Mission.CreateForTests(554, objective));
         var quest = new CharacterQuest(554, 1) { State = 0 };
-        quest.ObjectiveProgress[0] = 2;
-        quest.ObjectiveMax[0] = 3;
         quest.ObjectiveProgress[1] = 1;
-        quest.ObjectiveMax[1] = 1;
+        quest.ObjectiveMax[1] = 2;
 
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms);
@@ -32,13 +32,11 @@ public class CharacterQuestAndMissionStringTests
         ms.Position = 0;
         using var reader = new BinaryReader(ms);
         Assert.AreEqual(554, reader.ReadInt32());
-        Assert.AreEqual(1, reader.ReadByte());
-        Assert.AreEqual(0, reader.ReadByte());
-        reader.ReadInt16(); // pad
-        Assert.AreEqual(2, reader.ReadInt32());
-        Assert.AreEqual(3, reader.ReadInt32());
-        Assert.AreEqual(1, reader.ReadInt32());
-        Assert.AreEqual(1, reader.ReadInt32());
+        Assert.AreEqual(0, reader.ReadInt32());
+        for (var i = 0; i < 10; ++i)
+            Assert.AreEqual(-1, reader.ReadInt32());
+        Assert.AreEqual(5541, reader.ReadInt32());
+        Assert.AreEqual(0.5f, reader.ReadSingle());
     }
 
     [TestMethod]
@@ -136,5 +134,139 @@ public class CharacterQuestAndMissionStringTests
         Assert.IsTrue(m.Objectives.ContainsKey(0));
         Assert.AreEqual(99, m.Objectives[0].ObjectiveId);
         Assert.AreEqual("mission_50", m.Name);
+    }
+
+    [TestMethod]
+    public void Mission_CreateForTests_WithoutObjectives_ProducesUsableEmptyMission()
+    {
+        var mission = Mission.CreateForTests(77);
+
+        Assert.AreEqual(77, mission.Id);
+        Assert.AreEqual(0, mission.NumberOfObjectives);
+        Assert.IsNotNull(mission.Objectives);
+        Assert.AreEqual(0, mission.Objectives.Count);
+        Assert.AreEqual("mission_77", mission.Name);
+    }
+
+    [TestMethod]
+    public void Mission_OptionalTextMetadata_RoundTripsForJournalAndDialogConsumers()
+    {
+        var mission = new Mission
+        {
+            Title = "Title",
+            InternalName = "internal",
+            Description = "Description",
+            OnLineAccept = "Accepted",
+            OnLineReject = "Rejected",
+            NotCompleteText = "Incomplete",
+            CompleteText = "Complete",
+            FailText = "Failed",
+            CoreMission = true,
+        };
+
+        Assert.AreEqual("Title", mission.Title);
+        Assert.AreEqual("internal", mission.InternalName);
+        Assert.AreEqual("Description", mission.Description);
+        Assert.AreEqual("Accepted", mission.OnLineAccept);
+        Assert.AreEqual("Rejected", mission.OnLineReject);
+        Assert.AreEqual("Incomplete", mission.NotCompleteText);
+        Assert.AreEqual("Complete", mission.CompleteText);
+        Assert.AreEqual("Failed", mission.FailText);
+        Assert.IsTrue(mission.CoreMission);
+    }
+
+    [TestMethod]
+    public void Mission_Read_DeserializesTemplateFieldsWithoutOptionalXml()
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            writer.Write(901);
+            WriteFixedUtf16(writer, "mission_901", 65);
+            writer.Write((byte)MissionType.Deliver);
+            writer.Write((byte)0);
+            writer.Write(404); // NPC
+            writer.Write(7); // priority
+            writer.Write((short)2);
+            writer.Write((short)3);
+            writer.Write(4);
+            writer.Write(55);
+            foreach (var id in new[] { 10, 11, 12, 13 }) writer.Write(id);
+            writer.Write((short)1);
+            writer.Write((short)0);
+            foreach (var value in new[] { 1, 2, 3, 4 }) writer.Write(value);
+            foreach (var value in new[] { 5, 6, 7, 8 }) writer.Write(value);
+            foreach (var value in new[] { 1.5f, 2.5f, 3.5f, 4.5f }) writer.Write(value);
+            foreach (var value in new short[] { 1, 0, 1, 0 }) writer.Write(value);
+            foreach (var value in new[] { 9, 10, 11, 12 }) writer.Write(value);
+            writer.Write((short)1); // auto assign
+            writer.Write((short)2); // objective override
+            foreach (var value in new[] { 707, 88, 9, 10, 11, 12, 13, 14 }) writer.Write(value);
+            writer.Write((short)15); // target level
+            writer.Write((short)0);
+            foreach (var value in new[] { 16, 17, 18, 19 }) writer.Write(value);
+            writer.Write((byte)0); // NumberOfObjectives
+            writer.Write(new byte[7]);
+            writer.Write(0); // objective records
+        }
+
+        stream.Position = 0;
+        var mission = Mission.Read(new BinaryReader(stream));
+
+        Assert.AreEqual(901, mission.Id);
+        Assert.AreEqual("mission_901", mission.Name);
+        Assert.AreEqual((byte)MissionType.Deliver, mission.Type);
+        Assert.AreEqual(404, mission.NPC);
+        Assert.AreEqual(707, mission.Continent);
+        CollectionAssert.AreEqual(new[] { 10, 11, 12, 13 }, mission.ReqMissionId);
+        CollectionAssert.AreEqual(new[] { 9, 10, 11, 12 }, mission.ItemQuantity);
+        Assert.AreEqual(0, mission.Objectives.Count);
+    }
+
+    [TestMethod]
+    public void MissionObjective_ReadNew_DeserializesBinaryFieldsWhenXmlIsAbsent()
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            writer.Write(700);
+            writer.Write(701);
+            writer.Write((byte)2);
+            writer.Write((byte)0);
+            WriteFixedUtf16(writer, "objective name", 65);
+            WriteFixedUtf16(writer, "test_map", 65);
+            writer.Write((short)0);
+            writer.Write(702);
+            writer.Write(703);
+            writer.Write((byte)4);
+            writer.Write(new byte[3]);
+            foreach (var value in new[] { 5, 6, 7, 8, 9 }) writer.Write(value);
+            writer.Write((short)10);
+            writer.Write((short)11);
+            writer.Write(1.25f);
+            writer.Write(2.5f);
+            writer.Write(3.75f);
+        }
+
+        stream.Position = 0;
+        var owner = Mission.CreateForTests(700);
+        var objective = MissionObjective.ReadNew(new BinaryReader(stream), owner, null);
+
+        Assert.AreEqual(700, objective.QuestId);
+        Assert.AreEqual(701, objective.ObjectiveId);
+        Assert.AreEqual(2, objective.Sequence);
+        Assert.AreSame(owner, objective.Owner);
+        Assert.AreEqual("objective name", objective.ObjectiveName);
+        Assert.AreEqual("test_map", objective.MapName);
+        Assert.AreEqual(5, objective.XP);
+        Assert.AreEqual(3.75f, objective.CreditScaler);
+        Assert.AreEqual(0, objective.Requirements.Count);
+    }
+
+    private static void WriteFixedUtf16(BinaryWriter writer, string value, int characters)
+    {
+        var bytes = System.Text.Encoding.Unicode.GetBytes(value);
+        writer.Write(bytes);
+        writer.Write(new byte[characters * 2 - bytes.Length]);
     }
 }

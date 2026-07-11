@@ -641,7 +641,7 @@ public static class NpcInteractHandler
         }
     }
 
-    private static void GrantMission(TNLConnection conn, Character character, int missionId)
+    internal static void GrantMission(TNLConnection conn, Character character, int missionId)
     {
         if (character.CurrentQuests.Any(q => q.MissionId == missionId))
             return;
@@ -649,6 +649,7 @@ public static class NpcInteractHandler
         var quest = new CharacterQuest(missionId, 0);
         quest.PopulateFromAssets();
         character.CurrentQuests.Add(quest);
+        MissionPersistence.Instance.OnQuestChanged(character, quest);
 
         // Seed client objective state so journal can show the new objective.
         var objective = GetActiveObjective(quest);
@@ -801,6 +802,7 @@ public static class NpcInteractHandler
 
         character.CurrentQuests.Remove(quest);
         character.CompletedMissionIds.Add(missionId);
+        MissionPersistence.Instance.OnMissionCompleted(character.ObjectId.Coid, missionId);
 
         conn.SendGamePacket(new CompleteDynamicObjectivePacket
         {
@@ -1044,6 +1046,7 @@ public static class NpcInteractHandler
             quest.ActiveObjectiveSequence = nextSeq;
             if (seq < quest.ObjectiveProgress.Length)
                 quest.ObjectiveProgress[seq] = quest.ObjectiveMax[seq];
+            MissionPersistence.Instance.OnQuestChanged(character, quest);
 
             Logger.WriteLog(LogType.Debug,
                 "{0}: advanced mission={1} seq {2} -> {3} objective={4}",
@@ -1086,6 +1089,7 @@ public static class NpcInteractHandler
 
         character.CurrentQuests.Remove(quest);
         character.CompletedMissionIds.Add(quest.MissionId);
+        MissionPersistence.Instance.OnMissionCompleted(character.ObjectId.Coid, quest.MissionId);
 
         Logger.WriteLog(LogType.Debug,
             "{0}: completed mission={1} objective={2}",

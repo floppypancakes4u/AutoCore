@@ -1010,6 +1010,17 @@ public partial class TNLConnection : GhostConnection
                 $"EndCharacterSession: failed to persist world state for coid {character.ObjectId.Coid}: {ex.Message}");
         }
 
+        // Drain any pending mission writes so a fast logout cannot outrun the background flush.
+        try
+        {
+            MissionPersistence.Instance.FlushPending();
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                $"EndCharacterSession: failed to flush mission state for coid {character.ObjectId.Coid}: {ex.Message}");
+        }
+
         // SS-04: drop ownership before teardown so chat/send paths cannot use a dead connection.
         character.SetOwningConnection(null);
         character.SetMap(null);

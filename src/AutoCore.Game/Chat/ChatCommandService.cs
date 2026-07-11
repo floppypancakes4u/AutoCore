@@ -1,7 +1,9 @@
+using System.Text;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Inventory;
+using AutoCore.Game.Managers;
 using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Sector;
 
@@ -54,6 +56,14 @@ public sealed class ChatCommandService
             case "/sector.tick":
                 return SectorTick(parts);
 
+            case "/showMissions":
+            case "/showmissions":
+                return ShowMissions(character);
+
+            case "/clearAllMissions":
+            case "/clearallmissions":
+                return ClearAllMissions(character);
+
             default:
                 return new ChatCommandExecutionResult(false, string.Empty);
         }
@@ -81,6 +91,66 @@ public sealed class ChatCommandService
             return new ChatCommandExecutionResult(true, message);
 
         return new ChatCommandExecutionResult(true, message);
+    }
+
+    /// <summary>
+    /// Report this character's server-side mission state: completed mission ids and active quests
+    /// (with active objective sequence + progress). Diagnostic for mission persistence.
+    /// </summary>
+    private static ChatCommandExecutionResult ShowMissions(Character character)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        var completed = character.CompletedMissionIds.OrderBy(x => x).ToList();
+
+        var sb = new StringBuilder();
+        sb.Append($"Completed ({completed.Count}): ");
+        sb.Append(completed.Count == 0 ? "none" : string.Join(", ", completed));
+
+        sb.Append($" | Active ({character.CurrentQuests.Count}): ");
+        if (character.CurrentQuests.Count == 0)
+        {
+            sb.Append("none");
+        }
+        else
+        {
+            sb.Append(string.Join("; ", character.CurrentQuests.Select(q =>
+            {
+                var progress = q.ObjectiveProgress != null && q.ActiveObjectiveSequence < q.ObjectiveProgress.Length
+                    ? q.ObjectiveProgress[q.ActiveObjectiveSequence]
+                    : 0;
+                var max = q.ObjectiveMax != null && q.ActiveObjectiveSequence < q.ObjectiveMax.Length
+                    ? q.ObjectiveMax[q.ActiveObjectiveSequence]
+                    : 0;
+                return $"mission {q.MissionId} (seq {q.ActiveObjectiveSequence}, {progress}/{max})";
+            })));
+        }
+
+        return new ChatCommandExecutionResult(true, sb.ToString());
+    }
+
+    /// <summary>
+    /// Wipe this character's mission state (active + completed) from memory AND the char DB.
+    /// The client keeps its current journal until the next relog, when the (now empty) create
+    /// packet resets it. Diagnostic / test reset for mission persistence.
+    /// </summary>
+    private static ChatCommandExecutionResult ClearAllMissions(Character character)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        var coid = character.ObjectId.Coid;
+        var activeCount = character.CurrentQuests.Count;
+        var completedCount = character.CompletedMissionIds.Count;
+
+        character.CurrentQuests.Clear();
+        character.CompletedMissionIds.Clear();
+        MissionPersistence.Instance.DeleteAllForCharacter(coid);
+
+        return new ChatCommandExecutionResult(
+            true,
+            $"Cleared {activeCount} active and {completedCount} completed mission(s) for coid {coid} (memory + DB). Relog to reset the client journal.");
     }
 
     private static ChatCommandExecutionResult SetCargo(Character character, string[] parts)

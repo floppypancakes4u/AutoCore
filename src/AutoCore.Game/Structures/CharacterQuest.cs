@@ -7,12 +7,11 @@ using AutoCore.Game.Mission;
 /// Represents a player's current quest/mission state.
 /// The client expects 72 bytes per quest in CreateCharacterExtendedPacket.
 ///
-/// Structure (72 bytes total) - Partially reverse-engineered:
-/// - Offset 0:  Mission ID (4 bytes, int)
-/// - Offset 4:  Active Objective Sequence (1 byte)
-/// - Offset 5:  State/Flags (1 byte)
-/// - Offset 6:  Padding (2 bytes)
-/// - Offset 8:  Objective progress data (64 bytes - 8 objectives x 8 bytes each)
+/// Structure (72 bytes total), verified against CVOGCharacter_ApplyCreateFromPacket:
+/// - +0x00 mission id; +0x04 reserved
+/// - +0x08 ten mission saved-state dwords
+/// - +0x30 global active objective id
+/// - +0x34 four objective saved-state floats; +0x44 reserved
 /// </summary>
 public class CharacterQuest
 {
@@ -43,17 +42,45 @@ public class CharacterQuest
     public void Write(BinaryWriter writer)
     {
         writer.Write(MissionId);
-        writer.Write(ActiveObjectiveSequence);
-        writer.Write(State);
-        writer.Write((short)0);
+        writer.Write(0); // +0x04 reserved/ignored by the client parser
 
-        for (int i = 0; i < MaxObjectives; i++)
+        // CVOGCharacter_ApplyCreateFromPacket copies these ten dwords into the mission's
+        // 0x30-byte saved-state object. A newly granted mission initializes them to -1.
+        for (var i = 0; i < 10; ++i)
+            writer.Write(-1);
+
+        var mission = AssetManager.Instance.GetMission(MissionId);
+        var objective = mission != null
+            && mission.Objectives.TryGetValue(ActiveObjectiveSequence, out var activeObjective)
+                ? activeObjective
+                : null;
+
+        writer.Write(objective?.ObjectiveId ?? -1); // +0x30
+
+        var slots = new float[4];
+        if (objective != null)
         {
-            var progress = i < ObjectiveProgress.Length ? ObjectiveProgress[i] : 0;
-            var max = i < ObjectiveMax.Length ? ObjectiveMax[i] : 1;
-            writer.Write(progress);
-            writer.Write(max);
+            var progress = ActiveObjectiveSequence < ObjectiveProgress.Length
+                ? ObjectiveProgress[ActiveObjectiveSequence]
+                : 0;
+            var maximum = ActiveObjectiveSequence < ObjectiveMax.Length
+                ? Math.Max(1, ObjectiveMax[ActiveObjectiveSequence])
+                : 1;
+            var normalized = Math.Clamp((float)progress / maximum, 0.0f, 1.0f);
+            var authoredSlots = objective.Requirements
+                .Select(requirement => (int)requirement.FirstStateSlot)
+                .Where(slot => slot < slots.Length)
+                .Distinct()
+                .ToList();
+            if (authoredSlots.Count == 0)
+                authoredSlots.Add(0);
+            foreach (var slot in authoredSlots)
+                slots[slot] = normalized;
         }
+
+        foreach (var slot in slots)
+            writer.Write(slot);
+        writer.Write(0); // +0x44 reserved/ignored by the client parser
     }
 
     /// <summary>Size progress arrays from mission template assets.</summary>

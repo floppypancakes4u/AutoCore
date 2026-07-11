@@ -81,6 +81,7 @@ public static class MissionKillProgress
                     ObjectiveBitmask = 0u,
                     ObjectiveId = objective.ObjectiveId,
                 });
+                MissionPersistence.Instance.OnQuestChanged(killer, quest);
                 NpcInteractHandler.PushJournalMissionList(conn, killer);
                 TriggerManager.Instance.OnMissionStateChanged(
                     killer.CurrentVehicle ?? (ClonedObjectBase)killer);
