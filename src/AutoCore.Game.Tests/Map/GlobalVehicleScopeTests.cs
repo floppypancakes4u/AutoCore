@@ -161,6 +161,8 @@ public class GlobalVehicleScopeTests
         // Create, then hold queries, then ghost.
         map.PerformScopeQuery(null, self, connection);
         Assert.AreEqual(1, packets.OfType<CreateVehiclePacket>().Count(), "first scope sends the create");
+        Assert.IsFalse(packets.OfType<CreateVehiclePacket>().Single().IsItemLink,
+            "IsItemLink stays off by default — live re-scope IsItemLink caused Red Brigade tooltips");
         Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef(), "ghost deferred on create query");
 
         map.PerformScopeQuery(null, self, connection);
@@ -181,6 +183,8 @@ public class GlobalVehicleScopeTests
         map.PerformScopeQuery(null, self, connection);
         Assert.AreEqual(2, packets.OfType<CreateVehiclePacket>().Count(),
             "re-scope after ghost detach must re-send CreateVehicle so nest equip cannot be ghost-blob-only");
+        Assert.IsFalse(packets.OfType<CreateVehiclePacket>().Last().IsItemLink,
+            "re-scope must not set IsItemLink (tooltip regression); WheelSetMask delta recovers nest");
         Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef(), "ghost held again after re-create");
 
         map.PerformScopeQuery(null, self, connection);

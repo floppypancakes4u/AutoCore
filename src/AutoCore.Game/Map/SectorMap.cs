@@ -412,6 +412,8 @@ public class SectorMap
                 && !gameConnection.HasActiveForeignCreateHold(coid))
             {
                 // First sighting or re-scope after detach: ensure sector create before ghost.
+                // Do NOT set IsItemLink here — client packet+0xA1 drives item-link UI (Red Brigade
+                // tooltips on live). Nest recovery after a ghost race uses WheelSetMask delta instead.
                 var createPacket = new CreateVehiclePacket();
                 ((Vehicle)entity).WriteToPacket(createPacket);
                 if (TNL.TNLConnection.ForceForeignCreateReapply)
@@ -432,9 +434,24 @@ public class SectorMap
                 && !gameConnection.TryAllowForeignVehicleGhostScope(coid))
                 continue;
 
+            // First ObjectInScope after create hold: re-dirty wheel so the first ghost delta can
+            // PackHardpoint/SetWheelset if CreateVehicle equip lost a race to the zero nest blob.
+            var releasingCreateHold = foreignGlobalVehicle
+                && gameConnection != null
+                && gameConnection.HasActiveForeignCreateHold(coid);
+
             connection.ObjectInScope(ghost);
             if (foreignGlobalVehicle && gameConnection != null)
+            {
                 gameConnection.ClearForeignVehicleCreateHold(coid);
+                if (releasingCreateHold
+                    && entity is Vehicle scopedVeh
+                    && scopedVeh.WheelSet != null
+                    && scopedVeh.WheelSet.CBID > 0)
+                {
+                    ghost.SetMaskBits(GhostVehicle.WheelSetMask);
+                }
+            }
         }
     }
 
