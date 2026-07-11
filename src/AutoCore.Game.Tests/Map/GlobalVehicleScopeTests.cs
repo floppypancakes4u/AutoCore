@@ -176,13 +176,61 @@ public class GlobalVehicleScopeTests
         Assert.IsFalse(npcVehicle.Ghost.IsGhostedTo(connection),
             "detaching must drop the ghost so the re-scope path is exercised");
 
-        // Player returns into scope: the ghost re-registers, but the create must NOT be re-sent —
-        // the client still holds the object from the first create (duplicate-create regression).
+        // Player returns into scope: client may have dropped the vehicle; re-send CreateVehicle
+        // (FUN_00812630 no-ops if TFID still present, full create if missing) then hold, then ghost.
         map.PerformScopeQuery(null, self, connection);
+        Assert.AreEqual(2, packets.OfType<CreateVehiclePacket>().Count(),
+            "re-scope after ghost detach must re-send CreateVehicle so nest equip cannot be ghost-blob-only");
+        Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef(), "ghost held again after re-create");
 
-        Assert.AreEqual(1, packets.OfType<CreateVehiclePacket>().Count(),
-            "a drop/re-add scope cycle must not deliver a duplicate CreateVehicle for an object the client still holds");
-        Assert.IsNotNull(npcVehicle.Ghost.GetFirstObjectRef(), "ghost must be re-scoped after re-entry");
+        map.PerformScopeQuery(null, self, connection);
+        Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef());
+
+        map.PerformScopeQuery(null, self, connection);
+        Assert.IsNotNull(npcVehicle.Ghost.GetFirstObjectRef(), "ghost re-scoped after hold");
+        Assert.AreEqual(2, packets.OfType<CreateVehiclePacket>().Count(), "no third create while still ghosted");
+    }
+
+    [TestMethod]
+    public void PerformScopeQuery_StaleCreateHoldWithoutGhost_ResendsCreate()
+    {
+        // Live Path A: leave range mid-hold leaves HasActive hold stuck; re-entry skipped CreateVehicle
+        // and ObjectInScope'd from the ghost zero nest (wheel_cbid=0). Hold must expire if never cleared.
+        const int vehicleCbid = 650_012;
+        const long vehicleCoid = MapNpcIdentity.CoidBase + 18_151;
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid);
+
+        var map = CreateFieldMap();
+        var npcVehicle = new Vehicle { Position = new Vector3(25f, 0f, 0f) };
+        npcVehicle.SetCoid(vehicleCoid, true);
+        npcVehicle.LoadCloneBase(vehicleCbid);
+        npcVehicle.SetupCBFields();
+        npcVehicle.SetMap(map);
+        npcVehicle.CreateGhost();
+
+        var self = new Character { Position = new Vector3(0f, 0f, 0f) };
+        self.SetCurrentVehicleForTests(new Vehicle { Position = self.Position });
+        var connection = new TNLConnection();
+        connection.SetGhostFrom(true);
+        connection.ActivateGhosting();
+        var packets = new List<BasePacket>();
+        TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);
+
+        // Create starts the hold; do not finish hold queries / ObjectInScope (player left range).
+        map.PerformScopeQuery(null, self, connection);
+        Assert.AreEqual(1, packets.OfType<CreateVehiclePacket>().Count());
+        Assert.IsTrue(connection.HasActiveForeignCreateHold(vehicleCoid));
+        Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef());
+
+        // Age the hold past HoldMs + stale grace without ever ObjectInScope.
+        connection.DebugAgeForeignCreateHoldForTests(vehicleCoid, ageMs: 10_000);
+        Assert.IsFalse(connection.HasActiveForeignCreateHold(vehicleCoid),
+            "hold that never reached ObjectInScope must expire so re-entry can re-create");
+
+        map.PerformScopeQuery(null, self, connection);
+        Assert.AreEqual(2, packets.OfType<CreateVehiclePacket>().Count(),
+            "re-entry after stale mid-hold must re-send CreateVehicle before ghost");
+        Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef(), "new hold defers ghost again");
     }
 
     [TestMethod]

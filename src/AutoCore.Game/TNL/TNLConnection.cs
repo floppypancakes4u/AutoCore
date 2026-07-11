@@ -31,10 +31,11 @@ public partial class TNLConnection : GhostConnection
     private ushort FragmentCounter { get; set; } = 1;
 
     /// <summary>
-    /// Foreign global vehicles for which an in-world <c>CreateVehicle</c> has already been sent
-    /// this map session, plus ghost-hold progress. Create is once-per-coid per session (duplicate
-    /// create after ghost-kill without DestroyObject → Invalid Packet). Cleared on
-    /// <see cref="ResetGhosting"/> / map transfer.
+    /// Active foreign CreateVehicle → ObjectInScope holds for this connection. Keyed by vehicle coid.
+    /// Create is re-sent whenever a foreign global vehicle is not currently ghosted (first sighting
+    /// or re-scope after TNL detach). Client FUN_008078b0 processes ghost object-create before game
+    /// packets; ghost create uses a zeroed wheel nest, so ObjectInScope must wait until CreateVehicle
+    /// has been held long enough to land. Cleared on <see cref="ResetGhosting"/> / map transfer.
     /// </summary>
     private readonly Dictionary<long, ForeignVehicleCreateHold> _globalVehicleCreates = new();
 
@@ -48,9 +49,17 @@ public partial class TNLConnection : GhostConnection
     public static int ForeignGhostScopeHoldMilliseconds { get; set; } = 500;
 
     /// <summary>
+    /// Extra ms beyond <see cref="ForeignGhostScopeHoldMilliseconds"/> after which a create hold that
+    /// never reached ObjectInScope is dropped. Leaving range mid-hold used to leave the hold stuck so
+    /// re-entry skipped CreateVehicle and ghosted from a zero nest.
+    /// </summary>
+    public static int ForeignCreateHoldStaleGraceMilliseconds { get; set; } = 1500;
+
+    /// <summary>
     /// When true, foreign CreateVehicle sets <see cref="Packets.Sector.CreateSimpleObjectPacket.IsItemLink"/>
     /// so client packet+0xA1 is non-zero and FUN_00812630 re-applies create if the object already exists
-    /// from a ghost blob. Default false — multi-hold is preferred; re-apply runs inventory/UI side paths.
+    /// from a ghost blob. Default false — multi-hold is preferred; re-apply can touch inventory/UI paths
+    /// (e.g. item-link tooltips).
     /// </summary>
     public static bool ForceForeignCreateReapply { get; set; }
 
@@ -83,33 +92,68 @@ public partial class TNLConnection : GhostConnection
     private SFragmentData FragmentGuaranteedOrdered { get; } = new();
 
     /// <summary>
-    /// Records that a foreign global-vehicle <c>CreateVehicle</c> is being sent for <paramref name="coid"/>
-    /// this map session. Returns <c>true</c> the first time (caller should send the create), <c>false</c>
-    /// on repeat scopes so the create is never duplicated for an object the client still holds.
+    /// True while a create→ghost hold is open for <paramref name="coid"/> (create sent, ObjectInScope
+    /// not yet released). SectorMap uses this to avoid re-sending CreateVehicle every hold tick.
+    /// Stale holds (never ObjectInScope'd) expire so leave/re-enter mid-hold re-creates.
     /// </summary>
-    public bool TryMarkGlobalVehicleCreateSent(long coid)
+    public bool HasActiveForeignCreateHold(long coid)
     {
-        if (_globalVehicleCreates.ContainsKey(coid))
+        if (!_globalVehicleCreates.TryGetValue(coid, out var hold))
             return false;
 
+        if (IsForeignCreateHoldStale(hold))
+        {
+            _globalVehicleCreates.Remove(coid);
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Starts (or restarts) the create→ghost hold after a foreign <c>CreateVehicle</c> is sent.
+    /// </summary>
+    public void NoteForeignVehicleCreateSent(long coid)
+    {
         _globalVehicleCreates[coid] = new ForeignVehicleCreateHold
         {
             CreatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             ScopeQueriesSinceCreate = 0,
         };
+    }
+
+    /// <summary>
+    /// Legacy once-per-session mark used by older scope paths. Prefer
+    /// <see cref="NoteForeignVehicleCreateSent"/> + <see cref="HasActiveForeignCreateHold"/> for re-scope.
+    /// Returns <c>true</c> only the first time a hold is opened for <paramref name="coid"/>.
+    /// </summary>
+    public bool TryMarkGlobalVehicleCreateSent(long coid)
+    {
+        if (HasActiveForeignCreateHold(coid))
+            return false;
+
+        NoteForeignVehicleCreateSent(coid);
         return true;
     }
 
     /// <summary>
     /// Whether foreign <paramref name="coid"/> may ObjectInScope yet. Call once per scope query after
-    /// create has been marked. Requires <see cref="ForeignGhostScopeHoldQueries"/> further queries
+    /// create has been noted. Requires <see cref="ForeignGhostScopeHoldQueries"/> further queries
     /// and <see cref="ForeignGhostScopeHoldMilliseconds"/> wall time since create.
-    /// Unknown coids (create lever off) are allowed immediately.
+    /// Unknown coids (create lever off / never held) are allowed immediately.
+    /// Stale mid-hold entries are dropped (same rule as <see cref="HasActiveForeignCreateHold"/>).
     /// </summary>
     public bool TryAllowForeignVehicleGhostScope(long coid)
     {
         if (!_globalVehicleCreates.TryGetValue(coid, out var hold))
             return true;
+
+        if (IsForeignCreateHoldStale(hold))
+        {
+            _globalVehicleCreates.Remove(coid);
+            // Stale: never ghosted after create. Caller should re-create before ObjectInScope.
+            return false;
+        }
 
         hold.ScopeQueriesSinceCreate++;
         var holdQueries = Math.Max(0, ForeignGhostScopeHoldQueries);
@@ -125,18 +169,46 @@ public partial class TNLConnection : GhostConnection
     }
 
     /// <summary>
-    /// Forgets which foreign global-vehicle creates were sent. Called when the client discards its
-    /// local object table on a map transfer (see <see cref="EnsureGhostsAndScopeAfterMapTransfer"/>),
-    /// so the next map session legitimately re-sends creates.
+    /// Ends the create→ghost hold after ObjectInScope succeeds so a later detach can re-create.
+    /// </summary>
+    public void ClearForeignVehicleCreateHold(long coid) => _globalVehicleCreates.Remove(coid);
+
+    /// <summary>
+    /// Forgets all foreign create holds. Called when the client discards its local object table on
+    /// a map transfer (see <see cref="EnsureGhostsAndScopeAfterMapTransfer"/>).
     /// </summary>
     internal void ClearGlobalVehicleCreateTracking() => _globalVehicleCreates.Clear();
+
+    /// <summary>Test helper: age an open hold without sleeping the suite.</summary>
+    internal void DebugAgeForeignCreateHoldForTests(long coid, long ageMs)
+    {
+        if (!_globalVehicleCreates.TryGetValue(coid, out var hold))
+            return;
+
+        hold.CreatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - Math.Max(0, ageMs);
+    }
 
     /// <summary>Test helper: reset static hold knobs after experiments.</summary>
     internal static void ResetForeignGhostHoldDefaultsForTests()
     {
         ForeignGhostScopeHoldQueries = 2;
         ForeignGhostScopeHoldMilliseconds = 500;
+        ForeignCreateHoldStaleGraceMilliseconds = 1500;
         ForceForeignCreateReapply = false;
+    }
+
+    private static bool IsForeignCreateHoldStale(ForeignVehicleCreateHold hold)
+    {
+        var holdMs = Math.Max(0, ForeignGhostScopeHoldMilliseconds);
+        var graceMs = Math.Max(0, ForeignCreateHoldStaleGraceMilliseconds);
+        // When both knobs are 0 (common in unit tests), never treat as stale by wall clock —
+        // tests drive hold completion via query count only.
+        if (holdMs == 0 && graceMs == 0)
+            return false;
+
+        var staleAfterMs = holdMs + graceMs;
+        var elapsed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - hold.CreatedAtUnixMs;
+        return elapsed > staleAfterMs;
     }
 
     public new static void RegisterNetClassReps()
@@ -231,7 +303,6 @@ public partial class TNLConnection : GhostConnection
                 objectCoid = cv.ObjectId?.Coid ?? 0;
                 detail = WireDiag.FormatCreateVehicleDetail(cv);
                 var wireWheelCbid = WireDiag.ExtractNestedWheelCbidFromWire(arr);
-                // Always surface wheelset health on the Network channel for null-wheels hunts.
                 Logger.WriteLog(LogType.Network,
                     "CreateVehicle wire coid={0} bytes={1} {2} wireScanWheelCbid={3}",
                     objectCoid, arr.Length, detail, wireWheelCbid);
