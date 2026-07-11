@@ -1,4 +1,5 @@
 using AutoCore.Game.Constants;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Packets;
@@ -48,9 +49,38 @@ public sealed class ChatCommandService
             case "/cargoInfo":
                 return CargoInfo(character);
 
+            case "/sectorTick":
+            case "/sectortick":
+            case "/sector.tick":
+                return SectorTick(parts);
+
             default:
                 return new ChatCommandExecutionResult(false, string.Empty);
         }
+    }
+
+    /// <summary>
+    /// Live-tune sector main loop period (ms). Usage: <c>/sectorTick 100</c> or <c>/sectorTick</c> to query.
+    /// </summary>
+    private static ChatCommandExecutionResult SectorTick(string[] parts)
+    {
+        if (parts.Length < 2)
+        {
+            var current = SectorLoopControl.CurrentMilliseconds;
+            return new ChatCommandExecutionResult(
+                true,
+                current.HasValue
+                    ? $"Sector tick is {current.Value}ms. Usage: /sectorTick <ms>  (e.g. /sectorTick 50, /sectorTick 10)"
+                    : "Sector loop control is not available (sector server not running).");
+        }
+
+        if (!int.TryParse(parts[1], out var ms))
+            return new ChatCommandExecutionResult(true, "Usage: /sectorTick <ms>  (integer 1-5000)");
+
+        if (!SectorLoopControl.TrySet(ms, out var message))
+            return new ChatCommandExecutionResult(true, message);
+
+        return new ChatCommandExecutionResult(true, message);
     }
 
     private static ChatCommandExecutionResult SetCargo(Character character, string[] parts)

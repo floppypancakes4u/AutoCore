@@ -1,6 +1,7 @@
 ﻿namespace AutoCore.Sector.Network;
 
 using AutoCore.Game.Constants;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Managers;
 using AutoCore.Game.TNL;
 using AutoCore.Sector.Dev;
@@ -49,7 +50,26 @@ public partial class SectorServer : BaseServer, ILoopable
         Logger.WriteLog(LogType.Initialize, "Initializing the network...");
         PublicAddress = IPAddress.Parse(Config.GameConfig.PublicAddress);
 
+        RegisterSectorLoopControl();
+
         Logger.WriteLog(LogType.Initialize, "The Sector server has been setup!");
+    }
+
+    /// <summary>Exposes live main-loop period to chat/console via <see cref="SectorLoopControl"/>.</summary>
+    private void RegisterSectorLoopControl()
+    {
+        SectorLoopControl.GetLoopMilliseconds = () => Loop?.LoopTime;
+        SectorLoopControl.TrySetLoopMilliseconds = ms =>
+        {
+            if (Loop == null)
+                return "Sector main loop is not running.";
+
+            var before = Loop.LoopTime;
+            Loop.LoopTime = ms;
+            var after = Loop.LoopTime;
+            Logger.WriteLog(LogType.Command, "Sector main loop period {0}ms → {1}ms (requested {2}ms)", before, after, ms);
+            return $"Sector tick set to {after}ms (requested {ms}ms; clamp {Utils.Threading.MainLoop.MinLoopTimeMs}-{Utils.Threading.MainLoop.MaxLoopTimeMs}).";
+        };
     }
 
     public void MainLoop(long delta)

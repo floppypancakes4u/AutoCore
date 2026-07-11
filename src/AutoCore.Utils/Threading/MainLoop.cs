@@ -4,7 +4,18 @@ using AutoCore.Utils;
 
 public class MainLoop
 {
-    public int LoopTime { get; }
+    /// <summary>Target tick period in ms. Mutable for live tuning (e.g. /sectorTick).</summary>
+    public int LoopTime
+    {
+        get => Volatile.Read(ref _loopTime);
+        set => Volatile.Write(ref _loopTime, Math.Clamp(value, MinLoopTimeMs, MaxLoopTimeMs));
+    }
+
+    public const int MinLoopTimeMs = 1;
+    public const int MaxLoopTimeMs = 5000;
+
+    private int _loopTime;
+
     public bool Running { get; private set; }
     public ILoopable Object { get; }
     public Thread LoopThread { get; private set; }
@@ -17,7 +28,7 @@ public class MainLoop
     public MainLoop(ILoopable obj, int loopTime)
     {
         Object = obj;
-        LoopTime = loopTime;
+        _loopTime = Math.Clamp(loopTime, MinLoopTimeMs, MaxLoopTimeMs);
     }
 
     public void Start()
@@ -67,14 +78,19 @@ public class MainLoop
 
             prevTime = realTime;
 
-            if (delta <= LoopTime + prevSleepTime)
+            // Floor sleep with LoopTime so short ticks (e.g. 10ms) are not forced to 10ms+ overhead
+            // when LoopTime itself is small; never sleep less than 1ms.
+            var loopTime = LoopTime;
+            var minSleep = Math.Max(1, Math.Min(10, loopTime));
+
+            if (delta <= loopTime + prevSleepTime)
             {
-                prevSleepTime = LoopTime + prevSleepTime - (int)delta;
-                if (prevSleepTime < 10)
-                    prevSleepTime = 10;
+                prevSleepTime = loopTime + prevSleepTime - (int)delta;
+                if (prevSleepTime < minSleep)
+                    prevSleepTime = minSleep;
             }
             else
-                prevSleepTime = 10;
+                prevSleepTime = minSleep;
 
             Thread.Sleep(prevSleepTime);
         }

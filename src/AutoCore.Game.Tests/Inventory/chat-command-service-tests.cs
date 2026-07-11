@@ -1,5 +1,6 @@
 using AutoCore.Game.Chat;
 using AutoCore.Game.Constants;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Packets.Sector;
@@ -12,7 +13,12 @@ namespace AutoCore.Game.Tests.Inventory;
 public class ChatCommandServiceTests
 {
     [TestCleanup]
-    public void Cleanup() => AssetManagerTestHelper.ClearRegisteredCloneBases();
+    public void Cleanup()
+    {
+        AssetManagerTestHelper.ClearRegisteredCloneBases();
+        SectorLoopControl.GetLoopMilliseconds = null;
+        SectorLoopControl.TrySetLoopMilliseconds = null;
+    }
 
     [TestMethod]
     public void Execute_UnknownCommand_IsNotHandled()
@@ -20,6 +26,35 @@ public class ChatCommandServiceTests
         var result = ChatCommandService.Instance.Execute(null, "/unknown");
 
         Assert.IsFalse(result.Handled);
+    }
+
+    [TestMethod]
+    public void SectorTick_Query_WhenUnregistered_ExplainsUnavailable()
+    {
+        var result = ChatCommandService.Instance.Execute(null, "/sectorTick");
+        Assert.IsTrue(result.Handled);
+        StringAssert.Contains(result.Message, "not available");
+    }
+
+    [TestMethod]
+    public void SectorTick_Set_UsesRegisteredControl()
+    {
+        var stored = 100;
+        SectorLoopControl.GetLoopMilliseconds = () => stored;
+        SectorLoopControl.TrySetLoopMilliseconds = ms =>
+        {
+            stored = Math.Clamp(ms, 1, 5000);
+            return $"Sector tick set to {stored}ms (requested {ms}ms; clamp 1-5000).";
+        };
+
+        var query = ChatCommandService.Instance.Execute(null, "/sectorTick");
+        Assert.IsTrue(query.Handled);
+        StringAssert.Contains(query.Message, "100ms");
+
+        var set = ChatCommandService.Instance.Execute(null, "/sectorTick 25");
+        Assert.IsTrue(set.Handled);
+        Assert.AreEqual(25, stored);
+        StringAssert.Contains(set.Message, "25ms");
     }
 
     [TestMethod]

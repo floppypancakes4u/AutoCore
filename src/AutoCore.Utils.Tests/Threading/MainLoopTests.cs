@@ -63,6 +63,20 @@ public class MainLoopTests
     }
 
     [TestMethod]
+    public void LoopTime_Set_ClampsAndIsReadable()
+    {
+        var mainLoop = new MainLoop(new CallbackLoopable(_ => { }), loopTime: 100);
+        mainLoop.LoopTime = 50;
+        Assert.AreEqual(50, mainLoop.LoopTime);
+
+        mainLoop.LoopTime = 0;
+        Assert.AreEqual(MainLoop.MinLoopTimeMs, mainLoop.LoopTime);
+
+        mainLoop.LoopTime = 99999;
+        Assert.AreEqual(MainLoop.MaxLoopTimeMs, mainLoop.LoopTime);
+    }
+
+    [TestMethod]
     public void Start_WhenAlreadyRunning_Throws()
     {
         var callCount = 0;

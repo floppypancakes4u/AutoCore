@@ -83,6 +83,8 @@ These are **not** fixed by P2; they need later delta expansion or new wire work:
 
 **M3 (pipeline — why M1/M2 alone looked unchanged):** Sector loop ran `Pulse()` **before** `TickNpcs`, so pose dirties missed the same 100ms tick. After a pose pack, `PositionMask` cleared until the next move. Fix: **Tick NPCs before Pulse**, and while velocity/angular speed is non-zero **keep `PositionMask` dirty** so TNL re-sends pose on every write.
 
+**Live tick tuning:** in-game chat `/sectorTick` (query) or `/sectorTick 50` (set ms, clamp 1–5000). Console: `sector.tick 50`. Default remains **100ms**. Use this to A/B whether loop rate is the motion bottleneck.
+
 ### Historical live result 2026-07-11 morning (owner + pose, no defer)
 
 | Time | Event |
