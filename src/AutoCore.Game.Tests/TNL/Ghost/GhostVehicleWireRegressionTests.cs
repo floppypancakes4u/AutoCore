@@ -961,6 +961,31 @@ public class GhostVehicleWireRegressionTests
     }
 
     [TestMethod]
+    public void PackDelta_MovingVehicle_KeepsPositionMaskDirtyForStream()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_190);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_190, true);
+        vehicle.ApplyServerMove(new Vector3(0, 0, 0), Quaternion.Default, new Vector3(12f, 0, 0));
+
+        NetObject.PIsInitialUpdate = false;
+        try
+        {
+            var stream = new BitStream(new byte[8192], 8192);
+            var ret = vehicle.Ghost.PackUpdate(null, GhostObject.PositionMask, stream);
+            Assert.AreNotEqual(0UL, ret & GhostObject.PositionMask,
+                "Moving vehicle must keep PositionMask dirty so pose streams every TNL write.");
+        }
+        finally
+        {
+            NetObject.PIsInitialUpdate = false;
+        }
+
+        Assert.IsTrue(GhostVehicle.IsMovingForPoseStream(vehicle));
+        vehicle.ApplyServerMove(new Vector3(0, 0, 0), Quaternion.Default, new Vector3(0, 0, 0));
+        Assert.IsFalse(GhostVehicle.IsMovingForPoseStream(vehicle));
+    }
+
+    [TestMethod]
     public void PackDelta_ForeignMinimal_DeferredPose_AdmitsPositionAfterInitial()
     {
         var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_182);

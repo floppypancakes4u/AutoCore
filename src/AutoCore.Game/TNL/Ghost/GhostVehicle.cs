@@ -510,7 +510,25 @@ public class GhostVehicle : GhostObject
             ret |= PositionMask;
         }
 
+        // Streaming pose: while the vehicle is moving, leave PositionMask dirty so the next TNL
+        // write resends pose even if no new ApplyServerMove lands (smooths 100ms sector ticks).
+        if (!isInitial && IsMovingForPoseStream(parentVehicle))
+            ret |= PositionMask;
+
         return ret;
+    }
+
+    /// <summary>True when linear or angular speed warrants continuous pose streaming.</summary>
+    internal static bool IsMovingForPoseStream(Vehicle vehicle)
+    {
+        if (vehicle == null)
+            return false;
+
+        const float eps = 0.05f;
+        var v = vehicle.Velocity;
+        var w = vehicle.AngularVelocity;
+        return (v.X * v.X) + (v.Y * v.Y) + (v.Z * v.Z) > eps * eps
+            || (w.X * w.X) + (w.Y * w.Y) + (w.Z * w.Z) > eps * eps;
     }
 
     /// <summary>

@@ -68,6 +68,11 @@ public partial class SectorServer : BaseServer, ILoopable
             // scope queries run inside Pulse(), so interest management sees current positions.
             MapManager.Instance.RebucketAllGrids();
 
+            // NPC AI before Pulse so ApplyServerMove dirties PositionMask on the same tick that
+            // CollapseDirtyList + ghost WritePacket run. Previously TickNpcs ran after Pulse, so
+            // pose dirties waited a full MainLoopTime (100ms) and often looked like sparse snaps.
+            MapManager.Instance.TickNpcs(Environment.TickCount64, delta / 1000f);
+
             Interface.Pulse();
 
             // Server-side combat tick: decouple firing from VehicleMoved packet arrival rate.
@@ -81,10 +86,6 @@ public partial class SectorServer : BaseServer, ILoopable
                 combatEntries.Add((coid, () => conn?.CurrentCharacter?.CurrentVehicle?.ProcessCombatIfFiring()));
             }
             SectorCombatTick.ProcessAll(combatEntries);
-
-            // Server-side NPC AI tick (idle-patrol path following). Runs after combat inside the
-            // same lock so it never mutates maps concurrently with packet handlers or Pulse().
-            MapManager.Instance.TickNpcs(Environment.TickCount64, delta / 1000f);
         }
     }
 
