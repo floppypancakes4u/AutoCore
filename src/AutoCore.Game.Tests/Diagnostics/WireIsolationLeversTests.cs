@@ -41,6 +41,8 @@ public class WireIsolationLeversTests
         Assert.IsTrue(GhostVehicle.EnablePathWire);
         Assert.IsTrue(GhostVehicle.EnableOwnerWire);
         Assert.IsTrue(GhostVehicle.EnableTemplateSpawnWire);
+        Assert.IsFalse(GhostVehicle.EnableInitialHardpointPack);
+        Assert.IsFalse(GhostVehicle.EnableDeferredForeignPose);
         Assert.IsFalse(WireDiag.Enabled);
     }
 

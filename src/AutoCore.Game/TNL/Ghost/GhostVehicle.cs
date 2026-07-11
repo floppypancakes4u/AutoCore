@@ -47,6 +47,24 @@ public class GhostVehicle : GhostObject
     /// <summary>Allows the initial owner/driver construction block during the minimal profile.</summary>
     public static bool EnableMinimalForeignOwnerBlock = false;
 
+    /// <summary>
+    /// When true, pack the WheelSet hardpoint on <b>initial</b> ghost updates (default: false).
+    /// Client RE: initial hardpoint CBID is written into the ghost create buffer at +0x45c —
+    /// the same field <c>EquipFromCreate</c> reads when materializing from ghost. This is
+    /// <b>not</b> a same-call SetWheelset; it seeds the create shell so ghost-first materialize
+    /// can GiveItem/SetWheelset. Does not fix a live vehicle that already equip-failed with CBID 0.
+    /// Off by default — isolation experiment only (see OWNER_WHEEL_RACE_RE §11).
+    /// </summary>
+    public static bool EnableInitialHardpointPack = false;
+
+    /// <summary>
+    /// Priority-1 owner-on experiment: on foreign (global) <b>initial</b> packs, omit
+    /// <see cref="PositionMask"/> so client unpack does not run
+    /// <c>Vehicle_setDrivingInputs</c>→activate while <c>+0x258</c> may still be null.
+    /// Position stays dirty and ships on a later delta. Default false.
+    /// </summary>
+    public static bool EnableDeferredForeignPose = false;
+
     private const int CoidCurrentPathBits = 18;
 
     /// <summary>
@@ -123,11 +141,20 @@ public class GhostVehicle : GhostObject
         // Minimal foreign: initial packs pose-only (optional initial blocks are separate levers).
         // Deltas also admit WheelSetMask so a hardpoint can materialize +0x258 when Path A equip
         // saw nested wheel CBID 0 (client zero-fill) despite a good server CreateVehicle.
+        // EnableInitialHardpointPack additionally admits WheelSet on initial so create-buffer
+        // +0x45c can be seeded before ghost materialize (EquipFromCreate).
+        // EnableDeferredForeignPose strips PositionMask from foreign initial (activate race).
+        var deferForeignPose = Parent.ObjectId.Global && EnableDeferredForeignPose;
         if (useMinimalForeignInitialProfile)
         {
+            var initialPose = deferForeignPose ? 0UL : PositionMask;
             updateMask = isInitial
-                ? PositionMask
+                ? initialPose | (EnableInitialHardpointPack ? WheelSetMask : 0UL)
                 : updateMask & (PositionMask | WheelSetMask);
+        }
+        else if (isInitial && deferForeignPose)
+        {
+            updateMask &= ~PositionMask;
         }
 
         // A connection-scoped override is deliberately limited to foreign initial updates. It
@@ -258,11 +285,17 @@ public class GhostVehicle : GhostObject
             }
         }
 
-        // Initial hardpoints are not applied as SetWheelset on the retail client (they only fill
-        // the ghost create buffer). Delta hardpoints call the GiveItem/SetWheelset path.
+        // Initial hardpoints are not applied as immediate SetWheelset (see OWNER_WHEEL_RACE_RE §10–11).
+        // On initial they write into the ghost create buffer (wheel CBID → +0x45c). EquipFromCreate
+        // reads that field when FUN_008078b0 materializes from ghost — so packing WheelSet on
+        // initial can fix ghost-first materialize, but not a live vehicle that already failed nest equip.
+        // Delta hardpoints take the PostCorrection / later equip path.
+        // Default: skip all initial equipment. EnableInitialHardpointPack: WheelSet only on initial.
         var packEquipment = !isInitial;
+        var packWheelHardpoint = packEquipment
+            || (isInitial && EnableInitialHardpointPack);
 
-        PackHardpoint(stream, packEquipment && (updateMask & WheelSetMask) != 0, parentVehicle.WheelSet);
+        PackHardpoint(stream, packWheelHardpoint && (updateMask & WheelSetMask) != 0, parentVehicle.WheelSet);
         PackHardpoint(stream, packEquipment && (updateMask & FrontWeaponMask) != 0, parentVehicle.WeaponFront);
         PackHardpoint(stream, packEquipment && (updateMask & TurretWeaponMask) != 0, parentVehicle.WeaponTurret);
         PackHardpoint(stream, packEquipment && (updateMask & RearWeaponMask) != 0, parentVehicle.WeaponRear);
@@ -413,6 +446,8 @@ public class GhostVehicle : GhostObject
                 detail: $"path={(packPath ? 1 : 0)}/{(wouldPackPath ? 1 : 0)} owner={(packOwner ? 1 : 0)}/{(wouldPackOwner ? 1 : 0)} " +
                         $"tmpl={(packTemplate ? 1 : 0)}/{(wouldPackTemplate ? 1 : 0)} spawn={(packSpawnOwner ? 1 : 0)}/{(wouldPackSpawnOwner ? 1 : 0)} " +
                         $"clientOwner={(clientHasOwner ? 1 : 0)} equip={(packEquipment ? 1 : 0)} " +
+                        $"initWheel={(isInitial && EnableInitialHardpointPack ? 1 : 0)} " +
+                        $"deferPose={(isInitial && deferForeignPose ? 1 : 0)} " +
                         $"aiWire={(EnableAiStateWire ? 1 : 0)} global={(Parent.ObjectId.Global ? 1 : 0)} " +
                         $"profile={(useMinimalForeignInitialProfile ? "minimal" : "full")} sourceMask={sourceUpdateMask:X}");
         }
@@ -425,6 +460,15 @@ public class GhostVehicle : GhostObject
             && (updateMask & WheelSetMask) == 0)
         {
             ret |= WheelSetMask;
+        }
+
+        // Deferred pose: first foreign initial omitted PositionMask — keep dirty for next delta.
+        if (isInitial
+            && deferForeignPose
+            && (sourceUpdateMask & PositionMask) != 0
+            && (updateMask & PositionMask) == 0)
+        {
+            ret |= PositionMask;
         }
 
         return ret;

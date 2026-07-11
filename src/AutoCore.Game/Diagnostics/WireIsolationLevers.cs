@@ -44,6 +44,10 @@ public static class WireIsolationLevers
             () => GhostVehicle.EnableMinimalForeignTemplateSpawnBlock, v => GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = v, envSuffix: "MINIMAL_FOREIGN_TEMPLATE_SPAWN"),
         new("EnableMinimalForeignOwnerBlock", "Allow owner block during minimal foreign initial profile",
             () => GhostVehicle.EnableMinimalForeignOwnerBlock, v => GhostVehicle.EnableMinimalForeignOwnerBlock = v, envSuffix: "MINIMAL_FOREIGN_OWNER"),
+        new("EnableInitialHardpointPack", "Pack WheelSet hardpoint on ghost initial (seeds create-buffer +0x45c)",
+            () => GhostVehicle.EnableInitialHardpointPack, v => GhostVehicle.EnableInitialHardpointPack = v, envSuffix: "INITIAL_HARDPOINT"),
+        new("EnableDeferredForeignPose", "Omit pose on foreign ghost initial; ship pose on later delta (owner-on race)",
+            () => GhostVehicle.EnableDeferredForeignPose, v => GhostVehicle.EnableDeferredForeignPose = v, envSuffix: "DEFER_FOREIGN_POSE"),
     };
 
     /// <summary>Load JSON (if present) then env overrides. Call once at process start.</summary>
@@ -87,6 +91,8 @@ public static class WireIsolationLevers
         GhostVehicle.EnableMinimalForeignPathBlock = false;
         GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = false;
         GhostVehicle.EnableMinimalForeignOwnerBlock = false;
+        GhostVehicle.EnableInitialHardpointPack = false;
+        GhostVehicle.EnableDeferredForeignPose = false;
     }
 
     public static void ApplyFromEnvironmentVariables()

@@ -45,6 +45,8 @@ public class GhostVehicleWireRegressionTests
         GhostVehicle.EnableMinimalForeignPathBlock = false;
         GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = false;
         GhostVehicle.EnableMinimalForeignOwnerBlock = false;
+        GhostVehicle.EnableInitialHardpointPack = false;
+        GhostVehicle.EnableDeferredForeignPose = false;
         WireDiag.ResetForTests();
     }
 
@@ -754,6 +756,55 @@ public class GhostVehicleWireRegressionTests
         }
     }
 
+    /// <summary>
+    /// Under minimal foreign + initial hardpoint lever, WheelSet is admitted on initial so the
+    /// create-buffer +0x45c seed can ship before ghost materialize (RE OWNER_WHEEL_RACE_RE §11).
+    /// </summary>
+    [TestMethod]
+    public void PackInitial_ForeignMinimal_EnableInitialHardpointPack_EmitsWheelAndClearsDirty()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_176);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_176, true);
+        var wheel = new WheelSet();
+        wheel.SetCoid(MapNpcIdentity.CoidBase + 20_177, true);
+        Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.WheelSet, wheel, out _));
+        vehicle.CreateGhost();
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableInitialHardpointPack = true;
+
+        NetObject.PIsInitialUpdate = true;
+        ulong ret;
+        try
+        {
+            var dirtyStream = new BitStream(new byte[8192], 8192);
+            ret = vehicle.Ghost.PackUpdate(null, ulong.MaxValue, dirtyStream);
+        }
+        finally
+        {
+            NetObject.PIsInitialUpdate = false;
+        }
+
+        Assert.AreEqual(0UL, ret & GhostVehicle.WheelSetMask,
+            "WheelSet packed on initial should clear dirty (no forced re-dirty).");
+
+        var packed = PackInitial(vehicle, ulong.MaxValue);
+        SkipPackCommonAndMultipliers(packed);
+        Assert.IsFalse(packed.ReadFlag()); // path
+        Assert.IsFalse(packed.ReadFlag()); // template
+        Assert.IsFalse(packed.ReadFlag()); // spawn
+        packed.ReadInt(8); // tricks
+        Assert.IsFalse(packed.ReadFlag()); // trailer
+        Assert.IsFalse(packed.ReadFlag()); // owner
+        // Initial packs skip Skills (delta-only); first mask flag is WheelSet.
+        Assert.IsTrue(packed.ReadFlag(), "WheelSet mask admitted on minimal initial when lever on");
+        Assert.IsTrue(packed.ReadFlag(), "wheel present");
+        packed.ReadInt(20);
+        packed.Read(out long wheelCoid);
+        Assert.AreEqual(MapNpcIdentity.CoidBase + 20_177, wheelCoid);
+        Assert.IsTrue(packed.ReadFlag()); // global
+    }
+
     [TestMethod]
     public void PackInitial_ForeignVehicle_MinimalProfile_PathLeverAddsOnlyPathBlock()
     {
@@ -836,6 +887,114 @@ public class GhostVehicleWireRegressionTests
             Assert.IsFalse(stream.ReadFlag());
         Assert.AreEqual(7u, stream.ReadInt(8));
         Assert.IsFalse(stream.ReadFlag());
+    }
+
+    /// <summary>
+    /// P1: owner without pose on first foreign initial avoids setDrivingInputs→activate race.
+    /// PositionMask must stay dirty so a later delta can ship pose.
+    /// </summary>
+    [TestMethod]
+    public void PackInitial_ForeignMinimal_DeferredPose_OmitsPositionKeepsDirty_PacksOwner()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_180);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_180, true);
+        vehicle.Position = new Vector3(10, 20, 30);
+        var driver = new Creature();
+        driver.SetCoid(MapNpcIdentity.CoidBase + 20_181, true);
+        driver.Level = 5;
+        vehicle.SetOwner(driver);
+        vehicle.CreateGhost();
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignOwnerBlock = true;
+        GhostVehicle.EnableDeferredForeignPose = true;
+        WireDiag.Enabled = true;
+
+        NetObject.PIsInitialUpdate = true;
+        ulong ret;
+        try
+        {
+            var stream = new BitStream(new byte[8192], 8192);
+            ret = vehicle.Ghost.PackUpdate(null, ulong.MaxValue, stream);
+        }
+        finally
+        {
+            NetObject.PIsInitialUpdate = false;
+        }
+
+        Assert.AreNotEqual(0UL, ret & GhostObject.PositionMask,
+            "Deferred pose must keep PositionMask dirty for the next delta.");
+        Assert.AreEqual(0UL, WireDiag.Snapshot().Single().Mask & GhostObject.PositionMask,
+            "Effective initial mask must not include PositionMask when pose is deferred.");
+        StringAssert.Contains(WireDiag.Snapshot().Single().Detail, "deferPose=1");
+
+        var packed = PackInitial(vehicle, ulong.MaxValue);
+        SkipPackCommonAndMultipliers(packed);
+        Assert.IsFalse(packed.ReadFlag()); // path
+        Assert.IsFalse(packed.ReadFlag()); // template
+        Assert.IsFalse(packed.ReadFlag()); // spawn
+        packed.ReadInt(8); // tricks
+        Assert.IsFalse(packed.ReadFlag()); // trailer
+        Assert.IsTrue(packed.ReadFlag(), "owner on initial with deferred pose");
+        packed.Read(out long ownerCoid);
+        Assert.AreEqual(driver.ObjectId.Coid, ownerCoid);
+        Assert.IsTrue(packed.ReadFlag()); // global
+        packed.ReadInt(20); // CBID
+        Assert.IsFalse(packed.ReadFlag()); // creature (not character)
+        for (var i = 0; i < 5; ++i)
+            Assert.IsFalse(packed.ReadFlag()); // enh/trig/react/summoner/doesnt
+        packed.ReadInt(8); // level
+        Assert.IsFalse(packed.ReadFlag()); // elite
+
+        // equipment (7) + GM + clan + pet + murderer + health + healthMax + state + position
+        for (var i = 0; i < 7; ++i)
+            Assert.IsFalse(packed.ReadFlag(), $"equip {i}");
+        Assert.IsFalse(packed.ReadFlag()); // GM
+        Assert.IsFalse(packed.ReadFlag()); // clan
+        Assert.IsFalse(packed.ReadFlag()); // pet
+        Assert.IsFalse(packed.ReadFlag()); // murderer
+        Assert.IsFalse(packed.ReadFlag()); // health
+        Assert.IsFalse(packed.ReadFlag()); // health max
+        Assert.IsFalse(packed.ReadFlag()); // AI state
+        Assert.IsFalse(packed.ReadFlag(), "Position must be withheld on deferred-pose initial");
+    }
+
+    [TestMethod]
+    public void PackDelta_ForeignMinimal_DeferredPose_AdmitsPositionAfterInitial()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_182);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_182, true);
+        vehicle.Position = new Vector3(1, 2, 3);
+        vehicle.Rotation = new Quaternion(0, 0, 0, 1);
+        var driver = new Creature();
+        driver.SetCoid(MapNpcIdentity.CoidBase + 20_183, true);
+        vehicle.SetOwner(driver);
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignOwnerBlock = true;
+        GhostVehicle.EnableDeferredForeignPose = true;
+
+        // Latch owner on initial (no pose).
+        PackInitial(vehicle, ulong.MaxValue);
+
+        var stream = PackUpdateNonInitial(vehicle, GhostObject.PositionMask);
+        Assert.IsFalse(stream.ReadFlag()); // Skills
+        for (var i = 0; i < 7; ++i)
+            Assert.IsFalse(stream.ReadFlag()); // equip
+        Assert.IsFalse(stream.ReadFlag()); // GM
+        Assert.IsFalse(stream.ReadFlag()); // clan
+        Assert.IsFalse(stream.ReadFlag()); // pet
+        Assert.IsFalse(stream.ReadFlag()); // murderer
+        Assert.IsFalse(stream.ReadFlag()); // health
+        Assert.IsFalse(stream.ReadFlag()); // health max
+        Assert.IsFalse(stream.ReadFlag()); // AI
+        Assert.IsTrue(stream.ReadFlag(), "Position packs on delta under minimal+defer");
+        stream.Read(out float x);
+        stream.Read(out float y);
+        stream.Read(out float z);
+        Assert.AreEqual(1f, x);
+        Assert.AreEqual(2f, y);
+        Assert.AreEqual(3f, z);
     }
 
     [TestMethod]

@@ -32,6 +32,8 @@ public class GhostVehicleWireTests
         GhostVehicle.EnableMinimalForeignPathBlock = false;
         GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = false;
         GhostVehicle.EnableMinimalForeignOwnerBlock = false;
+        GhostVehicle.EnableInitialHardpointPack = false;
+        GhostVehicle.EnableDeferredForeignPose = false;
         WireDiag.ResetForTests();
     }
 
@@ -417,6 +419,39 @@ public class GhostVehicleWireTests
         var stream = PackInitial(vehicle, GhostObject.InitialMask | GhostVehicle.WheelSetMask);
         SkipToMaskSectionAfterInitialBody(stream, ownerPacked: false);
         SkipEquipmentMaskFlags(stream);
+    }
+
+    /// <summary>
+    /// RE: initial wheel hardpoint writes CBID into ghost create-buffer +0x45c (EquipFromCreate).
+    /// Default still skips; EnableInitialHardpointPack seeds that field for ghost materialize.
+    /// </summary>
+    [TestMethod]
+    public void PackInitial_EnableInitialHardpointPack_EmitsWheelHardpointOnly()
+    {
+        var vehicle = CreateVehicleWithMap(9140);
+        var wheelSet = new WheelSet();
+        wheelSet.SetCoid(9141, false);
+        Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.WheelSet, wheelSet, out _));
+        var armor = new Armor();
+        armor.SetCoid(9142, false);
+        Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.Armor, armor, out _));
+
+        GhostVehicle.EnableInitialHardpointPack = true;
+        var stream = PackInitial(vehicle,
+            GhostObject.InitialMask | GhostVehicle.WheelSetMask | GhostVehicle.ChangeArmor);
+        SkipToMaskSectionAfterInitialBody(stream, ownerPacked: false);
+
+        Assert.IsTrue(stream.ReadFlag(), "WheelSetMask on initial when lever on");
+        Assert.IsTrue(stream.ReadFlag(), "wheel present");
+        stream.ReadInt(20); // CBID
+        stream.Read(out long wheelCoid);
+        Assert.AreEqual(9141L, wheelCoid);
+        Assert.IsFalse(stream.ReadFlag()); // global
+
+        // Other hardpoints remain initial-skipped (armor is separate ChangeArmor flag after 5 slots).
+        for (var i = 0; i < 5; ++i)
+            Assert.IsFalse(stream.ReadFlag(), $"non-wheel hardpoint {i} stays off on initial");
+        Assert.IsFalse(stream.ReadFlag(), "ChangeArmor stays off on initial even with lever");
     }
 
     [TestMethod]

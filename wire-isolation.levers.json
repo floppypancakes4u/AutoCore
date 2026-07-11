@@ -11,5 +11,7 @@
   "EnableMinimalForeignInitialProfile": true,
   "EnableMinimalForeignPathBlock": true,
   "EnableMinimalForeignTemplateSpawnBlock": true,
-  "EnableMinimalForeignOwnerBlock": false
+  "EnableMinimalForeignOwnerBlock": true,
+  "EnableInitialHardpointPack": true,
+  "EnableDeferredForeignPose": true
 }
