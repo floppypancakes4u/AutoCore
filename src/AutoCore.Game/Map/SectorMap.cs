@@ -435,6 +435,22 @@ public class SectorMap
                 && !gameConnection.TryAllowForeignVehicleGhostScope(coid))
                 continue;
 
+            // P2: after first no-owner scope + delay, skip ObjectInScope once so TNL detaches
+            // the ghost; next selection re-scopes with a full initial that may include owner.
+            if (foreignGlobalVehicle
+                && gameConnection != null
+                && gameConnection.ShouldSkipForeignObjectInScopeForReghost(coid))
+            {
+                if (WireDiag.Enabled)
+                {
+                    Logger.WriteLog(LogType.Network,
+                        "ForeignReghostDescope coid={0} {1}",
+                        coid, gameConnection.FormatGhostingDiag());
+                }
+
+                continue;
+            }
+
             // First ObjectInScope after create hold: re-dirty wheel so the first ghost delta can
             // PackHardpoint/SetWheelset if CreateVehicle equip lost a race to the zero nest blob.
             var releasingCreateHold = foreignGlobalVehicle
@@ -454,6 +470,9 @@ public class SectorMap
                         coid, wasGhosted ? 1 : 0, nowGhosted ? 1 : 0, releasingCreateHold ? 1 : 0,
                         gameConnection.FormatGhostingDiag());
                 }
+
+                if (nowGhosted)
+                    gameConnection.NoteForeignVehicleGhostScoped(coid);
 
                 gameConnection.ClearForeignVehicleCreateHold(coid);
                 if (releasingCreateHold && entity is Vehicle scopedVeh)

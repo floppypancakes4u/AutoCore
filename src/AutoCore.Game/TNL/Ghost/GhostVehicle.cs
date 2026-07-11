@@ -65,6 +65,12 @@ public class GhostVehicle : GhostObject
     /// </summary>
     public static bool EnableDeferredForeignPose = false;
 
+    /// <summary>
+    /// Priority-2: first foreign ghost initial withholds owner; after delay, descope once then
+    /// rescope so TNL sends a second initial with owner (and pose). Default false.
+    /// </summary>
+    public static bool EnableForeignReghostOwner = false;
+
     private const int CoidCurrentPathBits = 18;
 
     /// <summary>
@@ -176,9 +182,12 @@ public class GhostVehicle : GhostObject
         var packPath = (!useMinimalForeignInitialProfile || EnableMinimalForeignPathBlock)
             && EnablePathWire
             && wouldPackPath;
+        var suppressOwnerForReghost = connection is TNLConnection reghostConn
+            && reghostConn.ShouldSuppressForeignOwnerOnPack(Parent.ObjectId.Coid);
         var packOwner = (!useMinimalForeignInitialProfile || EnableMinimalForeignOwnerBlock)
             && EnableOwnerWire
-            && wouldPackOwner;
+            && wouldPackOwner
+            && !suppressOwnerForReghost;
         var allowTemplateSpawn = !useMinimalForeignInitialProfile || EnableMinimalForeignTemplateSpawnBlock;
         var packTemplate = allowTemplateSpawn && EnableTemplateSpawnWire && wouldPackTemplate;
         var packSpawnOwner = allowTemplateSpawn && EnableTemplateSpawnWire && wouldPackSpawnOwner;

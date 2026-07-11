@@ -8,17 +8,23 @@ The goal is to restore full foreign NPC vehicle ghost replication without reprod
 
 ## Current status
 
-The server is currently configured to use a stable, deliberately limited foreign-NPC vehicle profile:
+### Root cause (stable)
 
-- foreign `CreateVehicle` packets: enabled;
-- foreign TNL ghosting: enabled;
-- pose/position ghost updates: enabled;
-- initial path block: enabled;
-- initial template and spawn-owner blocks: enabled;
-- initial owner/driver block: **still unsafe** (AV returned after bit-align + nested MapNpc TFID); keep **off** until activation chain is fixed;
-- GM, AI state, health, target, armor, equipment, skills, and other non-pose deltas: suppressed by the minimal profile.
+Client AV `c0000005 @ 0x004F5566` when `ActivateEnterWorld` / `Vehicle_createVehicleAction` runs with `vehicle+0x258 == 0` (null wheelset). Usual trigger: ghost **owner** present **and** pose path calls `Vehicle_setDrivingInputs` while action empty, before create nest has SetWheelset.
 
-Known-safe settings:
+Naive owner-on + pose on the **first** foreign initial still crashes (2026-07-11 ~13:16, `mask=0x100000002 owner=1/1`).
+
+### Validated server fixes (2026-07-11 campaign)
+
+| Priority | Lever | Live result | Commit / code |
+| --- | --- | --- | --- |
+| **P1** | `EnableDeferredForeignPose` + owner block | **No crash** — owner on first initial, pose on later deltas | `8705611` |
+| **P2** | `EnableForeignReghostOwner` + owner block | **No crash** — first ghost without owner, descope, second initial with owner+pose | implemented; commit optional |
+| P3/P4 | Client null-wheel guard | Not required for this race | last resort only |
+
+Deep RE, wire maps, and campaign notes: [`docs/debugger-hits/OWNER_WHEEL_RACE_RE.md`](debugger-hits/OWNER_WHEEL_RACE_RE.md).
+
+### Recommended product defaults (max owner fidelity = P2)
 
 ```json
 {
@@ -26,29 +32,55 @@ Known-safe settings:
   "EnableMinimalForeignInitialProfile": true,
   "EnableMinimalForeignPathBlock": true,
   "EnableMinimalForeignTemplateSpawnBlock": true,
-  "EnableMinimalForeignOwnerBlock": false
+  "EnableMinimalForeignOwnerBlock": true,
+  "EnableForeignReghostOwner": true,
+  "EnableDeferredForeignPose": false,
+  "EnableInitialHardpointPack": true,
+  "EnableOwnerWire": true,
+  "EnablePathWire": true,
+  "EnableTemplateSpawnWire": true,
+  "EnableAiStateWire": true
 }
 ```
 
-### Live results 2026-07-11
+- **P2 (reghost)** — preferred when maximizing fidelity: second ghost initial can carry **owner + pose** after create/wheels exist. Thorough design: [`OWNER_WHEEL_RACE_RE.md` §12](debugger-hits/OWNER_WHEEL_RACE_RE.md).
+- **P1 (defer pose)** — alternative if descope flicker is unacceptable: owner on first initial, pose on later deltas (`8705611`).
+- Keep create-before-ghost hold + nest re-apply without IsItemLink (no tooltip spam).
 
-| Run | Profile | Result |
-| --- | --- | --- |
-| A | Bit-aligned owner (no false SpawnOwner bit) | **AV `0x004F5566`** @ 09:01:37 after `owner=1/1` ghosts |
-| B | Same + nested equipment `MapNpcIdentity` TFIDs | **Same AV** @ 09:09:59 (new Game.dll 09:08:25) |
-| C | Owner off (path/tmpl/spawn/pose) | Stable historically |
+### What works today (P2 + minimal foreign)
 
-**Conclusion:** owner-on is not a packing-width bug alone. Ghidra shows **owner presence is the Havok activation gate** on the ghost pose path; CreateVehicle must leave `vehicle+0x258` non-null *before* that gate fires. Nested TFID fix is still correct policy but insufficient by itself.
+| Have | Notes |
+| --- | --- |
+| Foreign CreateVehicle + wheel nest | Wheels visible in-world |
+| Ghost scope, path, template, spawn-owner | Initial body blocks |
+| Owner/driver after reghost | Second initial; brief no-owner window first |
+| Pose after scope | Second initial can include pose with owner |
+| No IsItemLink tooltips / no owner-race AV | Live validated |
 
-### Crash stack (both A and B)
+### What is still missing (same config)
 
-```text
-FUN_004F5560          vehicle+0x258 → wheelset+0xB0   (no null check)
-  ← Vehicle_buildHavokVehicleFramework  0x005FD390
-    ← Vehicle_createVehicleAction       0x004FB660   (ret 0x004FB773)
-      ← FUN_00503F30                    enter-world / activate
-        ← Vehicle_setDrivingInputs      0x00504C70   (from ghost pose unpack)
-```
+These are **not** fixed by P2; they need later delta expansion or new wire work:
+
+| Missing | Cause |
+| --- | --- |
+| Live **health** / max HP | Minimal foreign deltas only allow pose + wheel |
+| **Targeting** | `TargetMask` filtered out on foreign deltas |
+| **AI combat state** updates | `StateMask` filtered (and needs owner latch) |
+| Weapon / armor / ornament **changes** after spawn | Equipment masks filtered on foreign deltas |
+| Skills, GM, attributes, murderer | Same filter / incomplete stubs |
+| Handling multipliers, clan, pet | Never wired (always default/false) |
+| Smooth continuous NPC movement | Pose-only deltas + possible reghost pop; density/AI not retail-complete |
+
+**Next focus:** widen minimal foreign **delta** admission one family at a time (e.g. AI → health → target → weapons), with owner already safe via P2.
+
+### Historical live result 2026-07-11 morning (owner + pose, no defer)
+
+| Time | Event |
+| --- | --- |
+| 09:01:33 | Foreign GhostVehicle initial `owner=1/1` + pose |
+| 09:01:37 | Client AV `0x004F5566` |
+
+That failure mode is what P1/P2 avoid.
 
 ## Client crash signature
 
@@ -70,196 +102,12 @@ Other relevant client locations:
 
 | Address | Meaning |
 | --- | --- |
-| `0x004F5560` | Wheel-count getter: `*(vehicle+0x258)+0xB0`. AV site `0x004F5566`. |
-| `0x004FEA90` | Set wheelset → writes `vehicle+0x258`. |
-| `0x00504480` | Nested equip from CreateVehicle buffer (wheel @ `+0x45C` / TFID `@+0x4E8`). |
-| `0x00505270` | `Vehicle_applyCreatePacket` (vtable `+0xC4`). |
-| `0x0080A4B0` | Sector recv `CreateVehicle` `0x201D`. |
-| `0x00812630` | Ghost-path create vehicle (embedded create blob). |
+| `0x004F5560` | Dereferences vehicle `+0x258` wheelset pointer; AV site is `0x004F5566`. |
+| `0x004FEA90` | Client wheelset setter. |
+| `0x00504480` | Nested wheelset handling during `CreateVehicle`. |
 | `0x005F7720` | `VehicleNet_UnpackGhostVehicle`. |
-| `0x00504C70` | `Vehicle_setDrivingInputs` (ghost pose → optional activate). |
-| `0x00503F30` | Enter-world activate → `createVehicleAction` (**no wheelset check**). |
-| `0x00501420` | `Vehicle_TryActivatePhysics` (**does** check `+0x258`; crash stack does **not** use this). |
-| `0x0051A170` | `CVOGReaction_GiveItemByCbid`. |
-| `0x005F5AD0` | Alloc/init CreateVehicle message buffer `0xD78` + nested owner forms. |
 
----
-
-## Client chain map (Ghidra, 2026-07-11)
-
-This is the authoritative path from network message to the AV. Prefer this over earlier one-line hypotheses.
-
-### Path A — Sector `CreateVehicle` (`0x201D`)
-
-```text
-FUN_0080A4B0  Recv CreateVehicle
-  │
-  ├─ CVOGReaction_GiveItemByCbid(packet+4)     // vehicle CBID
-  │     fails → log "allocatenewobjectfromcbid failed" and return
-  │
-  ├─ vtable+0x08  bind CBID / map context
-  ├─ vtable+0x1D4 get vehicle object
-  │
-  └─ vtable+0xC4  Vehicle_applyCreatePacket (0x00505270)
-        │
-        ├─ vehicle flags from packet:
-        │     +0x151 IsInventory → vehicle gate field (equip skip if set)
-        │     +0x152 IsActive    → stored on vehicle (NOT the sole activate gate)
-        │     active gate for post-create: (IsInventory || IsInInventory@+0xA2)
-        │
-        ├─ FUN_005C9120  base simple-object apply from buffer
-        │
-        ├─ FUN_00504480  nested equip (mode from apply args)
-        │     if vehicle inventory-gate (+0x2AC) == 0:
-        │       1) ResolveObjectTarget(nested wheel TFID @ packet+0x4E8)
-        │          hit  → use existing object (skip GiveItem)
-        │          miss → GiveItemByCbid(wheel CBID @ packet+0x45C)
-        │       2) apply nested create at +0x458
-        │       3) FUN_004FEA90 → vehicle+0x258 = wheelset*
-        │          (requires type +0x38 == 0x10; else "unhappy type")
-        │       also armor / weapons / powerplant / ornament...
-        │     else: entire wheel equip skipped
-        │
-        ├─ if TemplateId != -1: resolve spawn-point / template link
-        │     (FUN_004BB340 / CVOGSpawnPoint cast) — separate from nested equip
-        │
-        └─ if not inventory-path:
-              FUN_004FEDC0  or  FUN_004C0140
-                world/physics bind paths that establish vehicle+0x08
-                (required later by setDrivingInputs)
-
-  then FUN_0080A4B0 continues:
-  ├─ vtable+0x218  map bind
-  └─ vtable+0x104  flags
-```
-
-**Server implications for Path A**
-
-| Server field / policy | Client effect |
-| --- | --- |
-| Nested `CreateWheelSet` CBID | `GiveItemByCbid` materializes wheelset object |
-| Nested wheelset TFID (`ObjectId`) | Looked up **before** GiveItem; wrong/local hit can skip GiveItem |
-| Empty CreateWheelSet body size | Must be 340 (212 simple + 128); short body desyncs rest of packet |
-| `IsInventory` / inventory flags | Must stay false for field NPCs or equip is skipped |
-| `IsActive` | Stored; does **not** alone call Havok |
-| `TemplateId` | Spawns template linkage; does **not** replace nested equip for sector 0x201D |
-
-### Path B — Ghost `VehicleNet_UnpackGhostVehicle` (`0x005F7720`)
-
-#### B1. Initial update
-
-```text
-VehicleNet_UnpackGhostVehicle  (initial)
-  │
-  ├─ FUN_005F5AD0(0,0)  alloc CreateVehicle-sized ghost buffer (0xD78)
-  ├─ colors, IsActive bit (buffer+0x152 class fields), trim, optional multipliers
-  ├─ optional path / template / spawn-owner blocks
-  ├─ CurrentOwner-present?
-  │     yes → read COID/global/CBID + form flag
-  │           form false → FUN_005F5AD0(1,1) creature owner (type 0x2013)
-  │           form true  → FUN_005F5AD0(1,0) character owner (type 0x2015)
-  │           creature form options: enh, on-use×2, summoner,
-  │             DoesntCountAsSummon, level[8], elite
-  │             *** no SpawnOwner slot in this form ***
-  │           owner object lands on vehicle owner slot (+0xB0 path)
-  │
-  ├─ resolve local vehicle object (ghost parent → local_12c)
-  │
-  ├─ hardpoint / equipment mask flags (minimal profile: off on initial)
-  │     if wheel hardpoint present: may SetWheelset on local_12c+0x258
-  │
-  └─ later masks (pose / health / …)
-```
-
-Creature-owner form contract (verified assembly): see section “Ghidra finding: vehicle creature-owner form has NO SpawnOwner slot” below.
-
-#### B2. Pose / PositionMask → driving inputs → **unsafe activate**
-
-```text
-PositionMask (and related) inside UnpackGhostVehicle
-  │
-  └─ Vehicle_setDrivingInputs  (0x00504C70)   // xref from 0x005F99AA
-        │
-        ├─ requires vehicle+0x08 != 0   // physics/world binding from Path A
-        │     else: return (no activate)
-        │
-        ├─ write throttle/steer/sharp-turn (+0x614/+0x618/+0x61C)
-        ├─ FUN_004FBC10
-        │
-        ├─ if param_9==0 AND vehicle+0x1A0==0 (no VehicleAction yet):
-        │     owner = vehicle owner pointer (+0xB0 via object layout)
-        │     if owner != null
-        │        AND owner identity matches vehicle identity check:
-        │           FUN_00503F30()          // *** NO wheelset null check ***
-        │             └─ if vehicle+0x1A0==0:
-        │                  Vehicle_createVehicleAction
-        │                    └─ if vehicle+0x08 != 0:
-        │                         buildHavokVehicleFramework
-        │                           └─ FUN_004F5560()  // CRASH if +0x258==0
-        │
-        └─ FUN_0053EEC0  apply position/transform (always if +0x08 set)
-```
-
-**Contrast — safe path (not on crash stack):**
-
-```text
-Vehicle_TryActivatePhysics  0x00501420
-  if vehicle+0x258 == 0: log "VOG_DEBUG_STOP"; return
-  else: createVehicleAction …
-```
-
-Crash dumps always show `createVehicleAction` via `FUN_00503F30`, never `TryActivatePhysics`.
-
-### Why owner-off is stable and owner-on is not
-
-| State | Owner slot | setDrivingInputs activate? | Havok build? | Needs +0x258 |
-| --- | --- | --- | --- | --- |
-| Owner lever **off** | null | **No** (owner null short-circuits) | No | No (pose only) |
-| Owner lever **on** | embedded owner present | **Yes** once `+0x08` bound and action empty | Yes | **Yes — AV if null** |
-
-So the owner block is not merely “extra bits on the wire.” On the retail client it is the **condition that arms Havok construction on the next pose ghost**, without checking the wheelset.
-
-CreateVehicle (Path A) must have already left `vehicle+0x258 != 0` before Path B pose deltas, **or** owner must not be delivered until that is true.
-
-### Ordering on Ark Bay (from WireDiag)
-
-```text
-t0    CreateVehicle foreign ×N     Path A — equip + world bind
-t0+ε  (map reactions, etc.)
-t1    GhostVehicle initial owner=1 Path B1 — install owner
-t1+δ  GhostVehicle pose mask=0x2   Path B2 — setDrivingInputs → FUN_00503F30 → AV
-```
-
-Typical δ ≈ 0.1–3s. Crash correlates with first wave of `owner=1/1` initials + pose, not with CreateVehicle alone.
-
-### Still open after Ghidra chain map
-
-| Open question | Why it matters | How to prove |
-| --- | --- | --- |
-| Does Path A leave `+0x258` null for Ark Bay foreign vehicles even with server wheelset CBID? | If yes, fix CreateVehicle equip materialization | CDB traces: EquipFromCreate, SetWheelset, then +0x258 before first ghost |
-| Does GiveItemByCbid(wheelset CBID) return null (type table / clonebase)? | Type at def+0x38 must be `0x10` for wheelset path | Trace `0x0051A170` return; client log `allocatenewobjectfromcbid failed` |
-| TFID hit on high MapNpc id still wrong object? | Unlikely but possible if client table polluted | Compare resolve hit vs GiveItem path |
-| Race: ghost initial before CreateVehicle apply finishes? | Owner+pose could activate mid-equip | WireDiag order + client attach ordering; server guarantee Create before ObjectInScope |
-| Does dump’s local vehicle (18424) mean wrong-object activate? | Would reframe the bug | Confirm `this` at 0x004FB660 is foreign vs local |
-
-### Server work already landed (necessary but not sufficient)
-
-| Change | Addresses |
-| --- | --- |
-| Equip clonebase `DefaultWheelset` at spawn | Nested CreateWheelSet present |
-| Nested equipment TFID = `MapNpcIdentity` (global, ≥`0x50000000`) | Avoid local TFID collision skipping GiveItem |
-| `CreateWheelSetPacket.WriteEmptyPacket` +128 | Nested empty size 340 |
-| Creature-owner form **without** SpawnOwner bit | Ghost owner bit alignment |
-
-### Exact next fix targets (ordered)
-
-1. **Prove Path A equip outcome** with CDB (SetWheelset / `+0x258`) on one Ark Bay foreign CreateVehicle under current binary.
-2. If `+0x258` still null: fix GiveItem/type/nested payload field-level (not more owner packing).
-3. If `+0x258` is set at CreateVehicle but null at activate: find clear/overwrite between Path A and B2.
-4. If `+0x258` is set at activate and still AV: wrong `this` / wrong vehicle — re-examine dump attribution.
-5. Optional safety (not permanent fix): withhold foreign owner until equip proven; or never call activate without wheelset (client cannot change — server must not arm owner early).
-
-## Confirmed root cause chain (historical)
+## Confirmed root cause chain
 
 The problem is not one single defect. There are two confirmed, closely related failure paths.
 
@@ -511,166 +359,14 @@ The current recovery work is committed as:
 
 ## Exact next work
 
-Do **not** enable more field families until owner-on is stable.
+Do **not** enable more field families until the owner branch is stable live.
 
-1. ~~Creature-owner form (no SpawnOwner)~~ — done; live still AVs.
-2. ~~Nested MapNpc TFID for equipment~~ — landed; live still AVs.
-3. ~~Ghidra full chain Path A + Path B~~ — done (this document).
-4. **Path A live capture (non-freezing MinHook injector — not cdb):**
-   ```bat
-   powershell -File tools\PathAHook\build.ps1
-   scripts\path-a-debug.cmd arm
-   :: login / Ark Bay
-   scripts\path-a-debug.cmd check
-   ```
-   Artifacts: `%TEMP%\AutoCorePathA\hits.jsonl` and `docs/debugger-hits/path-a-hits.jsonl`.
-   Events: `RecvCreateVehicle`, `EquipFromCreate`, `SetWheelset`, `CreateVehicleAction_*`, `ActivateEnterWorld_*` with `v258_before` / `v258_after`.
-5. Branch on hits: equip fail (`v258_after` null) vs clear-before-activate vs wrong object.
-6. Only after owner-on is stable: AI / health / equipment families.
-
-### Path A debugger (2026-07-11)
-
-| Item | Detail |
-| --- | --- |
-| Why not cdb | Prior cdb attach freezes DirectInput / client; hard breaks are unsafe for this game |
-| Approach | Inject `PathAHook.dll` (MinHook, same pattern as DevTool `SpeedHook`) |
-| Injector | `tools/PathADebug` (C#, reuses `AutoLoginInjector` platform) |
-| Wrapper | `scripts\path-a-debug.cmd` |
-| Log | JSONL, append-only, no process suspend |
-
-Do **not** use `scripts\cv-debug.cmd` / cdb for Path A unless you accept client freeze risk.
-
-### Path A live capture result (2026-07-11, owner-off session)
-
-Source: `docs/debugger-hits/path-a-hits.jsonl` (24 lines after setup).
-
-| Event | Count |
-| --- | --- |
-| EquipFromCreate | 9 |
-| SetWheelset | 5 |
-| CreateVehicleAction enter/exit | 4 each |
-| `v258_after` still null | **5** EquipFromCreate |
-
-**Healthy Path A (majority of NPCs / player):**
-
-```text
-SetWheelset → v258 null → non-null (e.g. 3DB5A550)
-EquipFromCreate wheel_cbid=40 or 52, opcode=0x201B (8219)
-CreateVehicleAction with v258 already non-null → Havok OK
-```
-
-**Broken Path A (5 vehicles):**
-
-```text
-EquipFromCreate wheel_cbid=0, opcode=0x201B, mode=2
-NO SetWheelset
-v258_before = v258_after = null
-NO CreateVehicleAction in the capture window
-```
-
-Same packet buffer `3E2BF0D8` appears on multiple null-equip hits (reused create blob with nested wheel CBID **0**, not empty’s **−1**).
-
-**Implication:** Path A can and does equip correctly when nested CBID is 40/52. The AV-ready vehicles are those whose CreateVehicle nested wheelset CBID is **0**, so the client never calls SetWheelset. Owner-on later activates Havok on those null-`+0x258` objects via `setDrivingInputs` → `FUN_00503F30`.
-
-**Next code target:** find which server CreateVehicle emissions write nested wheel CBID `0` (not −1 empty, not DefaultWheelset). Log every foreign create: vehicle CBID, `WheelSet?.CBID`, TemplateId, empty-vs-full nested.
-
-### Owner-on retest 2026-07-11 10:02 (FAILED — AV again)
-
-**Server:** all foreign CreateVehicle `wheelOk=1` (cbid 31/52/40). Ghosts `owner=1/1 bits=950`.
-
-**Path A (smoking gun):**
-
-```text
-EquipFromCreate  veh=31271110  wheel_cbid=0  v258 stays null   (no SetWheelset)
-ActivateEnterWorld_enter  veh=31271110  v258=null
-CreateVehicleAction_enter veh=31271110  v258=null   → AV 0x004F5566
-```
-
-Other NPCs in the same session equipped correctly (cbid 31/52 → SetWheelset → non-null v258 → safe CreateVehicleAction).
-
-**Implication:** crash is no longer “server never sends wheelsets.” At least one client equip run still sees nested **CBID 0** and then owner arms Havok on that same vehicle. Either a create path we don’t WireDiag, a ghost/create re-apply with a bad buffer, or nested layout still wrong for one emitter. Owner restored **off**.
-
-### Ghidra 2026-07-11 — client ghost buffer leaves wheel CBID = 0
-
-`FUN_005F5AD0` (alloc CreateVehicle-sized ghost buffer `0xD78`):
-
-- zero-fills the whole buffer first;
-- sets nested wheel **opcode** at `+0x458` = `0x201B`;
-- sets armor/powerplant/ornament CBIDs to **`0xFFFFFFFF` (−1)**;
-- **does not** write wheel CBID at `+0x45C` → remains **0** from zero-fill.
-
-Server empty nested path wires **−1** at `0x45C` (layout unit tests lock this). Path A `wheel_cbid=0` therefore matches the **client ghost zero-fill default**, not the server empty contract. Same packet pointer reuse (`3E2BF0D8`) on multiple null equips fits a recycled client buffer.
-
-Server CreateVehicle body size and offsets match retail (`0xD78`, wheel `@0x458/0x45C`). Owner-on must not arm until Path A left `+0x258` non-null for that vehicle.
-
-### Recovery 2026-07-11 — ghost delta WheelSet hardpoint
-
-Live owner-off capture: **every** foreign CreateVehicle had `wheelOk=1` / `wireScan` 31|52, yet Path A still had ~half EquipFromCreate with `wheel_cbid=0` + `nest_hex=1B20…00` (opcode only). No `ActivateEnterWorld` (owner off) → no AV.
-
-Minimal foreign profile previously forced **pose-only masks on all packs**, which **dropped dirty WheelSet forever** after initial. Server now packs `PositionMask|WheelSetMask` on foreign deltas and keeps WheelSet dirty across initial.
-
-**Ghidra follow-up (same day): hardpoint does NOT SetWheelset for foreign ghosts.**
-
-| Address | Name | Finding |
-| --- | --- | --- |
-| `0x004FEA90` | SetWheelset | Writes `vehicle+0x258` (`this+600`). Requires item type `def+0x38 == 0x10` (wheelset); else logs "unhappy type" but still assigns pointer. |
-| `0x00504480` | EquipFromCreate | **Only** Path A nested equip from CreateVehicle buffer; `GiveItemByCbid(packet+0x45C)`; **no** fallback to `IDDefaultWheelset`. |
-| `0x005F7720` | UnpackGhostVehicle | Wheel hardpoint (opcode `0x201B` mini-blob): on **delta** calls `VehicleNet_PostCorrectionEvent` only; on **initial** only fills ghost create buffer. **No call to SetWheelset.** |
-| `0x005F7360` | VehicleNet_PostCorrectionEvent | Builds local prediction/correction messages `0x203C` / `0x203E` (equip request style). Not a foreign SetWheelset. |
-| `0x00503780` | (template vehicle equip) | **Does** default wheels: `operator_new` wheelset, bind CBID from **vehicle clonebase vehicle-specific +0x6F4** (`IDDefaultWheelset`), then `SetWheelset`. Callers: `CVOGSpawnPoint_CreateTemplateVehicle`, `FUN_0058bf50`. |
-| `0x005252f0` | (vehicle switch / possess) | If `vehicle+0x258 == null`, creates wheelset from same **+0x6F4** DefaultWheelset and `SetWheelset`. |
-| `0x00501420` | TryActivatePhysics | **Safe:** if `+0x258 == null` → log `VOG_DEBUG_STOP`, return. Crash path does **not** use this. |
-| `0x00503F30` | ActivateEnterWorld | **Unsafe:** no wheel null check → `createVehicleAction` → Havok → AV. |
-| `0x005F5AD0` | ghost CreateVehicle buffer | Opcode `0x201B` at `+0x458`; wheel CBID at `+0x45C` left **0** (zero-fill); other empty CBIDs set to `−1`. |
-| `0x0051A170` | GiveItemByCbid | Type `0x10` → wheelset ctor `FUN_005A84F0` (0x2F0). CBID `0` → def lookup fails → null. |
-
-**Conclusion — default wheels hypothesis:**
-
-- Confirmed: client **does** have a DefaultWheelset field (`IDDefaultWheelset` / clonebase vehicle-specific **+0x6F4**).
-- Used only on **template spawn** and **vehicle switch when wheel pointer is already null**.
-- **Not** used when sector `CreateVehicle` nested equip fails (CBID 0 / GiveItem fail).
-- Ghost equipment hardpoints **do not** recover foreign `+0x258`. Server packing `WheelSetMask` is harmless but **not** a client recovery for NPCs.
-
-### Root cause (Ghidra 2026-07-11) — ghost create before sector CreateVehicle
-
-Two client CreateVehicle entry points:
-
-| Entry | Address | Packet source |
-| --- | --- | --- |
-| Sector queue `0x201D` | `FUN_0080A4B0` | Raw network message (EBX); full nested wheel from server wire |
-| Sector dispatch `0x201D`/`0x201E` | `Client_PacketDispatch` → `FUN_00812630` | Packet body (ECX); full wire when from game queue |
-| **Ghost missing-object create** | `FUN_008078b0` → `FUN_00812630` | **Ghost create blob** at ghost`+0x5C` (`FUN_005F5AD0` + partial `FUN_005B1360`) |
-
-Ghost blob fill (`FUN_005B1360`) writes only TFID / root CBID / HP fields — **not** nest at `+0x45C` (stays **0**).
-
-**Client tick order in `FUN_008078b0`:**
-1. Iterate pending ghosts → if object missing and create blob present → `FUN_00812630` (create + equip from blob)
-2. Drain game packet queue (`Client_PacketDispatch`) → sector CreateVehicle
-3. Drain second queue (includes `FUN_0080A4B0` for `0x201D`)
-
-So same-tick “CreateVehicle then ObjectInScope” on the server still loses: client may **ghost-create first** with wheel CBID 0. When the full sector create arrives, `FUN_00812630` resolves TFID already present and **skips re-apply** unless `packet+0xA1 != 0` (field NPCs wire `0xA1=0`).
-
-Path A `nest_hex=1B20…00` + good server `wireScan` is this race, not a bad nest serializer.
-
-**Server fix (layered):**
-
-1. **Create-only query:** never `ObjectInScope` on the same scope pass as first `CreateVehicle`.
-2. **Hold:** require `ForeignGhostScopeHoldQueries` further scope passes (default **2**) and `ForeignGhostScopeHoldMilliseconds` wall time (default **500**) before ghosting.
-3. **Optional re-apply:** `ForceForeignCreateReapply` sets `IsItemLink` on foreign create (client **packet+0xA1**). If the ghost still wins the race, `FUN_00812630` re-applies the full create. Default **off** (re-apply also runs inventory/UI helpers after create).
-
-### WireDiag CreateVehicle wheelset detail (landed)
-
-Every `CreateVehicle` / `CreateVehicleExtended` send (when WireDiag is on) now logs:
-
-```text
-CreateVehicle wire coid=… bytes=… vehicleCbid=… wheelsetCbid=… nested=full|empty wheelOk=0|1 templateId=… isActive=…
-```
-
-Also on WireDiag lines as `detail=…`. Grep live logs for `wheelOk=0` or `wheelsetCbid=0`.
-
-### WriteToPacket safety net (landed)
-
-`Vehicle.EnsureDefaultWheelSetForWire()` equips clonebase `DefaultWheelset` (MapNpc TFID) if missing before serialize. Field `IsActive` is forced **false** when still no valid wheelset (avoids arming Havok with null `+0x258`).
+1. ~~Decoder contract for vehicle creature-owner form~~ — done (no SpawnOwner slot; see above).
+2. ~~Live Ark Bay with bit-aligned owner~~ → **AV returned** (see live result table). Owner off again.
+3. Confirm foreign CreateVehicle leaves client vehicle `+0x258` null or set (CDB / CREATEVEHICLE debugger).
+4. Trace owner-present → `FUN_00503F30` / `Vehicle_TryActivatePhysics` / `Vehicle_createVehicleAction`; require wheelset before Havok build.
+5. Server options once client path is clear: ensure CreateVehicle nested wheelset always applies; delay owner until wheelset is client-side; or keep owner off until activation is safe.
+6. Only after owner alone is stable: evaluate AI state, health, and equipment.
 
 ## Safety checklist
 
@@ -700,10 +396,4 @@ Initial owner:                     off
 GM/AI/health/equipment/etc.:       off via pose-only mask restriction
 ```
 
-Experiments 2026-07-11:
-
-- Bit-aligned owner → AV.
-- Nested MapNpc wheelset TFID + owner → **same AV**.
-- Ghidra: owner presence on ghost arms `Vehicle_setDrivingInputs` → `FUN_00503F30` → Havok without wheelset check.
-
-**Production default until Path A equip is proven non-null:** `EnableMinimalForeignOwnerBlock = false`.
+Experiment 2026-07-11: owner lever on + bit-aligned creature-owner form → **AV 0x004F5566 returned**. Lever restored to **false**. Next: prove client `+0x258` after foreign CreateVehicle, and whether owner unpack forces `Vehicle_createVehicleAction` / `FUN_00503F30` without a wheelset.

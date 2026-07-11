@@ -47,6 +47,7 @@ public class GhostVehicleWireRegressionTests
         GhostVehicle.EnableMinimalForeignOwnerBlock = false;
         GhostVehicle.EnableInitialHardpointPack = false;
         GhostVehicle.EnableDeferredForeignPose = false;
+        GhostVehicle.EnableForeignReghostOwner = false;
         WireDiag.ResetForTests();
     }
 

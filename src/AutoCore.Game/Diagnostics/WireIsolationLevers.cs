@@ -48,6 +48,8 @@ public static class WireIsolationLevers
             () => GhostVehicle.EnableInitialHardpointPack, v => GhostVehicle.EnableInitialHardpointPack = v, envSuffix: "INITIAL_HARDPOINT"),
         new("EnableDeferredForeignPose", "Omit pose on foreign ghost initial; ship pose on later delta (owner-on race)",
             () => GhostVehicle.EnableDeferredForeignPose, v => GhostVehicle.EnableDeferredForeignPose = v, envSuffix: "DEFER_FOREIGN_POSE"),
+        new("EnableForeignReghostOwner", "First foreign ghost without owner; descope then rescope initial with owner (P2)",
+            () => GhostVehicle.EnableForeignReghostOwner, v => GhostVehicle.EnableForeignReghostOwner = v, envSuffix: "FOREIGN_REGHOST_OWNER"),
     };
 
     /// <summary>Load JSON (if present) then env overrides. Call once at process start.</summary>
@@ -93,6 +95,7 @@ public static class WireIsolationLevers
         GhostVehicle.EnableMinimalForeignOwnerBlock = false;
         GhostVehicle.EnableInitialHardpointPack = false;
         GhostVehicle.EnableDeferredForeignPose = false;
+        GhostVehicle.EnableForeignReghostOwner = false;
     }
 
     public static void ApplyFromEnvironmentVariables()

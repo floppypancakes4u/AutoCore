@@ -17,6 +17,7 @@ using AutoCore.Game.Extensions;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Packets;
+using AutoCore.Game.TNL.Ghost;
 using AutoCore.Utils;
 
 public partial class TNLConnection : GhostConnection
@@ -40,6 +41,12 @@ public partial class TNLConnection : GhostConnection
     private readonly Dictionary<long, ForeignVehicleCreateHold> _globalVehicleCreates = new();
 
     /// <summary>
+    /// P2 owner-on: first foreign ghost initial withholds owner; after delay, one descope then
+    /// rescope so TNL sends a second initial with owner. Keyed by vehicle coid.
+    /// </summary>
+    private readonly Dictionary<long, ForeignReghostState> _foreignReghost = new();
+
+    /// <summary>
     /// Post-create scope queries that must call <see cref="TryAllowForeignVehicleGhostScope"/> before
     /// ObjectInScope. Create itself does not count (same query continues without TryAllow).
     /// Default 1: interest selection may only include an NPC on sparse ticks; requiring 2+ meant the
@@ -49,6 +56,9 @@ public partial class TNLConnection : GhostConnection
 
     /// <summary>Minimum wall-clock ms after CreateVehicle before ObjectInScope (0 in unit tests).</summary>
     public static int ForeignGhostScopeHoldMilliseconds { get; set; } = 500;
+
+    /// <summary>Ms after first no-owner scope before forcing one descope for owner re-initial (P2).</summary>
+    public static int ForeignReghostDelayMilliseconds { get; set; } = 500;
 
     /// <summary>
     /// If a create hold is not observed in scope for this many ms, drop it so re-entry re-creates.
@@ -72,6 +82,20 @@ public partial class TNLConnection : GhostConnection
         public long CreatedAtUnixMs;
         public long LastSeenScopeUnixMs;
         public int ScopeQueriesSinceCreate;
+    }
+
+    internal enum ForeignReghostPhase : byte
+    {
+        None = 0,
+        FirstScopedNoOwner = 1,
+        Descoped = 2,
+        RescopedWithOwner = 3,
+    }
+
+    private sealed class ForeignReghostState
+    {
+        public ForeignReghostPhase Phase;
+        public long FirstScopedAtUnixMs;
     }
 
     /// <summary>
@@ -197,7 +221,84 @@ public partial class TNLConnection : GhostConnection
     /// Forgets all foreign create holds. Called when the client discards its local object table on
     /// a map transfer (see <see cref="EnsureGhostsAndScopeAfterMapTransfer"/>).
     /// </summary>
-    internal void ClearGlobalVehicleCreateTracking() => _globalVehicleCreates.Clear();
+    internal void ClearGlobalVehicleCreateTracking()
+    {
+        _globalVehicleCreates.Clear();
+        _foreignReghost.Clear();
+    }
+
+    /// <summary>
+    /// P2: suppress CurrentOwner on ghost packs until a second initial after descope/rescope.
+    /// </summary>
+    public bool ShouldSuppressForeignOwnerOnPack(long coid)
+    {
+        if (!GhostVehicle.EnableForeignReghostOwner)
+            return false;
+
+        if (!_foreignReghost.TryGetValue(coid, out var state))
+            return true;
+
+        return state.Phase != ForeignReghostPhase.RescopedWithOwner;
+    }
+
+    /// <summary>
+    /// P2: after first no-owner scope and delay, skip ObjectInScope once so TNL kills the ghost.
+    /// Returns true when the caller must not call ObjectInScope this query.
+    /// </summary>
+    public bool ShouldSkipForeignObjectInScopeForReghost(long coid)
+    {
+        if (!GhostVehicle.EnableForeignReghostOwner)
+            return false;
+
+        if (!_foreignReghost.TryGetValue(coid, out var state))
+            return false;
+
+        if (state.Phase != ForeignReghostPhase.FirstScopedNoOwner)
+            return false;
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var delay = Math.Max(0, ForeignReghostDelayMilliseconds);
+        if (now - state.FirstScopedAtUnixMs < delay)
+            return false;
+
+        state.Phase = ForeignReghostPhase.Descoped;
+        return true;
+    }
+
+    /// <summary>
+    /// P2: record first no-owner scope, or promote Descoped → RescopedWithOwner on the second scope.
+    /// </summary>
+    public void NoteForeignVehicleGhostScoped(long coid)
+    {
+        if (!GhostVehicle.EnableForeignReghostOwner)
+            return;
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (!_foreignReghost.TryGetValue(coid, out var state))
+        {
+            _foreignReghost[coid] = new ForeignReghostState
+            {
+                Phase = ForeignReghostPhase.FirstScopedNoOwner,
+                FirstScopedAtUnixMs = now,
+            };
+            return;
+        }
+
+        if (state.Phase == ForeignReghostPhase.Descoped)
+            state.Phase = ForeignReghostPhase.RescopedWithOwner;
+    }
+
+    internal ForeignReghostPhase GetForeignReghostPhaseForTests(long coid) =>
+        _foreignReghost.TryGetValue(coid, out var s) ? s.Phase : ForeignReghostPhase.None;
+
+    /// <summary>Test helper: age first-scope clock without sleeping.</summary>
+    internal void DebugAgeForeignReghostFirstScopeForTests(long coid, long ageMs)
+    {
+        if (!_foreignReghost.TryGetValue(coid, out var state))
+            return;
+
+        state.FirstScopedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - Math.Max(0, ageMs);
+    }
 
     /// <summary>Test helper: age last-seen (left scope) without sleeping the suite.</summary>
     internal void DebugAgeForeignCreateHoldForTests(long coid, long ageMs)
@@ -217,6 +318,7 @@ public partial class TNLConnection : GhostConnection
         ForeignGhostScopeHoldQueries = 1;
         ForeignGhostScopeHoldMilliseconds = 500;
         ForeignCreateHoldStaleGraceMilliseconds = 15000;
+        ForeignReghostDelayMilliseconds = 500;
         ForceForeignCreateReapply = false;
     }
 

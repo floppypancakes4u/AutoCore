@@ -252,42 +252,34 @@ Client tick (`FUN_008078b0`): ghost object-create/update **before** game packet 
 
 ---
 
-## 8. Recommended product path (updated)
+## 8. Recommended product path (updated 2026-07-11 evening)
 
-**Ship now (tooltip-free):** create-before-ghost hold + re-scope create + wheel delta + **owner off** — commit `74f0d0c`.
+**Baseline (always):** create-before-ghost hold + nest re-apply without IsItemLink + optional `EnableInitialHardpointPack` — commit `74f0d0c` family.
 
-**Owner-on requirements (from RE):**
+**Owner-on (validated):**
 
-1. **`+0x258` non-null before `FUN_00503F30`**, and  
-2. Without using **`packet+0xA1`** (IsItemLink), because that forces **`FUN_008024d0` → i_d_item.xml**.
+| Path | Lever(s) | Live | Role |
+| --- | --- | --- | --- |
+| **P2 reghost** | `EnableForeignReghostOwner` + owner block; **defer pose off** | **Pass** | **Feature-complete owner+pose initial** — preferred for max fidelity (§12) |
+| **P1 defer pose** | `EnableDeferredForeignPose` + owner block; reghost off | **Pass** | Smoother UX (no descope); pose arrives on delta (`8705611`) |
 
-**Plausible fix directions still open:**
+**Do not** ship owner + pose on the **first** foreign initial without P1 or P2 (crash proven).
 
-| Direction | RE status | Notes |
-| --- | --- | --- |
-| Nest re-apply without `+0xA1` | **Blocked** by `FUN_00812630` | Only IsItemLink re-applies existing TFID |
-| Owner on later delta | **Blocked** by unpack | Owner initial-only |
-| Force non-zero nest in ghost `FUN_005F5AD0` buffer | Server cannot (client zero-fill) | Would need client patch or different ghost create |
-| Ensure game CreateVehicle **always wins** before any owner-bearing initial | Timing / identity | Correct retail contract; hold is necessary but not sufficient if re-scope rebuilds |
-| Flush PostCorrection / S2C `0x203C` before setDrivingInputs | **Blocked** | PostCorrection does not SetWheelset; game `0x203C` is after ghost on tick |
-| S2C InventoryEquip as wheel fix for foreign NPCs | Weak | Needs live item object + runs after ghost; not spawn-safe |
-| **Client patch** skip activate if `+0x258==0` | Cleanest safety | Out of pure server scope |
-| Default-wheel helper `FUN_00833680` | UI/select only | Callers are menu/vehicle-select (`FUN_0083ab90` etc.), **not** ghost activate |
-
-**Most honest server-only owner-on path:** keep owner off until create-before-ghost is **provably** always in table with non-null `+0x258` before any owner-bearing initial (or force a full re-ghost initial after wheels without racing activate). Timing-only hopes that PostCorrection/`0x203C` will “fix wheels before activate” are **disproven** by §10.
+Full P2 design + gap list: **§12**. Comparison: **§11.7**.
 
 ---
 
 ## 9. Suggested next RE sessions
 
-1. ~~Event queue consumer for `0x203C` / `0x203E`~~ — **done** (§10): producers only; no apply-to-SetWheelset consumer.
-2. ~~Non-create S2C SetWheelset paths~~ — **done** (§10.4): full caller set of `FUN_004FEA90`.
+1. ~~Event queue consumer for `0x203C` / `0x203E`~~ — **done** (§10).
+2. ~~Non-create S2C SetWheelset paths~~ — **done** (§10.4).
 3. ~~`FUN_008078b0` ghost vs game order~~ — **done** (§10.3).
-4. ~~Initial hardpoint → create-buffer `+0x45c`~~ — **done** (§11); lever `EnableInitialHardpointPack`.
-5. Live PathA: with `EnableInitialHardpointPack true`, do ghost-materialize EquipFromCreate hits show non-zero `wheel_cbid`?
-6. Retail capture: does live retail ever send IsItemLink on vehicle creates?
-7. Whether AutoCore can force a **second initial** (destroy ghost + re-scope) after wheels without owner on the first initial.
-8. Map remaining initial hardpoint slots (weapons/armor dword indices) if full nest seed is needed later.
+4. ~~Initial hardpoint → create-buffer `+0x45c`~~ — **done** (§11).
+5. ~~P1 defer pose~~ — **live pass** (§11.6); commit `8705611`.
+6. ~~P2 reghost second initial~~ — **live pass** (§12).
+7. **Next product:** expand minimal foreign **delta** masks (AI → health → target → weapons) one family at a time.
+8. Optional: PathA evidence for `v258` under P2.
+9. Map remaining initial hardpoint slots if full nest seed is needed later.
 
 ---
 
@@ -506,27 +498,237 @@ Only after PathA proves non-zero nest materialize: consider `EnableMinimalForeig
 
 ### 11.6 Campaign: four priorities (2026-07-11)
 
-| Priority | Approach | Lever / note |
-| --- | --- | --- |
-| **P1** | Owner initial, **pose deferred** to delta | `EnableDeferredForeignPose` (+ owner block) |
-| **P2** | Re-ghost second initial with owner+pose | only if P1 fails |
-| **P3** | Lab client null-`+0x258` guard | only if P1+P2 fail |
-| **P4** | Distributed client patch | last resort |
+| Priority | Approach | Lever | Live |
+| --- | --- | --- | --- |
+| **P1** | Owner on first initial; **pose deferred** to delta | `EnableDeferredForeignPose` + owner block | **PASS** — commit `8705611` |
+| **P2** | First ghost **without** owner; descope; **second initial** owner+pose | `EnableForeignReghostOwner` + owner block | **PASS** — no AV |
+| **P3** | Lab client null-`+0x258` guard | inject / private patch | not required |
+| **P4** | Distributed client patch | fleet download | last resort only |
 
-P1 live config: owner block **true**, defer pose **true**, initWheel **true**. WireDiag: `deferPose=1`, initial mask **without** `0x2`, later deltas carry pose.
+#### P1 — defer pose (detail)
 
-#### P1 live result (2026-07-11, Ark Bay / conn 18423)
+**Mechanism:** Foreign initial omits `PositionMask` (kept dirty). Unpack never sets pose flag → no `Vehicle_setDrivingInputs` → no activate on that unpack. Owner still ships on initial (`clientOwner` latch for later AI/GM).
 
-| Metric | Value |
+| Metric (conn 18423) | Value |
 | --- | --- |
 | Client crash | **None** |
 | `owner=1/1` GhostPacks | 60 |
 | Initial packs | 36, all `deferPose=1`, **0** with PositionMask |
-| Initial mask | always `0x100000000` (WheelSet only; no `0x2`) |
+| Initial mask | always `0x100000000` (WheelSet only) |
 | Delta packs with PositionMask | 24 |
-| Contrast | Prior owner+pose initial (`mask=0x100000002`) → AV `0x004F5566` |
+| Contrast | Prior owner+pose initial (`0x100000002`) → AV |
 
-**Verdict: P1 PASS.** Owner without pose on first foreign initial avoids activate race; pose ships on later deltas. P2–P4 not required for mainline unless residual gameplay issues (frozen NPCs, missing AI) appear.
+#### P2 — reghost owner (summary)
+
+Full design, state machine, levers, live metrics, and **feature gap list**: **§12**.
+
+### 11.7 Completeness comparison: P1 vs P2
+
+| Dimension | **P1 defer pose** | **P2 reghost** |
+| --- | --- | --- |
+| No AV (live) | Yes | Yes |
+| Owner on wire | First initial | Second initial only |
+| Pose on wire | After first delta(s) | On second initial (with owner) |
+| Owner+pose **same** ghost initial | No (by design) | **Yes** (second initial) |
+| Client owner latch for AI/GM early | **Yes** (first initial) | Delayed until rescope |
+| Visual / scope continuity | Continuous ghost | **Brief descope** (flicker risk) |
+| Create-before-activate | Relies on hold + delayed pose | Relies on hold + first no-owner scope |
+| Extra server complexity | Mask/dirty only | Per-coid state machine + descope |
+| Pure server | Yes | Yes |
+| Tooltip-free | Yes | Yes |
+
+**Most complete wire form (owner+pose co-located on one initial after wheels):** **P2** — see §12.  
+**Smoother UX without descope:** **P1**.
+
+**Product choice (2026-07-11):** prefer **P2** when maximizing fidelity; keep P1 available as a lower-flicker alternative.
+
+---
+
+## 12. Priority 2 — foreign reghost owner (thorough)
+
+### 12.1 Problem it solves
+
+Retail client activates Havok when:
+
+```text
+owner present  ∧  setDrivingInputs (pose unpack)  ∧  VehicleAction empty
+  → createVehicleAction → read *(vehicle+0x258) → AV if null
+```
+
+Sending **owner + pose on the first foreign ghost initial** (after or with CreateVehicle) still raced null `+0x258` live (`mask=0x100000002`, AV `0x004F5566`).
+
+**P2 strategy:** never put owner on that first ghost. Let create + first ghost establish wheels. Then **force a second TNL initial** that may safely carry owner **and** pose together.
+
+Owner cannot be added on a pure delta (unpack is initial-only for CurrentOwner). Descope + rescope is how TNL generates a new initial without a client patch.
+
+### 12.2 High-level sequence
+
+```text
+  interest hits foreign global vehicle
+           │
+           ▼
+  CreateVehicle (full nest, wheelOk) ── hold ──► first ObjectInScope
+           │                                         │
+           │                                         ▼
+           │                              phase = FirstScopedNoOwner
+           │                              PackUpdate: SUPPRESS owner
+           │                              (pose/wheel/path/template OK)
+           │                                         │
+           │                              wait ForeignReghostDelayMs (default 500)
+           │                                         │
+           │                                         ▼
+           │                              skip ObjectInScope once
+           │                              log ForeignReghostDescope
+           │                              TNL: not InScope → KillGhost
+           │                                         │
+           │                                         ▼
+           │                              phase = Descoped
+           │                              (may re-CreateVehicle if not ghosted)
+           │                                         │
+           │                                         ▼
+           │                              ObjectInScope again
+           │                              phase = RescopedWithOwner
+           │                              PackUpdate: ALLOW owner
+           │                              second initial: owner + pose (+ initWheel)
+           ▼
+  later deltas: still under minimal mask filter (see §12.6)
+```
+
+### 12.3 State machine (per connection × vehicle coid)
+
+| Phase | Meaning | `ShouldSuppressForeignOwnerOnPack` | Scope behavior |
+| --- | --- | --- | --- |
+| *(absent)* | Never scoped under reghost | **true** (safe default) | Normal create/hold then first scope |
+| `FirstScopedNoOwner` | First `ObjectInScope` recorded | **true** | Stay in scope until delay elapses |
+| `Descoped` | One deliberate skip of `ObjectInScope` done | **true** | TNL detaches; next hit may re-create + hold |
+| `RescopedWithOwner` | Second `ObjectInScope` after descope | **false** | Owner may pack if owner levers allow |
+
+**One reghost per coid per connection session** — once `RescopedWithOwner`, no further descope for that coid (until map transfer clears tracking).
+
+### 12.4 Code map
+
+| Piece | Location |
+| --- | --- |
+| Lever | `GhostVehicle.EnableForeignReghostOwner` (default **false**) |
+| Wire / env | `WireIsolationLevers` key `EnableForeignReghostOwner` / `AUTOCORE_WIRE_FOREIGN_REGHOST_OWNER` |
+| Delay | `TNLConnection.ForeignReghostDelayMilliseconds` (default **500**) |
+| Suppress owner on pack | `TNLConnection.ShouldSuppressForeignOwnerOnPack` |
+| Descope skip | `TNLConnection.ShouldSkipForeignObjectInScopeForReghost` → `SectorMap.PerformScopeQuery` `continue` |
+| Phase notes | `TNLConnection.NoteForeignVehicleGhostScoped` after successful `ObjectInScope` |
+| Pack gate | `GhostVehicle.PackUpdate`: `packOwner && !suppressOwnerForReghost` |
+| Clear on map transfer | `ClearGlobalVehicleCreateTracking` also clears `_foreignReghost` |
+| Tests | `ForeignReghostOwnerTests` |
+
+### 12.5 Live result (2026-07-11, conn 18423)
+
+Config: reghost **on**, defer pose **off**, owner block **on**, initWheel **on**, minimal foreign **on**.
+
+| Metric | Value |
+| --- | --- |
+| Client crash | **None** |
+| `ForeignReghostDescope` | **13** |
+| `owner=1/1` packs | 54 |
+| `owner=0/1` (suppressed) | 3 (includes first-scope style initial ~936 bits) |
+| Second-style initials | mostly **1036 bits**, `mask=0x100000002`, `owner=1/1` |
+
+**Interpretation:** the same owner+pose initial that crashed on first sighting is **safe** after create + first no-owner ghost. Wheels observed on vehicles in-world.
+
+### 12.6 What P2 does **not** give you (still missing)
+
+P2 only fixes **owner-on without AV**. It does **not** turn on full foreign vehicle fidelity. With **minimal foreign profile still on** (current isolation default):
+
+#### A. Delta mask filter (largest gameplay gap)
+
+Foreign non-initial `updateMask` is forced to:
+
+```text
+PositionMask | WheelSetMask
+```
+
+So these **do not replicate on deltas** even after owner is present:
+
+| Missing on deltas | Player-visible effect |
+| --- | --- |
+| **AI combat state** (`StateMask`) | Driver AI state not updated on client |
+| **Health / max HP** | No live HP bars / damage / corpse from ghost |
+| **Target** | Targeting / combat target not updated |
+| **Weapons** (front/turret/rear/melee) | Loadout changes after spawn not ghosted |
+| **Armor** | Armor hardpoint / resists not ghosted after create |
+| **Ornament** | Cosmetic hardpoint not ghosted after create |
+| **Skills** | Vehicle/owner skills not ghosted |
+| **GM nibble** | Character-owner only; still filtered |
+| **Attributes** | Character-owner only; still filtered |
+| **Murderer** | Stub / not useful under filter |
+
+CreateVehicle may still paint **initial** nest once; **ongoing** combat/loadout/AI is largely missing — matches “health, targeting, movement feel awful.”
+
+#### B. Pose-only motion quality
+
+Pose deltas carry position/rotation/velocity, but:
+
+- No rich path-follow beyond initial path id block  
+- Descope/rescope can interrupt continuity  
+- Server AI / physics may not match retail density of pose updates  
+
+#### C. Never wired (all profiles)
+
+| Field | Status |
+| --- | --- |
+| Handling multipliers (speed, brakes, steering, AVD) | Always client defaults |
+| Clan block | TODO / flag false |
+| Pet CBID | TODO / flag false |
+| Owner skills payload | Flag false |
+| Full character-owner cosmetics on NPC drivers | Creature form only for NPCs |
+
+#### D. P2-specific UX costs
+
+| Cost | Effect |
+| --- | --- |
+| ~500ms+ first ghost without owner | No driver object / no AI latch yet |
+| Forced descope | Possible brief pop / re-create |
+| Possible second CreateVehicle | Extra bandwidth; IsItemLink=0 nest re-apply |
+
+#### E. Explicitly out of scope for P2
+
+- Client patch / fleet download  
+- IsItemLink tooltip re-apply  
+- Fixing retail missing null check on `+0x258`  
+
+### 12.7 Recommended levers for “max owner fidelity” (P2)
+
+```json
+{
+  "EnableMinimalForeignInitialProfile": true,
+  "EnableMinimalForeignPathBlock": true,
+  "EnableMinimalForeignTemplateSpawnBlock": true,
+  "EnableMinimalForeignOwnerBlock": true,
+  "EnableForeignReghostOwner": true,
+  "EnableDeferredForeignPose": false,
+  "EnableInitialHardpointPack": true,
+  "EnableOwnerWire": true,
+  "EnablePathWire": true,
+  "EnableTemplateSpawnWire": true,
+  "EnableAiStateWire": true
+}
+```
+
+**Next work (not P2):** widen minimal foreign **delta** admission (e.g. StateMask → Health → Target → weapons), one family at a time, with owner already safe via P2.
+
+### 12.8 Ops / debugging
+
+| Signal | Meaning |
+| --- | --- |
+| `ForeignReghostDescope coid=…` | Deliberate skip of ObjectInScope |
+| `owner=0/1` on GhostPack | Server has owner but pack suppressed (first phase) |
+| `owner=1/1` + `initial=y` + `mask` includes `0x2` | Second initial with owner+pose |
+| AV `0x004F5566` again | Reghost failed or owner+pose raced first sighting — check descope count and phase |
+
+Map transfer / `ClearGlobalVehicleCreateTracking` resets reghost phases so the cycle can run again on re-entry.
+
+- **Ship P1** as the default owner-on configuration.  
+- Keep **P2** as an optional lever / defense in depth (or for experiments that require owner+pose on a single initial).  
+- Do **not** enable naive owner+pose on first foreign initial.  
+- P3/P4 only if a new race appears that neither P1 nor P2 covers.
 
 ### 11.5 Empty nest semantics (game vs ghost)
 
