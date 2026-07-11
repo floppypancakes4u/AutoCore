@@ -32,6 +32,10 @@ public class GhostObject : NetObject
     public const ulong TokenMask     = 0x100ul;
 
     protected ClonedObjectBase? Parent { get; set; }
+
+    /// <summary>Viewer entity for priority math when <paramref name="scopeObject"/> is a <see cref="GhostObject"/>.</summary>
+    protected static ClonedObjectBase GetViewerParent(NetObject scopeObject) =>
+        (scopeObject as GhostObject)?.Parent;
     protected float UpdatePriorityScalar { get; set; }
     protected object MsgCreate { get; set; }
     protected object MsgCreateOwner { get; set; }

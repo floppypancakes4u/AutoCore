@@ -135,14 +135,52 @@ public class Vehicle : SimpleObject
     /// Applies a server-authoritative pose/velocity update (NPC movement tick) and marks the
     /// ghost's PositionMask dirty so it reaches observers on the next update. Safe to call
     /// before the ghost exists.
+    /// When <paramref name="dt"/> &gt; 0, fills angular velocity / steering / acceleration from
+    /// the previous pose so client interpolation is less steppy (movement smoothness M2).
     /// </summary>
-    public void ApplyServerMove(Vector3 position, Quaternion rotation, Vector3 velocity)
+    public void ApplyServerMove(Vector3 position, Quaternion rotation, Vector3 velocity, float dt = 0f)
     {
+        if (dt > 0f && dt < 1f)
+        {
+            var prevYaw = YawFromQuaternion(Rotation);
+            var nextYaw = YawFromQuaternion(rotation);
+            var dYaw = NormalizeRadians(nextYaw - prevYaw);
+            AngularVelocity = new Vector3(0f, dYaw / dt, 0f);
+            // Map ~±45°/s of yaw rate into [-1,1] steering for the ghost pose block.
+            Steering = Math.Clamp(dYaw / (MathF.PI * 0.25f * Math.Max(dt, 1e-3f)) * dt, -1f, 1f);
+
+            var prevSpeed = MathF.Sqrt((Velocity.X * Velocity.X) + (Velocity.Y * Velocity.Y) + (Velocity.Z * Velocity.Z));
+            var nextSpeed = MathF.Sqrt((velocity.X * velocity.X) + (velocity.Y * velocity.Y) + (velocity.Z * velocity.Z));
+            Acceleration = Math.Clamp((nextSpeed - prevSpeed) / dt, -50f, 50f);
+        }
+        else
+        {
+            AngularVelocity = default;
+            // Leave Steering/Acceleration as-is when dt unknown (e.g. unit tests without time).
+        }
+
         Position = position;
         Rotation = rotation;
         Velocity = velocity;
 
         Ghost?.SetMaskBits(GhostObject.PositionMask);
+    }
+
+    private static float YawFromQuaternion(Quaternion q)
+    {
+        // Yaw about Y from standard unit quaternion (XZ plane heading).
+        var siny = 2f * ((q.W * q.Y) + (q.X * q.Z));
+        var cosy = 1f - (2f * ((q.Y * q.Y) + (q.X * q.X)));
+        return MathF.Atan2(siny, cosy);
+    }
+
+    private static float NormalizeRadians(float a)
+    {
+        while (a > MathF.PI)
+            a -= MathF.PI * 2f;
+        while (a < -MathF.PI)
+            a += MathF.PI * 2f;
+        return a;
     }
 
     /// <summary>

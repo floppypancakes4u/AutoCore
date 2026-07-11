@@ -41,6 +41,50 @@ public class GhostObjectPriorityTests
     }
 
     [TestMethod]
+    public void GetUpdatePriority_ForeignVehicleOutranksPlainCreature_WhenBoostEnabled()
+    {
+        GhostVehicle.EnableForeignVehiclePosePriorityBoost = true;
+        try
+        {
+            var viewer = MakeCharacter(1, 0f);
+            var vehicle = MakeVehicleGhost(2, 100f);
+            var plain = MakeCreatureGhost(3, 100f);
+
+            var vehiclePriority = vehicle.Ghost.GetUpdatePriority(viewer.Ghost, GhostObject.PositionMask, 0);
+            var plainPriority = plain.Ghost.GetUpdatePriority(viewer.Ghost, GhostObject.PositionMask, 0);
+
+            Assert.IsTrue(vehiclePriority > plainPriority,
+                $"Moving foreign vehicle priority must exceed plain NPC ({vehiclePriority} vs {plainPriority}).");
+        }
+        finally
+        {
+            GhostVehicle.EnableForeignVehiclePosePriorityBoost = true;
+        }
+    }
+
+    [TestMethod]
+    public void GetUpdatePriority_PlayerStillOutranksForeignVehicle()
+    {
+        GhostVehicle.EnableForeignVehiclePosePriorityBoost = true;
+        try
+        {
+            var viewer = MakeCharacter(1, 0f);
+            var otherPlayer = MakeCharacter(2, 100f);
+            var vehicle = MakeVehicleGhost(3, 100f);
+
+            var playerPriority = otherPlayer.Ghost.GetUpdatePriority(viewer.Ghost, GhostObject.PositionMask, 0);
+            var vehiclePriority = vehicle.Ghost.GetUpdatePriority(viewer.Ghost, GhostObject.PositionMask, 0);
+
+            Assert.IsTrue(playerPriority >= vehiclePriority,
+                $"Player vehicles/characters must not lose to foreign NPC cars ({playerPriority} vs {vehiclePriority}).");
+        }
+        finally
+        {
+            GhostVehicle.EnableForeignVehiclePosePriorityBoost = true;
+        }
+    }
+
+    [TestMethod]
     public void GetUpdatePriority_SelfAndTargetPinnedAtOne()
     {
         var viewer = MakeCharacter(1, 0f);
@@ -73,5 +117,14 @@ public class GhostObjectPriorityTests
         creature.IsMissionGiver = missionGiver;
         creature.CreateGhost();
         return creature;
+    }
+
+    private static Vehicle MakeVehicleGhost(long coid, float x)
+    {
+        var vehicle = new Vehicle();
+        vehicle.SetCoid(coid, true);
+        vehicle.Position = new Vector3(x, 0f, 0f);
+        vehicle.CreateGhost();
+        return vehicle;
     }
 }

@@ -63,7 +63,7 @@ public static class NpcTicker
             // waypoint) are never "holding" per the check above, so arrival snapping still applies
             // even when the NPC happened to already be sitting on the waypoint.
             if (!wasHolding || !PositionsEqual(result.NewPosition, entity.Position))
-                ApplyMove(entity, result);
+                ApplyMove(entity, result, dt);
 
             if (result.FireReactionCoid > 0)
                 map.TriggerReactions(entity, new List<long> { result.FireReactionCoid });
@@ -106,12 +106,12 @@ public static class NpcTicker
         return speed > 0f ? speed : fallback;
     }
 
-    private static void ApplyMove(ClonedObjectBase entity, PathStepResult result)
+    private static void ApplyMove(ClonedObjectBase entity, PathStepResult result, float dt)
     {
         switch (entity)
         {
             case Vehicle vehicle:
-                vehicle.ApplyServerMove(result.NewPosition, result.Rotation, result.Velocity);
+                vehicle.ApplyServerMove(result.NewPosition, result.Rotation, result.Velocity, dt);
                 vehicle.PathReversing = result.NowReversing;
                 break;
             case Creature creature:

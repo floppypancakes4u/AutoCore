@@ -14,5 +14,6 @@
   "EnableMinimalForeignOwnerBlock": true,
   "EnableInitialHardpointPack": true,
   "EnableDeferredForeignPose": false,
-  "EnableForeignReghostOwner": true
+  "EnableForeignReghostOwner": true,
+  "EnableForeignVehiclePosePriorityBoost": true
 }

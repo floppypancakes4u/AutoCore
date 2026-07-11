@@ -71,7 +71,15 @@ These are **not** fixed by P2; they need later delta expansion or new wire work:
 | Handling multipliers, clan, pet | Never wired (always default/false) |
 | Smooth continuous NPC movement | Pose-only deltas + possible reghost pop; density/AI not retail-complete |
 
-**Next focus:** widen minimal foreign **delta** admission one family at a time (e.g. AI → health → target → weapons), with owner already safe via P2.
+**Next focus:** smoother movement first (pose priority + richer `ApplyServerMove`), then widen minimal foreign **delta** admission one family at a time (e.g. AI → health → target → weapons), with owner already safe via P2.
+
+### Movement smoothness (2026-07-11)
+
+**Baseline (M0):** over multi-minute Ark Bay logs, individual foreign vehicles often saw only **~3 pose deltas** total — starvation, not a missing mask (`PositionMask` already admitted under minimal foreign).
+
+**M1:** `EnableForeignVehiclePosePriorityBoost` (default **true**) raises vehicle ghost TNL weight from generic **0.15** to **0.40** so pose updates compete better with players.
+
+**M2:** `Vehicle.ApplyServerMove(..., dt)` fills **angular velocity / steering / acceleration** from yaw and speed deltas for better client interpolation.
 
 ### Historical live result 2026-07-11 morning (owner + pose, no defer)
 

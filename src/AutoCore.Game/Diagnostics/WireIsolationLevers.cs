@@ -50,6 +50,8 @@ public static class WireIsolationLevers
             () => GhostVehicle.EnableDeferredForeignPose, v => GhostVehicle.EnableDeferredForeignPose = v, envSuffix: "DEFER_FOREIGN_POSE"),
         new("EnableForeignReghostOwner", "First foreign ghost without owner; descope then rescope initial with owner (P2)",
             () => GhostVehicle.EnableForeignReghostOwner, v => GhostVehicle.EnableForeignReghostOwner = v, envSuffix: "FOREIGN_REGHOST_OWNER"),
+        new("EnableForeignVehiclePosePriorityBoost", "Higher TNL ghost priority for vehicles (smoother pose updates)",
+            () => GhostVehicle.EnableForeignVehiclePosePriorityBoost, v => GhostVehicle.EnableForeignVehiclePosePriorityBoost = v, envSuffix: "VEHICLE_POSE_PRIORITY"),
     };
 
     /// <summary>Load JSON (if present) then env overrides. Call once at process start.</summary>
@@ -96,6 +98,7 @@ public static class WireIsolationLevers
         GhostVehicle.EnableInitialHardpointPack = false;
         GhostVehicle.EnableDeferredForeignPose = false;
         GhostVehicle.EnableForeignReghostOwner = false;
+        GhostVehicle.EnableForeignVehiclePosePriorityBoost = true;
     }
 
     public static void ApplyFromEnvironmentVariables()

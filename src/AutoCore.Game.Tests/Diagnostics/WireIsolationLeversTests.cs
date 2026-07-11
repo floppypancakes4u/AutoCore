@@ -44,6 +44,7 @@ public class WireIsolationLeversTests
         Assert.IsFalse(GhostVehicle.EnableInitialHardpointPack);
         Assert.IsFalse(GhostVehicle.EnableDeferredForeignPose);
         Assert.IsFalse(GhostVehicle.EnableForeignReghostOwner);
+        Assert.IsTrue(GhostVehicle.EnableForeignVehiclePosePriorityBoost);
         Assert.IsFalse(WireDiag.Enabled);
     }
 

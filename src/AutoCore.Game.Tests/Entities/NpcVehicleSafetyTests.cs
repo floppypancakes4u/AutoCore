@@ -95,6 +95,20 @@ public class NpcVehicleSafetyTests
     }
 
     [TestMethod]
+    public void Vehicle_ApplyServerMove_WithDt_FillsAngularAndSteeringFromYawChange()
+    {
+        var vehicle = new Vehicle();
+        vehicle.SetCoid(9005, true);
+        // Face +Z then turn toward +X (about +90° yaw).
+        vehicle.ApplyServerMove(new Vector3(0f, 0f, 0f), new Quaternion(0f, 0f, 0f, 1f), new Vector3(0f, 0f, 10f));
+        var turned = new Quaternion(0f, 0.7071068f, 0f, 0.7071068f);
+        vehicle.ApplyServerMove(new Vector3(1f, 0f, 1f), turned, new Vector3(10f, 0f, 0f), dt: 0.1f);
+
+        Assert.AreNotEqual(0f, vehicle.AngularVelocity.Y, "Yaw change over dt must set angular velocity Y.");
+        Assert.AreNotEqual(0f, vehicle.Steering, "Yaw change over dt must set steering for pose pack.");
+    }
+
+    [TestMethod]
     public void Creature_ApplyServerMove_SetsTargetPosition()
     {
         var creature = new Creature();

@@ -6,6 +6,7 @@ namespace AutoCore.Game.TNL.Ghost;
 
 using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
+using AutoCore.Game.Map;
 using AutoCore.Game.TNL;
 using AutoCore.Utils;
 
@@ -71,7 +72,36 @@ public class GhostVehicle : GhostObject
     /// </summary>
     public static bool EnableForeignReghostOwner = false;
 
+    /// <summary>
+    /// When true (default), foreign/other vehicles use a higher TNL ghost update weight than
+    /// generic props so pose deltas ship more often (smoother NPC patrol). Disable to A/B.
+    /// </summary>
+    public static bool EnableForeignVehiclePosePriorityBoost = true;
+
+    /// <summary>Type weight for vehicles when <see cref="EnableForeignVehiclePosePriorityBoost"/> is on.</summary>
+    internal const float VehiclePosePriorityWeight = 0.40f;
+
     private const int CoidCurrentPathBits = 18;
+
+    public override float GetUpdatePriority(NetObject scopeObject, ulong updateMask, int updateSkips)
+    {
+        // Same pin rules as GhostObject (self / viewer target).
+        if (ReferenceEquals(this, scopeObject))
+            return 1.0f;
+
+        var viewer = GetViewerParent(scopeObject);
+        if (Parent != null && viewer != null && ReferenceEquals(viewer.Target, Parent))
+            return 1.0f;
+
+        if (!EnableForeignVehiclePosePriorityBoost || Parent == null || viewer == null)
+            return base.GetUpdatePriority(scopeObject, updateMask, updateSkips);
+
+        var dx = viewer.Position.X - Parent.Position.X;
+        var dz = viewer.Position.Z - Parent.Position.Z;
+        var distance = (float)Math.Sqrt((dx * dx) + (dz * dz));
+        var falloff = Math.Clamp(1.0f - (distance / InterestSelector.BaseScopeDropRadius), 0.0f, 1.0f);
+        return (VehiclePosePriorityWeight * falloff) + (updateSkips * 0.01f);
+    }
 
     /// <summary>
     /// Latched at each initial pack: was the CurrentOwner block actually written on THIS ghost's
