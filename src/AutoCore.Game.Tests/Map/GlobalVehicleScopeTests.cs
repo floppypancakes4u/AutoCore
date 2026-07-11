@@ -21,9 +21,10 @@ public class GlobalVehicleScopeTests
         TNLConnection.TestPacketSink = null;
         AssetManagerTestHelper.ClearRegisteredCloneBases();
         ResetScopeLevers();
-        // Deterministic tests: two post-create scope queries, no wall-clock wait.
+        // Deterministic tests: two post-create TryAllow calls, no wall-clock wait.
         TNLConnection.ForeignGhostScopeHoldQueries = 2;
         TNLConnection.ForeignGhostScopeHoldMilliseconds = 0;
+        TNLConnection.ForeignCreateHoldStaleGraceMilliseconds = 0;
         TNLConnection.ForceForeignCreateReapply = false;
     }
 
@@ -92,8 +93,12 @@ public class GlobalVehicleScopeTests
 
         map.PerformScopeQuery(null, self, connection);
 
-        Assert.AreEqual(1, packets.OfType<CreateVehiclePacket>().Count(),
-            "Re-scoping must not duplicate CreateVehicle");
+        var creates = packets.OfType<CreateVehiclePacket>().ToList();
+        Assert.AreEqual(2, creates.Count,
+            "pre-hold create + post-ghost nest re-apply on first ObjectInScope");
+        Assert.IsFalse(creates[0].IsItemLink);
+        Assert.IsFalse(creates[1].IsItemLink,
+            "post-ghost re-apply must not use IsItemLink (Red Brigade tooltip regression)");
         Assert.IsNotNull(npcVehicle.Ghost.GetFirstObjectRef(),
             "Ghost scopes only after hold queries elapse");
     }
@@ -171,6 +176,9 @@ public class GlobalVehicleScopeTests
         map.PerformScopeQuery(null, self, connection);
         var ghostInfo = npcVehicle.Ghost.GetFirstObjectRef();
         Assert.IsNotNull(ghostInfo, "vehicle ghost must be scoped after hold queries");
+        Assert.AreEqual(2, packets.OfType<CreateVehiclePacket>().Count(),
+            "first attach: pre-hold create + post-ghost nest re-apply");
+        Assert.IsFalse(packets.OfType<CreateVehiclePacket>().Last().IsItemLink);
 
         // Player drives past the drop radius: TNL kills the ghost (no DestroyObject is ever sent, so
         // the client still holds the created object). IsGhostedTo now reports not-ghosted.
@@ -178,13 +186,11 @@ public class GlobalVehicleScopeTests
         Assert.IsFalse(npcVehicle.Ghost.IsGhostedTo(connection),
             "detaching must drop the ghost so the re-scope path is exercised");
 
-        // Player returns into scope: client may have dropped the vehicle; re-send CreateVehicle
-        // (FUN_00812630 no-ops if TFID still present, full create if missing) then hold, then ghost.
+        // Player returns into scope: re-send CreateVehicle, hold, then ghost+re-apply.
         map.PerformScopeQuery(null, self, connection);
-        Assert.AreEqual(2, packets.OfType<CreateVehiclePacket>().Count(),
-            "re-scope after ghost detach must re-send CreateVehicle so nest equip cannot be ghost-blob-only");
-        Assert.IsFalse(packets.OfType<CreateVehiclePacket>().Last().IsItemLink,
-            "re-scope must not set IsItemLink (tooltip regression); WheelSetMask delta recovers nest");
+        Assert.AreEqual(3, packets.OfType<CreateVehiclePacket>().Count(),
+            "re-scope after ghost detach must re-send CreateVehicle before ghost");
+        Assert.IsFalse(packets.OfType<CreateVehiclePacket>().Last().IsItemLink);
         Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef(), "ghost held again after re-create");
 
         map.PerformScopeQuery(null, self, connection);
@@ -192,17 +198,20 @@ public class GlobalVehicleScopeTests
 
         map.PerformScopeQuery(null, self, connection);
         Assert.IsNotNull(npcVehicle.Ghost.GetFirstObjectRef(), "ghost re-scoped after hold");
-        Assert.AreEqual(2, packets.OfType<CreateVehiclePacket>().Count(), "no third create while still ghosted");
+        Assert.AreEqual(4, packets.OfType<CreateVehiclePacket>().Count(),
+            "each create→ghost cycle: pre-hold create + post-ghost re-apply (no IsItemLink)");
+        Assert.IsFalse(packets.OfType<CreateVehiclePacket>().Last().IsItemLink);
     }
 
     [TestMethod]
     public void PerformScopeQuery_StaleCreateHoldWithoutGhost_ResendsCreate()
     {
-        // Live Path A: leave range mid-hold leaves HasActive hold stuck; re-entry skipped CreateVehicle
-        // and ObjectInScope'd from the ghost zero nest (wheel_cbid=0). Hold must expire if never cleared.
+        // Leave range mid-hold: last-seen ages out → re-entry must re-create (not ObjectInScope alone).
+        // Wall-clock-from-create stale was wrong: intermittent selection never reached ObjectInScope.
         const int vehicleCbid = 650_012;
         const long vehicleCoid = MapNpcIdentity.CoidBase + 18_151;
         AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid);
+        TNLConnection.ForeignCreateHoldStaleGraceMilliseconds = 1500;
 
         var map = CreateFieldMap();
         var npcVehicle = new Vehicle { Position = new Vector3(25f, 0f, 0f) };
@@ -226,14 +235,14 @@ public class GlobalVehicleScopeTests
         Assert.IsTrue(connection.HasActiveForeignCreateHold(vehicleCoid));
         Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef());
 
-        // Age the hold past HoldMs + stale grace without ever ObjectInScope.
+        // Age last-seen past grace (vehicle not observed in scope) without ever ObjectInScope.
         connection.DebugAgeForeignCreateHoldForTests(vehicleCoid, ageMs: 10_000);
         Assert.IsFalse(connection.HasActiveForeignCreateHold(vehicleCoid),
-            "hold that never reached ObjectInScope must expire so re-entry can re-create");
+            "hold not seen in scope must expire so re-entry can re-create");
 
         map.PerformScopeQuery(null, self, connection);
         Assert.AreEqual(2, packets.OfType<CreateVehiclePacket>().Count(),
-            "re-entry after stale mid-hold must re-send CreateVehicle before ghost");
+            "re-entry after leave mid-hold must re-send CreateVehicle before ghost");
         Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef(), "new hold defers ghost again");
     }
 

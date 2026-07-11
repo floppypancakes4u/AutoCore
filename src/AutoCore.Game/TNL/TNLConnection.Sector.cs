@@ -87,18 +87,19 @@ public partial class TNLConnection
             return;
         }
 
-        if (!Ghosting)
-            ActivateGhosting();
+        // OnConnectionEstablished already ActivateGhosting when DoGhosting. That leaves
+        // Scoping=true and Ghosting=false until rpcReadyForNormalGhosts. Calling ActivateGhosting
+        // again here (old `if (!Ghosting)`) bumps GhostingSequence and orphans the client's ready
+        // reply → Ghosting stuck false → zero GhostPacks / CreateVehicle thrash without owner.
+        EnsureSectorGhostingStarted();
 
         character.CreateGhost();
         character.CurrentVehicle.CreateGhost();
 
         SetScopeObject(character.Ghost);
 
-        // ActivateGhosting already set Scoping=true, but Ghosting stays false until the
-        // client answers rpcReadyForNormalGhosts. The vehicle is constructed by the
-        // CreateVehicleExtended packet below; registering its GhostVehicle here makes the
-        // client apply a second initial setup and clear its wheelset pointer.
+        // Local character always in scope. Do not ObjectLocalScopeAlways the vehicle — the client
+        // constructs it from CreateVehicleExtended; a GhostVehicle initial clears +0x258.
         ObjectLocalScopeAlways(character.Ghost);
 
         SendLocalPlayerCreatePackets(character);
@@ -143,12 +144,27 @@ public partial class TNLConnection
         character.CreateGhost();
         character.CurrentVehicle.CreateGhost();
 
-        // ResetGhosting always clears Ghosting and Scoping; restart the full sequence.
-        ActivateGhosting();
+        // ResetGhosting clears Ghosting and Scoping; restart only if not already scoping.
+        EnsureSectorGhostingStarted();
 
         SetScopeObject(character.Ghost);
 
         ObjectLocalScopeAlways(character.Ghost);
+    }
+
+    /// <summary>
+    /// Starts ghost scoping if inactive. Safe when already waiting for
+    /// <c>rpcReadyForNormalGhosts</c> (does not re-sequence).
+    /// </summary>
+    internal void EnsureSectorGhostingStarted()
+    {
+        // Scoping is set by ActivateGhosting and cleared by ResetGhosting. Ghosting flips true only
+        // after the client ready RPC matches GhostingSequence — do not ActivateGhosting when
+        // Scoping is already true (would orphan the client's ready for the prior sequence).
+        if (Scoping)
+            return;
+
+        ActivateGhosting();
     }
 
     private void SendLocalPlayerCreatePackets(Character character)

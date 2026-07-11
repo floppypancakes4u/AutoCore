@@ -4,6 +4,7 @@ using System.Linq;
 using global::TNL.Entities;
 using AutoCore.Database.World.Models;
 using AutoCore.Game.Constants;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
@@ -440,16 +441,41 @@ public class SectorMap
                 && gameConnection != null
                 && gameConnection.HasActiveForeignCreateHold(coid);
 
+            var wasGhosted = foreignGlobalVehicle && ghost.IsGhostedTo(connection);
             connection.ObjectInScope(ghost);
             if (foreignGlobalVehicle && gameConnection != null)
             {
-                gameConnection.ClearForeignVehicleCreateHold(coid);
-                if (releasingCreateHold
-                    && entity is Vehicle scopedVeh
-                    && scopedVeh.WheelSet != null
-                    && scopedVeh.WheelSet.CBID > 0)
+                var nowGhosted = ghost.IsGhostedTo(connection);
+                // Diagnose CreateVehicle thrash with zero GhostPacks (owner-on investigation).
+                if (WireDiag.Enabled && (releasingCreateHold || wasGhosted != nowGhosted))
                 {
-                    ghost.SetMaskBits(GhostVehicle.WheelSetMask);
+                    Logger.WriteLog(LogType.Network,
+                        "ForeignGhostScope coid={0} wasGhosted={1} nowGhosted={2} releasingHold={3} {4}",
+                        coid, wasGhosted ? 1 : 0, nowGhosted ? 1 : 0, releasingCreateHold ? 1 : 0,
+                        gameConnection.FormatGhostingDiag());
+                }
+
+                gameConnection.ClearForeignVehicleCreateHold(coid);
+                if (releasingCreateHold && entity is Vehicle scopedVeh)
+                {
+                    if (scopedVeh.WheelSet != null && scopedVeh.WheelSet.CBID > 0)
+                        ghost.SetMaskBits(GhostVehicle.WheelSetMask);
+
+                    // Client tick (FUN_008078b0): ghost object-create runs before game packets.
+                    // Ghost nest is zero-filled; owner-on can ActivateEnterWorld before wheels stick
+                    // (AV 0x004F5566). IsItemLink re-apply fixed that but caused Red Brigade tooltips.
+                    // Instead: post-scope create without IsItemLink (full create if TFID missing;
+                    // no-op if present) + WheelSetMask delta (SetWheelset path). No item-link UI.
+                    var reapply = new CreateVehiclePacket();
+                    scopedVeh.WriteToPacket(reapply);
+                    reapply.IsItemLink = false;
+                    gameConnection.SendGamePacket(reapply);
+                    if (WireDiag.Enabled)
+                    {
+                        Logger.WriteLog(LogType.Network,
+                            "ForeignGhostNestReapply coid={0} wheelCbid={1} isItemLink=0",
+                            coid, scopedVeh.WheelSet?.CBID ?? -1);
+                    }
                 }
             }
         }

@@ -119,6 +119,36 @@ public class MapTransferGhostingTests
         Assert.IsNotNull(character.CurrentVehicle.Ghost);
     }
 
+    [TestMethod]
+    public void EnsureSectorGhostingStarted_WhileWaitingForClientReady_DoesNotBumpSequence()
+    {
+        // Live owner-on: Stage3 called ActivateGhosting while Ghosting was still false (waiting for
+        // rpcReadyForNormalGhosts), which re-sequenced and left Ghosting stuck off → zero GhostPacks.
+        var connection = CreateGhostingConnection();
+        connection.ActivateGhosting();
+        var seq = connection.GetGhostingSequence();
+        Assert.IsFalse(connection.IsGhosting(), "ready RPC not simulated — Ghosting still false");
+
+        connection.EnsureSectorGhostingStarted();
+
+        Assert.AreEqual(seq, connection.GetGhostingSequence(),
+            "must not re-ActivateGhosting while already Scoping / waiting for ready");
+    }
+
+    [TestMethod]
+    public void EnsureSectorGhostingStarted_AfterReset_RestartsSequence()
+    {
+        var connection = CreateGhostingConnection();
+        connection.ActivateGhosting();
+        var seq = connection.GetGhostingSequence();
+        connection.ResetGhosting();
+
+        connection.EnsureSectorGhostingStarted();
+
+        Assert.IsTrue(connection.GetGhostingSequence() > seq,
+            "after ResetGhosting, sector entry must start a new ghosting sequence");
+    }
+
     private static TNLConnection CreateGhostingConnection()
     {
         var connection = new TNLConnection();

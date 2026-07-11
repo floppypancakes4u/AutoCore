@@ -40,20 +40,21 @@ public partial class TNLConnection : GhostConnection
     private readonly Dictionary<long, ForeignVehicleCreateHold> _globalVehicleCreates = new();
 
     /// <summary>
-    /// Scope queries after the create-only pass that must elapse before ObjectInScope.
-    /// Client FUN_008078b0 processes ghost create before game packets; one query is often not enough.
+    /// Post-create scope queries that must call <see cref="TryAllowForeignVehicleGhostScope"/> before
+    /// ObjectInScope. Create itself does not count (same query continues without TryAllow).
+    /// Default 1: interest selection may only include an NPC on sparse ticks; requiring 2+ meant the
+    /// hold went stale and CreateVehicle re-spammed forever with zero GhostPacks.
     /// </summary>
-    public static int ForeignGhostScopeHoldQueries { get; set; } = 2;
+    public static int ForeignGhostScopeHoldQueries { get; set; } = 1;
 
     /// <summary>Minimum wall-clock ms after CreateVehicle before ObjectInScope (0 in unit tests).</summary>
     public static int ForeignGhostScopeHoldMilliseconds { get; set; } = 500;
 
     /// <summary>
-    /// Extra ms beyond <see cref="ForeignGhostScopeHoldMilliseconds"/> after which a create hold that
-    /// never reached ObjectInScope is dropped. Leaving range mid-hold used to leave the hold stuck so
-    /// re-entry skipped CreateVehicle and ghosted from a zero nest.
+    /// If a create hold is not observed in scope for this many ms, drop it so re-entry re-creates.
+    /// Must exceed typical interest re-selection gaps (~7s seen live) or holds die before TryAllow.
     /// </summary>
-    public static int ForeignCreateHoldStaleGraceMilliseconds { get; set; } = 1500;
+    public static int ForeignCreateHoldStaleGraceMilliseconds { get; set; } = 15000;
 
     /// <summary>
     /// When true, foreign CreateVehicle sets <see cref="Packets.Sector.CreateSimpleObjectPacket.IsItemLink"/>
@@ -69,6 +70,7 @@ public partial class TNLConnection : GhostConnection
     private sealed class ForeignVehicleCreateHold
     {
         public long CreatedAtUnixMs;
+        public long LastSeenScopeUnixMs;
         public int ScopeQueriesSinceCreate;
     }
 
@@ -94,7 +96,8 @@ public partial class TNLConnection : GhostConnection
     /// <summary>
     /// True while a create→ghost hold is open for <paramref name="coid"/> (create sent, ObjectInScope
     /// not yet released). SectorMap uses this to avoid re-sending CreateVehicle every hold tick.
-    /// Stale holds (never ObjectInScope'd) expire so leave/re-enter mid-hold re-creates.
+    /// Holds not seen in scope for <see cref="ForeignCreateHoldStaleGraceMilliseconds"/> expire so
+    /// leave/re-enter mid-hold re-creates.
     /// </summary>
     public bool HasActiveForeignCreateHold(long coid)
     {
@@ -107,6 +110,8 @@ public partial class TNLConnection : GhostConnection
             return false;
         }
 
+        // Caller is evaluating this coid during a scope pass — keep last-seen fresh.
+        hold.LastSeenScopeUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         return true;
     }
 
@@ -115,9 +120,11 @@ public partial class TNLConnection : GhostConnection
     /// </summary>
     public void NoteForeignVehicleCreateSent(long coid)
     {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         _globalVehicleCreates[coid] = new ForeignVehicleCreateHold
         {
-            CreatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            CreatedAtUnixMs = now,
+            LastSeenScopeUnixMs = now,
             ScopeQueriesSinceCreate = 0,
         };
     }
@@ -151,10 +158,12 @@ public partial class TNLConnection : GhostConnection
         if (IsForeignCreateHoldStale(hold))
         {
             _globalVehicleCreates.Remove(coid);
-            // Stale: never ghosted after create. Caller should re-create before ObjectInScope.
+            // Stale: left scope mid-hold. Caller should re-create before ObjectInScope.
             return false;
         }
 
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        hold.LastSeenScopeUnixMs = now;
         hold.ScopeQueriesSinceCreate++;
         var holdQueries = Math.Max(0, ForeignGhostScopeHoldQueries);
         var holdMs = Math.Max(0, ForeignGhostScopeHoldMilliseconds);
@@ -164,7 +173,7 @@ public partial class TNLConnection : GhostConnection
         if (holdMs <= 0)
             return true;
 
-        var elapsed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - hold.CreatedAtUnixMs;
+        var elapsed = now - hold.CreatedAtUnixMs;
         return elapsed >= holdMs;
     }
 
@@ -173,42 +182,53 @@ public partial class TNLConnection : GhostConnection
     /// </summary>
     public void ClearForeignVehicleCreateHold(long coid) => _globalVehicleCreates.Remove(coid);
 
+    /// <summary>Compact TNL ghosting state for WireDiag null-wheels / owner-on hunts.</summary>
+    internal string FormatGhostingDiag() =>
+        string.Format(
+            System.Globalization.CultureInfo.InvariantCulture,
+            "ghosting={0} scoping={1} doesGhostFrom={2} scopeObj={3} ghostSeq={4}",
+            IsGhosting() ? 1 : 0,
+            Scoping ? 1 : 0,
+            DoesGhostFrom() ? 1 : 0,
+            GetScopeObject() != null ? 1 : 0,
+            GetGhostingSequence());
+
     /// <summary>
     /// Forgets all foreign create holds. Called when the client discards its local object table on
     /// a map transfer (see <see cref="EnsureGhostsAndScopeAfterMapTransfer"/>).
     /// </summary>
     internal void ClearGlobalVehicleCreateTracking() => _globalVehicleCreates.Clear();
 
-    /// <summary>Test helper: age an open hold without sleeping the suite.</summary>
+    /// <summary>Test helper: age last-seen (left scope) without sleeping the suite.</summary>
     internal void DebugAgeForeignCreateHoldForTests(long coid, long ageMs)
     {
         if (!_globalVehicleCreates.TryGetValue(coid, out var hold))
             return;
 
-        hold.CreatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - Math.Max(0, ageMs);
+        var past = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - Math.Max(0, ageMs);
+        hold.LastSeenScopeUnixMs = past;
+        // Keep CreatedAt older so create-time is not confused with leave-scope stale.
+        hold.CreatedAtUnixMs = Math.Min(hold.CreatedAtUnixMs, past);
     }
 
     /// <summary>Test helper: reset static hold knobs after experiments.</summary>
     internal static void ResetForeignGhostHoldDefaultsForTests()
     {
-        ForeignGhostScopeHoldQueries = 2;
+        ForeignGhostScopeHoldQueries = 1;
         ForeignGhostScopeHoldMilliseconds = 500;
-        ForeignCreateHoldStaleGraceMilliseconds = 1500;
+        ForeignCreateHoldStaleGraceMilliseconds = 15000;
         ForceForeignCreateReapply = false;
     }
 
     private static bool IsForeignCreateHoldStale(ForeignVehicleCreateHold hold)
     {
-        var holdMs = Math.Max(0, ForeignGhostScopeHoldMilliseconds);
         var graceMs = Math.Max(0, ForeignCreateHoldStaleGraceMilliseconds);
-        // When both knobs are 0 (common in unit tests), never treat as stale by wall clock —
-        // tests drive hold completion via query count only.
-        if (holdMs == 0 && graceMs == 0)
+        // When grace is 0 (unit tests that only drive query count), never wall-stale.
+        if (graceMs == 0)
             return false;
 
-        var staleAfterMs = holdMs + graceMs;
-        var elapsed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - hold.CreatedAtUnixMs;
-        return elapsed > staleAfterMs;
+        var sinceSeen = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - hold.LastSeenScopeUnixMs;
+        return sinceSeen > graceMs;
     }
 
     public new static void RegisterNetClassReps()
