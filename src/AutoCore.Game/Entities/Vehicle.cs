@@ -9,6 +9,7 @@ namespace AutoCore.Game.Entities;
 
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
+using AutoCore.Game.CloneBases;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
@@ -566,6 +567,63 @@ public class Vehicle : SimpleObject
         Ghost.SetParent(this);
     }
 
+    /// <summary>
+    /// Ensures a clonebase DefaultWheelset is equipped before CreateVehicle serialization.
+    /// Path A client capture: nested wheel CBID must be &gt; 0 or SetWheelset never runs and +0x258 stays null.
+    /// </summary>
+    /// <returns>True when <see cref="WheelSet"/> is present with CBID &gt; 0 after the call.</returns>
+    public bool EnsureDefaultWheelSetForWire()
+    {
+        if (WheelSet != null && WheelSet.CBID > 0)
+            return true;
+
+        var defaultWheelsetCbid = (CloneBaseObject as CloneBaseVehicle)?.VehicleSpecific.DefaultWheelset ?? 0;
+        if (defaultWheelsetCbid <= 0)
+        {
+            Logger.WriteLog(LogType.Error,
+                "EnsureDefaultWheelSetForWire: vehicle coid={0} cbid={1} has no DefaultWheelset",
+                ObjectId?.Coid ?? 0, CBID);
+            return false;
+        }
+
+        var wheelSet = new WheelSet();
+        // Nested TFID must use map-NPC identity space (client ResolveObjectTarget before GiveItemByCbid).
+        if (Map != null)
+        {
+            var counter = Map.LocalCoidCounter;
+            var id = MapNpcIdentity.AllocateCoid(ref counter);
+            Map.LocalCoidCounter = counter;
+            wheelSet.SetCoid(id.Coid, id.Global);
+        }
+        else
+        {
+            wheelSet.SetCoid(MapNpcIdentity.CoidBase + Math.Abs(ObjectId?.Coid ?? CBID), true);
+        }
+
+        try
+        {
+            wheelSet.LoadCloneBase(defaultWheelsetCbid);
+            wheelSet.SetupCBFields();
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "EnsureDefaultWheelSetForWire: failed LoadCloneBase wheelsetCbid={0} for vehicle cbid={1}: {2}",
+                defaultWheelsetCbid, CBID, ex.Message);
+            return false;
+        }
+
+        if (!TryEquipItem(VehicleEquipmentSlot.WheelSet, wheelSet, out _))
+        {
+            Logger.WriteLog(LogType.Error,
+                "EnsureDefaultWheelSetForWire: equip failed vehicle cbid={0} wheelsetCbid={1}",
+                CBID, defaultWheelsetCbid);
+            return false;
+        }
+
+        return WheelSet != null && WheelSet.CBID > 0;
+    }
+
     [ExcludeFromCodeCoverage]
     public override void WriteToPacket(CreateSimpleObjectPacket packet)
     {
@@ -573,7 +631,12 @@ public class Vehicle : SimpleObject
 
         if (packet is CreateVehiclePacket vehiclePacket)
         {
+            // Last-chance equip so foreign CreateVehicle never wires nested wheel CBID 0 / empty when clonebase has a default.
+            EnsureDefaultWheelSetForWire();
+
             vehiclePacket.CoidCurrentOwner = DBData?.CharacterCoid ?? 0;
+            // CreateVehiclePacket.CoidSpawnOwner is a 32-bit field; map-NPC COIDs are high 64-bit.
+            // Ghost carries spawn-owner separately (20-bit). Keep create payload at -1 for now.
             vehiclePacket.CoidSpawnOwner = -1;
 
             for (var i = 0; i < 8; ++i)
@@ -601,7 +664,18 @@ public class Vehicle : SimpleObject
             vehiclePacket.KMTravelled = 0.0f;
             vehiclePacket.IsTrailer = false;
             vehiclePacket.IsInventory = false;
-            vehiclePacket.IsActive = Map != null && !Map.MapData.ContinentObject.IsTown;
+            // Active field vehicles without a wheelset arm client Havok without +0x258 → AV 0x004F5566.
+            var hasWheelset = WheelSet != null && WheelSet.CBID > 0;
+            vehiclePacket.IsActive = hasWheelset
+                && Map != null
+                && !Map.MapData.ContinentObject.IsTown;
+            if (!hasWheelset && Map != null && !Map.MapData.ContinentObject.IsTown)
+            {
+                Logger.WriteLog(LogType.Error,
+                    "CreateVehicle: forcing IsActive=false; missing wheelset coid={0} vehicleCbid={1}",
+                    ObjectId?.Coid ?? 0, CBID);
+            }
+
             vehiclePacket.Trim = Trim;
 
             if (Ornament != null)
@@ -622,10 +696,24 @@ public class Vehicle : SimpleObject
                 PowerPlant.WriteToPacket(vehiclePacket.CreatePowerPlant);
             }
 
-            if (WheelSet != null)
+            if (WheelSet != null && WheelSet.CBID > 0)
             {
                 vehiclePacket.CreateWheelSet = new CreateWheelSetPacket();
                 WheelSet.WriteToPacket(vehiclePacket.CreateWheelSet);
+                // Client GiveItemByCbid(0) fails and never SetWheelset; empty path must stay CBID=-1.
+                if (vehiclePacket.CreateWheelSet.CBID <= 0)
+                {
+                    Logger.WriteLog(LogType.Error,
+                        "CreateVehicle: nested wheel CBID became {0} after WriteToPacket for vehicle cbid={1}; forcing empty nested",
+                        vehiclePacket.CreateWheelSet.CBID, CBID);
+                    vehiclePacket.CreateWheelSet = null;
+                }
+            }
+            else if (WheelSet != null)
+            {
+                Logger.WriteLog(LogType.Error,
+                    "CreateVehicle: WheelSet present but CBID={0} for vehicle cbid={1}; emitting empty nested wheelset",
+                    WheelSet.CBID, CBID);
             }
 
             if (Armor != null)

@@ -101,6 +101,7 @@ public class GhostVehicleWireRegressionTests
         Assert.IsTrue(stream.ReadFlag()); // owner global
         stream.ReadInt(20); // CBID
         Assert.IsFalse(stream.ReadFlag()); // not character
+        // Creature-owner form: enhancement, trigger, reaction, summoner, DoesntCountAsSummon (no SpawnOwner).
         Assert.IsFalse(stream.ReadFlag());
         Assert.IsFalse(stream.ReadFlag());
         Assert.IsFalse(stream.ReadFlag());
@@ -690,8 +691,10 @@ public class GhostVehicleWireRegressionTests
     }
 
     [TestMethod]
-    public void PackDelta_ForeignVehicle_MinimalProfile_RestrictsToPoseMask()
+    public void PackDelta_ForeignVehicle_MinimalProfile_RestrictsToPoseAndWheelSetMask()
     {
+        // Pose-only was dropping WheelSet forever; Path A can leave +0x258 null after CreateVehicle
+        // equip with a zeroed nest. Delta hardpoint is the recovery path before owner-on.
         var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_073);
         vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_073, true);
 
@@ -699,10 +702,56 @@ public class GhostVehicleWireRegressionTests
         WireDiag.Enabled = true;
         var stream = PackUpdateNonInitial(vehicle, ulong.MaxValue);
 
-        Assert.IsTrue(stream.ReadFlag() == false, "Skills must be withheld by the pose-only delta profile.");
+        Assert.IsTrue(stream.ReadFlag() == false, "Skills must stay withheld under minimal foreign deltas.");
         var entry = WireDiag.Snapshot().Single();
-        Assert.AreEqual(GhostObject.PositionMask, entry.Mask);
+        Assert.AreEqual(GhostObject.PositionMask | GhostVehicle.WheelSetMask, entry.Mask,
+            "Minimal foreign deltas admit pose + wheel hardpoint only.");
         StringAssert.Contains(entry.Detail, "profile=minimal");
+    }
+
+    [TestMethod]
+    public void PackDelta_ForeignVehicle_MinimalProfile_WithWheelEquipped_EmitsHardpoint()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_173);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_173, true);
+        var wheel = new WheelSet();
+        wheel.SetCoid(MapNpcIdentity.CoidBase + 20_174, true);
+        Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.WheelSet, wheel, out _));
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        var stream = PackUpdateNonInitial(vehicle, GhostVehicle.WheelSetMask | GhostVehicle.FrontWeaponMask);
+
+        Assert.IsFalse(stream.ReadFlag()); // Skills
+        Assert.IsTrue(stream.ReadFlag(), "WheelSetMask must pack under minimal foreign delta");
+        Assert.IsTrue(stream.ReadFlag(), "wheel present");
+        stream.ReadInt(20); // CBID (may be 0 without clonebase — hardpoint presence is the contract)
+        stream.Read(out long wheelCoid);
+        Assert.AreEqual(MapNpcIdentity.CoidBase + 20_174, wheelCoid);
+        Assert.IsTrue(stream.ReadFlag()); // global
+        Assert.IsFalse(stream.ReadFlag(), "Front weapon still suppressed by minimal filter");
+    }
+
+    [TestMethod]
+    public void PackInitial_ForeignVehicle_MinimalProfile_PreservesDirtyWheelSetInReturnMask()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_175);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_175, true);
+        vehicle.CreateGhost();
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        NetObject.PIsInitialUpdate = true;
+        try
+        {
+            var stream = new BitStream(new byte[8192], 8192);
+            // Initial packs force pose-only; WheelSet must remain dirty for the next delta recovery pack.
+            var ret = vehicle.Ghost.PackUpdate(null, ulong.MaxValue, stream);
+            Assert.AreNotEqual(0UL, ret & GhostVehicle.WheelSetMask,
+                "Stripped WheelSetMask must stay dirty so a post-CreateVehicle hardpoint delta can fire.");
+        }
+        finally
+        {
+            NetObject.PIsInitialUpdate = false;
+        }
     }
 
     [TestMethod]
@@ -782,6 +831,7 @@ public class GhostVehicleWireRegressionTests
         Assert.IsTrue(stream.ReadFlag()); // global
         stream.ReadInt(20); // CBID
         Assert.IsFalse(stream.ReadFlag()); // creature owner
+        // enhancement, trigger, reaction, summoner, DoesntCountAsSummon (no SpawnOwner slot)
         for (var i = 0; i < 5; ++i)
             Assert.IsFalse(stream.ReadFlag());
         Assert.AreEqual(7u, stream.ReadInt(8));

@@ -175,6 +175,39 @@ public class SpawnPointTemplateSpawnTests
         Assert.AreEqual(wheelsetCbid, vehicle.WheelSet.CBID);
     }
 
+    /// <summary>
+    /// Client EquipFromCreate resolves nested wheelset via TFID (packet+0x4E8) before GiveItemByCbid.
+    /// Low Global=false equipment COIDs collide with client-local map objects, skip GiveItem, leave
+    /// vehicle+0x258 null, and AV at 0x004F5566 when owner/ghost activates Havok.
+    /// </summary>
+    [TestMethod]
+    public void Spawn_DefaultWheelset_UsesMapNpcGlobalIdentity_NotUnsafeLocal()
+    {
+        const int vehicleCbid = 610_020;
+        const int wheelsetCbid = 610_021;
+        var map = CreateTestMap(9107);
+        map.LocalCoidCounter = 50; // low counter would produce unsafe locals under the old policy
+        AssetManagerTestHelper.RegisterCloneBase(wheelsetCbid, CloneBaseObjectType.WheelSet);
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid, defaultWheelsetCbid: wheelsetCbid);
+
+        var template = new SpawnPointTemplate { COID = 14_520 };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList { SpawnType = vehicleCbid, IsTemplate = false });
+        var spawnPoint = new SpawnPoint(template);
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var vehicle = map.Objects.Values.OfType<Vehicle>().Single();
+        Assert.IsNotNull(vehicle.WheelSet);
+        Assert.IsTrue(MapNpcIdentity.IsMapNpcIdentity(vehicle.WheelSet.ObjectId),
+            "Nested CreateWheelSet TFID must use MapNpcIdentity (global + high range) so client GiveItemByCbid runs.");
+        Assert.IsFalse(MapNpcIdentity.IsUnsafeLocalSpawnCoid(vehicle.WheelSet.ObjectId, mapHighestCoid: 0));
+        Assert.IsTrue(MapNpcIdentity.IsMapNpcIdentity(vehicle.ObjectId));
+        Assert.AreNotEqual(vehicle.ObjectId.Coid, vehicle.WheelSet.ObjectId.Coid,
+            "Wheelset must not reuse the vehicle TFID.");
+    }
+
     [TestMethod]
     public void Spawn_TemplateVehicleWithDriverAi_RegistersVehicleInNpcAiEntities()
     {

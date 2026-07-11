@@ -394,25 +394,44 @@ public class SectorMap
                 continue;
 
             // Global game objects must exist in the client's object table before the TNL ghost
-            // proxy attaches to them. SendGamePacket queues a guaranteed-ordered RPC event, and
-            // GhostConnection writes queued events before ghost updates in the same packet.
+            // proxy attaches to them.
             //
             // The create is once-per-connection-per-map-session (TryMarkGlobalVehicleCreateSent),
             // NOT gated on current ghost presence: a guaranteed CreateVehicle persists in the client
             // table across TNL ghost-kill/re-scope cycles with no DestroyObject, so re-sending it
             // when a player re-enters the scope radius would duplicate an object the client still
             // holds ('Invalid Packet' / double-object). The session set is cleared on ResetGhosting.
+            //
+            // Client tick order (FUN_008078b0): ghost object-create runs BEFORE game packet queues.
+            // Same-cycle (or too-soon) CreateVehicle + ObjectInScope lets the client materialize the
+            // vehicle from the ghost's zeroed nest blob; sector create then skips re-apply.
+            // Hold ObjectInScope for N further scope queries + min wall time after create.
+            TNL.TNLConnection gameConnection = connection as TNL.TNLConnection;
             if (foreignGlobalVehicle
                 && ScopeGlobalVehicleCreate
-                && connection is TNL.TNLConnection gameConnection
+                && gameConnection != null
                 && gameConnection.TryMarkGlobalVehicleCreateSent(entity.ObjectId.Coid))
             {
                 var createPacket = new CreateVehiclePacket();
                 ((Vehicle)entity).WriteToPacket(createPacket);
+                // IsItemLink wires to client packet+0xA1; when set, FUN_00812630 re-applies create
+                // if the TFID already exists (ghost won the race). Optional — can touch UI paths.
+                if (TNL.TNLConnection.ForceForeignCreateReapply)
+                    createPacket.IsItemLink = true;
                 gameConnection.SendGamePacket(createPacket);
+                if (((Vehicle)entity).WheelSet != null && ((Vehicle)entity).WheelSet.CBID > 0)
+                    ghost.SetMaskBits(GhostVehicle.WheelSetMask);
+                // Never ghost on the same query as create.
+                if (ScopeGlobalVehicleGhost)
+                    continue;
             }
 
             if (foreignGlobalVehicle && !ScopeGlobalVehicleGhost)
+                continue;
+
+            if (foreignGlobalVehicle
+                && gameConnection != null
+                && !gameConnection.TryAllowForeignVehicleGhostScope(entity.ObjectId.Coid))
                 continue;
 
             connection.ObjectInScope(ghost);

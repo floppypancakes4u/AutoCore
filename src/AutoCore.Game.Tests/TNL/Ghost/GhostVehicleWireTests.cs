@@ -177,6 +177,7 @@ public class GhostVehicleWireTests
         Assert.IsFalse(stream.ReadFlag()); // CoidOnUseTrigger
         Assert.IsFalse(stream.ReadFlag()); // CoidOnUseReaction
         Assert.IsFalse(stream.ReadFlag()); // CreatureSummoner
+        // Retail vehicle-owner form has no SpawnOwner slot here (unlike GhostCreature).
         Assert.IsFalse(stream.ReadFlag()); // DoesntCountAsSummon
         Assert.AreEqual(7u, stream.ReadInt(8), "Level must be the driver creature's level");
         Assert.IsFalse(stream.ReadFlag()); // IsElite
@@ -370,6 +371,39 @@ public class GhostVehicleWireTests
         Assert.IsTrue(stream.ReadFlag(), "AI packs when creature owner was on the wire");
         stream.Read(out byte state);
         Assert.AreEqual((byte)1, state);
+    }
+
+    [TestMethod]
+    public void PackInitial_CreatureOwnerPacked_DoesNotWriteSpawnOwnerSlotBeforeDoesntCountAsSummon()
+    {
+        // Retail VehicleNet_UnpackGhostVehicle creature-owner form (0x005F7DCA) has no
+        // SpawnOwner slot. Sequence after form-flag: enhancement, on-use-trigger,
+        // on-use-reaction, summoner, DoesntCountAsSummon, level[8], elite.
+        // An extra presence bit bit-shifts level and desyncs later mask flags.
+        var vehicle = CreateVehicleWithMap(9128);
+        var creature = new Creature();
+        creature.SetCoid(9129, false);
+        creature.Level = 0x6d; // Odd LSB detects a shifted DoesntCountAsSummon / level boundary.
+        vehicle.SetOwner(creature);
+
+        var stream = PackInitial(vehicle);
+        SkipToPathBlock(stream);
+        Assert.IsFalse(stream.ReadFlag()); // path
+        Assert.IsFalse(stream.ReadFlag()); // template
+        Assert.IsFalse(stream.ReadFlag()); // vehicle-level spawn owner
+        Assert.AreEqual(0u, stream.ReadInt(8)); // tricks
+        Assert.IsFalse(stream.ReadFlag()); // trailer
+        Assert.IsTrue(stream.ReadFlag()); // owner present
+        stream.Read(out long _); // owner COID
+        stream.ReadFlag(); // owner global
+        stream.ReadInt(20); // owner CBID
+        Assert.IsFalse(stream.ReadFlag()); // creature owner form (not character)
+        for (var i = 0; i < 4; ++i)
+            Assert.IsFalse(stream.ReadFlag()); // enhancement, use trigger, use reaction, summoner
+
+        Assert.IsFalse(stream.ReadFlag(), "DoesntCountAsSummon immediately follows summoner (no SpawnOwner slot)");
+        Assert.AreEqual(0x6du, stream.ReadInt(8), "Level must not be bit-shifted by an extra presence flag");
+        Assert.IsFalse(stream.ReadFlag()); // elite
     }
 
     [TestMethod]

@@ -40,13 +40,14 @@ public class TFID
 
     public static bool operator ==(TFID a, TFID b)
     {
-        return a is not null && b is not null && a.Coid == b.Coid && a.Global == b.Global;
+        if (ReferenceEquals(a, b))
+            return true;
+        if (a is null || b is null)
+            return false;
+        return a.Coid == b.Coid && a.Global == b.Global;
     }
 
-    public static bool operator !=(TFID a, TFID b)
-    {
-        return a is null || b is null || a.Coid != b.Coid || a.Global != b.Global;
-    }
+    public static bool operator !=(TFID a, TFID b) => !(a == b);
 
     public static bool operator <(TFID a, TFID b)
     {

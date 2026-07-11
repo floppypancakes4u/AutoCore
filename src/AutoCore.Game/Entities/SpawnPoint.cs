@@ -375,7 +375,13 @@ public class SpawnPoint : ClonedObjectBase
             VehicleEquipmentSlot.WheelSet => new WheelSet(),
             _ => new Weapon(),
         };
-        item.SetCoid(Map.LocalCoidCounter++, false);
+        // Nested CreateVehicle equipment TFIDs are resolved on the client before GiveItemByCbid.
+        // Low Global=false COIDs collide with client-local map objects and skip materialization,
+        // leaving vehicle+0x258 null → Havok AV 0x004F5566 when owner/ghost activates.
+        var counter = Map.LocalCoidCounter;
+        var objectId = MapNpcIdentity.AllocateCoid(ref counter);
+        Map.LocalCoidCounter = counter;
+        item.SetCoid(objectId.Coid, objectId.Global);
         item.LoadCloneBase(cbid);
         item.SetupCBFields();
 

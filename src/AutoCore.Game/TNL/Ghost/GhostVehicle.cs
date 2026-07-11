@@ -27,9 +27,9 @@ public class GhostVehicle : GhostObject
     public static bool EnableTemplateSpawnWire = true;
 
     /// <summary>
-    /// Phase-2 recovery profile for foreign NPC vehicles. Sends only the required initial body
-    /// and pose, and restricts later updates to pose as well, until each optional block is
-    /// decoder-verified.
+    /// Phase-2 recovery profile for foreign NPC vehicles. Initial packs keep the required body
+    /// plus pose; later updates are restricted to pose and wheel hardpoint (CreateVehicle equip
+    /// can leave +0x258 null — delta WheelSet hardpoint is the client recovery path).
     /// Disabled by default.
     /// </summary>
     public static bool EnableMinimalForeignInitialProfile = false;
@@ -120,8 +120,15 @@ public class GhostVehicle : GhostObject
         var useMinimalForeignInitialProfile = Parent.ObjectId.Global
             && EnableMinimalForeignInitialProfile;
 
+        // Minimal foreign: initial packs pose-only (optional initial blocks are separate levers).
+        // Deltas also admit WheelSetMask so a hardpoint can materialize +0x258 when Path A equip
+        // saw nested wheel CBID 0 (client zero-fill) despite a good server CreateVehicle.
         if (useMinimalForeignInitialProfile)
-            updateMask = PositionMask;
+        {
+            updateMask = isInitial
+                ? PositionMask
+                : updateMask & (PositionMask | WheelSetMask);
+        }
 
         // A connection-scoped override is deliberately limited to foreign initial updates. It
         // provides a deterministic recovery harness without changing the stream for any other
@@ -227,7 +234,8 @@ public class GhostVehicle : GhostObject
                 }
                 else
                 {
-                    // Optional creature-owner fields not wired yet — always flag false.
+                    // Retail VehicleNet_UnpackGhostVehicle creature-owner form has no SpawnOwner
+                    // slot (unlike GhostCreature). Optional fields then DoesntCountAsSummon + level + elite.
                     stream.WriteFlag(false); // EnhancementID == -1
                     stream.WriteFlag(false); // CoidOnUseTrigger == -1
                     stream.WriteFlag(false); // CoidOnUseReaction == -1
@@ -250,8 +258,8 @@ public class GhostVehicle : GhostObject
             }
         }
 
-        // The client constructs vehicle equipment from CreateVehicle. Initial GhostVehicle
-        // hardpoints are not accepted safely; equipment changes travel on delta updates.
+        // Initial hardpoints are not applied as SetWheelset on the retail client (they only fill
+        // the ghost create buffer). Delta hardpoints call the GiveItem/SetWheelset path.
         var packEquipment = !isInitial;
 
         PackHardpoint(stream, packEquipment && (updateMask & WheelSetMask) != 0, parentVehicle.WheelSet);
@@ -407,6 +415,16 @@ public class GhostVehicle : GhostObject
                         $"clientOwner={(clientHasOwner ? 1 : 0)} equip={(packEquipment ? 1 : 0)} " +
                         $"aiWire={(EnableAiStateWire ? 1 : 0)} global={(Parent.ObjectId.Global ? 1 : 0)} " +
                         $"profile={(useMinimalForeignInitialProfile ? "minimal" : "full")} sourceMask={sourceUpdateMask:X}");
+        }
+
+        // TNL treats ret as "still dirty". Minimal initial packs strip WheelSet from the effective
+        // mask; if we returned only ret (0x80), WheelSet would be cleared without ever shipping.
+        // Keep it dirty so the next delta can run the hardpoint recovery path.
+        if (useMinimalForeignInitialProfile
+            && (sourceUpdateMask & WheelSetMask) != 0
+            && (updateMask & WheelSetMask) == 0)
+        {
+            ret |= WheelSetMask;
         }
 
         return ret;

@@ -3,6 +3,7 @@ namespace AutoCore.Game.Diagnostics;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
+using AutoCore.Game.Packets.Sector;
 using AutoCore.Utils;
 
 /// <summary>
@@ -69,7 +70,8 @@ public static class WireDiag
         long coid,
         int bytes,
         long playerCoid,
-        string hexPreview = null)
+        string hexPreview = null,
+        string detail = null)
     {
         if (!Enabled)
             return;
@@ -85,7 +87,65 @@ public static class WireDiag
             Initial = false,
             PlayerCoid = playerCoid,
             HexPreview = hexPreview,
+            Detail = detail,
         });
+    }
+
+    /// <summary>
+    /// Detail string for CreateVehicle WireDiag lines. Nested empty CreateWheelSet wires CBID=-1;
+    /// a missing nested object reports as empty/-1. Positive CBID is the nested wheelset clonebase.
+    /// Path A client capture showed equip failures when nested CBID was 0 (not -1).
+    /// </summary>
+    public static string FormatCreateVehicleDetail(CreateVehiclePacket packet)
+    {
+        if (packet == null)
+            return "createVehicle=null";
+
+        var nested = packet.CreateWheelSet;
+        // Wire empty path writes CBID -1; treat absent nested the same for diagnostics.
+        var wheelCbid = nested != null ? nested.CBID : -1;
+        var nestedKind = nested == null ? "empty" : "full";
+        var wheelOk = wheelCbid > 0 ? 1 : 0;
+        // Use `is not null` — TFID overloads ==/!= and (null != null) is true with those operators.
+        var wheelTfid = "-";
+        if (nested is not null && nested.ObjectId is not null)
+        {
+            var tfid = nested.ObjectId;
+            wheelTfid = string.Format(CultureInfo.InvariantCulture, "{0}:{1}", tfid.Coid, tfid.Global ? 1 : 0);
+        }
+
+        return string.Format(
+            CultureInfo.InvariantCulture,
+            "vehicleCbid={0} wheelsetCbid={1} nested={2} wheelOk={3} wheelTfid={4} templateId={5} isActive={6} spawnOwner={7} isInventory={8}",
+            packet.CBID,
+            wheelCbid,
+            nestedKind,
+            wheelOk,
+            wheelTfid,
+            packet.TemplateId,
+            packet.IsActive ? 1 : 0,
+            packet.CoidSpawnOwner,
+            packet.IsInventory ? 1 : 0);
+    }
+
+    /// <summary>
+    /// Scan serialized CreateVehicle bytes for nested CreateWheelSet opcode (0x201B) and return the following CBID.
+    /// Returns int.MinValue if the nested opcode is not found.
+    /// </summary>
+    public static int ExtractNestedWheelCbidFromWire(byte[] packetBytes)
+    {
+        if (packetBytes == null || packetBytes.Length < 8)
+            return int.MinValue;
+
+        const uint createWheelSetOpcode = 0x201Bu;
+        for (var i = 0; i + 8 <= packetBytes.Length; i++)
+        {
+            if (BitConverter.ToUInt32(packetBytes, i) != createWheelSetOpcode)
+                continue;
+            return BitConverter.ToInt32(packetBytes, i + 4);
+        }
+
+        return int.MinValue;
     }
 
     public static void RecordGhostPack(

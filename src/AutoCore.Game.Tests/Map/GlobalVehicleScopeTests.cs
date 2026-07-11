@@ -21,6 +21,10 @@ public class GlobalVehicleScopeTests
         TNLConnection.TestPacketSink = null;
         AssetManagerTestHelper.ClearRegisteredCloneBases();
         ResetScopeLevers();
+        // Deterministic tests: two post-create scope queries, no wall-clock wait.
+        TNLConnection.ForeignGhostScopeHoldQueries = 2;
+        TNLConnection.ForeignGhostScopeHoldMilliseconds = 0;
+        TNLConnection.ForceForeignCreateReapply = false;
     }
 
     [TestCleanup]
@@ -29,6 +33,7 @@ public class GlobalVehicleScopeTests
         TNLConnection.TestPacketSink = null;
         AssetManagerTestHelper.ClearRegisteredCloneBases();
         ResetScopeLevers();
+        TNLConnection.ResetForeignGhostHoldDefaultsForTests();
     }
 
     private static void ResetScopeLevers()
@@ -66,28 +71,62 @@ public class GlobalVehicleScopeTests
         connection.ActivateGhosting();
 
         var packets = new List<BasePacket>();
-        var createWasSentBeforeScopeRegistration = false;
-        TNLConnection.TestPacketSink = (_, packet) =>
-        {
-            packets.Add(packet);
-            createWasSentBeforeScopeRegistration = npcVehicle.Ghost.GetFirstObjectRef() == null;
-        };
+        TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);
 
+        // Retail client FUN_008078b0 processes ghost object-create BEFORE game packet queues.
+        // Hold ObjectInScope for ForeignGhostScopeHoldQueries further scope passes after create.
         map.PerformScopeQuery(null, self, connection);
 
         var create = packets.OfType<CreateVehiclePacket>().SingleOrDefault();
         Assert.IsNotNull(create, "A global map vehicle needs an external create before its first ghost update");
-        Assert.IsTrue(createWasSentBeforeScopeRegistration, "CreateVehicle must be queued before ObjectInScope");
         Assert.AreEqual(vehicleCoid, create.ObjectId.Coid);
         Assert.IsTrue(create.ObjectId.Global);
         Assert.AreEqual(npcVehicle.Position, create.Position);
         Assert.AreEqual(npcVehicle.Rotation, create.Rotation);
-        Assert.IsNotNull(npcVehicle.Ghost.GetFirstObjectRef(), "vehicle ghost must still be scoped after create");
+        Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef(),
+            "Create query must not ObjectInScope");
+
+        map.PerformScopeQuery(null, self, connection);
+        Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef(),
+            "HoldQueries=2: first post-create query still defers ghost");
 
         map.PerformScopeQuery(null, self, connection);
 
         Assert.AreEqual(1, packets.OfType<CreateVehiclePacket>().Count(),
-            "Re-scoping an existing global vehicle must not duplicate its create packet");
+            "Re-scoping must not duplicate CreateVehicle");
+        Assert.IsNotNull(npcVehicle.Ghost.GetFirstObjectRef(),
+            "Ghost scopes only after hold queries elapse");
+    }
+
+    [TestMethod]
+    public void PerformScopeQuery_ForceForeignCreateReapply_SetsIsItemLinkOnWire()
+    {
+        const int vehicleCbid = 650_011;
+        const long vehicleCoid = MapNpcIdentity.CoidBase + 18_150;
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid);
+        TNLConnection.ForceForeignCreateReapply = true;
+
+        var map = CreateFieldMap();
+        var npcVehicle = new Vehicle { Position = new Vector3(10f, 0f, 0f) };
+        npcVehicle.SetCoid(vehicleCoid, true);
+        npcVehicle.LoadCloneBase(vehicleCbid);
+        npcVehicle.SetupCBFields();
+        npcVehicle.SetMap(map);
+        npcVehicle.CreateGhost();
+
+        var self = new Character { Position = new Vector3(0f, 0f, 0f) };
+        self.SetCurrentVehicleForTests(new Vehicle { Position = self.Position });
+        var connection = new TNLConnection();
+        connection.SetGhostFrom(true);
+        connection.ActivateGhosting();
+        var packets = new List<BasePacket>();
+        TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);
+
+        map.PerformScopeQuery(null, self, connection);
+
+        var create = packets.OfType<CreateVehiclePacket>().Single();
+        Assert.IsTrue(create.IsItemLink,
+            "ForceForeignCreateReapply maps to client packet+0xA1 so late create re-applies after ghost race");
     }
 
     [TestMethod]
@@ -119,11 +158,17 @@ public class GlobalVehicleScopeTests
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);
 
-        // First scope: create is sent and the ghost is registered.
+        // Create, then hold queries, then ghost.
         map.PerformScopeQuery(null, self, connection);
         Assert.AreEqual(1, packets.OfType<CreateVehiclePacket>().Count(), "first scope sends the create");
+        Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef(), "ghost deferred on create query");
+
+        map.PerformScopeQuery(null, self, connection);
+        Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef(), "still held on first post-create query");
+
+        map.PerformScopeQuery(null, self, connection);
         var ghostInfo = npcVehicle.Ghost.GetFirstObjectRef();
-        Assert.IsNotNull(ghostInfo, "vehicle ghost must be scoped after the first query");
+        Assert.IsNotNull(ghostInfo, "vehicle ghost must be scoped after hold queries");
 
         // Player drives past the drop radius: TNL kills the ghost (no DestroyObject is ever sent, so
         // the client still holds the created object). IsGhostedTo now reports not-ghosted.

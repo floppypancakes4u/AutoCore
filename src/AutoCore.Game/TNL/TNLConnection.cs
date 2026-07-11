@@ -31,19 +31,37 @@ public partial class TNLConnection : GhostConnection
     private ushort FragmentCounter { get; set; } = 1;
 
     /// <summary>
-    /// Coids of foreign global vehicles for which an in-world <c>CreateVehicle</c> has already been
-    /// sent this map session. A guaranteed-ordered CreateVehicle plants the object in the client's
-    /// table for the whole session; TNL later ghost-kills and re-scopes it without any DestroyObject,
-    /// so scope must send the create at most once per coid per session. Otherwise driving past the
-    /// scope-drop radius and back delivers a duplicate in-world create for an object the client still
-    /// holds — the duplicate-create / 'Invalid Packet' failure class. Cleared by
-    /// <see cref="ResetGhosting"/> (map transfer), which is exactly when the client discards its
-    /// local object table (rpcEndGhosting → DeleteLocalGhosts).
+    /// Foreign global vehicles for which an in-world <c>CreateVehicle</c> has already been sent
+    /// this map session, plus ghost-hold progress. Create is once-per-coid per session (duplicate
+    /// create after ghost-kill without DestroyObject → Invalid Packet). Cleared on
+    /// <see cref="ResetGhosting"/> / map transfer.
     /// </summary>
-    private readonly HashSet<long> _globalVehicleCreatesSent = new();
+    private readonly Dictionary<long, ForeignVehicleCreateHold> _globalVehicleCreates = new();
+
+    /// <summary>
+    /// Scope queries after the create-only pass that must elapse before ObjectInScope.
+    /// Client FUN_008078b0 processes ghost create before game packets; one query is often not enough.
+    /// </summary>
+    public static int ForeignGhostScopeHoldQueries { get; set; } = 2;
+
+    /// <summary>Minimum wall-clock ms after CreateVehicle before ObjectInScope (0 in unit tests).</summary>
+    public static int ForeignGhostScopeHoldMilliseconds { get; set; } = 500;
+
+    /// <summary>
+    /// When true, foreign CreateVehicle sets <see cref="Packets.Sector.CreateSimpleObjectPacket.IsItemLink"/>
+    /// so client packet+0xA1 is non-zero and FUN_00812630 re-applies create if the object already exists
+    /// from a ghost blob. Default false — multi-hold is preferred; re-apply runs inventory/UI side paths.
+    /// </summary>
+    public static bool ForceForeignCreateReapply { get; set; }
 
     public Account Account { get; set; }
     public Character CurrentCharacter { get; set; }
+
+    private sealed class ForeignVehicleCreateHold
+    {
+        public long CreatedAtUnixMs;
+        public int ScopeQueriesSinceCreate;
+    }
 
     /// <summary>
     /// Test-only mask profile for the initial update of a foreign global vehicle. It is unset in
@@ -69,14 +87,57 @@ public partial class TNLConnection : GhostConnection
     /// this map session. Returns <c>true</c> the first time (caller should send the create), <c>false</c>
     /// on repeat scopes so the create is never duplicated for an object the client still holds.
     /// </summary>
-    public bool TryMarkGlobalVehicleCreateSent(long coid) => _globalVehicleCreatesSent.Add(coid);
+    public bool TryMarkGlobalVehicleCreateSent(long coid)
+    {
+        if (_globalVehicleCreates.ContainsKey(coid))
+            return false;
+
+        _globalVehicleCreates[coid] = new ForeignVehicleCreateHold
+        {
+            CreatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            ScopeQueriesSinceCreate = 0,
+        };
+        return true;
+    }
+
+    /// <summary>
+    /// Whether foreign <paramref name="coid"/> may ObjectInScope yet. Call once per scope query after
+    /// create has been marked. Requires <see cref="ForeignGhostScopeHoldQueries"/> further queries
+    /// and <see cref="ForeignGhostScopeHoldMilliseconds"/> wall time since create.
+    /// Unknown coids (create lever off) are allowed immediately.
+    /// </summary>
+    public bool TryAllowForeignVehicleGhostScope(long coid)
+    {
+        if (!_globalVehicleCreates.TryGetValue(coid, out var hold))
+            return true;
+
+        hold.ScopeQueriesSinceCreate++;
+        var holdQueries = Math.Max(0, ForeignGhostScopeHoldQueries);
+        var holdMs = Math.Max(0, ForeignGhostScopeHoldMilliseconds);
+        if (hold.ScopeQueriesSinceCreate < holdQueries)
+            return false;
+
+        if (holdMs <= 0)
+            return true;
+
+        var elapsed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - hold.CreatedAtUnixMs;
+        return elapsed >= holdMs;
+    }
 
     /// <summary>
     /// Forgets which foreign global-vehicle creates were sent. Called when the client discards its
     /// local object table on a map transfer (see <see cref="EnsureGhostsAndScopeAfterMapTransfer"/>),
     /// so the next map session legitimately re-sends creates.
     /// </summary>
-    internal void ClearGlobalVehicleCreateTracking() => _globalVehicleCreatesSent.Clear();
+    internal void ClearGlobalVehicleCreateTracking() => _globalVehicleCreates.Clear();
+
+    /// <summary>Test helper: reset static hold knobs after experiments.</summary>
+    internal static void ResetForeignGhostHoldDefaultsForTests()
+    {
+        ForeignGhostScopeHoldQueries = 2;
+        ForeignGhostScopeHoldMilliseconds = 500;
+        ForceForeignCreateReapply = false;
+    }
 
     public new static void RegisterNetClassReps()
     {
@@ -120,11 +181,20 @@ public partial class TNLConnection : GhostConnection
             if (WireDiag.Enabled)
             {
                 // Tests often short-circuit before payload serialization; still record identity.
+                long sinkCoid = CurrentCharacter?.ObjectId.Coid ?? GetPlayerCOID();
+                string sinkDetail = null;
+                if (packet is AutoCore.Game.Packets.Sector.CreateVehiclePacket sinkCv)
+                {
+                    sinkCoid = sinkCv.ObjectId?.Coid ?? sinkCoid;
+                    sinkDetail = WireDiag.FormatCreateVehicleDetail(sinkCv);
+                }
+
                 WireDiag.RecordGamePacket(
                     packet.Opcode.ToString(),
-                    coid: CurrentCharacter?.ObjectId.Coid ?? GetPlayerCOID(),
+                    coid: sinkCoid,
                     bytes: -1,
-                    playerCoid: CurrentCharacter?.ObjectId.Coid ?? GetPlayerCOID());
+                    playerCoid: CurrentCharacter?.ObjectId.Coid ?? GetPlayerCOID(),
+                    detail: sinkDetail);
             }
 
             TestPacketSink(this, packet);
@@ -155,17 +225,40 @@ public partial class TNLConnection : GhostConnection
             var previewLen = Math.Min(arr.Length, 48);
             var hex = previewLen > 0 ? Convert.ToHexString(arr.AsSpan(0, previewLen)) : null;
             long objectCoid = 0;
+            string detail = null;
             if (packet is AutoCore.Game.Packets.Sector.CreateVehiclePacket cv)
-                objectCoid = cv.ObjectId.Coid;
+            {
+                objectCoid = cv.ObjectId?.Coid ?? 0;
+                detail = WireDiag.FormatCreateVehicleDetail(cv);
+                var wireWheelCbid = WireDiag.ExtractNestedWheelCbidFromWire(arr);
+                // Always surface wheelset health on the Network channel for null-wheels hunts.
+                Logger.WriteLog(LogType.Network,
+                    "CreateVehicle wire coid={0} bytes={1} {2} wireScanWheelCbid={3}",
+                    objectCoid, arr.Length, detail, wireWheelCbid);
+                if (wireWheelCbid != int.MinValue && wireWheelCbid <= 0)
+                {
+                    Logger.WriteLog(LogType.Error,
+                        "CreateVehicle NESTED_WHEEL_BAD coid={0} vehicleCbid={1} wireScanWheelCbid={2} objectWheelCbid={3}",
+                        objectCoid, cv.CBID, wireWheelCbid, cv.CreateWheelSet?.CBID ?? -1);
+                }
+                else if (cv.CreateWheelSet != null && cv.CreateWheelSet.CBID > 0
+                         && wireWheelCbid != int.MinValue && wireWheelCbid != cv.CreateWheelSet.CBID)
+                {
+                    Logger.WriteLog(LogType.Error,
+                        "CreateVehicle NESTED_WHEEL_MISMATCH coid={0} objectWheelCbid={1} wireScanWheelCbid={2}",
+                        objectCoid, cv.CreateWheelSet.CBID, wireWheelCbid);
+                }
+            }
             else if (packet is AutoCore.Game.Packets.Sector.CreateSimpleObjectPacket so)
-                objectCoid = so.ObjectId.Coid;
+                objectCoid = so.ObjectId?.Coid ?? 0;
 
             WireDiag.RecordGamePacket(
                 packet.Opcode.ToString(),
                 coid: objectCoid != 0 ? objectCoid : (CurrentCharacter?.ObjectId.Coid ?? GetPlayerCOID()),
                 bytes: arr.Length,
                 playerCoid: CurrentCharacter?.ObjectId.Coid ?? GetPlayerCOID(),
-                hexPreview: hex);
+                hexPreview: hex,
+                detail: detail);
         }
 
         if (packet.Opcode == GameOpcode.InventoryGrabResponse)

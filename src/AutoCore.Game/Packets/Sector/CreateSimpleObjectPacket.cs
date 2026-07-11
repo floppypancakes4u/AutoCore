@@ -130,6 +130,7 @@ public class CreateSimpleObjectPacket : BasePacket
         // CBID -1 signals that it is an empty packet
         writer.Write(-1);
 
-        writer.BaseStream.Position += 208;
+        // Write zeros (not Position-skip) so MemoryStream Length and wire buffers match client span.
+        writer.WriteZeros(208);
     }
 }
