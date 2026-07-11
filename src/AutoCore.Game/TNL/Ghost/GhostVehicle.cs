@@ -78,8 +78,31 @@ public class GhostVehicle : GhostObject
     /// </summary>
     public static bool EnableForeignVehiclePosePriorityBoost = true;
 
-    /// <summary>Type weight for vehicles when <see cref="EnableForeignVehiclePosePriorityBoost"/> is on.</summary>
+    /// <summary>
+    /// When true, idle path-patrol vehicles do <b>not</b> ghost continuous pose deltas. Retail
+    /// client path AI (<c>CVOGHBAIDriver</c> + <c>FUN_005ce990</c>) needs initial path + owner and
+    /// then drives at frame rate; network pose packets call <c>Vehicle_setDrivingInputs</c> →
+    /// hard snaps every few hundred ms (the "teleport along path" look). Server still advances
+    /// pose for combat authority; combat states still ghost pose. Requires owner + path on
+    /// initial (see <see cref="EnableMinimalForeignOwnerBlock"/> / path block).
+    /// </summary>
+    public static bool EnableClientSidePathVisual = false;
+
+    /// <summary>Diagnostics: non-initial PositionMask packs since last sector diag sample.</summary>
+    public static int PosePacksSinceDiag;
+
+    /// <summary>Type weight for idle vehicles when <see cref="EnableForeignVehiclePosePriorityBoost"/> is on.</summary>
     internal const float VehiclePosePriorityWeight = 0.40f;
+
+    /// <summary>
+    /// Type weight while moving. Matches <see cref="GhostObject"/> Character weight (0.5) so
+    /// pathing NPCs compete with players for TNL bits — sparse packs are the main skip-forward
+    /// cause (client hard-snaps pose; see nullWheels § movement RE).
+    /// </summary>
+    internal const float MovingVehiclePosePriorityWeight = 0.5f;
+
+    /// <summary>Skip starvation boost while moving (default ghosts use 0.01).</summary>
+    internal const float MovingVehicleSkipBoost = 0.05f;
 
     private const int CoidCurrentPathBits = 18;
 
@@ -96,11 +119,16 @@ public class GhostVehicle : GhostObject
         if (!EnableForeignVehiclePosePriorityBoost || Parent == null || viewer == null)
             return base.GetUpdatePriority(scopeObject, updateMask, updateSkips);
 
+        var parentVehicle = Parent.GetAsVehicle();
+        var moving = IsMovingForPoseStream(parentVehicle);
+        var weight = moving ? MovingVehiclePosePriorityWeight : VehiclePosePriorityWeight;
+        var skipScale = moving ? MovingVehicleSkipBoost : 0.01f;
+
         var dx = viewer.Position.X - Parent.Position.X;
         var dz = viewer.Position.Z - Parent.Position.Z;
         var distance = (float)Math.Sqrt((dx * dx) + (dz * dz));
         var falloff = Math.Clamp(1.0f - (distance / InterestSelector.BaseScopeDropRadius), 0.0f, 1.0f);
-        return (VehiclePosePriorityWeight * falloff) + (updateSkips * 0.01f);
+        return (weight * falloff) + (updateSkips * skipScale);
     }
 
     /// <summary>
@@ -395,6 +423,9 @@ public class GhostVehicle : GhostObject
 
         if (stream.WriteFlag((updateMask & PositionMask) != 0))
         {
+            if (!isInitial)
+                System.Threading.Interlocked.Increment(ref PosePacksSinceDiag);
+
             stream.Write(parentVehicle.Position.X);
             stream.Write(parentVehicle.Position.Y);
             stream.Write(parentVehicle.Position.Z);
@@ -510,9 +541,11 @@ public class GhostVehicle : GhostObject
             ret |= PositionMask;
         }
 
-        // Streaming pose: while the vehicle is moving, leave PositionMask dirty so the next TNL
-        // write resends pose even if no new ApplyServerMove lands (smooths 100ms sector ticks).
-        if (!isInitial && IsMovingForPoseStream(parentVehicle))
+        // Streaming pose: keep PositionMask dirty while the vehicle is on a patrol path or
+        // has non-zero velocity so TNL resends every write. Velocity-only was dropping the
+        // ghost from GhostZeroUpdateIndex on waypoint waits / zero-vel frames → only ~3 pose
+        // packs then silence (client hard-snaps at that starved cadence).
+        if (!isInitial && ShouldStreamPose(parentVehicle))
             ret |= PositionMask;
 
         return ret;
@@ -524,11 +557,38 @@ public class GhostVehicle : GhostObject
         if (vehicle == null)
             return false;
 
+        if (vehicle.ShouldSuppressPatrolPoseGhost())
+            return false;
+
         const float eps = 0.05f;
         var v = vehicle.Velocity;
         var w = vehicle.AngularVelocity;
         return (v.X * v.X) + (v.Y * v.Y) + (v.Z * v.Z) > eps * eps
             || (w.X * w.X) + (w.Y * w.Y) + (w.Z * w.Z) > eps * eps;
+    }
+
+    /// <summary>
+    /// Keep ghost pose in the TNL dirty list for path patrol even when instantaneous velocity
+    /// is zero (waypoint wait / arrival frame). Without this, live logs show initial + ~3 deltas
+    /// then no further GhostPack for that coid while the vehicle is still on a path.
+    /// </summary>
+    internal static bool ShouldStreamPose(Vehicle vehicle)
+    {
+        if (vehicle == null)
+            return false;
+
+        if (vehicle.ShouldSuppressPatrolPoseGhost())
+            return false;
+
+        if (IsMovingForPoseStream(vehicle))
+            return true;
+
+        if (vehicle.CoidCurrentPath <= 0)
+            return false;
+
+        // Idle path patrol (or AI not yet stamped): keep streaming pose.
+        return vehicle.NpcAi == null
+            || vehicle.NpcAi.CombatState == Constants.HBAICombatState.IdlePatrol;
     }
 
     /// <summary>

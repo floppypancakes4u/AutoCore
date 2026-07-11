@@ -6,6 +6,7 @@ namespace AutoCore.Game.Tests.Entities;
 
 using System;
 using AutoCore.Database.World.Models;
+using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
 using AutoCore.Game.Npc;
@@ -106,6 +107,100 @@ public class NpcVehicleSafetyTests
 
         Assert.AreNotEqual(0f, vehicle.AngularVelocity.Y, "Yaw change over dt must set angular velocity Y.");
         Assert.AreNotEqual(0f, vehicle.Steering, "Yaw change over dt must set steering for pose pack.");
+    }
+
+    [TestMethod]
+    public void Vehicle_ApplyServerMove_WithConstantSpeed_SetsCruiseThrottleNotZero()
+    {
+        // Ghost "Acceleration" is client throttle (+0x614), WriteSignedFloat 6-bit ∈ ~[-1,1].
+        // d(speed)/dt is ~0 at cruise and freezes Havok between pose snaps.
+        var vehicle = new Vehicle();
+        vehicle.SetCoid(9008, true);
+        vehicle.ApplyServerMove(new Vector3(0f, 0f, 0f), Quaternion.Default, new Vector3(0f, 0f, 12f), dt: 0.1f);
+        vehicle.ApplyServerMove(new Vector3(0f, 0f, 1.2f), Quaternion.Default, new Vector3(0f, 0f, 12f), dt: 0.1f);
+
+        Assert.IsTrue(vehicle.Acceleration > 0.5f,
+            $"Constant-speed path move must send cruise throttle, got {vehicle.Acceleration}");
+    }
+
+    [TestMethod]
+    public void Vehicle_ApplyServerMove_WithZeroVelocity_ClearsThrottle()
+    {
+        var vehicle = new Vehicle();
+        vehicle.SetCoid(9009, true);
+        vehicle.ApplyServerMove(new Vector3(0f, 0f, 0f), Quaternion.Default, new Vector3(0f, 0f, 12f), dt: 0.1f);
+        vehicle.ApplyServerMove(new Vector3(0f, 0f, 0f), Quaternion.Default, new Vector3(0f, 0f, 0f), dt: 0.1f);
+
+        Assert.AreEqual(0f, vehicle.Acceleration, 1e-3f, "Stopped vehicles must not leave cruise throttle on.");
+    }
+
+    [TestMethod]
+    public void Vehicle_ApplyServerMove_ClientSidePathVisual_SkipsPositionMaskWhileIdlePatrol()
+    {
+        GhostVehicle.EnableClientSidePathVisual = true;
+        try
+        {
+            var connection = new TNLConnection();
+            connection.SetGhostFrom(true);
+            connection.SetGhostTo(false);
+
+            var vehicle = new Vehicle();
+            vehicle.SetCoid(9006, true);
+            vehicle.CoidCurrentPath = 42;
+            vehicle.NpcAi = new NpcAiState { CombatState = HBAICombatState.IdlePatrol };
+            vehicle.CreateGhost();
+            connection.ActivateGhosting();
+            connection.ObjectLocalScopeAlways(vehicle.Ghost);
+
+            var ghostInfo = vehicle.Ghost.GetFirstObjectRef();
+            Assert.IsNotNull(ghostInfo);
+            ghostInfo.UpdateMask = 0;
+
+            vehicle.ApplyServerMove(new Vector3(5f, 0f, 0f), Quaternion.Default, new Vector3(12f, 0f, 0f));
+            NetObject.CollapseDirtyList();
+
+            Assert.AreEqual(5f, vehicle.Position.X, "Server pose must still advance for combat authority.");
+            Assert.AreEqual(0UL, ghostInfo.UpdateMask & GhostObject.PositionMask,
+                "Idle path patrol must not ghost pose when client-side path visual is enabled.");
+        }
+        finally
+        {
+            GhostVehicle.EnableClientSidePathVisual = false;
+        }
+    }
+
+    [TestMethod]
+    public void Vehicle_ApplyServerMove_ClientSidePathVisual_DirtiesPoseWhenEngaged()
+    {
+        GhostVehicle.EnableClientSidePathVisual = true;
+        try
+        {
+            var connection = new TNLConnection();
+            connection.SetGhostFrom(true);
+            connection.SetGhostTo(false);
+
+            var vehicle = new Vehicle();
+            vehicle.SetCoid(9007, true);
+            vehicle.CoidCurrentPath = 42;
+            vehicle.NpcAi = new NpcAiState { CombatState = HBAICombatState.Engage };
+            vehicle.CreateGhost();
+            connection.ActivateGhosting();
+            connection.ObjectLocalScopeAlways(vehicle.Ghost);
+
+            var ghostInfo = vehicle.Ghost.GetFirstObjectRef();
+            Assert.IsNotNull(ghostInfo);
+            ghostInfo.UpdateMask = 0;
+
+            vehicle.ApplyServerMove(new Vector3(9f, 0f, 0f), Quaternion.Default, new Vector3(12f, 0f, 0f));
+            NetObject.CollapseDirtyList();
+
+            Assert.AreEqual(GhostObject.PositionMask, ghostInfo.UpdateMask & GhostObject.PositionMask,
+                "Combat motion must still ghost pose even with client-side path visual.");
+        }
+        finally
+        {
+            GhostVehicle.EnableClientSidePathVisual = false;
+        }
     }
 
     [TestMethod]

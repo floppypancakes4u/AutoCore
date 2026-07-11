@@ -73,17 +73,61 @@ These are **not** fixed by P2; they need later delta expansion or new wire work:
 
 **Next focus:** smoother movement first (pose priority + richer `ApplyServerMove`), then widen minimal foreign **delta** admission one family at a time (e.g. AI → health → target → weapons), with owner already safe via P2.
 
-### Movement smoothness (2026-07-11)
+### Movement smoothness (2026-07-11 → RE closure)
 
-**Baseline (M0):** over multi-minute Ark Bay logs, individual foreign vehicles often saw only **~3 pose deltas** total — starvation, not a missing mask (`PositionMask` already admitted under minimal foreign).
+**Symptom:** NPC follows the path but **skips/teleports forward every ~250–500 ms** (not smooth frame-rate motion).
 
-**M1:** `EnableForeignVehiclePosePriorityBoost` (default **true**) raises vehicle ghost TNL weight from generic **0.15** to **0.40** so pose updates compete better with players.
+#### Client motion model (Ghidra, Final Exam / Gunny context)
 
-**M2:** `Vehicle.ApplyServerMove(..., dt)` fills **angular velocity / steering / acceleration** from yaw and speed deltas for better client interpolation.
+Mission `h_1-1_tas_arkbay_finalexam` kills template vehicle **580** (Gunny Sioux, CBID 12425). Live WireDiag: path+owner can ship; continuous pose is still the only reliable visual mover.
 
-**M3 (pipeline — why M1/M2 alone looked unchanged):** Sector loop ran `Pulse()` **before** `TickNpcs`, so pose dirties missed the same 100ms tick. After a pose pack, `PositionMask` cleared until the next move. Fix: **Tick NPCs before Pulse**, and while velocity/angular speed is non-zero **keep `PositionMask` dirty** so TNL re-sends pose on every write.
+| Client path | Address | Role |
+| --- | --- | --- |
+| Ghost pose unpack | `VehicleNet_UnpackGhostVehicle` `0x005F7720` | Reads pos/rot/vel/angVel + quantized throttle/steer |
+| Apply network pose | `Vehicle_setDrivingInputs` `0x00504C70` | Throttle `+0x614`, steer `+0x618` → `FUN_0053EEC0` |
+| Pose apply / buffer | `FUN_0053EEC0` | Stores network target buffer; **if Havok fully active, falls through and hard-writes graphics pose every pack** |
+| Soft teleport threshold | `DAT_009d000c` = **15.0** | Soft path only hard-teleports when error &gt; 15 units |
+| Throttle → action | `FUN_004FBC10` | **No-op unless `vehicle+0x1A0` (VehicleAction) exists** (created by activate) |
+| Dead-reckon / validate | `FUN_0053E820` / `FUN_0053F1F0` | Extrapolates buffer with **linear velocity × dt**; corrects when diverged |
+| Integrate dt from net | unpack call site | `dt = ghostObj+0xBC * 0.001` (ms→s) into `FUN_0053EB90` |
+| Client path AI | `CVOGHBAIDriver_DoLogic` `0x005D7750`, `FUN_005CE990` | Frame-rate path follow — **requires working driver AI attach** |
+| Map path geometry | `CVOGMapPath_AdvanceAndSteer` `0x005DF950` | Steer toward waypoints (client-side) |
 
-**Live tick tuning:** in-game chat `/sectorTick` (query) or `/sectorTick 50` (set ms, clamp 1–5000). Console: `sector.tick 50`. Default remains **100ms**. Use this to A/B whether loop rate is the motion bottleneck.
+**Hard conclusion from live A/B:**
+
+1. **`EnableClientSidePathVisual` (suppress idle pose) freezes NPCs** even with `path=1 owner=1 clientOwner=1` — client HBAI is **not** driving our foreign vehicles. Server pose is mandatory for motion.
+2. Retail smooth feel is **not** “client path AI alone for remotes”; it is **Havok + throttle/steer + dense pose corrections**, with velocity used for short dead reckoning between packs.
+3. Ghost field we call `Acceleration` is **throttle** (`WriteSignedFloat` 6-bit ∈ **[-1,1]**), **not** m/s². Constant-speed path with `d(speed)/dt ≈ 0` left throttle at 0 → Havok freezes → next pose is a visible skip. Fixed: cruise throttle **1.0** while speed &gt; ε.
+4. Sparse TNL ghost slots (priority 0.40 vs character 0.5, stream `IsFull()` cut-off) → packs every few hundred ms → skip-forward cadence matches **ghost update rate**, not sector tick alone.
+
+#### Server work applied
+
+| Step | Change |
+| --- | --- |
+| M1 | Vehicle ghost priority weight **0.40** (was 0.15 props) |
+| M1b | **Moving** vehicle weight **0.50** (match Character) + skip boost **0.05** |
+| M2 | `ApplyServerMove(dt)` fills angVel/steering; **cruise throttle** while moving |
+| M3 | Tick NPCs **before** Pulse; keep `PositionMask` dirty while moving |
+| Soft path | `EnableSoftNpcPathMotion` — yaw rate, Y blend, velocity carry (server path quality only) |
+| Client-path visual | **Rejected** — freezes (client AI not latched) |
+
+**Live tick tuning:** `/sectorTick` / `sector.tick` (1–5000 ms). Alone does not fix skip if TNL still starves the ghost.
+
+**Still open for true retail parity:** ensure foreign activate creates `VehicleAction` so throttle reaches Havok; mid-session AI state / combat deltas.
+
+#### TNL rate starvation (same cadence after priority — 2026-07-11 evening)
+
+Live WireDiag often shows only **~3 pose packs** per foreign vehicle after scope, not continuous 100 ms streams.
+
+TNL `DefaultFixedBandwidth = 2500` B/s and `DefaultFixedSendPeriod = 96` ms → **~240 B/packet**. Each foreign pose is ~500 bits (~62 B) plus framing. A few GhostVehicles fill the packet; the rest wait **multiple send periods** → **~250–500 ms** between pose packs for a given NPC. Client hard-snaps each pack → skip-forward cadence.
+
+Ctor already called `SetFixedRateParameters(50, 50, 40000, 40000)`, but client rate negotiation (and `LocalRate`/`RemoteRate` sharing one object in this TNL port) can collapse both sides back to ~2500/96.
+
+**Fix:** `TNLConnection.ComputeNegotiatedRate` floors ghosting connections to **≥20 KB/s** effective send and **≤50 ms** period so multi-NPC pose fits every tick.
+
+**Still same cadence after floor (live):** Gunny logged `period=50ms packetSize=1490B` but only **initial + 3 pose deltas** then **no further GhostPack** for that coid. Bandwidth was not the remaining limit — **pose dirty list was dying**. `IsMovingForPoseStream` used velocity only; waypoint waits / zero-vel frames cleared keep-dirty → ghost left `GhostZeroUpdateIndex`.
+
+**Fix (follow-up):** `ShouldStreamPose` keeps `PositionMask` dirty for **path + IdlePatrol** even at zero velocity; `NpcTicker` re-dirties pose while holding on a waypoint; pathing foreign vehicles use **`ObjectLocalScopeAlways`** so interest flaps do not `DetachObject` mid-patrol.
 
 ### Historical live result 2026-07-11 morning (owner + pose, no defer)
 

@@ -85,6 +85,30 @@ public class GhostObjectPriorityTests
     }
 
     [TestMethod]
+    public void GetUpdatePriority_MovingVehicleOutranksIdleVehicle()
+    {
+        GhostVehicle.EnableForeignVehiclePosePriorityBoost = true;
+        try
+        {
+            var viewer = MakeCharacter(1, 0f);
+            var idle = MakeVehicleGhost(2, 50f);
+            var moving = MakeVehicleGhost(3, 50f);
+            // Non-zero linear velocity arms IsMovingForPoseStream.
+            moving.ApplyServerMove(moving.Position, Quaternion.Default, new Vector3(12f, 0f, 0f), dt: 0.1f);
+
+            var idleP = idle.Ghost.GetUpdatePriority(viewer.Ghost, GhostObject.PositionMask, 0);
+            var movingP = moving.Ghost.GetUpdatePriority(viewer.Ghost, GhostObject.PositionMask, 0);
+
+            Assert.IsTrue(movingP > idleP,
+                $"Moving vehicle must outrank idle ({movingP} vs {idleP}).");
+        }
+        finally
+        {
+            GhostVehicle.EnableForeignVehiclePosePriorityBoost = true;
+        }
+    }
+
+    [TestMethod]
     public void GetUpdatePriority_SelfAndTargetPinnedAtOne()
     {
         var viewer = MakeCharacter(1, 0f);

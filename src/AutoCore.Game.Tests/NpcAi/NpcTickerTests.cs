@@ -98,7 +98,7 @@ public class NpcTickerTests
     }
 
     [TestMethod]
-    public void NpcTicker_WaitingNpc_DoesNotDirtyPositionMask()
+    public void NpcTicker_WaitingPathVehicle_ReDirtiesPositionMask()
     {
         var map = CreateMap();
 
@@ -109,8 +109,9 @@ public class NpcTickerTests
             AcceptDistance = 2f,
         });
 
-        // Already dwelling (WaitUntilMs is in the future) — not yet at the deadline, so the path
-        // stepper holds in place. This tick must not re-broadcast a pose that did not change.
+        // Already dwelling (WaitUntilMs is in the future) — holds in place, but path vehicles
+        // must re-dirty pose so TNL does not drop them from the non-zero update list
+        // (live: ~3 pose packs then silence until the next move).
         var start = new Vector3(5f, 0f, 5f);
         var patrol = PlaceNpcVehicle(map, PatrolVehicleCoid, start, npcAi: true);
         patrol.CoidCurrentPath = PatrolPathCoid;
@@ -133,8 +134,8 @@ public class NpcTickerTests
         NetObject.CollapseDirtyList();
 
         Assert.AreEqual(start, patrol.Position, "a waiting NPC must not move");
-        Assert.AreEqual(0ul, ghostInfo.UpdateMask & GhostObject.PositionMask,
-            "a waiting/holding NPC whose pose did not change must not dirty PositionMask");
+        Assert.AreEqual(GhostObject.PositionMask, ghostInfo.UpdateMask & GhostObject.PositionMask,
+            "holding path vehicle must re-dirty PositionMask to keep the pose stream warm");
     }
 
     [TestMethod]

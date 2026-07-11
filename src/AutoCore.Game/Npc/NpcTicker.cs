@@ -5,6 +5,7 @@ using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
 using AutoCore.Game.Structures;
+using AutoCore.Game.TNL.Ghost;
 
 /// <summary>
 /// Adapter that drives the pure <see cref="NpcPathFollower"/> over a map's live NPC AI entities.
@@ -62,8 +63,26 @@ public static class NpcTicker
             // every scoped client for no reason. Ticks that actually arrive (and snap onto the
             // waypoint) are never "holding" per the check above, so arrival snapping still applies
             // even when the NPC happened to already be sitting on the waypoint.
+            if (SoftNpcPathMotion.Enabled)
+            {
+                result = SoftNpcPathMotion.Apply(
+                    result,
+                    entity.Position,
+                    GetRotation(entity),
+                    ResolveSpeed(entity),
+                    dt,
+                    path,
+                    nowMs);
+            }
+
             if (!wasHolding || !PositionsEqual(result.NewPosition, entity.Position))
                 ApplyMove(entity, result, dt);
+            else if (entity is Vehicle holdVehicle && holdVehicle.CoidCurrentPath > 0)
+            {
+                // Holding on a waypoint: still re-dirty pose so TNL does not drop the ghost from
+                // the non-zero update list (live: 3 pose packs then silence until the next move).
+                holdVehicle.Ghost?.SetMaskBits(GhostObject.PositionMask);
+            }
 
             if (result.FireReactionCoid > 0)
                 map.TriggerReactions(entity, new List<long> { result.FireReactionCoid });
@@ -82,6 +101,13 @@ public static class NpcTicker
         Vehicle vehicle => vehicle.CoidCurrentPath,
         Creature creature => creature.CoidCurrentPath,
         _ => -1L,
+    };
+
+    private static Quaternion GetRotation(ClonedObjectBase entity) => entity switch
+    {
+        Vehicle vehicle => vehicle.Rotation,
+        Creature creature => creature.Rotation,
+        _ => Quaternion.Default,
     };
 
     /// <summary>True when both positions are exactly equal on all three axes.</summary>

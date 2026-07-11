@@ -4,6 +4,7 @@ using AutoCore.Game.Constants;
 using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Managers;
 using AutoCore.Game.TNL;
+using AutoCore.Game.TNL.Ghost;
 using AutoCore.Sector.Dev;
 using AutoCore.Sector.Config;
 using AutoCore.Utils;
@@ -14,7 +15,11 @@ using System.Net;
 
 public partial class SectorServer : BaseServer, ILoopable
 {
-    public const int MainLoopTime = 100; // Milliseconds
+    /// <summary>
+    /// 50ms: halves path step length and matches TNL ghost send floor so hard pose snaps
+    /// are smaller/denser (client capture: median SetDrivingInputs gap was ~480ms when packs starved).
+    /// </summary>
+    public const int MainLoopTime = 50; // Milliseconds
 
     public SectorConfig Config { get; private set; } = new();
     public IPAddress PublicAddress { get; private set; }
@@ -24,6 +29,7 @@ public partial class SectorServer : BaseServer, ILoopable
     public TNLInterface Interface { get; private set; }
     private readonly object _interfaceLock = new();
     private DevControlServer _devControlServer;
+    private long _lastPathPoseDiagBucket = -1;
 
     public SectorServer()
         : base("Sector")
@@ -93,7 +99,31 @@ public partial class SectorServer : BaseServer, ILoopable
             // pose dirties waited a full MainLoopTime (100ms) and often looked like sparse snaps.
             MapManager.Instance.TickNpcs(Environment.TickCount64, delta / 1000f);
 
+            // Hard guarantee: every pathing NPC re-enters the TNL dirty queue every tick.
+            // Live WireDiag after rate floor still showed only ~4 pose packs per Gunny then silence.
+            var pathPoseDirty = MapManager.Instance.ForcePathVehiclePoseDirty();
+
             Interface.Pulse();
+
+            if ((Environment.TickCount64 / 2000) != _lastPathPoseDiagBucket)
+            {
+                _lastPathPoseDiagBucket = Environment.TickCount64 / 2000;
+                var rates = "";
+                foreach (var kvp in Interface.MapConnections)
+                {
+                    var c = kvp.Value;
+                    if (c == null)
+                        continue;
+                    rates =
+                        $" period={c.NegotiatedPacketSendPeriodMs}ms pkt={c.NegotiatedPacketSendSizeBytes}B ghosting={c.IsGhosting()}";
+                    break;
+                }
+
+                var packs = System.Threading.Interlocked.Exchange(ref GhostVehicle.PosePacksSinceDiag, 0);
+                Logger.WriteLog(LogType.Network,
+                    "PathPoseForce dirtyGhosted={0} posePacks2s={1}{2}",
+                    pathPoseDirty, packs, rates);
+            }
 
             // Server-side combat tick: decouple firing from VehicleMoved packet arrival rate.
             // This fixes "clicking fires faster than holding" when the client sends fewer movement packets while stationary.

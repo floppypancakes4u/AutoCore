@@ -345,11 +345,51 @@ public partial class TNLConnection : GhostConnection
         NetEvent.ImplementNetEvent(out RPCMsgNonGuaranteedFragmented.DynClassRep,     "RPC_TNLConnection_rpcMsgNonGuaranteedFragmented",     NetClassMask.NetClassGroupGameMask, 0);
     }
 
+    /// <summary>
+    /// Sector ghost pose is ~500 bits per vehicle. TNL default remote rates often advertise
+    /// ~2500 B/s and ~96ms period → ~240 B/packet. Only a few GhostVehicle poses fit, so each
+    /// NPC gets a pack every few packets (the ~250–500ms skip-forward cadence). Floor rates so
+    /// multi-NPC pose streams stay dense when we have advertised high LocalRate in the ctor.
+    /// </summary>
+    public const uint SectorGhostMinSendBandwidth = 20000;
+    public const uint SectorGhostMaxSendPeriodMs = 50;
+
     public TNLConnection()
     {
         SetFixedRateParameters(50, 50, 40000, 40000);
         SetPingTimeouts(7000, 6);
     }
+
+    /// <summary>
+    /// After client rate negotiation, keep a floor when this connection ghosts (sector).
+    /// Remote MaxRecvBandwidth of 2500 (TNL default) otherwise caps us to starvation
+    /// (~240 B/packet → each NPC pose every few packets = skip-forward cadence).
+    /// </summary>
+    protected override void ComputeNegotiatedRate()
+    {
+        base.ComputeNegotiatedRate();
+
+        if (!DoesGhostFrom())
+            return;
+
+        // Force denser sends even if negotiation (or LocalRate/RemoteRate aliasing) collapsed
+        // both sides to TNL defaults (~96ms / 2500 B/s).
+        if (CurrentPacketSendPeriod > SectorGhostMaxSendPeriodMs)
+            CurrentPacketSendPeriod = SectorGhostMaxSendPeriodMs;
+
+        var flooredSize = (uint)(SectorGhostMinSendBandwidth * CurrentPacketSendPeriod * 0.001f);
+        if (flooredSize > MaxPacketDataSize)
+            flooredSize = MaxPacketDataSize;
+
+        if (CurrentPacketSendSize < flooredSize)
+            CurrentPacketSendSize = flooredSize;
+    }
+
+    /// <summary>Negotiated send period (ms) after floors — for diagnostics and tests.</summary>
+    public uint NegotiatedPacketSendPeriodMs => CurrentPacketSendPeriod;
+
+    /// <summary>Negotiated max payload bytes per data packet after floors — for diagnostics and tests.</summary>
+    public uint NegotiatedPacketSendSizeBytes => CurrentPacketSendSize;
 
     ~TNLConnection()
     {
@@ -952,7 +992,13 @@ public partial class TNLConnection : GhostConnection
         {
             SetGhostTo(false);
             SetGhostFrom(true);
+            // Re-apply rate floor now that DoesGhostFrom() is true (ctor negotiated without ghost).
+            SetFixedRateParameters(50, 50, 40000, 40000);
             ActivateGhosting();
+            Logger.WriteLog(LogType.Network,
+                "Sector ghost rates: period={0}ms packetSize={1}B (floor bw={2} B/s period≤{3}ms)",
+                NegotiatedPacketSendPeriodMs, NegotiatedPacketSendSizeBytes,
+                SectorGhostMinSendBandwidth, SectorGhostMaxSendPeriodMs);
         }
 
         Logger.WriteLog(LogType.Network, $"Client ({PlayerCoid}) connected from {GetNetAddressString()}");

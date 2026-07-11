@@ -81,14 +81,19 @@ public static class NpcPathFollower
         var distSq = (dx * dx) + (dz * dz);
         var dist = (float)System.Math.Sqrt(distSq);
         var accept = path.Points[index].AcceptDistance;
-        var stepLen = speed * dt;
+        if (accept < 0f)
+            accept = 0f;
+        var stepLen = speed * Math.Max(dt, 0f);
 
-        // Arrive when already inside the accept radius or this tick would carry us to/past the point.
-        if (dist <= accept || stepLen >= dist)
+        // Already on the point (or step covers the rest): true geometric arrival.
+        // IMPORTANT: do NOT snap the full AcceptDistance gap in one tick — live capture showed
+        // ~14u teleports every few hundred ms while |v|*dt predicted ~1u (AcceptDistance≈15).
+        const float onPointEps = 0.05f;
+        if (dist <= onPointEps || (stepLen > 0f && stepLen >= dist))
         {
             result.NewPosition = target;
             result.Velocity = new Vector3(0f, 0f, 0f);
-            result.Rotation = dist > 0f ? YawQuaternion(dx, dz) : Quaternion.Default;
+            result.Rotation = dist > onPointEps ? YawQuaternion(dx, dz) : Quaternion.Default;
             result.Arrived = true;
 
             var reactionCoid = path.Points[index].ReactionCoid;
@@ -102,18 +107,39 @@ public static class NpcPathFollower
             return result;
         }
 
-        // Steer in XZ at `speed`; Y comes straight from the target waypoint.
+        // Steer in XZ at most one stepLen toward the waypoint (never more).
         var inv = 1f / dist;
+        var move = Math.Min(stepLen, dist);
         result.NewPosition = new Vector3(
-            position.X + (dx * inv * stepLen),
+            position.X + (dx * inv * move),
             target.Y,
-            position.Z + (dz * inv * stepLen));
+            position.Z + (dz * inv * move));
         result.Velocity = new Vector3(dx * inv * speed, 0f, dz * inv * speed);
         result.Rotation = YawQuaternion(dx, dz);
-        result.Arrived = false;
-        result.FireReactionCoid = 0;
         result.WaitUntilMs = waitUntilMs;
         result.NowReversing = direction < 0;
+
+        // Inside AcceptDistance: count as arrived (advance path / fire reaction) but do not
+        // teleport the remaining gap — position only moved `move` this tick.
+        var remaining = dist - move;
+        if (remaining <= accept)
+        {
+            result.Arrived = true;
+            var reactionCoid = path.Points[index].ReactionCoid;
+            result.FireReactionCoid = reactionCoid > 0 ? reactionCoid : 0;
+            result.WaitUntilMs = nowMs + path.Points[index].WaitTime;
+            Advance(index, direction, count, path.ReverseDirection, out var nextIndex, out var nextDirection);
+            result.NewIndex = nextIndex;
+            result.NewDirection = nextDirection;
+            result.NowReversing = nextDirection < 0;
+            // Zero-wait: SoftNpcPathMotion / next tick aims at the new index; keep velocity.
+            if (path.Points[index].WaitTime > 0)
+                result.Velocity = new Vector3(0f, 0f, 0f);
+            return result;
+        }
+
+        result.Arrived = false;
+        result.FireReactionCoid = 0;
         return result;
     }
 

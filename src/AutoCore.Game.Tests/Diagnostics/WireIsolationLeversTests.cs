@@ -4,6 +4,7 @@ namespace AutoCore.Game.Tests.Diagnostics;
 
 using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Map;
+using AutoCore.Game.Npc;
 using AutoCore.Game.TNL.Ghost;
 
 [TestClass]
@@ -45,7 +46,24 @@ public class WireIsolationLeversTests
         Assert.IsFalse(GhostVehicle.EnableDeferredForeignPose);
         Assert.IsFalse(GhostVehicle.EnableForeignReghostOwner);
         Assert.IsTrue(GhostVehicle.EnableForeignVehiclePosePriorityBoost);
+        Assert.IsFalse(SoftNpcPathMotion.Enabled, "soft path motion is opt-in (lever / env)");
+        Assert.IsFalse(GhostVehicle.EnableClientSidePathVisual,
+            "client-side path visual freezes server pose authority when misused");
         Assert.IsFalse(WireDiag.Enabled);
+    }
+
+    [TestMethod]
+    public void TrySet_SoftNpcPathMotion_And_ClientSidePathVisual()
+    {
+        Assert.IsTrue(WireIsolationLevers.TrySet("EnableSoftNpcPathMotion", true, out _));
+        Assert.IsTrue(SoftNpcPathMotion.Enabled);
+
+        Assert.IsTrue(WireIsolationLevers.TrySet("EnableClientSidePathVisual", true, out _));
+        Assert.IsTrue(GhostVehicle.EnableClientSidePathVisual);
+
+        WireIsolationLevers.ResetToDefaults();
+        Assert.IsFalse(SoftNpcPathMotion.Enabled);
+        Assert.IsFalse(GhostVehicle.EnableClientSidePathVisual);
     }
 
     [TestMethod]

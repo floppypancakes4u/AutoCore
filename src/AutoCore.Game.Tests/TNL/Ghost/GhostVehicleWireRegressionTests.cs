@@ -11,6 +11,7 @@ using AutoCore.Game.Constants;
 using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
+using AutoCore.Game.Npc;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL;
 using AutoCore.Game.TNL.Ghost;
@@ -983,6 +984,34 @@ public class GhostVehicleWireRegressionTests
         Assert.IsTrue(GhostVehicle.IsMovingForPoseStream(vehicle));
         vehicle.ApplyServerMove(new Vector3(0, 0, 0), Quaternion.Default, new Vector3(0, 0, 0));
         Assert.IsFalse(GhostVehicle.IsMovingForPoseStream(vehicle));
+    }
+
+    [TestMethod]
+    public void PackDelta_PathPatrolZeroVelocity_StillKeepsPositionMaskDirty()
+    {
+        // Live: after rate floor, Gunny still only got ~3 pose deltas then silence when
+        // velocity hit zero at a waypoint. Path patrol must keep PositionMask warm.
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_195);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_195, true);
+        vehicle.CoidCurrentPath = 42;
+        vehicle.NpcAi = new NpcAiState { CombatState = HBAICombatState.IdlePatrol };
+        vehicle.ApplyServerMove(new Vector3(0, 0, 0), Quaternion.Default, new Vector3(0, 0, 0));
+
+        Assert.IsFalse(GhostVehicle.IsMovingForPoseStream(vehicle), "velocity is zero");
+        Assert.IsTrue(GhostVehicle.ShouldStreamPose(vehicle), "path idle patrol must still stream");
+
+        NetObject.PIsInitialUpdate = false;
+        try
+        {
+            var stream = new BitStream(new byte[8192], 8192);
+            var ret = vehicle.Ghost.PackUpdate(null, GhostObject.PositionMask, stream);
+            Assert.AreNotEqual(0UL, ret & GhostObject.PositionMask,
+                "Path patrol must keep PositionMask dirty with zero velocity.");
+        }
+        finally
+        {
+            NetObject.PIsInitialUpdate = false;
+        }
     }
 
     [TestMethod]

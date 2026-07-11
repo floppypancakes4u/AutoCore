@@ -4,6 +4,7 @@ using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
+using AutoCore.Game.TNL.Ghost;
 using AutoCore.Utils;
 using AutoCore.Utils.Memory;
 
@@ -88,6 +89,45 @@ public class MapManager : Singleton<MapManager>
             if (map.PlayerCount > 0)
                 Npc.NpcTicker.Tick(map, nowMs, deltaSeconds);
         }
+    }
+
+    /// <summary>
+    /// Force <see cref="GhostObject.PositionMask"/> dirty on every pathing NPC vehicle that has
+    /// an observer map. Live diagnosis: even with keep-dirty + rate floor, Gunny only shipped
+    /// ~4 GhostPacks then silence — dirty list was going cold. This is the hard guarantee that
+    /// path vehicles re-enter the TNL non-zero update queue every sector tick.
+    /// </summary>
+    /// <returns>Number of vehicles force-dirtied this call.</returns>
+    /// <summary>
+    /// Force-dirty only path vehicles that are currently ghosted to at least one connection.
+    /// Dirties on unghosted shells are no-ops for packing (CollapseDirtyList finds no GhostInfo).
+    /// </summary>
+    public int ForcePathVehiclePoseDirty()
+    {
+        var n = 0;
+        foreach (var map in SectorMaps.Values)
+        {
+            if (map.PlayerCount <= 0)
+                continue;
+
+            foreach (var entity in map.NpcAiEntities)
+            {
+                if (entity is not Vehicle vehicle)
+                    continue;
+                if (vehicle.CoidCurrentPath <= 0 || vehicle.Ghost == null)
+                    continue;
+                if (vehicle.IsCorpse)
+                    continue;
+                // No connection has this ghost in scope → SetMaskBits cannot enqueue a pack.
+                if (vehicle.Ghost.GetFirstObjectRef() == null)
+                    continue;
+
+                vehicle.Ghost.SetMaskBits(GhostObject.PositionMask);
+                n++;
+            }
+        }
+
+        return n;
     }
 
     private void SetupMap(int continentId)

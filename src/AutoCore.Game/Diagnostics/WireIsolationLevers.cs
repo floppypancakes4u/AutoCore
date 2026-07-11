@@ -3,6 +3,7 @@ namespace AutoCore.Game.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using AutoCore.Game.Map;
+using AutoCore.Game.Npc;
 using AutoCore.Game.TNL.Ghost;
 using AutoCore.Utils;
 
@@ -52,6 +53,10 @@ public static class WireIsolationLevers
             () => GhostVehicle.EnableForeignReghostOwner, v => GhostVehicle.EnableForeignReghostOwner = v, envSuffix: "FOREIGN_REGHOST_OWNER"),
         new("EnableForeignVehiclePosePriorityBoost", "Higher TNL ghost priority for vehicles (smoother pose updates)",
             () => GhostVehicle.EnableForeignVehiclePosePriorityBoost, v => GhostVehicle.EnableForeignVehiclePosePriorityBoost = v, envSuffix: "VEHICLE_POSE_PRIORITY"),
+        new("EnableSoftNpcPathMotion", "Limit turn rate, blend Y, carry velocity through zero-wait path arrivals",
+            () => SoftNpcPathMotion.Enabled, v => SoftNpcPathMotion.Enabled = v, envSuffix: "SOFT_NPC_PATH"),
+        new("EnableClientSidePathVisual", "Skip idle-patrol pose deltas so client HBAI path AI drives (needs owner+path)",
+            () => GhostVehicle.EnableClientSidePathVisual, v => GhostVehicle.EnableClientSidePathVisual = v, envSuffix: "CLIENT_PATH_VISUAL"),
     };
 
     /// <summary>Load JSON (if present) then env overrides. Call once at process start.</summary>
@@ -99,6 +104,8 @@ public static class WireIsolationLevers
         GhostVehicle.EnableDeferredForeignPose = false;
         GhostVehicle.EnableForeignReghostOwner = false;
         GhostVehicle.EnableForeignVehiclePosePriorityBoost = true;
+        SoftNpcPathMotion.Enabled = false;
+        GhostVehicle.EnableClientSidePathVisual = false;
     }
 
     public static void ApplyFromEnvironmentVariables()

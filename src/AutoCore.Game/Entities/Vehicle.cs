@@ -146,12 +146,14 @@ public class Vehicle : SimpleObject
             var nextYaw = YawFromQuaternion(rotation);
             var dYaw = NormalizeRadians(nextYaw - prevYaw);
             AngularVelocity = new Vector3(0f, dYaw / dt, 0f);
-            // Map ~±45°/s of yaw rate into [-1,1] steering for the ghost pose block.
+            // Map yaw rate into [-1,1] steering for the ghost pose block (client +0x618).
             Steering = Math.Clamp(dYaw / (MathF.PI * 0.25f * Math.Max(dt, 1e-3f)) * dt, -1f, 1f);
 
-            var prevSpeed = MathF.Sqrt((Velocity.X * Velocity.X) + (Velocity.Y * Velocity.Y) + (Velocity.Z * Velocity.Z));
+            // Ghost "Acceleration" is the client throttle axis (+0x614), packed with
+            // WriteSignedFloat(6) ∈ ~[-1,1]. Constant-speed path follow must send cruise throttle
+            // so Havok keeps driving between pose packs (client capture: thr=1 + action present).
             var nextSpeed = MathF.Sqrt((velocity.X * velocity.X) + (velocity.Y * velocity.Y) + (velocity.Z * velocity.Z));
-            Acceleration = Math.Clamp((nextSpeed - prevSpeed) / dt, -50f, 50f);
+            Acceleration = nextSpeed > 0.05f ? 1f : 0f;
         }
         else
         {
@@ -163,7 +165,24 @@ public class Vehicle : SimpleObject
         Rotation = rotation;
         Velocity = velocity;
 
-        Ghost?.SetMaskBits(GhostObject.PositionMask);
+        // Idle path patrol: optional client-side path visual (no continuous pose snaps).
+        if (!ShouldSuppressPatrolPoseGhost())
+            Ghost?.SetMaskBits(GhostObject.PositionMask);
+    }
+
+    /// <summary>
+    /// True when continuous pose ghosting should be withheld so the retail client can drive
+    /// the vehicle along its assigned path at frame rate (see
+    /// <see cref="GhostVehicle.EnableClientSidePathVisual"/>).
+    /// </summary>
+    internal bool ShouldSuppressPatrolPoseGhost()
+    {
+        if (!GhostVehicle.EnableClientSidePathVisual)
+            return false;
+        if (CoidCurrentPath <= 0)
+            return false;
+        // Only suppress genuine idle patrol; engage/combat still need authoritative pose.
+        return NpcAi == null || NpcAi.CombatState == HBAICombatState.IdlePatrol;
     }
 
     private static float YawFromQuaternion(Quaternion q)
@@ -703,6 +722,7 @@ public class Vehicle : SimpleObject
             vehiclePacket.IsTrailer = false;
             vehiclePacket.IsInventory = false;
             // Active field vehicles without a wheelset arm client Havok without +0x258 → AV 0x004F5566.
+            // NOTE: Do NOT force IsActive=false for NPCs — live test 2026-07-11 froze all NPC motion.
             var hasWheelset = WheelSet != null && WheelSet.CBID > 0;
             vehiclePacket.IsActive = hasWheelset
                 && Map != null

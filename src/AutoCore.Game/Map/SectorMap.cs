@@ -458,7 +458,14 @@ public class SectorMap
                 && gameConnection.HasActiveForeignCreateHold(coid);
 
             var wasGhosted = foreignGlobalVehicle && ghost.IsGhostedTo(connection);
-            connection.ObjectInScope(ghost);
+            // Pathing foreign vehicles: pin ScopeLocalAlways so PrepareWritePacket does not clear
+            // InScope and Detach them between interest-query flaps (drops pose stream).
+            if (foreignGlobalVehicle
+                && entity is Vehicle pathVehicle
+                && pathVehicle.CoidCurrentPath > 0)
+                connection.ObjectLocalScopeAlways(ghost);
+            else
+                connection.ObjectInScope(ghost);
             if (foreignGlobalVehicle && gameConnection != null)
             {
                 var nowGhosted = ghost.IsGhostedTo(connection);

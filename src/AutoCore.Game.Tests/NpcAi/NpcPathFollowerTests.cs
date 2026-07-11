@@ -82,6 +82,64 @@ public class NpcPathFollowerTests
     }
 
     [TestMethod]
+    public void Step_LargeAcceptDistance_DoesNotTeleportFullGapInOneTick()
+    {
+        // Live client capture: |v|=18 predicts ~1u/tick but every few hundred ms
+        // dist jumped ~14u while dt stayed ~50ms — path AcceptDistance snap.
+        var path = new MapPathTemplate { ReverseDirection = false };
+        path.Points.Add(new MapPathTemplate.MapPathPoint
+        {
+            Position = new Vector3(100f, 0f, 0f),
+            AcceptDistance = 15f, // retail-scale accept ring
+            ReactionCoid = 99,
+            WaitTime = 0,
+        });
+        path.Points.Add(new MapPathTemplate.MapPathPoint
+        {
+            Position = new Vector3(200f, 0f, 0f),
+            AcceptDistance = 15f,
+        });
+
+        // 14u inside the accept ring, but one step is only 0.9u (18 * 0.05).
+        var result = NpcPathFollower.Step(
+            new Vector3(86f, 0f, 0f), path, index: 0, direction: 1,
+            waitUntilMs: 0, nowMs: 1000, speed: 18f, dt: 0.05f);
+
+        var moved = result.NewPosition.X - 86f;
+        Assert.IsTrue(moved > 0f && moved <= 18f * 0.05f + Tolerance,
+            $"Must not teleport across accept gap; moved {moved} (stepLen={18f * 0.05f})");
+        Assert.IsTrue(result.Arrived,
+            "Still counts as arrived when inside AcceptDistance so the path advances.");
+        Assert.AreEqual(1, result.NewIndex, "Advance to next waypoint after accept arrival.");
+        Assert.AreEqual(99L, result.FireReactionCoid);
+    }
+
+    [TestMethod]
+    public void Step_InsideAccept_KeepsNonZeroVelocityTowardNextWhenNoWait()
+    {
+        var path = new MapPathTemplate { ReverseDirection = false };
+        path.Points.Add(new MapPathTemplate.MapPathPoint
+        {
+            Position = new Vector3(100f, 0f, 0f),
+            AcceptDistance = 15f,
+            WaitTime = 0,
+        });
+        path.Points.Add(new MapPathTemplate.MapPathPoint
+        {
+            Position = new Vector3(200f, 0f, 0f),
+            AcceptDistance = 1f,
+        });
+
+        var result = NpcPathFollower.Step(
+            new Vector3(90f, 0f, 0f), path, index: 0, direction: 1,
+            waitUntilMs: 0, nowMs: 1000, speed: 18f, dt: 0.05f);
+
+        Assert.IsTrue(result.Arrived);
+        // Continuous step, not zeroed arrival snap — client gets non-zero vel between packs.
+        Assert.IsTrue(result.Velocity.X > 0f || result.NewPosition.X > 90f);
+    }
+
+    [TestMethod]
     public void Step_WaitTime_HoldsUntilDeadline()
     {
         var path = Path(false, new Vector3(100f, 0f, 0f));
@@ -145,5 +203,87 @@ public class NpcPathFollowerTests
         Assert.AreEqual(1f, result.NewPosition.X, Tolerance);
         Assert.AreEqual(2f, result.NewPosition.Z, Tolerance);
         Assert.AreEqual(0, result.NewIndex);
+    }
+
+    [TestMethod]
+    public void Step_AcceptArrivalWithWait_ZerosVelocity()
+    {
+        var path = new MapPathTemplate { ReverseDirection = false };
+        path.Points.Add(new MapPathTemplate.MapPathPoint
+        {
+            Position = new Vector3(100f, 0f, 0f),
+            AcceptDistance = 15f,
+            WaitTime = 500,
+        });
+        path.Points.Add(new MapPathTemplate.MapPathPoint
+        {
+            Position = new Vector3(200f, 0f, 0f),
+            AcceptDistance = 1f,
+        });
+
+        var result = NpcPathFollower.Step(
+            new Vector3(90f, 0f, 0f), path, index: 0, direction: 1,
+            waitUntilMs: 0, nowMs: 1000, speed: 18f, dt: 0.05f);
+
+        Assert.IsTrue(result.Arrived);
+        Assert.AreEqual(0f, result.Velocity.X, Tolerance);
+        Assert.AreEqual(0f, result.Velocity.Z, Tolerance);
+        Assert.AreEqual(1500L, result.WaitUntilMs);
+    }
+
+    [TestMethod]
+    public void Step_OutsideAccept_DoesNotArriveAndStepsAtMostStepLen()
+    {
+        var path = Path(false, new Vector3(100f, 0f, 0f));
+        // Accept=1; start at X=50 → remaining 50 >> accept after 0.9 step.
+        var result = NpcPathFollower.Step(
+            new Vector3(50f, 0f, 0f), path, index: 0, direction: 1,
+            waitUntilMs: 0, nowMs: 1000, speed: 18f, dt: 0.05f);
+
+        Assert.IsFalse(result.Arrived);
+        Assert.AreEqual(50f + 0.9f, result.NewPosition.X, Tolerance);
+        Assert.AreEqual(0, result.NewIndex);
+        Assert.AreEqual(0L, result.FireReactionCoid);
+    }
+
+    [TestMethod]
+    public void Step_EmptyPath_NoOp()
+    {
+        var path = new MapPathTemplate();
+        var start = new Vector3(3f, 1f, 4f);
+        var result = NpcPathFollower.Step(
+            start, path, index: 0, direction: 1,
+            waitUntilMs: 0, nowMs: 1000, speed: 18f, dt: 0.05f);
+
+        Assert.AreEqual(start, result.NewPosition);
+        Assert.IsFalse(result.Arrived);
+    }
+
+    [TestMethod]
+    public void Step_NullPath_NoOp()
+    {
+        var start = new Vector3(1f, 2f, 3f);
+        var result = NpcPathFollower.Step(
+            start, path: null!, index: 0, direction: 1,
+            waitUntilMs: 0, nowMs: 1000, speed: 18f, dt: 0.05f);
+
+        Assert.AreEqual(start, result.NewPosition);
+        Assert.IsFalse(result.Arrived);
+    }
+
+    [TestMethod]
+    public void Step_SinglePointPath_AcceptAdvancesIndexToSelf()
+    {
+        var path = Path(false, new Vector3(5f, 0f, 5f));
+        path.Points[0].AcceptDistance = 15f;
+
+        var result = NpcPathFollower.Step(
+            new Vector3(0f, 0f, 0f), path, index: 0, direction: 1,
+            waitUntilMs: 0, nowMs: 1000, speed: 18f, dt: 0.05f);
+
+        // dist≈7.07 < 15 → accept arrival; single-point Advance stays at 0.
+        Assert.IsTrue(result.Arrived);
+        Assert.AreEqual(0, result.NewIndex);
+        Assert.IsTrue(result.NewPosition.X > 0f && result.NewPosition.X < 5f);
     }
 }
