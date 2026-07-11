@@ -96,11 +96,10 @@ public partial class TNLConnection
         SetScopeObject(character.Ghost);
 
         // ActivateGhosting already set Scoping=true, but Ghosting stays false until the
-        // client answers rpcReadyForNormalGhosts. ObjectLocalScopeAlways still works while
-        // Scoping is true; call it again after ghost create so vehicle dirty masks have a
-        // GhostInfo connection ref (required for SetMaskBits → CollapseDirtyList delivery).
+        // client answers rpcReadyForNormalGhosts. The vehicle is constructed by the
+        // CreateVehicleExtended packet below; registering its GhostVehicle here makes the
+        // client apply a second initial setup and clear its wheelset pointer.
         ObjectLocalScopeAlways(character.Ghost);
-        ObjectLocalScopeAlways(character.CurrentVehicle.Ghost);
 
         SendLocalPlayerCreatePackets(character);
     }
@@ -150,7 +149,6 @@ public partial class TNLConnection
         SetScopeObject(character.Ghost);
 
         ObjectLocalScopeAlways(character.Ghost);
-        ObjectLocalScopeAlways(character.CurrentVehicle.Ghost);
     }
 
     private void SendLocalPlayerCreatePackets(Character character)

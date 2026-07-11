@@ -36,6 +36,14 @@ public static class WireIsolationLevers
             () => GhostVehicle.EnableOwnerWire, v => GhostVehicle.EnableOwnerWire = v, envSuffix: "OWNER"),
         new("EnableTemplateSpawnWire", "GhostVehicle template + spawn-owner blocks",
             () => GhostVehicle.EnableTemplateSpawnWire, v => GhostVehicle.EnableTemplateSpawnWire = v, envSuffix: "TEMPLATE_SPAWN"),
+        new("EnableMinimalForeignInitialProfile", "Foreign GhostVehicle required-initial-body + pose-only updates",
+            () => GhostVehicle.EnableMinimalForeignInitialProfile, v => GhostVehicle.EnableMinimalForeignInitialProfile = v, envSuffix: "MINIMAL_FOREIGN_INITIAL"),
+        new("EnableMinimalForeignPathBlock", "Allow path block during minimal foreign initial profile",
+            () => GhostVehicle.EnableMinimalForeignPathBlock, v => GhostVehicle.EnableMinimalForeignPathBlock = v, envSuffix: "MINIMAL_FOREIGN_PATH"),
+        new("EnableMinimalForeignTemplateSpawnBlock", "Allow template/spawn block during minimal foreign initial profile",
+            () => GhostVehicle.EnableMinimalForeignTemplateSpawnBlock, v => GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = v, envSuffix: "MINIMAL_FOREIGN_TEMPLATE_SPAWN"),
+        new("EnableMinimalForeignOwnerBlock", "Allow owner block during minimal foreign initial profile",
+            () => GhostVehicle.EnableMinimalForeignOwnerBlock, v => GhostVehicle.EnableMinimalForeignOwnerBlock = v, envSuffix: "MINIMAL_FOREIGN_OWNER"),
     };
 
     /// <summary>Load JSON (if present) then env overrides. Call once at process start.</summary>
@@ -69,12 +77,16 @@ public static class WireIsolationLevers
         WireDiag.Enabled = false;
         SectorMap.ScopeGlobalVehicles = true;
         SectorMap.ScopeGlobalVehicleCreate = true;
-        SectorMap.ScopeGlobalVehicleGhost = true;
+        SectorMap.ScopeGlobalVehicleGhost = false;
         SectorMap.SendGroupReactionCall = true;
         GhostVehicle.EnableAiStateWire = true;
         GhostVehicle.EnablePathWire = true;
         GhostVehicle.EnableOwnerWire = true;
         GhostVehicle.EnableTemplateSpawnWire = true;
+        GhostVehicle.EnableMinimalForeignInitialProfile = false;
+        GhostVehicle.EnableMinimalForeignPathBlock = false;
+        GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = false;
+        GhostVehicle.EnableMinimalForeignOwnerBlock = false;
     }
 
     public static void ApplyFromEnvironmentVariables()

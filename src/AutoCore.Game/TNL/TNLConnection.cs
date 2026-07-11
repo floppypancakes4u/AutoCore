@@ -46,6 +46,13 @@ public partial class TNLConnection : GhostConnection
     public Character CurrentCharacter { get; set; }
 
     /// <summary>
+    /// Test-only mask profile for the initial update of a foreign global vehicle. It is unset in
+    /// normal operation; recovery experiments set it on one connection so they cannot alter
+    /// other clients' ghost streams.
+    /// </summary>
+    public ulong? ForeignVehicleInitialMaskOverrideForTests { get; set; }
+
+    /// <summary>
     /// When set (unit tests), world-state logout persistence uses this instead of the EF singleton.
     /// </summary>
     internal static ICharacterWorldStatePersistence WorldStatePersistenceForTests { get; set; }

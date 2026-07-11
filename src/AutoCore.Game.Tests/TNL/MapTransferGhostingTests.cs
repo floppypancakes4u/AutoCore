@@ -45,6 +45,8 @@ public class MapTransferGhostingTests
         Assert.IsNotNull(character.CurrentVehicle.Ghost);
         Assert.IsInstanceOfType(character.CurrentVehicle.Ghost, typeof(GhostVehicle));
         Assert.AreSame(character.Ghost, connection.GetScopeObject());
+        Assert.IsNull(character.CurrentVehicle.Ghost.GetFirstObjectRef(),
+            "The client constructs its own vehicle from CreateVehicleExtended; an initial GhostVehicle update overwrites its wheelset.");
     }
 
     [TestMethod]

@@ -4,6 +4,7 @@ namespace AutoCore.Game.Tests.Entities;
 
 using System.Linq;
 using AutoCore.Database.World.Models;
+using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
@@ -150,6 +151,28 @@ public class SpawnPointTemplateSpawnTests
         Assert.IsTrue(vehicle.ObjectId.Global, "Spawned vehicles must not occupy the client-local map-object namespace");
         Assert.IsTrue(MapNpcIdentity.IsMapNpcIdentity(vehicle.ObjectId));
         Assert.IsFalse(MapNpcIdentity.IsUnsafeLocalSpawnCoid(vehicle.ObjectId, mapHighestCoid: 0));
+    }
+
+    [TestMethod]
+    public void Spawn_RawVehicleWithDefaultWheelset_EquipsWheelsetForCreateVehicle()
+    {
+        const int vehicleCbid = 610_010;
+        const int wheelsetCbid = 610_011;
+        var map = CreateTestMap(9106);
+        AssetManagerTestHelper.RegisterCloneBase(wheelsetCbid, CloneBaseObjectType.WheelSet);
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid, defaultWheelsetCbid: wheelsetCbid);
+
+        var template = new SpawnPointTemplate { COID = 14_510 };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList { SpawnType = vehicleCbid, IsTemplate = false });
+        var spawnPoint = new SpawnPoint(template);
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var vehicle = map.Objects.Values.OfType<Vehicle>().Single();
+        Assert.IsNotNull(vehicle.WheelSet, "CreateVehicle must contain the clonebase default wheelset before ghosting can render this NPC.");
+        Assert.AreEqual(wheelsetCbid, vehicle.WheelSet.CBID);
     }
 
     [TestMethod]

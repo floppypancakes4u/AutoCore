@@ -41,13 +41,17 @@ public static class AssetManagerTestHelper
         GetCloneBasesDictionary()[cbid] = clone;
     }
 
-    /// <summary>Registers a fake <see cref="CloneBaseVehicle"/> (with DefaultDriver) for spawn-flow tests.</summary>
-    public static void RegisterVehicleCloneBase(int cbid, int defaultDriverCbid = 0)
+    /// <summary>Registers a fake <see cref="CloneBaseVehicle"/> for spawn-flow tests.</summary>
+    public static void RegisterVehicleCloneBase(int cbid, int defaultDriverCbid = 0, int defaultWheelsetCbid = 0)
     {
         var clone = (CloneBaseVehicle)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseVehicle));
         clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.Vehicle, CloneBaseId = cbid };
         clone.SimpleObjectSpecific = new SimpleObjectSpecific();
-        clone.VehicleSpecific = new VehicleSpecific { DefaultDriver = defaultDriverCbid };
+        clone.VehicleSpecific = new VehicleSpecific
+        {
+            DefaultDriver = defaultDriverCbid,
+            DefaultWheelset = defaultWheelsetCbid,
+        };
         Registered[cbid] = clone;
         GetCloneBasesDictionary()[cbid] = clone;
     }

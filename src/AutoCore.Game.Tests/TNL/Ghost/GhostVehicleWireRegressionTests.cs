@@ -12,6 +12,7 @@ using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
 using AutoCore.Game.Structures;
+using AutoCore.Game.TNL;
 using AutoCore.Game.TNL.Ghost;
 
 /// <summary>
@@ -40,6 +41,10 @@ public class GhostVehicleWireRegressionTests
         GhostVehicle.EnablePathWire = true;
         GhostVehicle.EnableOwnerWire = true;
         GhostVehicle.EnableTemplateSpawnWire = true;
+        GhostVehicle.EnableMinimalForeignInitialProfile = false;
+        GhostVehicle.EnableMinimalForeignPathBlock = false;
+        GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = false;
+        GhostVehicle.EnableMinimalForeignOwnerBlock = false;
         WireDiag.ResetForTests();
     }
 
@@ -630,6 +635,157 @@ public class GhostVehicleWireRegressionTests
         Assert.IsTrue(stream.ReadFlag()); // Skills
         Assert.IsFalse(stream.ReadFlag()); // owner skills
         Assert.AreEqual(0u, stream.ReadInt(8)); // vehicle skill count
+    }
+
+    [TestMethod]
+    public void PackInitial_ForeignVehicle_ConnectionMaskOverrideIsRecordedAsEffectiveMask()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_070);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_070, true);
+        var connection = new TNLConnection
+        {
+            ForeignVehicleInitialMaskOverrideForTests = GhostObject.PositionMask,
+        };
+        var ghost = new GhostVehicle();
+        ghost.SetParent(vehicle);
+        var stream = new BitStream(new byte[8192], 8192);
+
+        WireDiag.Enabled = true;
+        NetObject.PIsInitialUpdate = true;
+        ghost.PackUpdate(connection, ulong.MaxValue, stream);
+
+        var entry = WireDiag.Snapshot().Single();
+        Assert.AreEqual(GhostObject.PositionMask, entry.Mask,
+            "A controlled foreign-vehicle experiment must use the connection's initial mask profile.");
+        StringAssert.Contains(entry.Detail, "sourceMask=FFFFFFFFFFFFFFFF");
+    }
+
+    [TestMethod]
+    public void PackInitial_ForeignVehicle_MinimalProfile_OmitsOptionalStateAndKeepsPose()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_071);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_071, true);
+        vehicle.CoidCurrentPath = 555;
+        vehicle.TemplateId = 42;
+        vehicle.SpawnOwnerCoid = 18_097;
+        var driver = new Creature();
+        driver.SetCoid(MapNpcIdentity.CoidBase + 20_072, true);
+        vehicle.SetOwner(driver);
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        WireDiag.Enabled = true;
+        var stream = PackInitial(vehicle, ulong.MaxValue);
+
+        SkipPackCommonAndMultipliers(stream);
+        Assert.IsFalse(stream.ReadFlag(), "minimal profile omits path");
+        Assert.IsFalse(stream.ReadFlag(), "minimal profile omits template");
+        Assert.IsFalse(stream.ReadFlag(), "minimal profile omits spawn owner");
+        stream.ReadInt(8); // trick count
+        Assert.IsFalse(stream.ReadFlag()); // trailer
+        Assert.IsFalse(stream.ReadFlag(), "minimal profile omits owner");
+
+        var entry = WireDiag.Snapshot().Single();
+        Assert.AreEqual(GhostObject.PositionMask, entry.Mask);
+        StringAssert.Contains(entry.Detail, "profile=minimal");
+    }
+
+    [TestMethod]
+    public void PackDelta_ForeignVehicle_MinimalProfile_RestrictsToPoseMask()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_073);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_073, true);
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        WireDiag.Enabled = true;
+        var stream = PackUpdateNonInitial(vehicle, ulong.MaxValue);
+
+        Assert.IsTrue(stream.ReadFlag() == false, "Skills must be withheld by the pose-only delta profile.");
+        var entry = WireDiag.Snapshot().Single();
+        Assert.AreEqual(GhostObject.PositionMask, entry.Mask);
+        StringAssert.Contains(entry.Detail, "profile=minimal");
+    }
+
+    [TestMethod]
+    public void PackInitial_ForeignVehicle_MinimalProfile_PathLeverAddsOnlyPathBlock()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_074);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_074, true);
+        vehicle.CoidCurrentPath = 555;
+        vehicle.ExtraPathId = 3;
+        vehicle.PathReversing = true;
+        vehicle.PathIsRoad = false;
+        vehicle.PatrolDistance = 9.5f;
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignPathBlock = true;
+        var stream = PackInitial(vehicle, ulong.MaxValue);
+
+        SkipPackCommonAndMultipliers(stream);
+        Assert.IsTrue(stream.ReadFlag(), "path is the only optional initial block admitted by this lever");
+        Assert.AreEqual(555u, stream.ReadInt(18));
+        stream.Read(out int extraPathId);
+        Assert.AreEqual(3, extraPathId);
+        Assert.IsTrue(stream.ReadFlag());
+        Assert.IsFalse(stream.ReadFlag());
+        stream.Read(out float patrolDistance);
+        Assert.AreEqual(9.5f, patrolDistance);
+        Assert.IsFalse(stream.ReadFlag(), "template remains suppressed");
+        Assert.IsFalse(stream.ReadFlag(), "spawn owner remains suppressed");
+    }
+
+    [TestMethod]
+    public void PackInitial_ForeignVehicle_MinimalProfile_TemplateSpawnLeverAddsOnlyTemplateBlocks()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_075);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_075, true);
+        vehicle.TemplateId = 42;
+        vehicle.SpawnOwnerCoid = 18_097;
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = true;
+        var stream = PackInitial(vehicle, ulong.MaxValue);
+
+        SkipPackCommonAndMultipliers(stream);
+        Assert.IsFalse(stream.ReadFlag(), "path remains separately gated");
+        Assert.IsTrue(stream.ReadFlag());
+        Assert.AreEqual(42u, stream.ReadInt(20));
+        Assert.IsTrue(stream.ReadFlag());
+        Assert.AreEqual(18_097u, stream.ReadInt(20));
+        stream.ReadInt(8); // trick count
+        Assert.IsFalse(stream.ReadFlag()); // trailer
+        Assert.IsFalse(stream.ReadFlag(), "owner remains suppressed");
+    }
+
+    [TestMethod]
+    public void PackInitial_ForeignVehicle_MinimalProfile_OwnerLeverAddsOnlyOwnerBlock()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_076);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_076, true);
+        var driver = new Creature();
+        driver.SetCoid(MapNpcIdentity.CoidBase + 20_077, true);
+        driver.Level = 7;
+        vehicle.SetOwner(driver);
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignOwnerBlock = true;
+        var stream = PackInitial(vehicle, ulong.MaxValue);
+
+        SkipPackCommonAndMultipliers(stream);
+        Assert.IsFalse(stream.ReadFlag()); // path
+        Assert.IsFalse(stream.ReadFlag()); // template
+        Assert.IsFalse(stream.ReadFlag()); // spawn owner
+        stream.ReadInt(8); // trick count
+        Assert.IsFalse(stream.ReadFlag()); // trailer
+        Assert.IsTrue(stream.ReadFlag(), "owner is the only newly admitted block");
+        stream.Read(out long ownerCoid);
+        Assert.AreEqual(driver.ObjectId.Coid, ownerCoid);
+        Assert.IsTrue(stream.ReadFlag()); // global
+        stream.ReadInt(20); // CBID
+        Assert.IsFalse(stream.ReadFlag()); // creature owner
+        for (var i = 0; i < 5; ++i)
+            Assert.IsFalse(stream.ReadFlag());
+        Assert.AreEqual(7u, stream.ReadInt(8));
+        Assert.IsFalse(stream.ReadFlag());
     }
 
     [TestMethod]

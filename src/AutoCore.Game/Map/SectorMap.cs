@@ -23,8 +23,11 @@ public class SectorMap
     /// <summary>Isolation lever: when false, skip CreateVehicle for foreign global vehicles (still may ghost).</summary>
     public static bool ScopeGlobalVehicleCreate { get; set; } = true;
 
-    /// <summary>Isolation lever: when false, send CreateVehicle but skip ObjectInScope for foreign globals.</summary>
-    public static bool ScopeGlobalVehicleGhost { get; set; } = true;
+    /// <summary>
+    /// Send CreateVehicle but skip ObjectInScope for foreign globals. Disabled by default because
+    /// retail client's GhostVehicle initial path can crash while rendering nearby NPC vehicles.
+    /// </summary>
+    public static bool ScopeGlobalVehicleGhost { get; set; } = false;
 
     /// <summary>Isolation lever: when false, skip sending GroupReactionCall (0x206C) after reactions run.</summary>
     public static bool SendGroupReactionCall { get; set; } = true;
@@ -380,6 +383,12 @@ public class SectorMap
             var foreignGlobalVehicle = entity is Vehicle vehicleEntity
                 && entity.ObjectId.Global
                 && !IsLocalPlayerVehicle(vehicleEntity, self);
+
+            // The local vehicle has already been constructed by CreateVehicleExtended. Sending
+            // GhostVehicle's initial update afterwards clears the client's wheelset reference
+            // and crashes the renderer at FUN_004F5560.
+            if (entity is Vehicle localVehicle && IsLocalPlayerVehicle(localVehicle, self))
+                continue;
 
             if (foreignGlobalVehicle && !ScopeGlobalVehicles)
                 continue;

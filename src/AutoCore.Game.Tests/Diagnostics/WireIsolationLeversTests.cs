@@ -34,7 +34,8 @@ public class WireIsolationLeversTests
 
         Assert.IsTrue(SectorMap.ScopeGlobalVehicles);
         Assert.IsTrue(SectorMap.ScopeGlobalVehicleCreate);
-        Assert.IsTrue(SectorMap.ScopeGlobalVehicleGhost);
+        Assert.IsFalse(SectorMap.ScopeGlobalVehicleGhost,
+            "Foreign GhostVehicle updates crash the retail client; normal CreateVehicle remains enabled.");
         Assert.IsTrue(SectorMap.SendGroupReactionCall);
         Assert.IsTrue(GhostVehicle.EnableAiStateWire);
         Assert.IsTrue(GhostVehicle.EnablePathWire);
@@ -93,6 +94,18 @@ public class WireIsolationLeversTests
         Assert.IsTrue(SectorMap.ScopeGlobalVehicles, "unmentioned lever stays default");
         Assert.IsFalse(SectorMap.ScopeGlobalVehicleGhost);
         Assert.IsFalse(GhostVehicle.EnableAiStateWire);
+    }
+
+    [TestMethod]
+    public void ApplyFromDictionary_EnablesMinimalForeignVehicleInitialProfile()
+    {
+        WireIsolationLevers.ResetToDefaults();
+        WireIsolationLevers.ApplyFromDictionary(new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["EnableMinimalForeignInitialProfile"] = true,
+        });
+
+        Assert.IsTrue(GhostVehicle.EnableMinimalForeignInitialProfile);
     }
 
     [TestMethod]

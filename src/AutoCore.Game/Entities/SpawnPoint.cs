@@ -252,6 +252,7 @@ public class SpawnPoint : ClonedObjectBase
         // Raw-CBID spawn lists have no VehicleTemplate row, so the driver can only come from
         // the vehicle clonebase's own VehicleSpecific.DefaultDriver.
         var cloneBaseVehicle = vehicle.CloneBaseObject as CloneBaseVehicle;
+        EquipDefaultWheelSet(vehicle, cloneBaseVehicle);
         var defaultDriverCbid = cloneBaseVehicle?.VehicleSpecific.DefaultDriver ?? 0;
         var driver = BuildDriver(0, defaultDriverCbid, spawnList.LevelOffset);
         if (driver != null)
@@ -289,12 +290,13 @@ public class SpawnPoint : ClonedObjectBase
         vehicle.Rotation = Rotation;
         vehicle.ApplyTemplateBaseHp(template.BaseHp);
 
+        var cloneBaseVehicle = vehicle.CloneBaseObject as CloneBaseVehicle;
+        EquipDefaultWheelSet(vehicle, cloneBaseVehicle);
         EquipTemplateItem(vehicle, VehicleEquipmentSlot.WeaponFront, template.WeaponFrontCbid);
         EquipTemplateItem(vehicle, VehicleEquipmentSlot.WeaponTurret, template.WeaponTurretCbid);
         EquipTemplateItem(vehicle, VehicleEquipmentSlot.WeaponMelee, template.WeaponMeleeCbid);
         EquipTemplateItem(vehicle, VehicleEquipmentSlot.Armor, template.ArmorCbid);
 
-        var cloneBaseVehicle = vehicle.CloneBaseObject as CloneBaseVehicle;
         var defaultDriverCbid = cloneBaseVehicle?.VehicleSpecific.DefaultDriver ?? 0;
         var driver = BuildDriver(template.DriverCbid, defaultDriverCbid, spawnList.LevelOffset);
         if (driver != null)
@@ -367,7 +369,12 @@ public class SpawnPoint : ClonedObjectBase
         if (cbid <= 0)
             return;
 
-        SimpleObject item = slot == VehicleEquipmentSlot.Armor ? new Armor() : new Weapon();
+        SimpleObject item = slot switch
+        {
+            VehicleEquipmentSlot.Armor => new Armor(),
+            VehicleEquipmentSlot.WheelSet => new WheelSet(),
+            _ => new Weapon(),
+        };
         item.SetCoid(Map.LocalCoidCounter++, false);
         item.LoadCloneBase(cbid);
         item.SetupCBFields();
@@ -377,6 +384,17 @@ public class SpawnPoint : ClonedObjectBase
             Logger.WriteLog(LogType.Error,
                 $"SpawnPoint {Template.COID}: template vehicle (TemplateId={vehicle.TemplateId}) failed to equip slot={slot} itemCbid={cbid}");
         }
+    }
+
+    /// <summary>
+    /// NPC vehicles do not have character-inventory rows to supply equipment. Their clonebase
+    /// default wheelset is therefore required in the nested CreateVehicle payload before the
+    /// client can safely construct or render the vehicle.
+    /// </summary>
+    private void EquipDefaultWheelSet(Vehicle vehicle, CloneBaseVehicle cloneBaseVehicle)
+    {
+        var wheelsetCbid = cloneBaseVehicle?.VehicleSpecific.DefaultWheelset ?? 0;
+        EquipTemplateItem(vehicle, VehicleEquipmentSlot.WheelSet, wheelsetCbid);
     }
 
     /// <summary>Resolves this spawn point's <see cref="SpawnPointTemplate.MapPathCoid"/> on the current map.</summary>

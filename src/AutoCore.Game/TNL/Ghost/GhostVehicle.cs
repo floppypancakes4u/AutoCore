@@ -26,6 +26,27 @@ public class GhostVehicle : GhostObject
     /// <summary>Isolation lever: when false, force TemplateId and SpawnOwner flags false.</summary>
     public static bool EnableTemplateSpawnWire = true;
 
+    /// <summary>
+    /// Phase-2 recovery profile for foreign NPC vehicles. Sends only the required initial body
+    /// and pose, and restricts later updates to pose as well, until each optional block is
+    /// decoder-verified.
+    /// Disabled by default.
+    /// </summary>
+    public static bool EnableMinimalForeignInitialProfile = false;
+
+    /// <summary>
+    /// Allows the documented path block during the minimal foreign-vehicle initial profile.
+    /// This is a separate experiment because paths are initial-only and have client lifetime
+    /// requirements distinct from pose replication.
+    /// </summary>
+    public static bool EnableMinimalForeignPathBlock = false;
+
+    /// <summary>Allows template and spawn-owner fields during the minimal foreign initial profile.</summary>
+    public static bool EnableMinimalForeignTemplateSpawnBlock = false;
+
+    /// <summary>Allows the initial owner/driver construction block during the minimal profile.</summary>
+    public static bool EnableMinimalForeignOwnerBlock = false;
+
     private const int CoidCurrentPathBits = 18;
 
     /// <summary>
@@ -93,18 +114,40 @@ public class GhostVehicle : GhostObject
         var ret = 0ul;
         var startBits = stream.GetBitPosition();
         var isInitial = PIsInitialUpdate;
+        var sourceUpdateMask = updateMask;
 
         var parentVehicle = Parent.GetAsVehicle();
+        var useMinimalForeignInitialProfile = Parent.ObjectId.Global
+            && EnableMinimalForeignInitialProfile;
+
+        if (useMinimalForeignInitialProfile)
+            updateMask = PositionMask;
+
+        // A connection-scoped override is deliberately limited to foreign initial updates. It
+        // provides a deterministic recovery harness without changing the stream for any other
+        // player or for later deltas.
+        if (isInitial
+            && Parent.ObjectId.Global
+            && connection is TNLConnection { ForeignVehicleInitialMaskOverrideForTests: ulong overrideMask })
+        {
+            updateMask = overrideMask;
+        }
+
         var owner = parentVehicle.Owner;
 
         var wouldPackPath = parentVehicle.CoidCurrentPath > 0;
         var wouldPackOwner = owner != null;
         var wouldPackTemplate = parentVehicle.TemplateId != -1;
         var wouldPackSpawnOwner = parentVehicle.SpawnOwnerCoid != -1;
-        var packPath = EnablePathWire && wouldPackPath;
-        var packOwner = EnableOwnerWire && wouldPackOwner;
-        var packTemplate = EnableTemplateSpawnWire && wouldPackTemplate;
-        var packSpawnOwner = EnableTemplateSpawnWire && wouldPackSpawnOwner;
+        var packPath = (!useMinimalForeignInitialProfile || EnableMinimalForeignPathBlock)
+            && EnablePathWire
+            && wouldPackPath;
+        var packOwner = (!useMinimalForeignInitialProfile || EnableMinimalForeignOwnerBlock)
+            && EnableOwnerWire
+            && wouldPackOwner;
+        var allowTemplateSpawn = !useMinimalForeignInitialProfile || EnableMinimalForeignTemplateSpawnBlock;
+        var packTemplate = allowTemplateSpawn && EnableTemplateSpawnWire && wouldPackTemplate;
+        var packSpawnOwner = allowTemplateSpawn && EnableTemplateSpawnWire && wouldPackSpawnOwner;
 
         if (PIsInitialUpdate)
         {
@@ -207,10 +250,8 @@ public class GhostVehicle : GhostObject
             }
         }
 
-        // CreateVehicle / CreateVehicleExtended already embed full equipment for global vehicles.
-        // Client initial-ghost equipment path (DAT_00d1798c != 0) differs from the delta path and
-        // re-sending hardpoints on the first ghost update has been tied to stream desync /
-        // Invalid Packet after scoped NPC create. Skip equipment payloads on initial; deltas still pack.
+        // The client constructs vehicle equipment from CreateVehicle. Initial GhostVehicle
+        // hardpoints are not accepted safely; equipment changes travel on delta updates.
         var packEquipment = !isInitial;
 
         PackHardpoint(stream, packEquipment && (updateMask & WheelSetMask) != 0, parentVehicle.WheelSet);
@@ -364,7 +405,8 @@ public class GhostVehicle : GhostObject
                 detail: $"path={(packPath ? 1 : 0)}/{(wouldPackPath ? 1 : 0)} owner={(packOwner ? 1 : 0)}/{(wouldPackOwner ? 1 : 0)} " +
                         $"tmpl={(packTemplate ? 1 : 0)}/{(wouldPackTemplate ? 1 : 0)} spawn={(packSpawnOwner ? 1 : 0)}/{(wouldPackSpawnOwner ? 1 : 0)} " +
                         $"clientOwner={(clientHasOwner ? 1 : 0)} equip={(packEquipment ? 1 : 0)} " +
-                        $"aiWire={(EnableAiStateWire ? 1 : 0)} global={(Parent.ObjectId.Global ? 1 : 0)}");
+                        $"aiWire={(EnableAiStateWire ? 1 : 0)} global={(Parent.ObjectId.Global ? 1 : 0)} " +
+                        $"profile={(useMinimalForeignInitialProfile ? "minimal" : "full")} sourceMask={sourceUpdateMask:X}");
         }
 
         return ret;

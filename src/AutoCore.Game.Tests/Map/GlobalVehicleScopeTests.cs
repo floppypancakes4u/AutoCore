@@ -213,7 +213,7 @@ public class GlobalVehicleScopeTests
     }
 
     [TestMethod]
-    public void PerformScopeQuery_ScopeGlobalVehiclesFalse_StillScopesLocalPlayerVehicle()
+    public void PerformScopeQuery_ScopeGlobalVehiclesFalse_DoesNotScopeLocalPlayerVehicle()
     {
         const int vehicleCbid = 650_003;
         AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid);
@@ -250,8 +250,8 @@ public class GlobalVehicleScopeTests
         SectorMap.ScopeGlobalVehicles = false;
         map.PerformScopeQuery(null, self, connection);
 
-        Assert.IsNotNull(localVehicle.Ghost.GetFirstObjectRef(),
-            "Local player vehicle must remain scopable when ScopeGlobalVehicles is false");
+        Assert.IsNull(localVehicle.Ghost.GetFirstObjectRef(),
+            "CreateVehicleExtended owns the local vehicle state; GhostVehicle must never overwrite it.");
         Assert.IsNull(npc.Ghost.GetFirstObjectRef(), "Foreign NPC must be skipped");
     }
 

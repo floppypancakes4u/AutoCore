@@ -28,6 +28,10 @@ public class GhostVehicleWireTests
         GhostVehicle.EnablePathWire = true;
         GhostVehicle.EnableOwnerWire = true;
         GhostVehicle.EnableTemplateSpawnWire = true;
+        GhostVehicle.EnableMinimalForeignInitialProfile = false;
+        GhostVehicle.EnableMinimalForeignPathBlock = false;
+        GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = false;
+        GhostVehicle.EnableMinimalForeignOwnerBlock = false;
         WireDiag.ResetForTests();
     }
 
@@ -369,17 +373,31 @@ public class GhostVehicleWireTests
     }
 
     [TestMethod]
-    public void PackInitial_WithEquipmentMask_DoesNotEmitHardpointPayload()
+    public void PackInitial_WithWheelSet_DoesNotEmitHardpointPayload()
     {
-        // CreateVehicle already embeds hardpoints; initial ghost must not re-send them.
         var vehicle = CreateVehicleWithMap(9130);
+        var wheelSet = new WheelSet();
+        wheelSet.SetCoid(9131, false);
+        Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.WheelSet, wheelSet, out _));
+
+        var stream = PackInitial(vehicle, GhostObject.InitialMask | GhostVehicle.WheelSetMask);
+        SkipToMaskSectionAfterInitialBody(stream, ownerPacked: false);
+        SkipEquipmentMaskFlags(stream);
+    }
+
+    [TestMethod]
+    public void PackInitial_WithNonWheelEquipment_DoesNotEmitHardpointPayload()
+    {
+        var vehicle = CreateVehicleWithMap(9132);
         var armor = new Armor();
-        armor.SetCoid(9131, false);
-        vehicle.TryEquipItem(VehicleEquipmentSlot.Armor, armor, out _);
+        armor.SetCoid(9133, false);
+        var weapon = new Weapon();
+        weapon.SetCoid(9134, false);
+        Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.Armor, armor, out _));
+        Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.WeaponFront, weapon, out _));
 
         var stream = PackInitial(vehicle, GhostObject.InitialMask | GhostVehicle.ChangeArmor | GhostVehicle.FrontWeaponMask);
         SkipToMaskSectionAfterInitialBody(stream, ownerPacked: false);
-        // All seven equipment lead flags false even though ChangeArmor / FrontWeapon were in the mask.
         SkipEquipmentMaskFlags(stream);
     }
 
