@@ -111,7 +111,10 @@ public class TutorialNpcLifecycleRegressionTests
         // Collision volume with always-true conditions — fires.
         PlaceCollisionAlwaysTrue(map, coid: 99001, deleteTarget: DialogCreatureCoid);
         TriggerManager.Instance.CheckTriggersFor(vehicle);
-        Assert.IsNull(map.GetObjectByCoid(DialogCreatureCoid), "DoCollision volume must fire on enter");
+        Assert.IsTrue(character.MapPresence.IsSuppressed(DialogCreatureCoid),
+            "DoCollision volume must fire on enter (personal suppress)");
+        Assert.IsNotNull(map.GetObjectByCoid(DialogCreatureCoid),
+            "Shared map keeps dialog for other players");
     }
 
     [TestMethod]
@@ -216,7 +219,10 @@ public class TutorialNpcLifecycleRegressionTests
 
         character.CurrentQuests.Add(new CharacterQuest(TutorialMissionId, 0));
         TriggerManager.Instance.OnMissionStateChanged(vehicle);
-        Assert.IsNull(map.GetObjectByCoid(gate), "DoConditionals remote watcher must still fire");
+        Assert.IsTrue(character.MapPresence.IsSuppressed(gate),
+            "DoConditionals remote watcher must still fire (personal suppress)");
+        Assert.IsNotNull(map.GetObjectByCoid(gate),
+            "Shared map keeps gate for other players");
     }
 
     // ─── B. Initiate volume gating (HasActiveObjective) ─────────────────────
@@ -257,8 +263,10 @@ public class TutorialNpcLifecycleRegressionTests
         Assert.IsTrue(GetTriggerFireCount(map, InitiateVolumeCoid) >= 1,
             "Initiate collision volume must fire with combat objective");
         // Cascade: Activate rem → delete dialog + create combat spawn marker.
-        Assert.IsNull(map.GetObjectByCoid(DialogCreatureCoid),
-            "Initiate cascade deletes dialog spawn children");
+        Assert.IsNotNull(map.GetObjectByCoid(DialogCreatureCoid),
+            "Shared map keeps dialog NPC for other players");
+        Assert.IsTrue(character.MapPresence.IsSuppressed(DialogCreatureCoid),
+            "Initiate cascade suppresses dialog for activator only");
         Assert.IsNotNull(map.GetObjectByCoid(CombatSpawnCoid) as SpawnPoint,
             "Initiate cascade Create places combat spawn");
     }
@@ -306,7 +314,8 @@ public class TutorialNpcLifecycleRegressionTests
 
         FireActivateOnRem(map, vehicle);
 
-        Assert.IsNull(map.GetObjectByCoid(DialogCreatureCoid));
+        Assert.IsTrue(character.MapPresence.IsSuppressed(DialogCreatureCoid));
+        Assert.IsNotNull(map.GetObjectByCoid(DialogCreatureCoid));
         Assert.IsNotNull(map.GetObjectByCoid(CombatSpawnCoid) as SpawnPoint);
         Assert.IsTrue(GetTriggerFireCount(map, RemInitiatorCoid) >= 1);
     }
@@ -339,17 +348,18 @@ public class TutorialNpcLifecycleRegressionTests
         PlaceDialogCreature(map);
 
         FireActivateOnRem(map, vehicle);
-        Assert.IsNull(map.GetObjectByCoid(DialogCreatureCoid));
+        Assert.IsTrue(character.MapPresence.IsSuppressed(DialogCreatureCoid));
         var firesAfterFirst = GetTriggerFireCount(map, RemInitiatorCoid);
 
-        // Restore dialog as if hygiene ran, then try Activate again.
-        PlaceDialogCreature(map);
+        // Clear personal suppress as if client reloaded fam; latch still blocks rem.
+        character.MapPresence.Clear();
+        character.MapPresence.EnsureContinent(map.ContinentId);
         FireActivateOnRem(map, vehicle);
 
         Assert.AreEqual(firesAfterFirst, GetTriggerFireCount(map, RemInitiatorCoid),
             "Latch hasdeleted==1 must block rem FireTriggerReactions on second Activate");
-        Assert.IsNotNull(map.GetObjectByCoid(DialogCreatureCoid),
-            "Second Activate must not re-delete dialog when latch is set");
+        Assert.IsFalse(character.MapPresence.IsSuppressed(DialogCreatureCoid),
+            "Second Activate must not re-suppress dialog when latch is set");
     }
 
     [TestMethod]
@@ -404,10 +414,11 @@ public class TutorialNpcLifecycleRegressionTests
     {
         SeedCombatMission();
         var (character, vehicle, map) = CreateFullMapGraph();
-        // Simulate leaked mid-Final-Exam world from a previous false fire.
-        // Dialog creature gone; combat vehicle live on inactive spawn.
+        // Simulate leaked mid-Final-Exam world from a previous false fire:
+        // dialog spawn marker missing, combat vehicle live on inactive spawn.
         PlaceLeakedCombatVehicle(map);
-        Assert.IsNull(map.GetObjectByCoid(DialogCreatureCoid));
+        Assert.IsNull(map.GetObjectByCoid(DialogCreatureCoid),
+            "Fixture starts without dialog creature");
         Assert.IsNotNull(map.GetObjectByCoid(CombatVehicleCoid));
 
         // Solo enter hygiene (relog).
@@ -473,8 +484,9 @@ public class TutorialNpcLifecycleRegressionTests
         // Drive into initiate volume with combat objective active.
         vehicle.Position = new Vector3(0, 0, 0);
         TriggerManager.Instance.CheckTriggersFor(vehicle);
-        Assert.IsNull(map.GetObjectByCoid(DialogCreatureCoid),
-            "Legitimate initiate deletes dialog Gunny");
+        Assert.IsTrue(character.MapPresence.IsSuppressed(DialogCreatureCoid),
+            "Legitimate initiate suppresses dialog Gunny for activator");
+        Assert.IsNotNull(map.GetObjectByCoid(DialogCreatureCoid));
         Assert.IsNotNull(map.GetObjectByCoid(CombatSpawnCoid) as SpawnPoint,
             "Combat spawn marker remains after Create cascade");
         Assert.IsTrue(GetTriggerFireCount(map, InitiateVolumeCoid) >= 1);
@@ -490,7 +502,7 @@ public class TutorialNpcLifecycleRegressionTests
         character.CurrentQuests.Add(new CharacterQuest(CombatMissionId, CombatObjectiveSeq));
         vehicle.Position = new Vector3(0, 0, 0);
         TriggerManager.Instance.CheckTriggersFor(vehicle);
-        Assert.IsNull(map.GetObjectByCoid(DialogCreatureCoid));
+        Assert.IsTrue(character.MapPresence.IsSuppressed(DialogCreatureCoid));
 
         character.SetMap(null);
         vehicle.SetMap(null);
@@ -642,9 +654,11 @@ public class TutorialNpcLifecycleRegressionTests
         p1.CurrentQuests.Add(new CharacterQuest(CombatMissionId, CombatObjectiveSeq));
         v1.Position = new Vector3(0, 0, 0);
         TriggerManager.Instance.CheckTriggersFor(v1);
-        Assert.IsNull(map.GetObjectByCoid(DialogCreatureCoid));
+        Assert.IsTrue(p1.MapPresence.IsSuppressed(DialogCreatureCoid));
+        Assert.IsNotNull(map.GetObjectByCoid(DialogCreatureCoid),
+            "P1 personal delete must leave shared dialog for P2");
 
-        // Second player joins — PlayerCount becomes 2; no full hygiene purge of reaction state.
+        // Second player joins — must still see dialog (not suppressed for them).
         var p2 = new Character();
         p2.SetCoid(250, true);
         var v2 = new Vehicle();
@@ -653,8 +667,10 @@ public class TutorialNpcLifecycleRegressionTests
         p2.SetMap(map);
         v2.SetMap(map);
         Assert.AreEqual(2, map.PlayerCount);
-        Assert.IsNull(map.GetObjectByCoid(DialogCreatureCoid),
-            "Second join must not restore dialog during p1 combat phase via PlayerCount==1 hygiene");
+        Assert.IsNotNull(map.GetObjectByCoid(DialogCreatureCoid),
+            "P2 must still have shared dialog NPC available");
+        Assert.IsFalse(p2.MapPresence.IsSuppressed(DialogCreatureCoid),
+            "P2 has not progressed — dialog not suppressed for them");
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────

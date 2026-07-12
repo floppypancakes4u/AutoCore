@@ -56,6 +56,24 @@ public partial class TNLConnection : GhostConnection
     private readonly Dictionary<long, long> _foreignOwnerAttachReapplyAtUnixMs = new();
 
     /// <summary>
+    /// Foreign path vehicles currently pinned via <see cref="GhostConnection.ObjectLocalScopeAlways"/>
+    /// on this connection (see <see cref="Map.SectorMap.PerformScopeQuery"/>), keyed by vehicle coid.
+    /// Tracked so a later scope pass can call <see cref="GhostConnection.ObjectLocalClearAlways"/> once
+    /// a coid stops qualifying for the pin (path ended, vehicle left the grid, or despawned) — without
+    /// this, a pinned ghost can never be detached by TNL's normal InScope-clearing flow again.
+    /// </summary>
+    private readonly Dictionary<long, GhostObject> _pinnedPathVehicles = new();
+
+    /// <summary>Read-only view of currently pinned path-vehicle ghosts, keyed by coid.</summary>
+    public IReadOnlyDictionary<long, GhostObject> PinnedPathVehicles => _pinnedPathVehicles;
+
+    /// <summary>Records that <paramref name="coid"/>'s ghost is pinned via ObjectLocalScopeAlways.</summary>
+    public void NotePathVehiclePinned(long coid, GhostObject ghost) => _pinnedPathVehicles[coid] = ghost;
+
+    /// <summary>Forgets a coid's pin once it has been unpinned via ObjectLocalClearAlways.</summary>
+    public void ClearPathVehiclePinned(long coid) => _pinnedPathVehicles.Remove(coid);
+
+    /// <summary>
     /// P2 owner-on: first foreign ghost initial withholds owner; after delay, one descope then
     /// rescope so TNL sends a second initial with owner. Keyed by vehicle coid.
     /// </summary>
@@ -248,6 +266,7 @@ public partial class TNLConnection : GhostConnection
         _globalVehicleCreates.Clear();
         _foreignReghost.Clear();
         _foreignOwnerAttachReapplyAtUnixMs.Clear();
+        _pinnedPathVehicles.Clear();
     }
 
     /// <summary>

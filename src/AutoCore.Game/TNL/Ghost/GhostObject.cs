@@ -76,6 +76,9 @@ public class GhostObject : NetObject
 
     public override void OnGhostRemove()
     {
+        if (Parent != null && IsGhostedToAny())
+            return; // still watched by another connection; do not sever the shared link
+
         Parent?.ClearGhost();
     }
 
@@ -134,6 +137,25 @@ public class GhostObject : NetObject
             if (walk.Connection != connection)
                 continue;
 
+            if ((walk.Flags & killing) != 0U)
+                continue;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>True when this ghost is still actively tracked by ANY connection (walks the
+    /// same ref chain as <see cref="IsGhostedTo"/>). Used to avoid severing the shared
+    /// <see cref="Parent"/> link while another connection still expects to PackUpdate this
+    /// exact ghost instance.</summary>
+    public bool IsGhostedToAny()
+    {
+        const uint killing = (uint)(GhostInfoFlags.KillGhost | GhostInfoFlags.KillingGhost);
+
+        for (var walk = GetFirstObjectRef(); walk != null; walk = walk.NextObjectRef)
+        {
             if ((walk.Flags & killing) != 0U)
                 continue;
 

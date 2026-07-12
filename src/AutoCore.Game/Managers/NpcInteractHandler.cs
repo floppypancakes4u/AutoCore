@@ -189,6 +189,17 @@ public static class NpcInteractHandler
         if (targetCoid <= 0)
             return;
 
+        // Personal mission presence: COIDs deleted for this character are not interactable.
+        character.MapPresence.EnsureContinent(character.Map.ContinentId);
+        if (character.MapPresence.IsSuppressed(targetCoid))
+        {
+            Logger.WriteLog(LogType.Debug,
+                "UseObject: rejected suppressed coid={0} for char={1}",
+                targetCoid,
+                character.ObjectId.Coid);
+            return;
+        }
+
         // Prefer live object; fall back to map template pose for client-only world objects.
         var targetObj = character.Map.GetObjectByCoid(targetCoid);
         if (!TryGetWorldPosition(character.Map, targetCoid, out var targetPos))
@@ -435,7 +446,7 @@ public static class NpcInteractHandler
             packet.Accepted,
             packet.MissionGiver?.Coid ?? -1);
 
-        var npc = FindNpcByCoid(character.Map, packet.MissionGiver?.Coid ?? -1);
+        var npc = FindNpcByCoid(character, character.Map, packet.MissionGiver?.Coid ?? -1);
         var npcCbid = npc?.CBID ?? 0;
 
         // Client may echo mission id OR an objective id (same pattern as deliver turn-in).
@@ -1498,33 +1509,48 @@ public static class NpcInteractHandler
         });
     }
 
-    private static Creature FindNpcByCoid(SectorMap map, long coid)
+    private static Creature FindNpcByCoid(Character character, SectorMap map, long coid)
     {
         if (map == null || coid <= 0)
             return null;
 
+        if (character != null)
+        {
+            character.MapPresence.EnsureContinent(map.ContinentId);
+            if (character.MapPresence.IsSuppressed(coid))
+                return null;
+        }
+
         var obj = map.GetObjectByCoid(coid);
-        if (obj is Creature creature && IsNpc(creature))
+        if (obj is Creature creature && IsNpc(creature)
+            && !IsSuppressedFor(character, creature.ObjectId.Coid))
             return creature;
 
         // Dialog may send vehicle TFID for a seated NPC.
         if (obj is Vehicle vehicle)
         {
             var driver = vehicle.Owner as Creature ?? vehicle.GetSuperCharacter(false);
-            if (driver != null && driver is not Character && IsNpc(driver))
+            if (driver != null && driver is not Character && IsNpc(driver)
+                && !IsSuppressedFor(character, driver.ObjectId.Coid)
+                && !IsSuppressedFor(character, vehicle.ObjectId.Coid))
                 return driver;
         }
 
         // Or spawn-point COID (map template id) while the live child has a different global COID.
         if (obj is SpawnPoint spawn && spawn.HasLiveSpawn())
         {
+            if (IsSuppressedFor(character, spawn.LastSpawnedCoid))
+                return null;
+
             var child = map.GetObjectByCoid(spawn.LastSpawnedCoid);
-            if (child is Creature childNpc && IsNpc(childNpc))
+            if (child is Creature childNpc && IsNpc(childNpc)
+                && !IsSuppressedFor(character, childNpc.ObjectId.Coid))
                 return childNpc;
             if (child is Vehicle childVehicle)
             {
                 var driver = childVehicle.Owner as Creature ?? childVehicle.GetSuperCharacter(false);
-                if (driver != null && driver is not Character && IsNpc(driver))
+                if (driver != null && driver is not Character && IsNpc(driver)
+                    && !IsSuppressedFor(character, driver.ObjectId.Coid))
                     return driver;
             }
         }
@@ -1534,7 +1560,8 @@ public static class NpcInteractHandler
         {
             if (kvp.Value is Creature owned
                 && owned.SpawnOwner == coid
-                && IsNpc(owned))
+                && IsNpc(owned)
+                && !IsSuppressedFor(character, owned.ObjectId.Coid))
             {
                 return owned;
             }
@@ -1542,6 +1569,9 @@ public static class NpcInteractHandler
 
         return null;
     }
+
+    static bool IsSuppressedFor(Character character, long coid)
+        => character != null && coid > 0 && character.MapPresence.IsSuppressed(coid);
 
     private static bool IsNpc(Creature creature)
     {

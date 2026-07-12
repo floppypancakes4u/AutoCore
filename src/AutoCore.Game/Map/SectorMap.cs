@@ -253,6 +253,7 @@ public class SectorMap
         {
             PlayerCount++;
             Players.Add(character);
+            character.MapPresence.EnsureContinent(ContinentId);
 
             // Solo enter: scrub leaked Final Exam combat vehicles and restore dialog NPCs.
             // Map-leave reset can miss if PlayerCount never hit 0 (stuck session / order bugs).
@@ -760,6 +761,10 @@ public class SectorMap
     private readonly List<ClonedObjectBase> _scopeNearby = new();
     private readonly List<ClonedObjectBase> _scopeMissionGivers = new();
     private readonly List<ClonedObjectBase> _scopeSelected = new();
+    // Not initialized inline: CreateForTests builds instances via GetUninitializedObject, which skips
+    // field initializers (see the other _scope* buffers above, which tests re-initialize by reflection).
+    // Self-initializing on first use avoids requiring every test call site to know about this field too.
+    private HashSet<long> _scopePinnedSeenThisQuery;
 
     /// <summary>
     /// Distance/tier based interest management for one connection (replaces the old scope-everything
@@ -797,6 +802,10 @@ public class SectorMap
             entity => entity.Ghost != null && entity.Ghost.IsGhostedTo(connection),
             _scopeSelected);
 
+        var gameConnection = connection as TNL.TNLConnection;
+        _scopePinnedSeenThisQuery ??= new HashSet<long>();
+        _scopePinnedSeenThisQuery.Clear();
+
         foreach (var entity in _scopeSelected)
         {
             var ghost = entity.Ghost;
@@ -825,7 +834,6 @@ public class SectorMap
             // Whenever the foreign vehicle is not currently ghosted, (re)send CreateVehicle and
             // hold ObjectInScope. FUN_00812630: missing TFID → full create with nest; existing TFID
             // + IsItemLink → re-apply nest; existing + !IsItemLink → no-op (safe if client kept it).
-            TNL.TNLConnection gameConnection = connection as TNL.TNLConnection;
             var coid = entity.ObjectId.Coid;
             var notGhostedToConn = foreignGlobalVehicle && !ghost.IsGhostedTo(connection);
             if (foreignGlobalVehicle
@@ -889,11 +897,16 @@ public class SectorMap
 
             var wasGhosted = foreignGlobalVehicle && ghost.IsGhostedTo(connection);
             // Pathing foreign vehicles: pin ScopeLocalAlways so PrepareWritePacket does not clear
-            // InScope and Detach them between interest-query flaps (drops pose stream).
+            // InScope and Detach them between interest-query flaps (drops pose stream). Unpinned
+            // via the sweep below once a coid stops qualifying, so TNL can eventually detach it.
             if (foreignGlobalVehicle
                 && entity is Vehicle pathVehicle
                 && pathVehicle.CoidCurrentPath > 0)
+            {
                 connection.ObjectLocalScopeAlways(ghost);
+                gameConnection?.NotePathVehiclePinned(coid, ghost);
+                _scopePinnedSeenThisQuery.Add(coid);
+            }
             else
                 connection.ObjectInScope(ghost);
             if (foreignGlobalVehicle && gameConnection != null)
@@ -960,6 +973,30 @@ public class SectorMap
                 ForeignNpcDriverWire.TryExecuteOwnerAttachReapply(gameConnection, attachVeh, ghost);
             }
         }
+
+        // Unpin path vehicles that no longer qualify for ScopeLocalAlways this pass (path ended,
+        // vehicle left the grid, or despawned) so TNL's normal InScope-clearing/DetachObject flow
+        // can reclaim them instead of holding them in scope for the life of the connection.
+        if (gameConnection != null && gameConnection.PinnedPathVehicles.Count > 0)
+        {
+            List<long> stalePinned = null;
+            foreach (var pinnedCoid in gameConnection.PinnedPathVehicles.Keys)
+            {
+                if (!_scopePinnedSeenThisQuery.Contains(pinnedCoid))
+                    (stalePinned ??= new List<long>()).Add(pinnedCoid);
+            }
+
+            if (stalePinned != null)
+            {
+                foreach (var staleCoid in stalePinned)
+                {
+                    if (gameConnection.PinnedPathVehicles.TryGetValue(staleCoid, out var staleGhost))
+                        connection.ObjectLocalClearAlways(staleGhost);
+
+                    gameConnection.ClearPathVehiclePinned(staleCoid);
+                }
+            }
+        }
     }
 
     /// <summary>True when <paramref name="vehicle"/> is the scoping character's current vehicle.</summary>
@@ -1002,20 +1039,28 @@ public class SectorMap
 
             if (reaction.TriggerIfPossible(activator))
             {
-                var packet = new LogicStateChangePacket(reaction.ObjectId.Coid, activator.ObjectId, false);
+                // SingleClientOnly=true for activator-only presence mutations (Create/Delete/etc.).
+                // DoForAllPlayers broadcast uses a separate packet; flag stays false there.
+                var singleClientOnly = !reaction.Template.DoForAllPlayers;
+                var packet = new LogicStateChangePacket(
+                    reaction.ObjectId.Coid,
+                    activator.ObjectId,
+                    singleClientOnly);
 
                 clientPacket.AddPacket(packet);
 
                 if (reaction.Template.DoForAllPlayers)
                 {
                     broadcastPacket ??= new GroupReactionCallPacket();
-                    broadcastPacket.AddPacket(packet);
+                    broadcastPacket.AddPacket(
+                        new LogicStateChangePacket(reaction.ObjectId.Coid, activator.ObjectId, false));
                 }
 
                 if (reaction.Template.DoForConvoy)
                 {
                     convoyPacket ??= new GroupReactionCallPacket();
-                    convoyPacket.AddPacket(packet);
+                    convoyPacket.AddPacket(
+                        new LogicStateChangePacket(reaction.ObjectId.Coid, activator.ObjectId, false));
                 }
 
                 // Queue child reactions for processing after this batch

@@ -99,7 +99,10 @@ public class ReactionCreateDeathDeleteTests
         var reaction = PlaceReaction(map, ReactionCoid, ReactionType.Death, PropCoid);
         Assert.IsTrue(reaction.TriggerIfPossible(vehicle));
 
-        Assert.IsNull(map.GetObjectByCoid(PropCoid), "Death must drop listed COID from server map");
+        Assert.IsNotNull(map.GetObjectByCoid(PropCoid),
+            "Personal Death keeps shared prop for other players");
+        Assert.IsTrue(character.MapPresence.IsSuppressed(PropCoid),
+            "Death must suppress listed COID for activator");
         // Client death FX / mesh is 0x206C only — DestroyObject double-frees and crashes the client.
         Assert.IsFalse(
             _sent.OfType<DestroyObjectPacket>().Any(),
@@ -155,14 +158,18 @@ public class ReactionCreateDeathDeleteTests
         var reaction = PlaceReaction(map, ReactionCoid, ReactionType.Delete, blockerCoid);
         Assert.IsTrue(reaction.TriggerIfPossible(vehicle));
 
-        Assert.IsNull(map.GetObjectByCoid(blockerCoid), "Listed collision blocker must leave the map");
+        Assert.IsNotNull(map.GetObjectByCoid(blockerCoid),
+            "Personal Delete keeps shared map object for other players");
+        Assert.IsTrue(character.MapPresence.IsSuppressed(blockerCoid),
+            "Listed collision blocker suppressed for activator");
         Assert.IsNotNull(map.GetObjectByCoid(gateMeshCoid), "Gate mesh COID must not be deleted");
+        Assert.IsFalse(character.MapPresence.IsSuppressed(gateMeshCoid));
         Assert.IsFalse(_sent.OfType<DestroyObjectPacket>().Any());
         AssertNoCreateDeathIncomplete();
     }
 
     [TestMethod]
-    public void Delete_RemovesListedObjectFromMap()
+    public void Delete_PersonallySuppressesListedObject_SharedMapKeepsIt()
     {
         var (character, vehicle, map) = CreatePlayer();
         PlaceGraphicsProp(map, PropCoid);
@@ -170,7 +177,8 @@ public class ReactionCreateDeathDeleteTests
         var reaction = PlaceReaction(map, ReactionCoid, ReactionType.Delete, PropCoid);
         Assert.IsTrue(reaction.TriggerIfPossible(vehicle));
 
-        Assert.IsNull(map.GetObjectByCoid(PropCoid));
+        Assert.IsNotNull(map.GetObjectByCoid(PropCoid));
+        Assert.IsTrue(character.MapPresence.IsSuppressed(PropCoid));
         // Delete relies on GroupReactionCall 0x206C for client visuals (not DestroyObject).
         Assert.IsFalse(_sent.OfType<DestroyObjectPacket>().Any());
         AssertNoCreateDeathIncomplete();

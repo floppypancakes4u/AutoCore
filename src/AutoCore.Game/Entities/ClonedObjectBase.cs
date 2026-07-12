@@ -234,6 +234,20 @@ public abstract class ClonedObjectBase
 
     public void ClearGhost()
     {
+        if (Ghost != null && Ghost.IsGhostedToAny())
+        {
+            // Another connection still holds this exact ghost instance in active scope (e.g. a
+            // second player still observing this vehicle as a foreign object). Drop our own
+            // reference so a future CreateGhost() starts fresh, but leave Ghost.Parent intact so
+            // that connection's PackUpdate keeps working instead of throwing. The other
+            // connection's own scope query will naturally stop selecting this entity (it is
+            // already off Map/Grid by the time ClearGhost runs) and detach it within 1-2 ticks.
+            Logger.WriteLog(LogType.Network,
+                $"ClearGhost: coid {ObjectId.Coid} still ghosted to another connection; deferring Parent clear");
+            Ghost = null;
+            return;
+        }
+
         Ghost?.SetParent(null);
         Ghost = null;
         //LastServerUpdate = Environment.TickCount; // TODO: linux time or what?

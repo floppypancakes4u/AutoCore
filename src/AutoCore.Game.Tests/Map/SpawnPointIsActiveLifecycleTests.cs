@@ -112,12 +112,15 @@ public class SpawnPointIsActiveLifecycleTests
         player.SetCoid(300, true);
         player.SetMap(map);
         Assert.IsTrue(del.TriggerIfPossible(player));
-        Assert.IsNull(map.GetObjectByCoid(dialogCoid));
+        // Personal Delete: shared map keeps dialog; only this character is suppressed.
+        Assert.IsNotNull(map.GetObjectByCoid(dialogCoid) as SpawnPoint);
+        Assert.IsTrue(player.MapPresence.IsSuppressed(dialogCoid));
 
         // Create combat spawn marker
         var create = PlaceReaction(map, 14139, ReactionType.Create, combatCoid);
         Assert.IsTrue(create.TriggerIfPossible(player));
         Assert.IsNotNull(map.GetObjectByCoid(combatCoid));
+        Assert.IsTrue(player.MapPresence.IsMaterialized(combatCoid));
 
         // Last player leaves → reset
         player.SetMap(null);
@@ -228,10 +231,10 @@ public class SpawnPointIsActiveLifecycleTests
     }
 
     [TestMethod]
-    public void Delete_SpawnPoint_RemovesMissionGiverCreature()
+    public void Delete_SpawnPoint_PersonalSuppressesMissionGiver_SharedMapKeepsIt()
     {
-        // Final Exam: l1_del_gunnysioux1 deletes spawn 14090 and must remove standing Gunny
-        // (mission-giver creature), not leave the human prop after accept.
+        // Final Exam: l1_del_gunnysioux1 targets spawn 14090 — personal presence only.
+        // Shared map keeps standing Gunny so other players can still turn in earlier missions.
         var map = CreateMap();
         const long spawnCoid = 14090;
         const long creatureCoid = 90001;
@@ -257,13 +260,17 @@ public class SpawnPointIsActiveLifecycleTests
         activator.SetMap(map);
 
         Assert.IsTrue(reaction.TriggerIfPossible(activator));
-        Assert.IsNull(map.GetObjectByCoid(spawnCoid), "SpawnPoint marker is deleted");
-        Assert.IsNull(map.GetObjectByCoid(creatureCoid),
-            "Standing mission-giver must despawn with the spawn (Final Exam start)");
+        Assert.IsNotNull(map.GetObjectByCoid(spawnCoid) as SpawnPoint,
+            "SpawnPoint marker stays on shared map");
+        Assert.IsNotNull(map.GetObjectByCoid(creatureCoid),
+            "Mission-giver stays on shared map for other players");
+        Assert.IsTrue(activator.MapPresence.IsSuppressed(spawnCoid));
+        Assert.IsTrue(activator.MapPresence.IsSuppressed(creatureCoid),
+            "Activator must not interact with place-A giver after personal delete");
     }
 
     [TestMethod]
-    public void Delete_SpawnPoint_RemovesOwnedVehicle()
+    public void Delete_SpawnPoint_PersonalSuppressesOwnedVehicle_SharedMapKeepsIt()
     {
         var map = CreateMap();
         const long spawnCoid = 14138;
@@ -294,7 +301,9 @@ public class SpawnPointIsActiveLifecycleTests
         activator.SetMap(map);
 
         Assert.IsTrue(reaction.TriggerIfPossible(activator));
-        Assert.IsNull(map.GetObjectByCoid(vehicleCoid), "Spawn-owned NPC vehicle must despawn");
+        Assert.IsNotNull(map.GetObjectByCoid(vehicleCoid),
+            "NPC vehicle stays on shared map under personal delete (Phase 3: private combat)");
+        Assert.IsTrue(activator.MapPresence.IsSuppressed(vehicleCoid));
         Assert.IsNotNull(map.GetObjectByCoid(90003), "Player vehicle must remain");
     }
 

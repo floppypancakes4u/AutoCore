@@ -190,6 +190,12 @@ public partial class Character : Creature
     public LogicVariableStore LogicVariables { get; private set; }
 
     /// <summary>
+    /// Per-character mission-world presence (Create/Delete suppressions, private combat).
+    /// See <see cref="CharacterMapPresence"/>.
+    /// </summary>
+    public CharacterMapPresence MapPresence { get; } = new();
+
+    /// <summary>
     /// Returns the logic-variable store for the character's current map, creating it if needed.
     /// </summary>
     public LogicVariableStore EnsureLogicVariables()

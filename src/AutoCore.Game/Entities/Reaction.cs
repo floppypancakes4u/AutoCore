@@ -475,9 +475,11 @@ public class Reaction : ClonedObjectBase
     }
 
     /// <summary>
-    /// Create (type 2): spawn map template COIDs that are not yet live (client CVOGReaction_SpawnObject).
+    /// Create (type 2): client applies via 0x206C (<c>CVOGReaction_SpawnObject</c>).
+    /// Server records personal materialization; places shared spawn markers only when missing
+    /// (logic graph). Does not materialize combat children into a shared slot for all players
+    /// unless <see cref="ReactionTemplate.DoForAllPlayers"/> (Phase 3: private combat spawn).
     /// Nested child reactions are fired by <see cref="SectorMap"/> after this returns.
-    /// Only listed COIDs are created — never parents/siblings of a collision blocker.
     /// </summary>
     private bool HandleCreate(ClonedObjectBase activator)
     {
@@ -488,28 +490,35 @@ public class Reaction : ClonedObjectBase
             return true;
         }
 
+        var character = GetCharacterFromActivator(activator);
+        if (character != null)
+            character.MapPresence.EnsureContinent(map.ContinentId);
+
+        var sharedWorld = Template.DoForAllPlayers;
+
         foreach (var objectCoid in Template.Objects)
         {
+            character?.MapPresence.Materialize(objectCoid);
+
             var existing = map.GetObjectByCoid(objectCoid);
             if (existing != null)
             {
-                // Inactive spawn points may already sit on the map without a live child
-                // (or after a prior despawn). Create must re-Spawn, not skip.
-                if (existing is SpawnPoint existingSpawn && !existingSpawn.HasLiveSpawn())
+                // Shared combat materialization only when DoForAllPlayers (rare).
+                // Personal Create: client SpawnObject + Phase 3 private combat; keep marker.
+                if (sharedWorld
+                    && existing is SpawnPoint existingSpawn
+                    && !existingSpawn.HasLiveSpawn())
                 {
-                    // Do not mutate shared MapData template.IsActive — that is process-global
-                    // and leaves combat spawns permanently "active" after one Create.
-                    // fireTriggerEvents: Create is reaction-driven (pad Gunny TE, etc.).
                     existingSpawn.Spawn(fireTriggerEvents: true, triggerActivator: activator);
                     Logger.WriteLog(LogType.Debug,
-                        "Create reaction {0}: re-spawned children for existing SpawnPoint coid={1}",
+                        "Create reaction {0}: re-spawned children for existing SpawnPoint coid={1} (DoForAllPlayers)",
                         Template.COID,
                         objectCoid);
                 }
                 else
                 {
                     Logger.WriteLog(LogType.Debug,
-                        "Create reaction {0}: object {1} already on map — skip",
+                        "Create reaction {0}: object {1} already on map — personal materialize only",
                         Template.COID,
                         objectCoid);
                 }
@@ -558,15 +567,18 @@ public class Reaction : ClonedObjectBase
 
             obj.SetMap(map);
 
-            if (obj is SpawnPoint spawnPoint)
+            // Shared DoForAllPlayers: materialize spawn children for everyone.
+            // Personal Create: place marker only — combat children are private (Phase 3).
+            if (sharedWorld && obj is SpawnPoint spawnPoint)
                 spawnPoint.Spawn(fireTriggerEvents: true, triggerActivator: activator);
 
             Logger.WriteLog(LogType.Debug,
-                "Create reaction {0}: spawned coid={1} type={2} on map {3}",
+                "Create reaction {0}: placed coid={1} type={2} on map {3} sharedChildren={4}",
                 Template.COID,
                 objectCoid,
                 obj.GetType().Name,
-                map.ContinentId);
+                map.ContinentId,
+                sharedWorld ? 1 : 0);
         }
 
         return true;
@@ -605,8 +617,17 @@ public class Reaction : ClonedObjectBase
     }
 
     /// <summary>
-    /// Shared Delete/Death server authority: drop exactly the listed map COIDs (or activator prop)
-    /// from <see cref="SectorMap"/> without client destroy packets. Never touch player vehicles.
+    /// Delete/Death server authority.
+    /// <para>
+    /// Default (not <see cref="ReactionTemplate.DoForAllPlayers"/>): personal presence only —
+    /// suppress COIDs for the activating character and leave shared <see cref="SectorMap"/> intact
+    /// so other players keep their mission-world NPCs. Client apply is 0x206C
+    /// (<c>CVOGReaction_RemoveObject</c>).
+    /// </para>
+    /// <para>
+    /// <see cref="ReactionTemplate.DoForAllPlayers"/>: shared leave-map for listed COIDs (legacy
+    /// world-wide delete). Never touch player vehicles.
+    /// </para>
     /// </summary>
     private bool ApplyReactionMapRemove(ClonedObjectBase activator, string label)
     {
@@ -628,6 +649,25 @@ public class Reaction : ClonedObjectBase
                 Template.COID,
                 activator.ObjectId.Coid);
             activator.SetMap(null);
+            return true;
+        }
+
+        // Personal mission presence: do not rewrite shared SectorMap for one player.
+        if (!Template.DoForAllPlayers)
+        {
+            var character = GetCharacterFromActivator(activator);
+            if (character != null)
+            {
+                character.MapPresence.EnsureContinent(map.ContinentId);
+                foreach (var objectCoid in Template.Objects)
+                    SuppressPresenceForCharacter(character, map, objectCoid, label);
+                return true;
+            }
+
+            Logger.WriteLog(LogType.Debug,
+                "{0} reaction {1}: no character activator — skip personal presence suppress",
+                label,
+                Template.COID);
             return true;
         }
 
@@ -654,7 +694,7 @@ public class Reaction : ClonedObjectBase
                 spawnPoint.DespawnOwnedEntities();
 
             Logger.WriteLog(LogType.Debug,
-                "{0} reaction {1}: removing object coid={2} type={3} from map (no DestroyObject; client 0x206C)",
+                "{0} reaction {1}: removing object coid={2} type={3} from map (DoForAllPlayers)",
                 label,
                 Template.COID,
                 objectCoid,
@@ -663,6 +703,41 @@ public class Reaction : ClonedObjectBase
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Marks a map COID suppressed for <paramref name="character"/> without shared leave-map.
+    /// SpawnPoints also suppress their live child COID (dialog giver / combat vehicle).
+    /// </summary>
+    static void SuppressPresenceForCharacter(Character character, SectorMap map, long objectCoid, string label)
+    {
+        if (objectCoid <= 0)
+            return;
+
+        character.MapPresence.Suppress(objectCoid);
+
+        var obj = map.GetObjectByCoid(objectCoid);
+        if (obj is SpawnPoint spawn)
+        {
+            if (spawn.LastSpawnedCoid > 0)
+                character.MapPresence.Suppress(spawn.LastSpawnedCoid);
+
+            // Also suppress any owned entities by SpawnOwner link (dialog creature may not be LastSpawned).
+            foreach (var kvp in map.Objects)
+            {
+                var child = kvp.Value;
+                if (child is Creature creature && creature.SpawnOwner == objectCoid)
+                    character.MapPresence.Suppress(creature.ObjectId.Coid);
+                else if (child is Vehicle vehicle && vehicle.SpawnOwnerCoid == objectCoid)
+                    character.MapPresence.Suppress(vehicle.ObjectId.Coid);
+            }
+        }
+
+        Logger.WriteLog(LogType.Debug,
+            "{0} reaction: personal suppress coid={1} for char={2} (shared map unchanged)",
+            label,
+            objectCoid,
+            character.ObjectId.Coid);
     }
 
     /// <summary>
