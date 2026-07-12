@@ -36,11 +36,14 @@ public static class NpcTicker
             if (npcAi == null)
                 continue;
 
-            // Combat brain first: aggro scan (idle), pursue/fire (engage/combat), leash home.
+            // Combat brain first: aggro scan (idle), fire, bounded pursuit lunge (engage/combat).
             NpcCombatAi.Tick(map, entity, nowMs, dt);
 
-            // Path patrol only drives a genuinely idle NPC that isn't already walking home.
-            if (npcAi.CombatState != HBAICombatState.IdlePatrol || npcAi.ReturningHome)
+            // The path follower owns movement whenever the combat brain didn't: a path NPC keeps
+            // riding (and returning to) its route even while engaged, and only stands down while it is
+            // walking home, fleeing, or lunging at its target this tick. Pathless NPCs have no path and
+            // fall through the TryGetMapPath check below.
+            if (npcAi.ReturningHome || nowMs < npcAi.FleeUntilMs || npcAi.PursuingThisTick)
                 continue;
 
             if (!map.TryGetMapPath(GetPathCoid(entity), out var path) || path.Points.Count == 0)
@@ -96,7 +99,7 @@ public static class NpcTicker
         _ => null,
     };
 
-    private static long GetPathCoid(ClonedObjectBase entity) => entity switch
+    internal static long GetPathCoid(ClonedObjectBase entity) => entity switch
     {
         Vehicle vehicle => vehicle.CoidCurrentPath,
         Creature creature => creature.CoidCurrentPath,

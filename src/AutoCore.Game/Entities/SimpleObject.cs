@@ -193,7 +193,7 @@ public class SimpleObject : GraphicsObject
         packet.Faction = Faction;
         packet.TeamFaction = TeamFaction;
         packet.CoidStore = -1;
-        packet.IsCorpse = false;
+        packet.IsCorpse = IsCorpse;
         packet.SkillLevel1 = SkillLevel1;
         packet.SkillLevel2 = SkillLevel2;
         packet.SkillLevel3 = SkillLevel3;

@@ -138,6 +138,16 @@ public class GhostVehicle : GhostObject
             return 1.0f;
 
         var viewer = GetViewerParent(scopeObject);
+        if (Parent is Vehicle { IsCorpse: true } vehicle
+            && viewer is Character owner
+            && ReferenceEquals(vehicle.Owner?.GetAsCharacter(), owner))
+        {
+            // A player's own dead vehicle is not part of normal interest selection. Its
+            // HealthMask must win the next TNL packet so the client can execute its corpse/INC
+            // state transition instead of being starved by foreign pose updates.
+            return 1.0f;
+        }
+
         if (Parent != null && viewer != null && ReferenceEquals(viewer.Target, Parent))
             return 1.0f;
 
@@ -558,7 +568,7 @@ public class GhostVehicle : GhostObject
                         $"initWheel={(isInitial && EnableInitialHardpointPack ? 1 : 0)} " +
                         $"deferPose={(isInitial && deferForeignPose ? 1 : 0)} " +
                         $"aiWire={(EnableAiStateWire ? 1 : 0)} global={(Parent.ObjectId.Global ? 1 : 0)} " +
-                        $"hp={((updateMask & HealthMask) != 0 ? 1 : 0)} cur={Parent.GetCurrentHP()} max={Parent.GetMaximumHP()} " +
+                        $"hp={((updateMask & HealthMask) != 0 ? 1 : 0)} cur={Parent.GetCurrentHP()} max={Parent.GetMaximumHP()} corpse={(Parent.GetIsCorpse() ? 1 : 0)} " +
                         $"profile={(useMinimalForeignInitialProfile ? "minimal" : "full")} sourceMask={sourceUpdateMask:X}");
         }
 

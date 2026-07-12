@@ -20,6 +20,23 @@ public sealed class NpcAiState
     /// <summary>Spawn/anchor position used for patrol loops and return-to-home behavior.</summary>
     public Vector3 HomePosition { get; set; }
 
+    /// <summary>
+    /// Leash/return target resolved each combat tick: the nearest point on the active path for a
+    /// path-following NPC, otherwise <see cref="HomePosition"/>. Keeps a damaged path NPC anchored to
+    /// its patrol line instead of snapping back to spawn (client 005d6e80 waypoint +0x52 branch).
+    /// </summary>
+    public Vector3 ReturnAnchor { get; set; }
+
+    /// <summary>True when <see cref="ReturnAnchor"/> is a path waypoint (path NPC); false when it is spawn.</summary>
+    public bool HasPathAnchor { get; set; }
+
+    /// <summary>
+    /// Set for this tick when the combat brain steered the NPC toward its target (a bounded pursuit
+    /// lunge). Signals <see cref="NpcTicker"/> to skip path-following this tick so the two movement
+    /// sources don't fight; reset at the top of every <see cref="NpcCombatAi.Tick"/>.
+    /// </summary>
+    public bool PursuingThisTick { get; set; }
+
     /// <summary>Index into the active path's waypoint list; -1 when not following a path.</summary>
     public int PathIndex { get; set; } = -1;
 

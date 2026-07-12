@@ -32,6 +32,19 @@ public partial class TNLConnection : GhostConnection
     private ushort FragmentCounter { get; set; } = 1;
 
     /// <summary>
+    /// Immediately emits a queued ghost update for a state transition that the client must apply
+    /// before accepting further input (currently the owner vehicle's death/corpse transition).
+    /// Normal sector ticking may otherwise spend the packet budget on foreign pose updates first.
+    /// </summary>
+    internal void FlushDeathGhostUpdate()
+    {
+        if (!IsEstablished())
+            return;
+
+        CheckPacketSend(force: true, Environment.TickCount);
+    }
+
+    /// <summary>
     /// Active foreign CreateVehicle → ObjectInScope holds for this connection. Keyed by vehicle coid.
     /// Create is re-sent whenever a foreign global vehicle is not currently ghosted (first sighting
     /// or re-scope after TNL detach). Client FUN_008078b0 processes ghost object-create before game

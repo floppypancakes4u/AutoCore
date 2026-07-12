@@ -2,6 +2,7 @@
 
 namespace AutoCore.Sector;
 
+using AutoCore.Database.Auth;
 using AutoCore.Database.Char;
 using AutoCore.Database.World;
 using AutoCore.Game.Constants;
@@ -30,6 +31,8 @@ public class Program : ExitableProgram
 
         CharContext.InitializeConnectionString(config.CharDatabaseConnectionString);
         WorldContext.InitializeConnectionString(config.WorldDatabaseConnectionString);
+        if (!string.IsNullOrWhiteSpace(config.AuthDatabaseConnectionString))
+            AuthContext.InitializeConnectionString(config.AuthDatabaseConnectionString);
 
         CharContext.EnsureCreated();
         WorldContext.EnsureCreated();

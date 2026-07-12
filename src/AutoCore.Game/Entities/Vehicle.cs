@@ -1188,6 +1188,25 @@ public class Vehicle : SimpleObject
         if (NpcAi == null)
         {
             base.OnDeath(deathType);
+
+            // Ghidra: VehicleNet_UnpackGhostVehicle reads the HealthMask block as
+            // currentHP + corpse, invokes the live HP setter, then sets vehicle state bit
+            // +0x17c/0x100. Re-sending CreateVehicle allocates/materializes an object and does
+            // not perform that transition. Scope and dirty the ghost only after base has made
+            // IsCorpse true so the client receives one coherent HP=0/corpse=true update.
+            EnsureGhostMaskDelivery(GhostObject.HealthMask | GhostObject.HealthMaxMask);
+
+            var ownerConnection = Owner?.GetAsCharacter()?.OwningConnection;
+            ownerConnection?.FlushDeathGhostUpdate();
+            Logger.WriteLog(LogType.Network,
+                "PlayerDeathGhost coid={0} hp={1}/{2} corpse={3} ghost={4} scoped={5} ghosting={6}",
+                ObjectId.Coid,
+                GetCurrentHP(),
+                GetMaximumHP(),
+                IsCorpse ? 1 : 0,
+                Ghost != null ? 1 : 0,
+                Ghost?.GetFirstObjectRef() != null ? 1 : 0,
+                ownerConnection?.IsGhosting() == true ? 1 : 0);
             return;
         }
 

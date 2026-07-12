@@ -41,6 +41,22 @@ public class NpcPathFollowerTests
     }
 
     [TestMethod]
+    public void NearestPoint_ReturnsClosestWaypoint()
+    {
+        var path = Path(false,
+            new Vector3(0f, 0f, 0f),
+            new Vector3(100f, 0f, 0f),
+            new Vector3(100f, 0f, 100f));
+
+        // (90,0,10) is nearest to (100,0,0): distSq 200 vs 8200/8200.
+        var nearest = NpcPathFollower.NearestPoint(new Vector3(90f, 0f, 10f), path);
+
+        Assert.AreEqual(100f, nearest.X, Tolerance);
+        Assert.AreEqual(0f, nearest.Y, Tolerance);
+        Assert.AreEqual(0f, nearest.Z, Tolerance);
+    }
+
+    [TestMethod]
     public void Step_MovesTowardPointAtSpeedTimesDt()
     {
         var path = Path(false, new Vector3(100f, 0f, 0f));

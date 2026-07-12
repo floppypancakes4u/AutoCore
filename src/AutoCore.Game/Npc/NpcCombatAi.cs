@@ -64,6 +64,13 @@ public static class NpcCombatAi
         if (npcAi == null)
             return;
 
+        // Resolve this tick's leash/return anchor once (nearest path point for a path NPC, else spawn)
+        // so TryLeash / TickIdle / TickFlee all steer to the same target without re-querying the map.
+        var (anchor, isPath) = ResolveReturnAnchor(map, entity, npcAi);
+        npcAi.ReturnAnchor = anchor;
+        npcAi.HasPathAnchor = isPath;
+        npcAi.PursuingThisTick = false; // set only when a combat branch lunges toward the target
+
         // Flee lifecycle runs ahead of the state switch: while the latch holds we run home; at
         // expiry we either re-engage (recovered ≥ val4) or re-extend the latch and keep fleeing.
         if (npcAi.FleeUntilMs > 0 && TickFleeLifecycle(entity, npcAi, nowMs, dt))
@@ -88,11 +95,11 @@ public static class NpcCombatAi
         // Walk back to the anchor before re-scanning, to avoid oscillating on a target that leashed us.
         if (npcAi.ReturningHome)
         {
-            if (entity.Position.Dist(npcAi.HomePosition) <= ResumePathRadius)
+            if (entity.Position.Dist(npcAi.ReturnAnchor) <= ResumePathRadius)
                 npcAi.ReturningHome = false;
             else
             {
-                SteerToward(entity, npcAi.HomePosition, NpcTicker.ResolveSpeed(entity), dt);
+                SteerToward(entity, npcAi.ReturnAnchor, NpcTicker.ResolveSpeed(entity), dt);
                 return;
             }
         }
@@ -118,16 +125,16 @@ public static class NpcCombatAi
 
     private static void TickEngage(ClonedObjectBase entity, NpcAiState npcAi, long nowMs, float dt)
     {
-        if (TargetLost(entity) || TryLeash(entity, npcAi))
+        if (TargetLost(entity) || LeashOrDrop(entity, npcAi))
             return;
 
         var target = entity.Target;
         var (_, weapon) = SelectFiringWeapon(entity);
         var rangeMax = WeaponRangeMax(weapon);
         var desired = rangeMax > 0f ? rangeMax * EngageCloseFactor : 0f;
+        var closed = entity.Position.Dist(target.Position) <= desired;
 
-        if (entity.Position.Dist(target.Position) > desired)
-            SteerToward(entity, target.Position, NpcTicker.ResolveSpeed(entity), dt);
+        CombatMove(entity, npcAi, target.Position, atRange: closed, dt);
 
         // After the profile's flee/engage timer, commit to Combat (where flee evaluation runs).
         var timerMs = npcAi.Profile?.ValFleeOrEngageTimerMs ?? 0f;
@@ -137,7 +144,7 @@ public static class NpcCombatAi
 
     private static void TickCombat(ClonedObjectBase entity, NpcAiState npcAi, long nowMs, float dt)
     {
-        if (TargetLost(entity) || TryLeash(entity, npcAi))
+        if (TargetLost(entity) || LeashOrDrop(entity, npcAi))
             return;
 
         // Wounded past the flee band: break off and run home (the timer already elapsed to reach Combat).
@@ -150,20 +157,47 @@ public static class NpcCombatAi
         var target = entity.Target;
         var (bit, weapon) = SelectFiringWeapon(entity);
         var rangeMax = WeaponRangeMax(weapon);
-        var dist = entity.Position.Dist(target.Position);
-        var inRange = rangeMax <= 0f || dist <= rangeMax;
+        var inRange = rangeMax <= 0f || entity.Position.Dist(target.Position) <= rangeMax;
 
+        // Fire when the target is in weapon range — independent of movement (client parity: FireWeapons
+        // runs every tick with a may-fire flag, not gated on whether the NPC also pursued this tick).
         if (entity is Vehicle vehicle && weapon != null && inRange)
         {
             vehicle.SetTargetObject(target);
             vehicle.Firing = bit;
             vehicle.ProcessCombatIfFiring();
+        }
+        else
+        {
+            CeaseFire(entity);
+        }
+
+        CombatMove(entity, npcAi, target.Position, atRange: inRange, dt);
+    }
+
+    /// <summary>
+    /// Combat movement. A pathless NPC closes on its target when out of range (spawn leash already
+    /// bounds it). A path NPC lunges toward the target only while still near its path and the target is
+    /// off-range-but-reachable; otherwise it leaves movement to <see cref="NpcTicker"/> so it rides /
+    /// returns to its route (client 005d6e80 pursue-vs-return-to-waypoint tether). Sets
+    /// <see cref="NpcAiState.PursuingThisTick"/> when it steers, so the path follower stands down.
+    /// </summary>
+    private static void CombatMove(ClonedObjectBase entity, NpcAiState npcAi, Vector3 targetPos, bool atRange, float dt)
+    {
+        if (!npcAi.HasPathAnchor)
+        {
+            if (!atRange)
+                SteerToward(entity, targetPos, NpcTicker.ResolveSpeed(entity), dt);
             return;
         }
 
-        // Out of range (or a non-firing creature): cease fire and pursue.
-        CeaseFire(entity);
-        SteerToward(entity, target.Position, NpcTicker.ResolveSpeed(entity), dt);
+        var tether = System.Math.Max(GetPatrolDistance(entity), LeashRadius);
+        var strayed = entity.Position.Dist(npcAi.ReturnAnchor) > tether;
+        if (!atRange && !strayed)
+        {
+            SteerToward(entity, targetPos, NpcTicker.ResolveSpeed(entity), dt);
+            npcAi.PursuingThisTick = true;
+        }
     }
 
     /// <summary>True when the current target is gone/dead; resets the NPC to a homing IdlePatrol.</summary>
@@ -178,13 +212,41 @@ public static class NpcCombatAi
     }
 
     /// <summary>
-    /// Drops the target and returns home when the NPC has been dragged past its leash radius
-    /// (max of its patrol distance and <see cref="LeashRadius"/>), mirroring client 005d6e80.
+    /// This tick's leash/return anchor: the nearest point on the active path for a path-following NPC
+    /// (CoidCurrentPath &gt; 0 with a resolvable, non-empty path), otherwise the spawn
+    /// <see cref="NpcAiState.HomePosition"/>. Mirrors the client 005d6e80 waypoint <c>+0x52</c> branch,
+    /// where a path NPC returns to its waypoint and only a pathless NPC leashes to spawn.
     /// </summary>
-    private static bool TryLeash(ClonedObjectBase entity, NpcAiState npcAi)
+    private static (Vector3 Anchor, bool IsPath) ResolveReturnAnchor(SectorMap map, ClonedObjectBase entity, NpcAiState npcAi)
     {
-        var leash = System.Math.Max(GetPatrolDistance(entity), LeashRadius);
-        if (entity.Position.Dist(npcAi.HomePosition) <= leash)
+        var coid = NpcTicker.GetPathCoid(entity);
+        if (coid > 0 && map.TryGetMapPath(coid, out var path) && path.Points.Count > 0)
+            return (NpcPathFollower.NearestPoint(entity.Position, path), true);
+
+        return (npcAi.HomePosition, false);
+    }
+
+    /// <summary>
+    /// Decides whether the NPC breaks off this tick. A <b>pathless</b> NPC leashes to spawn once dragged
+    /// past <c>max(patrol, LeashRadius)</c> from home (client 005d6e80). A <b>path</b> NPC never leashes
+    /// on distance — it stays tethered to its route and keeps its target (client parity: the aggro list
+    /// is only pruned when the target leaves perception), so it disengages only when the target escapes
+    /// its aggro/vision range. Either way <see cref="Disengage"/> routes it back to its anchor.
+    /// </summary>
+    private static bool LeashOrDrop(ClonedObjectBase entity, NpcAiState npcAi)
+    {
+        if (!npcAi.HasPathAnchor)
+        {
+            var leash = System.Math.Max(GetPatrolDistance(entity), LeashRadius);
+            if (entity.Position.Dist(npcAi.ReturnAnchor) <= leash)
+                return false;
+
+            Disengage(entity, npcAi);
+            return true;
+        }
+
+        var target = entity.Target;
+        if (target == null || entity.Position.Dist(target.Position) <= ResolveAggroRange(entity, npcAi))
             return false;
 
         Disengage(entity, npcAi);
@@ -199,6 +261,10 @@ public static class NpcCombatAi
         {
             npcAi.ReturningHome = true;
             npcAi.FleeUntilMs = 0;
+            // Path NPC: drop the cursor so NpcPathFollower.Step re-latches to the nearest node when
+            // patrol resumes at the anchor (the point we are walking back to), not the stale index.
+            if (npcAi.HasPathAnchor)
+                npcAi.PathIndex = -1;
         }
         SetCombatState(entity, HBAICombatState.IdlePatrol);
     }
@@ -263,11 +329,11 @@ public static class NpcCombatAi
         SetCombatState(entity, HBAICombatState.Engage);
     }
 
-    /// <summary>Guns silent, run back toward the home anchor.</summary>
+    /// <summary>Guns silent, run back toward the return anchor (nearest path point or spawn).</summary>
     private static void TickFlee(ClonedObjectBase entity, NpcAiState npcAi, float dt)
     {
         CeaseFire(entity);
-        SteerToward(entity, npcAi.HomePosition, NpcTicker.ResolveSpeed(entity), dt);
+        SteerToward(entity, npcAi.ReturnAnchor, NpcTicker.ResolveSpeed(entity), dt);
     }
 
     /// <summary>Current-to-maximum HP ratio; 1.0 when max HP is unknown (never forces a flee).</summary>

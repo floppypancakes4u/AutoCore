@@ -53,13 +53,17 @@ public class RespawnManager : Singleton<RespawnManager>
             return false;
         }
 
-        // Client 0xe98 entity COID is the character; SpecialEvent target must match for the airlift path.
+        // Retail clients may submit either the character or current-vehicle COID. Both identify
+        // this session, but the Respawn SpecialEvent must always target the character: the client
+        // checks its character object before constructing the INC airlift presentation.
         if (clientEntityCoid != 0 &&
             clientEntityCoid != character.ObjectId.Coid &&
             clientEntityCoid != vehicle.ObjectId.Coid)
         {
+            failureReason = "request entity does not belong to character or current vehicle";
             Logger.WriteLog(LogType.Debug,
-                $"RespawnInSector: unexpected entity COID packet={clientEntityCoid} char={character.ObjectId.Coid} vehicle={vehicle.ObjectId.Coid}");
+                $"RespawnInSector: rejected entity COID packet={clientEntityCoid} char={character.ObjectId.Coid} vehicle={vehicle.ObjectId.Coid}");
+            return false;
         }
 
         if (!TryResolveDestination(character, out var destMap, out var position, out var rotation, out var destReason))
@@ -89,21 +93,17 @@ public class RespawnManager : Singleton<RespawnManager>
         RevivePlayer(character, vehicle);
         ApplyPose(character, vehicle, position, rotation);
 
-        var eventTarget = clientEntityCoid == vehicle.ObjectId.Coid
-            ? vehicle.ObjectId
-            : character.ObjectId;
-
         character.OwningConnection.SendGamePacket(new SpecialEventPacket
         {
             Type = SpecialEventType.Respawn,
             Position = position,
             Rotation = rotation,
-            Target = eventTarget,
+            Target = character.ObjectId,
             Flag = 1
         });
 
         Logger.WriteLog(LogType.Network,
-            $"RespawnInSector: character {character.ObjectId.Coid} airlift to {position} on map {destMap.ContinentId} specialTarget={eventTarget.Coid}");
+            $"RespawnInSector: character {character.ObjectId.Coid} airlift to {position} on map {destMap.ContinentId} specialTarget={character.ObjectId.Coid}");
         return true;
     }
 

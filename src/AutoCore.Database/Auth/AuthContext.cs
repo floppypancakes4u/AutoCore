@@ -18,6 +18,14 @@ public class AuthContext : DbContext
         GlobalServers = Set<GlobalServer>();
     }
 
+    /// <summary>Options-based constructor for unit tests (InMemory / SQLite) without MySQL.</summary>
+    public AuthContext(DbContextOptions<AuthContext> options)
+        : base(options)
+    {
+        Accounts = Set<Account>();
+        GlobalServers = Set<GlobalServer>();
+    }
+
     public static void InitializeConnectionString(string connectionString)
     {
         ArgumentException.ThrowIfNullOrEmpty(connectionString);
@@ -59,5 +67,12 @@ public class AuthContext : DbContext
         }
     }
 
-    protected override void OnConfiguring(DbContextOptionsBuilder options) => options.UseMySql(ConnectionString, ServerVersion.AutoDetect(ConnectionString));
+    protected override void OnConfiguring(DbContextOptionsBuilder options)
+    {
+        // Skip when constructed with DbContextOptions (unit tests inject InMemory/SQLite).
+        if (options.IsConfigured)
+            return;
+
+        options.UseMySql(ConnectionString, ServerVersion.AutoDetect(ConnectionString));
+    }
 }

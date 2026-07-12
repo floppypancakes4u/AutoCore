@@ -107,8 +107,27 @@ public sealed class ChatCommandService
                 return SetMaxPower(character, parts);
 
             default:
+                // Case-insensitive account-create aliases (client steals bare /player for //playerrename).
+                var cmd = parts[0].ToLowerInvariant();
+                if (cmd is "/addplayer" or "/newaccount" or "/player")
+                    return CreatePlayer(parts);
+
                 return new ChatCommandExecutionResult(false, string.Empty);
         }
+    }
+
+    /// <summary>
+    /// Create an auth login account. Prefer <c>/addplayer</c> — the client intercepts <c>/player</c>
+    /// as the GM <c>//playerrename</c> command ("not allowed to choose a new name for yourself").
+    /// Email is auto-generated as <c>{user}@autocore.local</c>. Char account is created on first login.
+    /// </summary>
+    private static ChatCommandExecutionResult CreatePlayer(string[] parts)
+    {
+        if (parts.Length < 3)
+            return new ChatCommandExecutionResult(true, "Usage: /addplayer <user> <pass>  (aliases: /newaccount, /player)");
+
+        var result = PlayerAccountService.Instance.Create(parts[1], parts[2]);
+        return new ChatCommandExecutionResult(true, result.Message);
     }
 
     /// <summary>

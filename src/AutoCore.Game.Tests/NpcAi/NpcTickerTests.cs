@@ -94,7 +94,9 @@ public class NpcTickerTests
         NpcTicker.Tick(map, nowMs: 10_000, dt: 0.5f);
 
         Assert.AreEqual(corpseStart, corpse.Position, "corpses must not be moved by the patrol tick");
-        Assert.AreEqual(engagedStart, engaged.Position, "non-IdlePatrol NPCs must not be moved by the patrol tick");
+        // An Engage-state NPC with no live target disengages (TargetLost) before the follower runs,
+        // so it does not ride its path this tick. (A path NPC WITH a target does ride its route.)
+        Assert.AreEqual(engagedStart, engaged.Position, "a targetless engaged NPC disengages, not moved this tick");
     }
 
     [TestMethod]

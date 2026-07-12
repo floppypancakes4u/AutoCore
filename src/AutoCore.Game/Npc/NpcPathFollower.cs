@@ -188,6 +188,14 @@ public static class NpcPathFollower
         nextDirection = direction;
     }
 
+    /// <summary>
+    /// World position of the waypoint on <paramref name="path"/> nearest to <paramref name="position"/>
+    /// (XZ distance). Used as the leash/return anchor for a path-following NPC so it returns to its
+    /// patrol line rather than its spawn. Caller must ensure <c>path.Points.Count &gt; 0</c>.
+    /// </summary>
+    public static Vector3 NearestPoint(Vector3 position, MapPathTemplate path)
+        => path.Points[NearestPointIndex(position, path)].Position;
+
     private static int NearestPointIndex(Vector3 position, MapPathTemplate path)
     {
         var best = 0;

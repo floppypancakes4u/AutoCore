@@ -7,13 +7,18 @@ using AutoCore.Game.Entities;
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
+using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL;
+using AutoCore.Game.TNL.Ghost;
 
 [TestClass]
 public class RespawnManagerTests
 {
+    [TestCleanup]
+    public void TearDown() => TNLConnection.TestPacketSink = null;
+
     private static SectorMap CreateMap(int continentId, Vector4 entry)
     {
         var continent = new ContinentObject
@@ -607,7 +612,54 @@ public class RespawnManagerTests
     }
 
     [TestMethod]
-    public void TryRespawnInSector_UnexpectedCoid_StillSucceeds()
+    public void TryRespawnInSector_ValidVehicleRequest_TargetsCharacterSpecialEvent()
+    {
+        var map = CreateMap(94, new Vector4(0, 0, 0, 0));
+        var character = CreateCharacterWithVehicle(220, 221);
+        character.SetMap(map);
+        character.CurrentVehicle.SetMap(map);
+        BasePacket sent = null;
+        TNLConnection.TestPacketSink = (_, packet) => sent = packet;
+        character.CurrentVehicle.SetHPForTests(0);
+        character.CurrentVehicle.OnDeath(AutoCore.Game.Constants.DeathType.Silent);
+        character.SetLastRepairStation(1, 94, new Vector3(8f, 9f, 10f), Quaternion.Default);
+
+        Assert.IsNull(sent, "vehicle death initializes the client UI through ghost state, not SpecialEvent");
+
+        Assert.IsTrue(RespawnManager.Instance.TryRespawnInSector(
+            character, character.CurrentVehicle.ObjectId.Coid, out var reason));
+
+        Assert.IsNull(reason);
+        var specialEvent = sent as SpecialEventPacket;
+        Assert.IsNotNull(specialEvent, "repair is the only step that sends a SpecialEvent");
+        Assert.AreEqual(SpecialEventType.Respawn, specialEvent.Type);
+        Assert.AreEqual(character.ObjectId.Coid, specialEvent.Target.Coid);
+        Assert.AreEqual(character.ObjectId.Global, specialEvent.Target.Global);
+        Assert.AreEqual(1, specialEvent.Flag);
+    }
+
+    [TestMethod]
+    public void PlayerVehicleDeath_ScopesCorpseHealthGhostAfterStateTransition()
+    {
+        var character = CreateCharacterWithVehicle(230, 231);
+        character.CreateGhost();
+        character.OwningConnection.ActivateGhosting();
+        var vehicle = character.CurrentVehicle;
+        vehicle.SetHPForTests(0);
+
+        vehicle.OnDeath(AutoCore.Game.Constants.DeathType.Silent);
+
+        Assert.IsTrue(vehicle.IsCorpse);
+        Assert.IsNotNull(vehicle.Ghost, "death must create the owner vehicle ghost if needed");
+        Assert.IsNotNull(vehicle.Ghost.GetFirstObjectRef(),
+            "death must scope the health/corpse ghost block to the owner connection");
+        Assert.AreEqual(1.0f,
+            vehicle.Ghost.GetUpdatePriority(character.Ghost, GhostObject.HealthMask, updateSkips: 0),
+            "the owner corpse update must outrank foreign pose traffic");
+    }
+
+    [TestMethod]
+    public void TryRespawnInSector_UnexpectedCoid_FailsWithoutMovingOrReviving()
     {
         var map = CreateMap(94, new Vector4(0, 0, 0, 0));
         var character = CreateCharacterWithVehicle(210, 211);
@@ -615,7 +667,15 @@ public class RespawnManagerTests
         character.CurrentVehicle.SetMap(map);
         character.SetLastRepairStation(1, 94, new Vector3(1f, 1f, 1f), Quaternion.Default);
 
-        Assert.IsTrue(RespawnManager.Instance.TryRespawnInSector(character, 999999L, out _));
+        character.CurrentVehicle.SetHPForTests(0);
+        character.CurrentVehicle.OnDeath(AutoCore.Game.Constants.DeathType.Silent);
+        var originalPosition = character.CurrentVehicle.Position;
+
+        Assert.IsFalse(RespawnManager.Instance.TryRespawnInSector(character, 999999L, out var reason));
+        StringAssert.Contains(reason, "entity");
+        Assert.IsTrue(character.CurrentVehicle.IsCorpse);
+        Assert.AreEqual(0, character.CurrentVehicle.GetCurrentHP());
+        Assert.AreEqual(originalPosition.X, character.CurrentVehicle.Position.X);
     }
 
     [TestMethod]

@@ -965,6 +965,27 @@ public class GhostVehicleWireRegressionTests
     }
 
     [TestMethod]
+    public void OnDeath_PacksZeroHealthAndCorpseFlagInVehicleHealthDelta()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_183);
+        vehicle.SetHPForTests(0);
+        vehicle.OnDeath(DeathType.Silent);
+
+        var stream = PackUpdateNonInitial(vehicle, GhostObject.HealthMask);
+
+        Assert.IsFalse(stream.ReadFlag()); // Skills
+        for (var i = 0; i < 7; ++i)
+            Assert.IsFalse(stream.ReadFlag(), "equipment lead flag");
+        Assert.IsFalse(stream.ReadFlag()); // GM
+        Assert.IsFalse(stream.ReadFlag()); // clan
+        Assert.IsFalse(stream.ReadFlag()); // pet
+        Assert.IsFalse(stream.ReadFlag()); // murderer
+        Assert.IsTrue(stream.ReadFlag(), "death must retain the HealthMask delta");
+        Assert.AreEqual(0u, stream.ReadInt(18));
+        Assert.IsTrue(stream.ReadFlag(), "zero HP must be marked as a corpse for the client death UI");
+    }
+
+    [TestMethod]
     public void PackDelta_ForeignMinimal_HealthLeverOff_StripsHealthAndPreservesDirty()
     {
         var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_184);
