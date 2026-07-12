@@ -80,6 +80,22 @@ public class GraphicsObject : ClonedObjectBase
         return actualDamage;
     }
 
+    public override int RestoreHealth(int amount)
+    {
+        if (amount <= 0 || IsCorpse)
+            return 0;
+
+        EnsureHealthInitialized();
+        var restored = Math.Min(amount, Math.Max(0, MaxHP - HP));
+        if (restored == 0)
+            return 0;
+
+        HP += restored;
+        EnsureCombatGhost();
+        Ghost?.SetMaskBits(GhostObject.HealthMask);
+        return restored;
+    }
+
     public override void Revive()
     {
         EnsureHealthInitialized();

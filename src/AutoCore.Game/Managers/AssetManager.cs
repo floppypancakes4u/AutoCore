@@ -20,6 +20,7 @@ public class AssetManager : Singleton<AssetManager>
 
     /// <summary>Unit-test mission overrides (checked before WAD).</summary>
     private Dictionary<int, Mission.Mission> _testMissions;
+    private Dictionary<int, Skill> _testSkills;
 
     /// <summary>Unit-test NPC data overrides (checked before wad.xml data).</summary>
     private Dictionary<int, VehicleTemplate> _testVehicleTemplates;
@@ -193,6 +194,26 @@ public class AssetManager : Singleton<AssetManager>
     #endregion
 
     #region WAD
+    /// <summary>Returns a WAD skill definition; test overrides take precedence.</summary>
+    public Skill GetSkill(int skillId)
+    {
+        if (_testSkills != null && _testSkills.TryGetValue(skillId, out var testSkill))
+            return testSkill;
+
+        return WADLoader.Skills.TryGetValue(skillId, out var skill) ? skill : null;
+    }
+
+    internal void SetTestSkill(Skill skill)
+    {
+        if (skill == null)
+            return;
+
+        _testSkills ??= new Dictionary<int, Skill>();
+        _testSkills[skill.Id] = skill;
+    }
+
+    internal void ClearTestSkills() => _testSkills = null;
+
     public Mission.Mission GetMission(int missionId)
     {
         if (_testMissions != null && _testMissions.TryGetValue(missionId, out var testMission))

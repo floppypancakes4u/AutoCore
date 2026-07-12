@@ -22,6 +22,10 @@ public class TriggerManager : Singleton<TriggerManager>
     // Physical enter latch: (ObjectCoid, TriggerCoid) currently inside and already fired.
     private readonly ConcurrentDictionary<(long ObjectCoid, long TriggerCoid), bool> _activeTriggers = new();
 
+    // Per-collider repair cadence. Multiple vehicles on one pad must never share a deadline.
+    private readonly ConcurrentDictionary<(long ObjectCoid, long TriggerCoid, long ReactionCoid), long> _nextSkillPulseMs = new();
+    internal const long SkillPulseIntervalMs = 1000;
+
     // One-shot for remote/condition-driven fires (mission change, variable set).
     private readonly ConcurrentDictionary<(long ActorCoid, long TriggerCoid), bool> _firedConditionalTriggers = new();
 
@@ -84,6 +88,9 @@ public class TriggerManager : Singleton<TriggerManager>
     }
 
     public void CheckTriggersFor(ClonedObjectBase clonedObject)
+        => CheckTriggersFor(clonedObject, Environment.TickCount64);
+
+    internal void CheckTriggersFor(ClonedObjectBase clonedObject, long nowMs)
     {
         if (clonedObject is null)
             return;
@@ -119,12 +126,63 @@ public class TriggerManager : Singleton<TriggerManager>
                 {
                     _activeTriggers[key] = true;
                     FireTriggerReactions(clonedObject, trigger);
+                    ScheduleSkillPulses(clonedObject, trigger, nowMs);
                 }
+                else
+                    PulseSkillsIfDue(clonedObject, trigger, nowMs);
             }
             else if (alreadyTriggered)
             {
                 _activeTriggers.TryRemove(key, out _);
+                ClearSkillPulses(objectCoid, triggerCoid);
             }
+        }
+    }
+
+    private void ScheduleSkillPulses(ClonedObjectBase activator, Trigger trigger, long nowMs)
+    {
+        foreach (var reactionCoid in trigger.Template.Reactions)
+        {
+            if (activator.Map?.GetObjectByCoid(reactionCoid) is Reaction { Template.ReactionType: ReactionType.SkillCast })
+                _nextSkillPulseMs[(activator.ObjectId.Coid, trigger.ObjectId.Coid, reactionCoid)] = nowMs + SkillPulseIntervalMs;
+        }
+    }
+
+    private void PulseSkillsIfDue(ClonedObjectBase activator, Trigger trigger, long nowMs)
+    {
+        foreach (var reactionCoid in trigger.Template.Reactions)
+        {
+            if (activator.Map?.GetObjectByCoid(reactionCoid) is not Reaction { Template.ReactionType: ReactionType.SkillCast })
+                continue;
+
+            var key = (activator.ObjectId.Coid, trigger.ObjectId.Coid, reactionCoid);
+            if (!_nextSkillPulseMs.TryGetValue(key, out var nextPulseMs))
+            {
+                _nextSkillPulseMs[key] = nowMs + SkillPulseIntervalMs;
+                continue;
+            }
+
+            if (nowMs < nextPulseMs)
+                continue;
+
+            _nextSkillPulseMs[key] = nowMs + SkillPulseIntervalMs;
+
+            // Keep the deadline alive so a vehicle damaged while remaining on the pad resumes
+            // within one second, but emit no skill/effect traffic while already full.
+            if (activator.GetMaximumHP() > 0 && activator.GetCurrentHP() >= activator.GetMaximumHP())
+                continue;
+
+            activator.Map.TriggerReactions(activator, new List<long> { reactionCoid });
+        }
+    }
+
+    private void ClearSkillPulses(long objectCoid, long triggerCoid)
+    {
+        foreach (var key in _nextSkillPulseMs.Keys
+                     .Where(key => key.ObjectCoid == objectCoid && key.TriggerCoid == triggerCoid)
+                     .ToList())
+        {
+            _nextSkillPulseMs.TryRemove(key, out _);
         }
     }
 
@@ -298,6 +356,9 @@ public class TriggerManager : Singleton<TriggerManager>
 
         foreach (var key in _firedConditionalTriggers.Keys.Where(k => k.ActorCoid == objectCoid).ToList())
             _firedConditionalTriggers.TryRemove(key, out _);
+
+        foreach (var key in _nextSkillPulseMs.Keys.Where(k => k.ObjectCoid == objectCoid).ToList())
+            _nextSkillPulseMs.TryRemove(key, out _);
     }
 
     public void ClearTrigger(long triggerCoid)
@@ -307,18 +368,23 @@ public class TriggerManager : Singleton<TriggerManager>
 
         foreach (var key in _firedConditionalTriggers.Keys.Where(k => k.TriggerCoid == triggerCoid).ToList())
             _firedConditionalTriggers.TryRemove(key, out _);
+
+        foreach (var key in _nextSkillPulseMs.Keys.Where(k => k.TriggerCoid == triggerCoid).ToList())
+            _nextSkillPulseMs.TryRemove(key, out _);
     }
 
     public void ResetTriggerFor(long objectCoid, long triggerCoid)
     {
         _activeTriggers.TryRemove((objectCoid, triggerCoid), out _);
         _firedConditionalTriggers.TryRemove((objectCoid, triggerCoid), out _);
+        ClearSkillPulses(objectCoid, triggerCoid);
     }
 
     /// <summary>Unit-test helper: wipe all latches (process-wide singleton).</summary>
     internal void ClearAllForTests()
     {
         _activeTriggers.Clear();
+        _nextSkillPulseMs.Clear();
         _firedConditionalTriggers.Clear();
         _firingTriggerCoids.Clear();
         _cascadeDepth = 0;

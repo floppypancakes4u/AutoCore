@@ -272,6 +272,10 @@ public class Reaction : ClonedObjectBase
                 // Progress bar — client via 0x206C.
                 return true;
 
+            case ReactionType.Boost:
+                // Client applies boost presentation/effect from the reaction COID via 0x206C.
+                return true;
+
             case ReactionType.Death:
                 return HandleDeath(activator);
 
@@ -283,6 +287,9 @@ public class Reaction : ClonedObjectBase
 
             case ReactionType.MarkRepairStation:
                 return HandleMarkRepairStation(activator);
+
+            case ReactionType.SkillCast:
+                return Skills.SkillService.TryCastReaction(activator, Template.GenericVar1, Template.GenericVar3);
 
             case ReactionType.ResetTrigger:
                 return HandleResetTrigger(activator);

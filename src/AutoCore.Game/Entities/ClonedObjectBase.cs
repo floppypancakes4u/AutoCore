@@ -134,6 +134,9 @@ public abstract class ClonedObjectBase
         return 0;
     }
 
+    /// <summary>Restores hit points and returns the amount actually restored.</summary>
+    public virtual int RestoreHealth(int amount) => 0;
+
     /// <summary>
     /// Applies damage and, when it actually lands from a known attacker, notifies the NPC combat
     /// brain so an idle NPC latches onto its attacker and may call for help (Stage 11). Delegates
