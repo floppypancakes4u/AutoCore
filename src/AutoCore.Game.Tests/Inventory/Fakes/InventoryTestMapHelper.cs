@@ -42,11 +42,20 @@ public static class AssetManagerTestHelper
     }
 
     /// <summary>Registers a fake <see cref="CloneBaseVehicle"/> for spawn-flow tests.</summary>
-    public static void RegisterVehicleCloneBase(int cbid, int defaultDriverCbid = 0, int defaultWheelsetCbid = 0)
+    public static void RegisterVehicleCloneBase(
+        int cbid,
+        int defaultDriverCbid = 0,
+        int defaultWheelsetCbid = 0,
+        int faction = 0,
+        short maxHitPoint = 100)
     {
         var clone = (CloneBaseVehicle)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseVehicle));
         clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.Vehicle, CloneBaseId = cbid };
-        clone.SimpleObjectSpecific = new SimpleObjectSpecific();
+        clone.SimpleObjectSpecific = new SimpleObjectSpecific
+        {
+            Faction = faction,
+            MaxHitPoint = maxHitPoint,
+        };
         clone.VehicleSpecific = new VehicleSpecific
         {
             DefaultDriver = defaultDriverCbid,
@@ -57,11 +66,20 @@ public static class AssetManagerTestHelper
     }
 
     /// <summary>Registers a fake <see cref="CloneBaseCreature"/> (with AIBehavior/BaseLevel) for spawn-flow tests.</summary>
-    public static void RegisterCreatureCloneBase(int cbid, int aiBehaviorId = 0, short baseLevel = 1)
+    public static void RegisterCreatureCloneBase(
+        int cbid,
+        int aiBehaviorId = 0,
+        short baseLevel = 1,
+        int faction = 0,
+        short maxHitPoint = 100)
     {
         var clone = (CloneBaseCreature)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseCreature));
         clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.Creature, CloneBaseId = cbid };
-        clone.SimpleObjectSpecific = new SimpleObjectSpecific();
+        clone.SimpleObjectSpecific = new SimpleObjectSpecific
+        {
+            Faction = faction,
+            MaxHitPoint = maxHitPoint,
+        };
         clone.CreatureSpecific = new CreatureSpecific { AIBehavior = aiBehaviorId, BaseLevel = baseLevel };
         Registered[cbid] = clone;
         GetCloneBasesDictionary()[cbid] = clone;

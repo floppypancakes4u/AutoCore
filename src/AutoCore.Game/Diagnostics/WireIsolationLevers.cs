@@ -45,6 +45,8 @@ public static class WireIsolationLevers
             () => GhostVehicle.EnableMinimalForeignTemplateSpawnBlock, v => GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = v, envSuffix: "MINIMAL_FOREIGN_TEMPLATE_SPAWN"),
         new("EnableMinimalForeignOwnerBlock", "Allow owner block during minimal foreign initial profile",
             () => GhostVehicle.EnableMinimalForeignOwnerBlock, v => GhostVehicle.EnableMinimalForeignOwnerBlock = v, envSuffix: "MINIMAL_FOREIGN_OWNER"),
+        new("EnableMinimalForeignHealthBlock", "Allow Health/HealthMax blocks during minimal foreign profile (NPC health bars)",
+            () => GhostVehicle.EnableMinimalForeignHealthBlock, v => GhostVehicle.EnableMinimalForeignHealthBlock = v, envSuffix: "MINIMAL_FOREIGN_HEALTH"),
         new("EnableInitialHardpointPack", "Pack WheelSet hardpoint on ghost initial (seeds create-buffer +0x45c)",
             () => GhostVehicle.EnableInitialHardpointPack, v => GhostVehicle.EnableInitialHardpointPack = v, envSuffix: "INITIAL_HARDPOINT"),
         new("EnableDeferredForeignPose", "Omit pose on foreign ghost initial; ship pose on later delta (owner-on race)",
@@ -83,6 +85,42 @@ public static class WireIsolationLevers
 
         ApplyFromEnvironmentVariables();
         Logger.WriteLog(LogType.Network, "WireIsolationLevers active:\n" + FormatStatus());
+
+        foreach (var warning in GetNpcCombatLeverWarnings())
+            Logger.WriteLog(LogType.Error, "WireIsolationLevers: " + warning);
+    }
+
+    /// <summary>
+    /// Warn when the minimal-foreign profile is on but health/owner admissions that NPC
+    /// target-frame HP needs are off. Incomplete lever JSON files (e.g. old Sector copies that
+    /// omit <c>EnableMinimalForeignHealthBlock</c>) leave code defaults after
+    /// <see cref="ResetToDefaults"/> and silently strip NPC Cur/Max.
+    /// </summary>
+    public static IReadOnlyList<string> GetNpcCombatLeverWarnings()
+    {
+        var warnings = new List<string>();
+        if (!GhostVehicle.EnableMinimalForeignInitialProfile)
+            return warnings;
+
+        if (!GhostVehicle.EnableMinimalForeignHealthBlock)
+        {
+            warnings.Add(
+                "EnableMinimalForeignInitialProfile=true but EnableMinimalForeignHealthBlock=false — " +
+                "foreign NPC Health/HealthMax are stripped (green CreateVehicle bar, no live HP). " +
+                "Set EnableMinimalForeignHealthBlock true in wire-isolation.levers.json.");
+        }
+
+        if (!GhostVehicle.EnableOwnerWire || !GhostVehicle.EnableMinimalForeignOwnerBlock)
+        {
+            warnings.Add(
+                "EnableMinimalForeignInitialProfile=true but owner is not admitted " +
+                $"(EnableOwnerWire={GhostVehicle.EnableOwnerWire}, " +
+                $"EnableMinimalForeignOwnerBlock={GhostVehicle.EnableMinimalForeignOwnerBlock}) — " +
+                "ghost never builds the driver; target-frame Cur/Max needs vehicle+0xAC (NPC.md §14.4). " +
+                "Set both owner levers true in wire-isolation.levers.json.");
+        }
+
+        return warnings;
     }
 
     public static void ResetToDefaults()
@@ -100,6 +138,7 @@ public static class WireIsolationLevers
         GhostVehicle.EnableMinimalForeignPathBlock = false;
         GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = false;
         GhostVehicle.EnableMinimalForeignOwnerBlock = false;
+        GhostVehicle.EnableMinimalForeignHealthBlock = false;
         GhostVehicle.EnableInitialHardpointPack = false;
         GhostVehicle.EnableDeferredForeignPose = false;
         GhostVehicle.EnableForeignReghostOwner = false;

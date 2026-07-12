@@ -12,6 +12,7 @@
   "EnableMinimalForeignPathBlock": true,
   "EnableMinimalForeignTemplateSpawnBlock": true,
   "EnableMinimalForeignOwnerBlock": true,
+  "EnableMinimalForeignHealthBlock": true,
   "EnableInitialHardpointPack": true,
   "EnableDeferredForeignPose": false,
   "EnableForeignReghostOwner": false,

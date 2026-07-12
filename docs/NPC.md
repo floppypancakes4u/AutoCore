@@ -22,6 +22,8 @@ named NPC is special-cased anywhere. Behaviour is driven only by map spawn field
 | D | Interest management (spatial hash + tiered scope + priority) | **Implemented** | `Map/SpatialHashGrid.cs`, `Map/InterestSelector.cs`, `TNL/Ghost/GhostObject.cs` |
 | D | Ghidra renames + RE closure notes for HBAI/path | **Complete** (§10, §12) |  |
 | — | `tCreatureAI` val1–val20 profile semantics | Documented §10.7 / §12.5 | `Structures/CreatureAiProfile.cs` |
+| — | NPC vehicle Health on the wire (`EnableMinimalForeignHealthBlock` + resend window) | **Implemented** (§14) | `GhostVehicle.cs`, `WireIsolationLevers.cs` |
+| — | Target-frame Cur/Max via CreateCreature driver + CreateVehicle owner attach | **Implemented** (§14.4); live confirm Cur/Max after redeploy | `CreateCreaturePacket`, `SectorMap.TrySendForeignDriverCreate` |
 
 **What is deliberately NOT on the server:** the client still owns the fine physics simulation
 (`CVOGHBAIDriver::DoLogic` steering math, weapon-geometry fire masks, skill VFX). The server holds
@@ -466,6 +468,24 @@ See **§10** for renamed symbols and AI-state notes, **§12** for the five RE cl
 | `005f7720` | `VehicleNet_UnpackGhostVehicle` (pre-existing) |
 | `004c5c30` | `CVOGCreature_PostCreateFromPacket` |
 
+### Ghidra anchors — health / target-frame RE (2026-07-11, §14)
+
+| Address | Identity | Note |
+|--------:|----------|------|
+| `004c49d0` | `Creature::SetVehicle` | THE creature↔vehicle link: `creature+0x250 = vehicle`, copies vehicle COID to `+0x210/+0x214`, calls vehicle `vtbl+0x158` (owner ptr `vehicle+0xAC`) |
+| `00505590` | `Vehicle_applyCreatePacket` | Resolves CreateVehicle `+0xd8` (`CoidCurrentOwner`) → `SetVehicle`; requires creature to already exist (no retry); skipped when `IsTrailer` |
+| `004fedc0` | `Vehicle::PostCreateFromPacket` | Same owner attach on the create-from-ghost path |
+| `0080a4b0` | CreateVehicle (0x201D) game-packet handler | Reads CBID +4, `CoidCurrentOwner` +0xd8 |
+| `008078b0` | Client net pump / pending-ghost processor | "Creating object from ghost %I64d" vs bind-only "Assigned a ghost to waiting %I64d" — bind-only **ignores** the parsed ghost CurrentOwner block |
+| `005f5de0` | `VehicleNet_PackUpdate` (client’s own pack) | Confirms `GhostVehicle.cs` owner-block encoding byte-compatible |
+| `005f5ad0` | Owner sub-packet allocator | Ghost owner block → nested 0x2013/0x2015 create with `+0xf8/+0xfc` = vehicle COID (ghost-first materialize auto-attaches) |
+| `0080af70` | CreateCreature (0x2013) game-packet handler | Same as ghost nest create; no-op if TFID already exists. AutoCore sends this for NPC drivers before CreateVehicle |
+| `00521310` | Character create apply | Player path: `CurrentVehicleCoid` → `SetVehicle` (why player vehicles always showed HP) |
+| `008c5960` | **Self** status HUD update | Reads local player global `DAT_00d1b6d8`; earlier notes calling this the target HUD were wrong |
+| `00839ff0` / `00838e20` | Target frame (`i_d_target.xml`) ctor / updater | Target at panel `+0x518`; vehicle-target `"%i/%i"` HP text gated on `vehicle+0xAC` owner ptr non-null + owner type Creature + `vehicle+0x17c` bit 10 clear |
+| `0093e120` / `005172d0` | UI target route / set attack target | Click stores picked object **as-is** (no vehicle→driver redirect) at HUDmgr `+0x3048` / player `+0xa0` |
+| `004bb040` | `ResolveObjectTarget→GetAsCreature` | Owner COID resolve used by the attach; null-safe |
+
 ---
 
 ## 8. Open RE / implementation questions
@@ -478,7 +498,10 @@ See **§10** for renamed symbols and AI-state notes, **§12** for the five RE cl
 6. ~~Faction "wrong relation" filter~~ — **closed** (§12.2): matches `FactionHostility`.
 7. ~~18-bit path id widening~~ — **closed** (§12.3): zero-extended 18-bit, `-1` via absence flag.
 8. ~~Flee HP-band semantics~~ — **closed** (§12.5): deterministic `hpRatio <= band` gate.
-9. **Driver as CurrentOwner** — NPC drivers must always ghost as the vehicle owner for the client to build `CVOGHBAIDriver` (implemented on spawn; **verify live**).
+9. ~~Driver as CurrentOwner~~ — **closed** (§14.4): client links driver↔vehicle via
+   `CreateVehiclePacket.CoidCurrentOwner` → `SetVehicle` (`004c49d0`). Ghost CurrentOwner is ignored
+   on bind-only. Server sends **`CreateCreature` (0x2013) for the NPC driver first**, then
+   CreateVehicle with driver coid; delayed destroy+CreateVehicle remains a one-shot recovery.
 10. **Character vs Mine** RTTI split when both use ctor `0063d0b0` (does not affect server behaviour).
 
 ---
@@ -621,6 +644,10 @@ yet emit the client "shout" packet.
 
 ## 11. Remaining optional work
 
+**Done since this list was written:** foreign NPC vehicle **Health / HealthMax on the wire** via
+`EnableMinimalForeignHealthBlock` + 5 s resend window, and **target-frame Cur/Max** via
+`CreateVehiclePacket.CoidCurrentOwner` = driver creature coid — see **§14**.
+
 Ordered by likely impact:
 
 1. **Skill casting** — cast from clonebase skill sets (client `FUN_005d1280` / `CVOGReaction_CastSkillOnTarget`); the server flee/help loop is in, skills are not.
@@ -762,4 +789,115 @@ else                                     -> typeWeight * falloff + updateSkips *
 
 ---
 
-*Last updated: 2026-07-10 — Phase D RE closure (WaitTime ms, faction, 18-bit path id, creature pose-only, flee HP-band) + interest-management section; status truthed-up to the as-built `feature/npc-ai` branch.*
+## 14. NPC health on the wire (2026-07-11)
+
+Server-side NPC health already worked end to end (spawn HP pools, shared player/NPC damage pipeline
+`Vehicle.ProcessCombatInternal` → `TakeDamage` → `OnDeath` → loot → `MissionKillProgress` kill
+credit). What clients never saw was **HP under the minimal foreign profile**: with
+`EnableMinimalForeignInitialProfile` on (production), foreign GhostVehicle masks were rewritten to
+pose|wheel only, stripping `HealthMask` (0x008) and `HealthMaxMask` (0x040) from both initial and
+delta packs — NPC bars stayed a mute CreateVehicle full-green.
+
+### 14.1 Lever
+
+| Item | Value |
+|------|-------|
+| Lever | `GhostVehicle.EnableMinimalForeignHealthBlock` |
+| Code default | **false** (production-safe reset) |
+| Env var | `AUTOCORE_WIRE_MINIMAL_FOREIGN_HEALTH` |
+| Production JSON | **true** in root, Launcher, and Sector `wire-isolation.levers.json` |
+| Console | `wire set EnableMinimalForeignHealthBlock <0|1>` (live) |
+
+**Cur/Max also needs owner on the wire.** With `EnableMinimalForeignInitialProfile=true`, set **both**:
+
+| Lever | Why |
+|-------|-----|
+| `EnableMinimalForeignHealthBlock` | Live HP setters / bar updates |
+| `EnableMinimalForeignOwnerBlock` + `EnableOwnerWire` | Ghost builds the driver so CreateVehicle `CoidCurrentOwner` can attach (`vehicle+0xAC`) |
+
+Incomplete lever files (old Sector copies that only listed Scope/Path/Owner/Template) leave Health/Owner admissions at **false** after `ResetToDefaults` and silently strip NPC numbers. Startup logs `WireIsolationLevers: loaded <path>` — confirm that path and that `GetNpcCombatLeverWarnings` does not fire errors.
+
+When on, the minimal-profile mask rewrite admits `HealthMask | HealthMaxMask` on **initial** packs
+and through the **delta** filter (`Position | WheelSet | Health | HealthMax`). With the production
+lever set (minimal + initial hardpoint + health) the foreign initial mask is exactly
+**`0x10000004A`** = pose(0x2) | Health(0x8) | HealthMax(0x40) | WheelSet(0x100000000).
+
+### 14.2 Post-materialize re-apply (keep-dirty after initial)
+
+The client only calls the HP combat setters (`vtable +0x240/+0x248`) against the **live** vehicle
+object. If the ghost initial races ahead of CreateVehicle materialize, HP is cached on ghost slots
+`0x21/0x22` and never reaches the target-frame getters (`vtable +0x1b0/+0x1ac`). The server
+therefore keeps `HealthMask | HealthMaxMask` dirty for **`HealthResendWindowMs` (default 5000 ms)**
+after any foreign initial that packed HP, so every delta in that window re-sends HP until the live
+object has certainly materialized. A single +430 ms re-send was live-observed (2026-07-11, coid
+1342195382) to still lose the race — blank bar despite `hp=1 cur=150 max=150` on the wire. Expected
+WireDiag signature: initial `hp=1`, then non-initial packs also `hp=1` for ~5 s (log shows at most
+`MaxPartialGhostPacksPerCoid = 3` non-initial packs per coid — later re-sends are real but unlogged).
+
+When the lever is **off** under the minimal profile, stripped health bits are preserved in the
+TNL return mask (same pattern as the WheelSet dirty-preserve), so a live lever flip ships HP
+without needing a fresh damage event.
+
+### 14.3 Diagnostics
+
+`WireDiag` GhostVehicle pack detail now includes `hp=<0|1> cur=<HP> max=<MaxHP>`. Live checks:
+
+1. Startup `WireIsolationLevers active:` lists `EnableMinimalForeignHealthBlock = true`.
+2. Foreign NPC ghost initial: `mask=10000004A ... hp=1 cur=… max=… profile=minimal`, followed by a
+   non-initial pack with `hp=1` (the keep-dirty re-send).
+3. In-game: damage → `HealthMask` dirty (`SimpleObject.TakeDamage`) → bar drop per delta → at 0 HP
+   the NPC vehicle despawns (`Vehicle.OnDeath` NPC path: loot roll, `SetMap(null)`,
+   `BroadcastDestroy`) and mission kill credit fires.
+
+### 14.4 Target-frame cur/max text — CreateVehicle owner attach (Ghidra, 2026-07-11)
+
+Live A/B with the health lever ON showed the wire fully correct (initial `mask=10000004A hp=1
+cur=150 max=150`, re-send delta `hp=1`) and the bar depleting on damage — but the target-frame
+**numbers** never rendered for NPC vehicles (walking NPCs fine). Deep RE closed it:
+
+- **`FUN_008c5960` is the SELF status HUD** (its global `DAT_00d1b6d8` is the local player, not
+  the UI target — earlier notes calling it the target HUD were wrong). The real target frame is
+  the `i_d_target.xml` panel: ctor `FUN_00839ff0`, updater **`FUN_00838e20`**, tracked target at
+  panel `+0x518`.
+- In `FUN_00838e20`, a **Vehicle target renders `"%i/%i"` HP text only when `vehicle+0xAC` (the
+  client owner-object pointer) is non-null and the owner's type is Creature (0x12)** — otherwise
+  the branch renders the name only. The gauge bar reads the vehicle directly, which is why it
+  depletes while the numbers stay blank. (Secondary gate: bit 10 of `vehicle+0x17c` must be clear.)
+- `vehicle+0xAC` / `driverCreature+0x250` are linked ONLY by **`Creature::SetVehicle`
+  (`004c49d0`)**, reached from `Vehicle_applyCreatePacket` (`00505590`) /
+  `Vehicle::PostCreateFromPacket` (`004fedc0`) resolving **`CreateVehiclePacket.CoidCurrentOwner`
+  (packet `+0xd8`)**. The vehicle **ghost** CurrentOwner block is parsed into a pending owner
+  sub-packet but is **ignored on the bind-only path** — which is the path AutoCore always takes
+  because it pre-sends CreateVehicle. There is no retry.
+- **Server fix (owner coid):** `Vehicle.WriteToPacket` sends
+  `CoidCurrentOwner = DBData?.CharacterCoid ?? Owner?.ObjectId.Coid ?? 0` — NPC vehicles carry
+  their driver creature coid.
+- **Server fix (driver materialize):** bind-only ghost path (`FUN_008078b0` "Assigned a ghost to
+  waiting") **never** runs nested `0x2013` CreateCreature for the driver — only ghost-first does.
+  AutoCore pre-sends CreateVehicle, so the driver object never existed on the client and
+  `FUN_004bb040(CoidCurrentOwner)` always failed. Fix: **`CreateCreaturePacket` (0x2013)** for
+  pure-creature owners **before** every foreign `CreateVehicle` / owner-attach reapply
+  (`SectorMap.TrySendForeignDriverCreate`). Layout matches nest offsets: vehicle link at `+0xF8`,
+  level at `+0x114`. WireDiag: `ForeignDriverCreate coid=… driverCoid=…`.
+- **Server fix (attach race):** even with driver create first, keep one-shot delayed
+  **`CreateCreature` + `DestroyObject` + `CreateVehicle` (`IsItemLink=0`)** after ghost
+  (`ForeignOwnerAttachReapplyMilliseconds`, default **1000 ms**) so a raced first apply still
+  gets a full `SetVehicle`. **IsItemLink re-apply is wrong** (tooltips, blank numbers). WireDiag:
+  `ForeignOwnerAttachReapply coid=… driverCoid=… destroy+create isItemLink=0`.
+
+### 14.5 Scope notes
+
+- **GhostCreature (foot NPCs) unchanged** — the minimal profile never filtered creature ghosts;
+  their Health/HealthMax pack whenever the mask bits are dirtied.
+- **Death is conveyed by the destroy broadcast**, not the corpse flag: `Vehicle.OnDeath` dirties
+  `HealthMask` then tears the ghost down in the same call, so the corpse delta usually never ships
+  for NPC vehicles. Intentional — do not force a corpse delta before destroy.
+- **HealthMax is never re-dirtied mid-life** — acceptable: NPC max HP is fixed at spawn before the
+  ghost initial, which always carries HealthMax under the lever.
+- Tests: `GhostVehicleWireRegressionTests` (`PackInitial/PackDelta_ForeignMinimal_Health*`) and
+  `WireIsolationLeversTests` cover mask math, stream layout, keep-dirty, strip+preserve, and lever
+  registry (name/env/JSON/reset/status).
+
+---
+
+*Last updated: 2026-07-11 — §14.4 CreateCreature driver materialize for Cur/Max; previously health lever + owner attach reapply.*

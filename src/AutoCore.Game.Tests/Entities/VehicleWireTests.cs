@@ -53,6 +53,50 @@ public class VehicleWireTests
         Assert.AreEqual(88, packet.TemplateId);
     }
 
+    /// <summary>
+    /// Ghidra RE (2026-07-11): the client links driverCreature+0x250 = vehicle (and the
+    /// vehicle-side owner pointer) ONLY from CreateVehiclePacket.CoidCurrentOwner (+0xd8) in
+    /// Vehicle_applyCreatePacket — the ghost CurrentOwner block is parsed but ignored on the
+    /// bind-only path because AutoCore pre-sends CreateVehicle. Owner 0 → no link → target-frame
+    /// HP text never renders for NPC vehicles.
+    /// </summary>
+    [TestMethod]
+    public void WriteToPacket_NpcVehicleWithDriver_SendsDriverAsCurrentOwner()
+    {
+        const int vehicleCbid = 640_010;
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid);
+
+        var vehicle = new Vehicle();
+        vehicle.SetCoid(9310, true);
+        vehicle.LoadCloneBase(vehicleCbid);
+
+        var driver = new Creature();
+        driver.SetCoid(9311, true);
+        vehicle.SetOwner(driver);
+
+        var packet = new CreateVehiclePacket();
+        vehicle.WriteToPacket(packet);
+
+        Assert.AreEqual(9311L, packet.CoidCurrentOwner,
+            "NPC CreateVehicle must carry the driver creature coid so the client attaches driver+0x250 = vehicle.");
+    }
+
+    [TestMethod]
+    public void WriteToPacket_NoDriverNoDb_CurrentOwnerZero()
+    {
+        const int vehicleCbid = 640_011;
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid);
+
+        var vehicle = new Vehicle();
+        vehicle.SetCoid(9312, true);
+        vehicle.LoadCloneBase(vehicleCbid);
+
+        var packet = new CreateVehiclePacket();
+        vehicle.WriteToPacket(packet);
+
+        Assert.AreEqual(0L, packet.CoidCurrentOwner);
+    }
+
     [TestMethod]
     public void WriteToPacket_NoPath_WritesDefaults()
     {

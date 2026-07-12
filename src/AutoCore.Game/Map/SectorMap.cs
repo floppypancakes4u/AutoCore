@@ -415,13 +415,21 @@ public class SectorMap
                 // First sighting or re-scope after detach: ensure sector create before ghost.
                 // Do NOT set IsItemLink here — client packet+0xA1 drives item-link UI (Red Brigade
                 // tooltips on live). Nest recovery after a ghost race uses WheelSetMask delta instead.
+                //
+                // Chassis first, then CreateCreature with packet+0xF8 = vehicle COID.
+                // CVOGCreature_PostCreateFromPacket only calls SetVehicle when the vehicle already
+                // exists (FUN_004bafe0). Vehicle_applyCreatePacket owner attach is gated by map
+                // +0xe4e8 and is not reliable for foreign NPCs. Bind-only ghost never materializes
+                // nested 0x2013.
+                var scopedForeign = (Vehicle)entity;
                 var createPacket = new CreateVehiclePacket();
-                ((Vehicle)entity).WriteToPacket(createPacket);
+                scopedForeign.WriteToPacket(createPacket);
                 if (TNL.TNLConnection.ForceForeignCreateReapply)
                     createPacket.IsItemLink = true;
                 gameConnection.SendGamePacket(createPacket);
+                ForeignNpcDriverWire.TrySendDriverCreate(gameConnection, scopedForeign);
                 gameConnection.NoteForeignVehicleCreateSent(coid);
-                if (((Vehicle)entity).WheelSet != null && ((Vehicle)entity).WheelSet.CBID > 0)
+                if (scopedForeign.WheelSet != null && scopedForeign.WheelSet.CBID > 0)
                     ghost.SetMaskBits(GhostVehicle.WheelSetMask);
                 if (ScopeGlobalVehicleGhost)
                     continue;
@@ -503,6 +511,31 @@ public class SectorMap
                             coid, scopedVeh.WheelSet?.CBID ?? -1);
                     }
                 }
+
+                // Target-frame Cur/Max (FUN_00838e20) needs vehicle+0xAC = driver via
+                // CreateVehicle CoidCurrentOwner → SetVehicle. First create races the ghost
+                // owner block that materializes the driver. IsItemLink re-apply re-runs nest
+                // equip + tooltip UI (FUN_008024d0) but is the wrong path for owner attach
+                // (live: tooltips with still-blank numbers). Schedule destroy+recreate instead.
+                if (nowGhosted
+                    && !wasGhosted
+                    && entity is Vehicle ownerVeh
+                    && TNL.TNLConnection.ShouldScheduleForeignOwnerAttachReapply(
+                        gameConnection, ownerVeh.Owner?.GetAsCreature() != null))
+                {
+                    gameConnection.ScheduleForeignOwnerAttachReapply(coid);
+                }
+            }
+
+            // Owner-attach recovery via ForeignNpcDriverWire (destroy veh+driver, recreate
+            // vehicle→creature so PostCreate SetVehicle runs). See NPC.md §14.4.
+            if (foreignGlobalVehicle
+                && gameConnection != null
+                && ghost.IsGhostedTo(connection)
+                && gameConnection.TryConsumeForeignOwnerAttachReapply(coid)
+                && entity is Vehicle attachVeh)
+            {
+                ForeignNpcDriverWire.TryExecuteOwnerAttachReapply(gameConnection, attachVeh, ghost);
             }
         }
     }

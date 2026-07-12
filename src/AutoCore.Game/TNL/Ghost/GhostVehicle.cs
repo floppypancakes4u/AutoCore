@@ -49,6 +49,31 @@ public class GhostVehicle : GhostObject
     public static bool EnableMinimalForeignOwnerBlock = false;
 
     /// <summary>
+    /// Admits <see cref="GhostObject.HealthMask"/>/<see cref="GhostObject.HealthMaxMask"/> under
+    /// the minimal foreign profile so clients render NPC health (full bar on initial, drops on
+    /// damage deltas, corpse flag). Health bytes apply to the vehicle object itself (client
+    /// vtable +0x240/+0x248) — no clientHasOwner gate needed. Default false; enabled in the
+    /// production wire-isolation.levers.json.
+    /// </summary>
+    public static bool EnableMinimalForeignHealthBlock = false;
+
+    /// <summary>Default for <see cref="HealthResendWindowMs"/>.</summary>
+    public const int DefaultHealthResendWindowMs = 5000;
+
+    /// <summary>
+    /// How long after a foreign initial that packed HP the ghost keeps Health/HealthMax dirty so
+    /// every delta re-sends them. The client only applies HP through the combat setters
+    /// (vtable +0x240/+0x248) when the live vehicle exists; live capture (2026-07-11) showed the
+    /// initial plus a single +430 ms re-send both landing before CreateVehicle materialize, HP
+    /// stuck on ghost cache slots 0x21/0x22, and a blank target bar. A window of re-sends rides
+    /// the 50 ms pose stream until the live object has certainly materialized.
+    /// </summary>
+    public static int HealthResendWindowMs = DefaultHealthResendWindowMs;
+
+    /// <summary>Tick (Environment.TickCount64) until which foreign health re-sends stay dirty.</summary>
+    private long _healthResendUntilTick;
+
+    /// <summary>
     /// When true, pack the WheelSet hardpoint on <b>initial</b> ghost updates (default: false).
     /// Client RE: initial hardpoint CBID is written into the ghost create buffer at +0x45c —
     /// the same field <c>EquipFromCreate</c> reads when materializing from ghost. This is
@@ -209,12 +234,13 @@ public class GhostVehicle : GhostObject
         // +0x45c can be seeded before ghost materialize (EquipFromCreate).
         // EnableDeferredForeignPose strips PositionMask from foreign initial (activate race).
         var deferForeignPose = Parent.ObjectId.Global && EnableDeferredForeignPose;
+        var minimalHealthBits = EnableMinimalForeignHealthBlock ? HealthMask | HealthMaxMask : 0UL;
         if (useMinimalForeignInitialProfile)
         {
             var initialPose = deferForeignPose ? 0UL : PositionMask;
             updateMask = isInitial
-                ? initialPose | (EnableInitialHardpointPack ? WheelSetMask : 0UL)
-                : updateMask & (PositionMask | WheelSetMask);
+                ? initialPose | (EnableInitialHardpointPack ? WheelSetMask : 0UL) | minimalHealthBits
+                : updateMask & (PositionMask | WheelSetMask | minimalHealthBits);
         }
         else if (isInitial && deferForeignPose)
         {
@@ -519,6 +545,7 @@ public class GhostVehicle : GhostObject
                         $"initWheel={(isInitial && EnableInitialHardpointPack ? 1 : 0)} " +
                         $"deferPose={(isInitial && deferForeignPose ? 1 : 0)} " +
                         $"aiWire={(EnableAiStateWire ? 1 : 0)} global={(Parent.ObjectId.Global ? 1 : 0)} " +
+                        $"hp={((updateMask & HealthMask) != 0 ? 1 : 0)} cur={Parent.GetCurrentHP()} max={Parent.GetMaximumHP()} " +
                         $"profile={(useMinimalForeignInitialProfile ? "minimal" : "full")} sourceMask={sourceUpdateMask:X}");
         }
 
@@ -530,6 +557,34 @@ public class GhostVehicle : GhostObject
             && (updateMask & WheelSetMask) == 0)
         {
             ret |= WheelSetMask;
+        }
+
+        // Health parity with the WheelSet preserve above: when the minimal profile strips
+        // Health/HealthMax (EnableMinimalForeignHealthBlock off), keep them dirty so a live
+        // lever flip ships HP without needing a fresh damage event.
+        if (useMinimalForeignInitialProfile
+            && (sourceUpdateMask & (HealthMask | HealthMaxMask)) != 0
+            && (updateMask & (HealthMask | HealthMaxMask)) == 0)
+        {
+            ret |= sourceUpdateMask & (HealthMask | HealthMaxMask);
+        }
+
+        // Ghost initial can race CreateVehicle materialize on the client: the HP setters
+        // (vtable +0x240/+0x248) only run against the live vehicle object; packs that land
+        // earlier cache HP on ghost slots 0x21/0x22 and never reach the combat getters. Keep
+        // Health dirty for HealthResendWindowMs after an initial that packed it so deltas keep
+        // re-sending HP until the live object has certainly materialized (one +430 ms re-send
+        // was observed to still lose the race). The window bounds the re-sends — after it,
+        // packed health clears dirty normally.
+        if (useMinimalForeignInitialProfile
+            && EnableMinimalForeignHealthBlock
+            && (updateMask & HealthMask) != 0)
+        {
+            if (isInitial)
+                _healthResendUntilTick = Environment.TickCount64 + HealthResendWindowMs;
+
+            if (isInitial || Environment.TickCount64 < _healthResendUntilTick)
+                ret |= HealthMask | HealthMaxMask;
         }
 
         // Deferred pose: first foreign initial omitted PositionMask — keep dirty for next delta.

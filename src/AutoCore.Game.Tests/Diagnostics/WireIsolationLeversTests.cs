@@ -29,6 +29,7 @@ public class WireIsolationLeversTests
     {
         SectorMap.ScopeGlobalVehicles = false;
         GhostVehicle.EnablePathWire = false;
+        GhostVehicle.EnableMinimalForeignHealthBlock = true;
         WireDiag.Enabled = true;
 
         WireIsolationLevers.ResetToDefaults();
@@ -49,7 +50,64 @@ public class WireIsolationLeversTests
         Assert.IsFalse(SoftNpcPathMotion.Enabled, "soft path motion is opt-in (lever / env)");
         Assert.IsFalse(GhostVehicle.EnableClientSidePathVisual,
             "client-side path visual freezes server pose authority when misused");
+        Assert.IsFalse(GhostVehicle.EnableMinimalForeignHealthBlock,
+            "NPC health under minimal foreign is opt-in via production levers JSON");
         Assert.IsFalse(WireDiag.Enabled);
+    }
+
+    [TestMethod]
+    public void GetNpcCombatLeverWarnings_EmptyWhenMinimalOff()
+    {
+        GhostVehicle.EnableMinimalForeignInitialProfile = false;
+        GhostVehicle.EnableMinimalForeignHealthBlock = false;
+        GhostVehicle.EnableMinimalForeignOwnerBlock = false;
+
+        Assert.AreEqual(0, WireIsolationLevers.GetNpcCombatLeverWarnings().Count);
+    }
+
+    [TestMethod]
+    public void GetNpcCombatLeverWarnings_FlagsMissingHealthAndOwnerUnderMinimal()
+    {
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = false;
+        GhostVehicle.EnableOwnerWire = true;
+        GhostVehicle.EnableMinimalForeignOwnerBlock = false;
+
+        var warnings = WireIsolationLevers.GetNpcCombatLeverWarnings();
+        Assert.IsTrue(warnings.Count >= 2, string.Join(" | ", warnings));
+        StringAssert.Contains(warnings[0] + warnings[1], "EnableMinimalForeignHealthBlock");
+        StringAssert.Contains(string.Join(" ", warnings), "EnableMinimalForeignOwnerBlock");
+    }
+
+    [TestMethod]
+    public void GetNpcCombatLeverWarnings_EmptyWhenProductionNpcLeversOn()
+    {
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = true;
+        GhostVehicle.EnableOwnerWire = true;
+        GhostVehicle.EnableMinimalForeignOwnerBlock = true;
+
+        Assert.AreEqual(0, WireIsolationLevers.GetNpcCombatLeverWarnings().Count);
+    }
+
+    [TestMethod]
+    public void TrySet_MinimalForeignHealthBlock_ByNameAndEnvSuffix()
+    {
+        Assert.IsTrue(WireIsolationLevers.TrySet("EnableMinimalForeignHealthBlock", true, out _));
+        Assert.IsTrue(GhostVehicle.EnableMinimalForeignHealthBlock);
+
+        WireIsolationLevers.ResetToDefaults();
+        Assert.IsTrue(WireIsolationLevers.TrySet("MINIMAL_FOREIGN_HEALTH", true, out _));
+        Assert.IsTrue(GhostVehicle.EnableMinimalForeignHealthBlock);
+    }
+
+    [TestMethod]
+    public void ApplyFromJson_EnablesMinimalForeignHealthBlock()
+    {
+        var applied = WireIsolationLevers.ApplyFromJson(
+            """{"EnableMinimalForeignHealthBlock": true}""", out var error);
+        Assert.IsTrue(applied, error);
+        Assert.IsTrue(GhostVehicle.EnableMinimalForeignHealthBlock);
     }
 
     [TestMethod]
@@ -165,6 +223,7 @@ public class WireIsolationLeversTests
         var text = WireIsolationLevers.FormatStatus();
         StringAssert.Contains(text, "ScopeGlobalVehicles");
         StringAssert.Contains(text, "EnablePathWire");
+        StringAssert.Contains(text, "EnableMinimalForeignHealthBlock");
         StringAssert.Contains(text, "WireDiag");
     }
 

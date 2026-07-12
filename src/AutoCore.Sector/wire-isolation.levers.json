@@ -1,5 +1,5 @@
 {
-  "WireDiag": false,
+  "WireDiag": true,
   "ScopeGlobalVehicles": true,
   "ScopeGlobalVehicleCreate": true,
   "ScopeGlobalVehicleGhost": true,
@@ -7,5 +7,16 @@
   "EnableAiStateWire": true,
   "EnablePathWire": true,
   "EnableOwnerWire": true,
-  "EnableTemplateSpawnWire": true
+  "EnableTemplateSpawnWire": true,
+  "EnableMinimalForeignInitialProfile": true,
+  "EnableMinimalForeignPathBlock": true,
+  "EnableMinimalForeignTemplateSpawnBlock": true,
+  "EnableMinimalForeignOwnerBlock": true,
+  "EnableMinimalForeignHealthBlock": true,
+  "EnableInitialHardpointPack": true,
+  "EnableDeferredForeignPose": false,
+  "EnableForeignReghostOwner": false,
+  "EnableForeignVehiclePosePriorityBoost": true,
+  "EnableSoftNpcPathMotion": true,
+  "EnableClientSidePathVisual": false
 }

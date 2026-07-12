@@ -46,6 +46,8 @@ public class GhostVehicleWireRegressionTests
         GhostVehicle.EnableMinimalForeignPathBlock = false;
         GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = false;
         GhostVehicle.EnableMinimalForeignOwnerBlock = false;
+        GhostVehicle.EnableMinimalForeignHealthBlock = false;
+        GhostVehicle.HealthResendWindowMs = GhostVehicle.DefaultHealthResendWindowMs;
         GhostVehicle.EnableInitialHardpointPack = false;
         GhostVehicle.EnableDeferredForeignPose = false;
         GhostVehicle.EnableForeignReghostOwner = false;
@@ -805,6 +807,259 @@ public class GhostVehicleWireRegressionTests
         packed.Read(out long wheelCoid);
         Assert.AreEqual(MapNpcIdentity.CoidBase + 20_177, wheelCoid);
         Assert.IsTrue(packed.ReadFlag()); // global
+    }
+
+    /// <summary>
+    /// Production NPC-health recipe: minimal foreign + initial hardpoint + health levers on.
+    /// Initial must pack pose|wheel|Health|HealthMax (mask 0x10000004A) so the client seeds
+    /// real HP through the combat setters instead of a mute full-green CreateVehicle bar.
+    /// </summary>
+    [TestMethod]
+    public void PackInitial_ForeignMinimal_HealthLever_ProductionMaskPacksHealth()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_180);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_180, true);
+        var wheel = new WheelSet();
+        wheel.SetCoid(MapNpcIdentity.CoidBase + 20_181, true);
+        Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.WheelSet, wheel, out _));
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableInitialHardpointPack = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = true;
+        WireDiag.Enabled = true;
+
+        var stream = PackInitial(vehicle, ulong.MaxValue);
+
+        SkipPackCommonAndMultipliers(stream);
+        Assert.IsFalse(stream.ReadFlag()); // path
+        Assert.IsFalse(stream.ReadFlag()); // template
+        Assert.IsFalse(stream.ReadFlag()); // spawn owner
+        stream.ReadInt(8); // trick count
+        Assert.IsFalse(stream.ReadFlag()); // trailer
+        Assert.IsFalse(stream.ReadFlag()); // owner
+        Assert.IsTrue(stream.ReadFlag(), "WheelSet admitted on minimal initial (hardpoint lever)");
+        Assert.IsTrue(stream.ReadFlag()); // wheel present
+        stream.ReadInt(20); // CBID
+        stream.Read(out long _); // wheel coid
+        stream.ReadFlag(); // global
+        for (var i = 0; i < 6; ++i)
+            Assert.IsFalse(stream.ReadFlag(), $"equipment lead flag {i + 1} must stay false");
+        Assert.IsFalse(stream.ReadFlag()); // GM
+        Assert.IsFalse(stream.ReadFlag()); // clan
+        Assert.IsFalse(stream.ReadFlag()); // pet
+        Assert.IsFalse(stream.ReadFlag()); // murderer
+        Assert.IsTrue(stream.ReadFlag(), "Health must pack on minimal initial when health lever on");
+        Assert.AreEqual((uint)vehicle.GetCurrentHP(), stream.ReadInt(18));
+        Assert.IsFalse(stream.ReadFlag(), "not a corpse");
+        Assert.IsTrue(stream.ReadFlag(), "HealthMax must pack on minimal initial when health lever on");
+        Assert.AreEqual((uint)vehicle.GetMaximumHP(), stream.ReadInt(18));
+        Assert.IsFalse(stream.ReadFlag()); // AI state
+        Assert.IsTrue(stream.ReadFlag(), "pose still packs on minimal initial");
+
+        var entry = WireDiag.Snapshot().Single();
+        Assert.AreEqual(0x10000004AUL, entry.Mask,
+            "Production foreign initial must be pose|wheel|Health|HealthMax.");
+        Assert.AreEqual(
+            GhostObject.PositionMask | GhostVehicle.WheelSetMask | GhostObject.HealthMask | GhostObject.HealthMaxMask,
+            entry.Mask);
+        StringAssert.Contains(entry.Detail, "hp=1");
+        StringAssert.Contains(entry.Detail, "profile=minimal");
+    }
+
+    /// <summary>
+    /// Ghost initial can race CreateVehicle materialize on the client; HP cached on ghost slots
+    /// never reaches the combat setters. Health packed on a foreign initial must stay dirty so
+    /// the next delta re-applies HP against the live object.
+    /// </summary>
+    [TestMethod]
+    public void PackInitial_ForeignMinimal_HealthLever_KeepsHealthDirtyForNextDelta()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_182);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_182, true);
+        vehicle.CreateGhost();
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = true;
+        NetObject.PIsInitialUpdate = true;
+        try
+        {
+            var stream = new BitStream(new byte[8192], 8192);
+            var ret = vehicle.Ghost.PackUpdate(null, ulong.MaxValue, stream);
+            Assert.AreEqual(GhostObject.HealthMask | GhostObject.HealthMaxMask,
+                ret & (GhostObject.HealthMask | GhostObject.HealthMaxMask),
+                "Health packed on a foreign initial must stay dirty for the post-materialize re-send.");
+        }
+        finally
+        {
+            NetObject.PIsInitialUpdate = false;
+        }
+    }
+
+    [TestMethod]
+    public void PackDelta_ForeignMinimal_HealthLever_AdmitsHealthBits()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_183);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_183, true);
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = true;
+        WireDiag.Enabled = true;
+        var stream = PackUpdateNonInitial(vehicle, GhostObject.HealthMask | GhostObject.HealthMaxMask);
+
+        Assert.IsFalse(stream.ReadFlag()); // Skills
+        for (var i = 0; i < 7; ++i)
+            Assert.IsFalse(stream.ReadFlag(), $"equipment lead flag {i} must stay false");
+        Assert.IsFalse(stream.ReadFlag()); // GM
+        Assert.IsFalse(stream.ReadFlag()); // clan
+        Assert.IsFalse(stream.ReadFlag()); // pet
+        Assert.IsFalse(stream.ReadFlag()); // murderer
+        Assert.IsTrue(stream.ReadFlag(), "Health delta must pack under minimal foreign when health lever on");
+        Assert.AreEqual((uint)vehicle.GetCurrentHP(), stream.ReadInt(18));
+        Assert.IsFalse(stream.ReadFlag()); // corpse
+        Assert.IsTrue(stream.ReadFlag(), "HealthMax delta must pack under minimal foreign when health lever on");
+        Assert.AreEqual((uint)vehicle.GetMaximumHP(), stream.ReadInt(18));
+
+        var entry = WireDiag.Snapshot().Single();
+        Assert.AreEqual(GhostObject.HealthMask | GhostObject.HealthMaxMask, entry.Mask);
+        StringAssert.Contains(entry.Detail, "hp=1");
+        StringAssert.Contains(entry.Detail, "cur=");
+    }
+
+    [TestMethod]
+    public void PackDelta_ForeignMinimal_HealthLeverOff_StripsHealthAndPreservesDirty()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_184);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_184, true);
+        vehicle.CreateGhost();
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        WireDiag.Enabled = true;
+        NetObject.PIsInitialUpdate = false;
+        var stream = new BitStream(new byte[8192], 8192);
+        var ret = vehicle.Ghost.PackUpdate(null, GhostObject.HealthMask | GhostObject.HealthMaxMask, stream);
+
+        stream.SetBitPosition(0);
+        // Effective mask is empty: Skills..Position lead flags all read false.
+        for (var i = 0; i < 16; ++i)
+            Assert.IsFalse(stream.ReadFlag(), $"lead flag {i} must be false when health is stripped");
+
+        Assert.AreEqual(GhostObject.HealthMask | GhostObject.HealthMaxMask,
+            ret & (GhostObject.HealthMask | GhostObject.HealthMaxMask),
+            "Stripped health must stay dirty so a live lever flip ships HP without a new damage event.");
+        var entry = WireDiag.Snapshot().Single();
+        StringAssert.Contains(entry.Detail, "hp=0");
+    }
+
+    [TestMethod]
+    public void PackInitial_ForeignMinimal_HealthLeverOff_PreservesDirtyHealth()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_185);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_185, true);
+        vehicle.CreateGhost();
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        NetObject.PIsInitialUpdate = true;
+        try
+        {
+            var stream = new BitStream(new byte[8192], 8192);
+            var ret = vehicle.Ghost.PackUpdate(null, ulong.MaxValue, stream);
+            Assert.AreEqual(GhostObject.HealthMask | GhostObject.HealthMaxMask,
+                ret & (GhostObject.HealthMask | GhostObject.HealthMaxMask),
+                "Initial that strips health (lever off) must keep it dirty.");
+        }
+        finally
+        {
+            NetObject.PIsInitialUpdate = false;
+        }
+    }
+
+    /// <summary>
+    /// One post-initial re-send is not enough: live capture showed initial + re-send both landing
+    /// ~430 ms after scope-in, before CreateVehicle materialize, so HP stayed cached on ghost
+    /// slots and the target bar stayed blank. Health must stay dirty for a window of deltas.
+    /// </summary>
+    [TestMethod]
+    public void PackDelta_ForeignMinimal_HealthLever_WithinResendWindow_KeepsHealthDirty()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_187);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_187, true);
+        vehicle.CreateGhost();
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = true;
+
+        NetObject.PIsInitialUpdate = true;
+        try
+        {
+            vehicle.Ghost.PackUpdate(null, ulong.MaxValue, new BitStream(new byte[8192], 8192));
+        }
+        finally
+        {
+            NetObject.PIsInitialUpdate = false;
+        }
+
+        var stream = new BitStream(new byte[8192], 8192);
+        var ret = vehicle.Ghost.PackUpdate(
+            null, GhostObject.HealthMask | GhostObject.HealthMaxMask | GhostObject.PositionMask, stream);
+
+        stream.SetBitPosition(0);
+        Assert.IsFalse(stream.ReadFlag()); // Skills
+        for (var i = 0; i < 7; ++i)
+            Assert.IsFalse(stream.ReadFlag());
+        for (var i = 0; i < 4; ++i)
+            Assert.IsFalse(stream.ReadFlag()); // GM, clan, pet, murderer
+        Assert.IsTrue(stream.ReadFlag(), "health must still pack on the in-window delta");
+
+        Assert.AreEqual(GhostObject.HealthMask | GhostObject.HealthMaxMask,
+            ret & (GhostObject.HealthMask | GhostObject.HealthMaxMask),
+            "Health must stay dirty for the whole materialize window, not just one re-send.");
+    }
+
+    [TestMethod]
+    public void PackDelta_ForeignMinimal_HealthLever_AfterResendWindow_ClearsHealthDirty()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_188);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_188, true);
+        vehicle.CreateGhost();
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = true;
+        GhostVehicle.HealthResendWindowMs = 0; // window expires immediately
+
+        NetObject.PIsInitialUpdate = true;
+        try
+        {
+            vehicle.Ghost.PackUpdate(null, ulong.MaxValue, new BitStream(new byte[8192], 8192));
+        }
+        finally
+        {
+            NetObject.PIsInitialUpdate = false;
+        }
+
+        var ret = vehicle.Ghost.PackUpdate(
+            null, GhostObject.HealthMask | GhostObject.HealthMaxMask,
+            new BitStream(new byte[8192], 8192));
+
+        Assert.AreEqual(0UL, ret & (GhostObject.HealthMask | GhostObject.HealthMaxMask),
+            "After the window, packed health clears dirty normally (no perpetual re-send).");
+    }
+
+    [TestMethod]
+    public void PackDelta_ForeignMinimal_HealthLever_FullMaskRestrictsToPoseWheelHealth()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_186);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_186, true);
+
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = true;
+        WireDiag.Enabled = true;
+        PackUpdateNonInitial(vehicle, ulong.MaxValue);
+
+        var entry = WireDiag.Snapshot().Single();
+        Assert.AreEqual(
+            GhostObject.PositionMask | GhostVehicle.WheelSetMask | GhostObject.HealthMask | GhostObject.HealthMaxMask,
+            entry.Mask,
+            "Minimal foreign deltas admit pose + wheel + health only when the health lever is on.");
     }
 
     [TestMethod]

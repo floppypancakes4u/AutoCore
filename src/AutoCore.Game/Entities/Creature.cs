@@ -94,6 +94,15 @@ public class Creature : SimpleObject
 
         if (packet is CreateCharacterPacket)
             return;
+
+        if (packet is CreateCreaturePacket creaturePacket)
+        {
+            creaturePacket.EnhancementId = EnhancementId;
+            creaturePacket.Level = Level;
+            creaturePacket.DoesntCountAsSummon = false;
+            creaturePacket.IsElite = false;
+            // CoidCurrentVehicle is set by the caller (foreign vehicle scope) when linking to a chassis.
+        }
     }
 
     public override void CreateGhost()

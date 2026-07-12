@@ -691,7 +691,12 @@ public class Vehicle : SimpleObject
             // Last-chance equip so foreign CreateVehicle never wires nested wheel CBID 0 / empty when clonebase has a default.
             EnsureDefaultWheelSetForWire();
 
-            vehiclePacket.CoidCurrentOwner = DBData?.CharacterCoid ?? 0;
+            // The client links driverCreature+0x250 = vehicle (and the vehicle-side owner ptr)
+            // ONLY from this field: Vehicle_applyCreatePacket resolves +0xd8 → Creature::SetVehicle
+            // (004c49d0). The ghost CurrentOwner block is parsed but ignored on the bind-only path
+            // because CreateVehicle pre-creates the object. Owner 0 → target-frame HP text never
+            // renders for NPC vehicles (blank cur/max, 2026-07-11 live).
+            vehiclePacket.CoidCurrentOwner = DBData?.CharacterCoid ?? Owner?.ObjectId.Coid ?? 0;
             // CreateVehiclePacket.CoidSpawnOwner is a 32-bit field; map-NPC COIDs are high 64-bit.
             // Ghost carries spawn-owner separately (20-bit). Keep create payload at -1 for now.
             vehiclePacket.CoidSpawnOwner = -1;

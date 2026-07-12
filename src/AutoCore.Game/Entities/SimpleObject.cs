@@ -49,7 +49,7 @@ public class SimpleObject : GraphicsObject
         HP = Math.Max(0, HP - actualDamage);
 
         if (Ghost != null)
-            Ghost.SetMaskBits(GhostObject.HealthMask);
+            Ghost.SetMaskBits(GhostObject.HealthMask | GhostObject.HealthMaxMask);
 
         return actualDamage;
     }

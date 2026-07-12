@@ -39,6 +39,8 @@ public partial class TNLConnection : GhostConnection
     /// has been held long enough to land. Cleared on <see cref="ResetGhosting"/> / map transfer.
     /// </summary>
     private readonly Dictionary<long, ForeignVehicleCreateHold> _globalVehicleCreates = new();
+    /// <summary>coid → Unix ms when a delayed CreateVehicle owner-attach re-send is due.</summary>
+    private readonly Dictionary<long, long> _foreignOwnerAttachReapplyAtUnixMs = new();
 
     /// <summary>
     /// P2 owner-on: first foreign ghost initial withholds owner; after delay, one descope then
@@ -73,6 +75,13 @@ public partial class TNLConnection : GhostConnection
     /// (e.g. item-link tooltips).
     /// </summary>
     public static bool ForceForeignCreateReapply { get; set; }
+
+    /// <summary>
+    /// Delay after a foreign NPC vehicle is ghosted before destroy+CreateVehicle owner-attach
+    /// recovery. Ghost owner block materializes the driver first; then a full create (not
+    /// IsItemLink) re-runs <c>SetVehicle</c> without tooltip UI. Default 1000 ms.
+    /// </summary>
+    public static int ForeignOwnerAttachReapplyMilliseconds { get; set; } = 1000;
 
     public Account Account { get; set; }
     public Character CurrentCharacter { get; set; }
@@ -225,6 +234,54 @@ public partial class TNLConnection : GhostConnection
     {
         _globalVehicleCreates.Clear();
         _foreignReghost.Clear();
+        _foreignOwnerAttachReapplyAtUnixMs.Clear();
+    }
+
+    /// <summary>
+    /// Whether to schedule a delayed CreateVehicle re-send for target-frame owner attach
+    /// (NPC.md §14.4). Requires a live connection and a creature driver on the vehicle.
+    /// </summary>
+    public static bool ShouldScheduleForeignOwnerAttachReapply(TNLConnection connection, bool hasCreatureOwner) =>
+        connection != null && hasCreatureOwner;
+
+    /// <summary>
+    /// Arms a one-shot delayed destroy+CreateVehicle for <paramref name="coid"/> so
+    /// <c>CoidCurrentOwner</c> can resolve after the ghost owner block materializes the driver.
+    /// </summary>
+    public void ScheduleForeignOwnerAttachReapply(long coid)
+    {
+        var delay = Math.Max(0, ForeignOwnerAttachReapplyMilliseconds);
+        _foreignOwnerAttachReapplyAtUnixMs[coid] =
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + delay;
+    }
+
+    /// <summary>
+    /// If a scheduled owner-attach recovery is due for <paramref name="coid"/>, clears it and
+    /// returns true (caller should DestroyObject + CreateVehicle without IsItemLink).
+    /// </summary>
+    public bool TryConsumeForeignOwnerAttachReapply(long coid)
+    {
+        if (!_foreignOwnerAttachReapplyAtUnixMs.TryGetValue(coid, out var dueAt))
+            return false;
+
+        if (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() < dueAt)
+            return false;
+
+        _foreignOwnerAttachReapplyAtUnixMs.Remove(coid);
+        return true;
+    }
+
+    internal bool HasPendingForeignOwnerAttachReapplyForTests(long coid) =>
+        _foreignOwnerAttachReapplyAtUnixMs.ContainsKey(coid);
+
+    /// <summary>Test helper: move the due time into the past without sleeping.</summary>
+    internal void DebugAgeForeignOwnerAttachReapplyForTests(long coid, long ageMs)
+    {
+        if (!_foreignOwnerAttachReapplyAtUnixMs.ContainsKey(coid))
+            return;
+
+        _foreignOwnerAttachReapplyAtUnixMs[coid] =
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - Math.Max(0, ageMs);
     }
 
     /// <summary>
@@ -319,6 +376,7 @@ public partial class TNLConnection : GhostConnection
         ForeignGhostScopeHoldMilliseconds = 500;
         ForeignCreateHoldStaleGraceMilliseconds = 15000;
         ForeignReghostDelayMilliseconds = 500;
+        ForeignOwnerAttachReapplyMilliseconds = 1000;
         ForceForeignCreateReapply = false;
     }
 
