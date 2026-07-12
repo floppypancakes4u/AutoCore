@@ -226,11 +226,7 @@ public class Reaction : ClonedObjectBase
                 return HandleGiveMission(activator);
 
             case ReactionType.CompleteObjective:
-                LogMissionReactionStub(
-                    "Reaction.CompleteObjective",
-                    "No server quest advance — client may finish via 0x206C only",
-                    "Call shared MissionManager/AdvanceOrCompleteObjective using GenericVar1 (objective id) or active quest; send CompleteDynamicObjective + ObjectiveState + rewards; OnMissionStateChanged.");
-                return true;
+                return HandleCompleteObjective(activator);
 
             case ReactionType.FailMission:
                 LogMissionReactionStub(
@@ -754,6 +750,97 @@ public class Reaction : ClonedObjectBase
             }
         }
         return true;
+    }
+
+    /// <summary>
+    /// CompleteObjective (type 31). GenericVar1 = objective id (map data / client lookup key).
+    /// Advances or finishes the matching active quest via shared
+    /// <see cref="NpcInteractHandler.AdvanceOrCompleteObjective"/> (0x2070).
+    /// Returns false so SectorMap does not also 0x206C-apply the same reaction (double complete).
+    /// </summary>
+    private bool HandleCompleteObjective(ClonedObjectBase activator)
+    {
+        var objectiveId = Template.GenericVar1;
+        Logger.WriteLog(LogType.Debug,
+            "Mission reaction CompleteObjective triggered for reaction {0} objective={1}",
+            Template.COID,
+            objectiveId);
+
+        var character = GetCharacterFromActivator(activator);
+        if (character == null)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "CompleteObjective: no character from activator for reaction {0}",
+                Template.COID);
+            return false;
+        }
+
+        var conn = character.OwningConnection;
+        if (conn == null)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "CompleteObjective: character {0} has no connection",
+                character.ObjectId.Coid);
+            return false;
+        }
+
+        Mission.Mission mission = null;
+        Mission.MissionObjective objective = null;
+        CharacterQuest quest = null;
+
+        if (objectiveId > 0)
+        {
+            mission = AssetManager.Instance.GetMissionByObjectiveId(objectiveId);
+            objective = AssetManager.Instance.GetObjectiveById(objectiveId);
+            if (mission != null)
+                quest = character.CurrentQuests.FirstOrDefault(q => q.MissionId == mission.Id);
+        }
+        else
+        {
+            // No G1: complete the first active quest's current objective (rare map data).
+            quest = character.CurrentQuests.FirstOrDefault();
+            if (quest != null)
+            {
+                mission = AssetManager.Instance.GetMission(quest.MissionId);
+                if (mission != null
+                    && mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var activeObj))
+                {
+                    objective = activeObj;
+                }
+            }
+        }
+
+        if (quest == null || mission == null || objective == null)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "CompleteObjective: no matching active quest for objective={0} char={1}",
+                objectiveId,
+                character.ObjectId.Coid);
+            return false;
+        }
+
+        // Only finish when this objective is the character's active sequence (not a stale reaction).
+        if (quest.ActiveObjectiveSequence != objective.Sequence)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "CompleteObjective: objective {0} seq={1} is not active (quest seq={2}) mission={3}",
+                objective.ObjectiveId,
+                objective.Sequence,
+                quest.ActiveObjectiveSequence,
+                mission.Id);
+            return false;
+        }
+
+        NpcInteractHandler.AdvanceOrCompleteObjective(
+            conn,
+            character,
+            quest,
+            mission,
+            objective,
+            source: "Reaction.CompleteObjective");
+
+        // false: skip 0x206C for this reaction — 0x2070 already force-completes client-side.
+        return false;
     }
 
     /// <summary>

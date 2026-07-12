@@ -91,6 +91,23 @@ public class TriggerManager : Singleton<TriggerManager>
         => CheckTriggersFor(clonedObject, Environment.TickCount64);
 
     internal void CheckTriggersFor(ClonedObjectBase clonedObject, long nowMs)
+        => CheckTriggersFor(clonedObject, nowMs, pulseSkills: true);
+
+    /// <summary>
+    /// After player HP changes (heal pad, skills, admin set HP), re-evaluate collision
+    /// volume conditions without advancing skill pulse cadence. Type-7 health% gates
+    /// (e.g. full-HP complete objectives) open while standing still; pad heal timing
+    /// stays owned by movement/tick <see cref="CheckTriggersFor"/>.
+    /// </summary>
+    public void OnPlayerHealthChanged(ClonedObjectBase activator)
+    {
+        if (activator == null)
+            return;
+
+        CheckTriggersFor(activator, Environment.TickCount64, pulseSkills: false);
+    }
+
+    internal void CheckTriggersFor(ClonedObjectBase clonedObject, long nowMs, bool pulseSkills)
     {
         if (clonedObject is null)
             return;
@@ -126,9 +143,10 @@ public class TriggerManager : Singleton<TriggerManager>
                 {
                     _activeTriggers[key] = true;
                     FireTriggerReactions(clonedObject, trigger);
-                    ScheduleSkillPulses(clonedObject, trigger, nowMs);
+                    if (pulseSkills)
+                        ScheduleSkillPulses(clonedObject, trigger, nowMs);
                 }
-                else
+                else if (pulseSkills)
                     PulseSkillsIfDue(clonedObject, trigger, nowMs);
             }
             else if (alreadyTriggered)

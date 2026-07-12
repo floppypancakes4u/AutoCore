@@ -8,6 +8,7 @@ using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Mission.Requirements;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL.Ghost;
@@ -257,6 +258,12 @@ public class SectorMap
             // Map-leave reset can miss if PlayerCount never hit 0 (stuck session / order bugs).
             if (PlayerCount == 1)
                 ApplyAuthoredSpawnHygiene();
+
+            // Mid-mission relog: after fam baseline, re-apply Creates for active deliver NPCs
+            // and mission-conditioned setup. Vehicle may join the map a tick later — login path
+            // also calls ApplyMissionPhaseWorldState after both character and vehicle SetMap.
+            if (character.CurrentQuests.Count > 0)
+                ApplyMissionPhaseWorldState(character.CurrentVehicle ?? (ClonedObjectBase)character);
         }
 
         if (HasNpcAi(clonedObject))
@@ -458,8 +465,23 @@ public class SectorMap
             if (placed == null)
                 continue;
 
+            // Spawn markers often use a map-tool CBID; missing clonebase must not abort hygiene.
             if (tpl.CBID > 0)
-                placed.LoadCloneBase(tpl.CBID);
+            {
+                try
+                {
+                    placed.LoadCloneBase(tpl.CBID);
+                }
+                catch (Exception ex)
+                {
+                    Logger.WriteLog(LogType.Debug,
+                        "SectorMap {0}: hygiene LoadCloneBase cbid={1} coid={2}: {3}",
+                        ContinentId,
+                        tpl.CBID,
+                        coid,
+                        ex.Message);
+                }
+            }
 
             placed.SetCoid(tpl.COID != 0 ? tpl.COID : coid, false);
             placed.Faction = tpl.Faction;
@@ -469,6 +491,190 @@ public class SectorMap
             if (placed is SpawnPoint restored)
                 restored.Spawn();
         }
+    }
+
+    /// <summary>
+    /// After fam hygiene (or login), recreate map actors that retail left mid-mission via
+    /// reaction Creates. Generic rules:
+    /// <list type="number">
+    /// <item>Mission-conditioned triggers (non-empty conditions that pass) listing Create
+    /// reactions — fire those Creates so type 9/11/12 gates re-apply without movement.</item>
+    /// <item>Active deliver objectives (<see cref="ObjectiveRequirementDeliver"/> with
+    /// <c>NPCTargetCompletes</c>): if no live map entity has that CBID, fire Create reactions
+    /// whose target SpawnPoint spawn-list type matches the CBID (pad turn-in NPCs created only
+    /// via TE / DoOnActivate in continuous play).</item>
+    /// </list>
+    /// Does not create combat spawns unless their Create is condition-gated and currently true.
+    /// </summary>
+    /// <returns>Number of Create reactions dispatched.</returns>
+    internal int ReplayMissionWorldSetup(ClonedObjectBase activator)
+    {
+        if (activator?.Map == null)
+            return 0;
+
+        var character = activator.GetAsCharacter() ?? activator.GetSuperCharacter(false);
+        if (character == null || character.CurrentQuests.Count == 0)
+            return 0;
+
+        character.EnsureLogicVariables();
+
+        var fired = 0;
+        var firedCreateCoids = new HashSet<long>();
+
+        // 1) Condition-gated Creates (mission vars). Require DoConditionals so pure Activate
+        // remotes (e.g. l1_rem_gunnysioux_initiator with latch leftovers) are not re-fired.
+        foreach (var trigger in Triggers.Values.ToList())
+        {
+            if (!trigger.Template.DoConditionals || trigger.Template.Conditions.Count == 0)
+                continue;
+
+            if (!trigger.ConditionsPass(activator))
+                continue;
+
+            var createCoids = CollectCreateReactionCoids(trigger.Template.Reactions);
+            if (createCoids.Count == 0)
+                continue;
+
+            foreach (var coid in createCoids)
+            {
+                if (!firedCreateCoids.Add(coid))
+                    continue;
+
+                TriggerReactions(activator, new List<long> { coid });
+                fired++;
+            }
+        }
+
+        // 2) Deliver-CBID Creates (TE-only pad NPCs after restart hygiene).
+        foreach (var deliverCbid in CollectActiveDeliverCbids(character))
+        {
+            if (MapHasLiveEntityWithCbid(deliverCbid))
+                continue;
+
+            foreach (var reaction in Reactions.Values.ToList())
+            {
+                if (reaction.Template.ReactionType != ReactionType.Create)
+                    continue;
+
+                if (!CreateTargetsSpawnType(reaction, deliverCbid))
+                    continue;
+
+                var coid = reaction.ObjectId.Coid;
+                if (!firedCreateCoids.Add(coid))
+                    continue;
+
+                Logger.WriteLog(LogType.Debug,
+                    "SectorMap {0}: replay Create {1} for missing deliver NPC cbid={2}",
+                    ContinentId,
+                    coid,
+                    deliverCbid);
+                TriggerReactions(activator, new List<long> { coid });
+                fired++;
+            }
+        }
+
+        if (fired > 0)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "SectorMap {0}: ReplayMissionWorldSetup fired {1} Create reaction(s) for coid={2}",
+                ContinentId,
+                fired,
+                character.ObjectId.Coid);
+        }
+
+        return fired;
+    }
+
+    /// <summary>
+    /// Mission re-eval + deliver/condition Create replay. Call after login create packets /
+    /// PerPlayerLoad, and after solo hygiene when the character already holds quests.
+    /// </summary>
+    internal void ApplyMissionPhaseWorldState(ClonedObjectBase activator)
+    {
+        if (activator == null)
+            return;
+
+        TriggerManager.Instance.OnMissionStateChanged(activator);
+        ReplayMissionWorldSetup(activator);
+    }
+
+    private List<long> CollectCreateReactionCoids(List<long> reactionCoids)
+    {
+        var result = new List<long>();
+        foreach (var coid in reactionCoids)
+        {
+            if (GetObjectByCoid(coid) is Reaction { Template.ReactionType: ReactionType.Create })
+                result.Add(coid);
+        }
+
+        return result;
+    }
+
+    private static IEnumerable<int> CollectActiveDeliverCbids(Character character)
+    {
+        var seen = new HashSet<int>();
+        foreach (var quest in character.CurrentQuests)
+        {
+            var mission = AssetManager.Instance.GetMission(quest.MissionId);
+            if (mission == null)
+                continue;
+
+            if (!mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var objective)
+                || objective == null)
+            {
+                continue;
+            }
+
+            foreach (var req in objective.Requirements.OfType<ObjectiveRequirementDeliver>())
+            {
+                if (!req.NPCTargetCompletes || req.NPCTargetCBID <= 0)
+                    continue;
+
+                if (seen.Add(req.NPCTargetCBID))
+                    yield return req.NPCTargetCBID;
+            }
+        }
+    }
+
+    private bool MapHasLiveEntityWithCbid(int cbid)
+    {
+        foreach (var obj in Objects.Values)
+        {
+            if (obj is Character)
+                continue;
+
+            if (obj.CBID == cbid)
+                return true;
+        }
+
+        return false;
+    }
+
+    private bool CreateTargetsSpawnType(Reaction reaction, int spawnTypeOrCbid)
+    {
+        foreach (var objectCoid in reaction.Template.Objects)
+        {
+            SpawnPointTemplate tpl = null;
+            if (GetObjectByCoid(objectCoid) is SpawnPoint liveSpawn)
+                tpl = liveSpawn.Template;
+            else if (MapData.Templates.TryGetValue(objectCoid, out var ot) && ot is SpawnPointTemplate mapTpl)
+                tpl = mapTpl;
+
+            if (tpl == null)
+                continue;
+
+            // Fam-active dialog spawns are restored by hygiene; only replay reaction pad spawns.
+            if (tpl.OriginalIsActive)
+                continue;
+
+            foreach (var entry in tpl.Spawns)
+            {
+                if (entry.SpawnType == spawnTypeOrCbid && entry.SpawnType != -1)
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

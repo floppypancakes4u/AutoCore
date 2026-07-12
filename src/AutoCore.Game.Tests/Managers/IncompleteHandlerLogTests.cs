@@ -158,8 +158,10 @@ public class IncompleteHandlerLogTests
     }
 
     [TestMethod]
-    public void Reaction_CompleteObjective_LogsMissionManagerTodo()
+    public void Reaction_CompleteObjective_NoLongerLogsIncompleteStub()
     {
+        // CompleteObjective is implemented via AdvanceOrCompleteObjective (GenericVar1 = objective id).
+        // Without a matching active quest it no-ops cleanly — no INCOMPLETE stub.
         var template = new ReactionTemplate
         {
             Name = "test_complete",
@@ -169,13 +171,12 @@ public class IncompleteHandlerLogTests
         };
         var reaction = new Reaction(template);
 
-        Assert.IsTrue(reaction.TriggerIfPossible(CreateActivator()));
+        Assert.IsFalse(reaction.TriggerIfPossible(CreateActivator()),
+            "No active quest for objective → false (suppress 0x206C)");
 
-        Assert.IsTrue(
-            _incomplete.Any(m =>
-                m.Contains("[Reaction.CompleteObjective]")
-                && m.Contains("MissionManager")),
-            "Expected CompleteObjective incomplete log, got: " + string.Join(" | ", _incomplete));
+        Assert.IsFalse(
+            _incomplete.Any(m => m.Contains("[Reaction.CompleteObjective]")),
+            "CompleteObjective is implemented — unexpected incomplete: " + string.Join(" | ", _incomplete));
     }
 
     private void SeedMultiTargetPatrol()

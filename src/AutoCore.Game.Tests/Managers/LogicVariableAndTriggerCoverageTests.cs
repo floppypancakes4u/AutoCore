@@ -68,6 +68,43 @@ public class LogicVariableAndTriggerCoverageTests
     }
 
     [TestMethod]
+    public void LogicVariableStore_Type7_PlayerHealthPercent_FullPartialZero()
+    {
+        // Ark Bay l1_playerhealth_percent (type 7): SCAB pad conditions use health% == 1.
+        var (character, vehicle, map) = CreatePlayer();
+        map.MapData.Variables[64] = Variable.CreateForTests(
+            64, LogicVariableStore.TypePlayerHealthPercent, 0f, 0f, "health_pct");
+        map.MapData.Variables[4] = Variable.CreateForTests(
+            4, LogicVariableStore.TypeConstant, 1f, 1f, "one");
+
+        vehicle.SetMaximumHP(100, triggerGhostUpdate: false);
+        vehicle.SetCurrentHP(100, triggerGhostUpdate: false);
+        var store = character.EnsureLogicVariables();
+        Assert.AreEqual(1f, store.Get(64), 0.0001f);
+
+        vehicle.SetCurrentHP(50, triggerGhostUpdate: false);
+        Assert.AreEqual(0.5f, store.Get(64), 0.0001f);
+
+        vehicle.SetCurrentHP(0, triggerGhostUpdate: false);
+        Assert.AreEqual(0f, store.Get(64), 0.0001f);
+
+        Assert.IsTrue(new TriggerConditional
+        {
+            LeftId = 64,
+            RightId = 4,
+            Type = ConditionalType.EqualTo,
+        }.Check(vehicle) == false, "Half HP must not equal const 1");
+
+        vehicle.SetCurrentHP(100, triggerGhostUpdate: false);
+        Assert.IsTrue(new TriggerConditional
+        {
+            LeftId = 64,
+            RightId = 4,
+            Type = ConditionalType.EqualTo,
+        }.Check(vehicle), "Full HP must equal const 1");
+    }
+
+    [TestMethod]
     public void LogicVariableStore_Ctor_RejectsNulls()
     {
         var (character, _, map) = CreatePlayer();

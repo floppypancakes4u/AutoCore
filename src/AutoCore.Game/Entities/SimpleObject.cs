@@ -48,8 +48,7 @@ public class SimpleObject : GraphicsObject
         var actualDamage = Math.Min(damage, HP);
         HP = Math.Max(0, HP - actualDamage);
 
-        if (Ghost != null)
-            Ghost.SetMaskBits(GhostObject.HealthMask | GhostObject.HealthMaxMask);
+        DirtyHealthMasks(GhostObject.HealthMask | GhostObject.HealthMaxMask);
 
         return actualDamage;
     }
@@ -61,7 +60,68 @@ public class SimpleObject : GraphicsObject
     }
 
     /// <summary>
-    /// Test helper: set current HP without going through combat.
+    /// Ghost wire packs HP as 18-bit unsigned ints; keep server values within that range.
+    /// </summary>
+    public const int MaxWireHP = (1 << 18) - 1; // 262143
+
+    /// <summary>
+    /// Dirties health-related ghost bits. Vehicles override to use
+    /// <see cref="Vehicle.EnsureGhostMaskDelivery"/> so bits are not dropped without a GhostInfo ref.
+    /// </summary>
+    protected virtual void DirtyHealthMasks(ulong mask)
+    {
+        Ghost?.SetMaskBits(mask);
+    }
+
+    /// <summary>
+    /// Absolute current HP set. Clamps to [0, MaxHP] and dirties <see cref="GhostObject.HealthMask"/>.
+    /// </summary>
+    public void SetCurrentHP(int hp, bool triggerGhostUpdate = true)
+    {
+        var newHp = Math.Clamp(hp, 0, Math.Max(MaxHP, 0));
+        if (HP == newHp)
+            return;
+
+        var increased = newHp > HP;
+        HP = newHp;
+
+        if (triggerGhostUpdate)
+            DirtyHealthMasks(GhostObject.HealthMask);
+
+        // Chat / admin / scripts that raise HP must also open type-7 health gates.
+        if (increased)
+            NotifyPlayerHealthChangedForTriggers();
+    }
+
+    /// <summary>
+    /// Absolute max HP set. Clamps to [1, MaxWireHP], pulls current HP down when needed,
+    /// and dirties <see cref="GhostObject.HealthMaxMask"/> (and Health if current changed).
+    /// </summary>
+    public void SetMaximumHP(int maxHp, bool triggerGhostUpdate = true)
+    {
+        var newMax = Math.Clamp(maxHp, 1, MaxWireHP);
+
+        if (MaxHP == newMax)
+        {
+            if (HP > MaxHP)
+                SetCurrentHP(MaxHP, triggerGhostUpdate);
+            return;
+        }
+
+        MaxHP = newMax;
+        var oldHp = HP;
+        HP = Math.Clamp(HP, 0, MaxHP);
+
+        if (!triggerGhostUpdate)
+            return;
+
+        DirtyHealthMasks(GhostObject.HealthMaxMask);
+        if (HP != oldHp)
+            DirtyHealthMasks(GhostObject.HealthMask);
+    }
+
+    /// <summary>
+    /// Test helper: set current HP without dirtying ghost masks.
     /// </summary>
     internal void SetHPForTests(int hp)
     {

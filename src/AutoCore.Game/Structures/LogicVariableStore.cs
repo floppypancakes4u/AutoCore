@@ -8,6 +8,7 @@ using AutoCore.Game.Map;
 /// Per-character runtime map logic variables (client CVOGVariable_EvaluateComputed @ 0x005afd40).
 /// Map defines variables in <see cref="MapData.Variables"/>; Type selects evaluation:
 ///   0  = plain flag/constant (mutable via VariableSet; seeded from InitialValue)
+///   7  = player vehicle health percent (current/max, clamped 0..1) — e.g. SCAB pad full-heal gates
 ///   9  = has completed mission Id in <see cref="Variable.Value"/>
 ///   11 = has active mission Id in Value (char mission hash / CurrentQuests)
 ///   12 = has active objective Id in Value
@@ -16,6 +17,7 @@ using AutoCore.Game.Map;
 public class LogicVariableStore
 {
     public const byte TypeConstant = 0;
+    public const byte TypePlayerHealthPercent = 7;
     public const byte TypeHasCompletedMission = 9;
     public const byte TypeHasActiveMission = 11;
     public const byte TypeHasActiveObjective = 12;
@@ -53,10 +55,33 @@ public class LogicVariableStore
             case TypeHasActiveObjective:
                 return HasActiveObjective((int)def.Value) ? True : False;
 
+            case TypePlayerHealthPercent:
+                return GetPlayerHealthPercent();
+
             case TypeConstant:
             default:
                 return _mutable.TryGetValue(id, out var value) ? value : def.InitialValue;
         }
+    }
+
+    /// <summary>
+    /// Vehicle current/max HP as 0..1. Full HP returns exactly 1 so conditions like
+    /// health_percent == const_1 work with float equality.
+    /// </summary>
+    private float GetPlayerHealthPercent()
+    {
+        var target = (ClonedObjectBase)_character.CurrentVehicle ?? _character;
+        var max = target.GetMaximumHP();
+        if (max <= 0)
+            return False;
+
+        var current = target.GetCurrentHP();
+        if (current >= max)
+            return True;
+        if (current <= 0)
+            return False;
+
+        return Math.Clamp(current / (float)max, 0f, 1f);
     }
 
     public void Set(int id, float value) => _mutable[id] = value;

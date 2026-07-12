@@ -191,6 +191,11 @@ public partial class TNLConnection
         // packets so 0x206C GiveMission can seed client mission state.
         character.Map?.FireOnLoadPlayerMissions(character);
 
+        // Reconstruct mid-mission reaction NPCs (pad turn-in, etc.) and re-eval type 9/11/12
+        // gates now that quests are loaded and both character + vehicle are on the map.
+        character.Map?.ApplyMissionPhaseWorldState(
+            character.CurrentVehicle ?? (ClonedObjectBase)character);
+
         // CreateCharacterExtended.Credits stay 0 (login-safe). Restore absolute money the same
         // way /currency does (CharacterLevel 0x2017), after create so the client object exists.
         // Reload from DB so restore always uses the ledger /currency persists.

@@ -93,7 +93,33 @@ public class GraphicsObject : ClonedObjectBase
         HP += restored;
         EnsureCombatGhost();
         Ghost?.SetMaskBits(GhostObject.HealthMask);
+
+        // Type-7 health% conditions (SCAB pad etc.) only re-eval on movement by default;
+        // recheck collision volumes so full-heal gates fire while standing still.
+        NotifyPlayerHealthChangedForTriggers();
         return restored;
+    }
+
+    /// <summary>
+    /// After player-owned HP increases, re-run collision condition checks so live-computed
+    /// vars (type 7 health percent) can open volume gates without a new move packet.
+    /// Does not advance repair-pad skill cadence (see <see cref="Managers.TriggerManager.OnPlayerHealthChanged"/>).
+    /// </summary>
+    protected void NotifyPlayerHealthChangedForTriggers()
+    {
+        if (Map == null)
+            return;
+
+        var character = GetAsCharacter() ?? GetSuperCharacter(false);
+        if (character == null)
+            return;
+
+        // Prefer the vehicle volume collider the pad/gate uses.
+        var activator = character.CurrentVehicle ?? (ClonedObjectBase)character;
+        if (activator.Map == null)
+            return;
+
+        Managers.TriggerManager.Instance.OnPlayerHealthChanged(activator);
     }
 
     public override void Revive()
