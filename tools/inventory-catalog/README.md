@@ -10,19 +10,7 @@ Static browser for inventory-capable clonebase items exported from the Auto Assa
 
 ## Export JSON
 
-From the repository root:
-
-```powershell
-.\scripts\export-inventory-catalog.ps1
-```
-
-This writes both `inventory-items.json` and `inventory-catalog-standalone.html`.
-
-Optional arguments:
-
-```powershell
-.\scripts\export-inventory-catalog.ps1 -GamePath "D:\Games\Auto Assault" -Serve
-```
+Catalog export previously lived in `AutoCore.Dev` (removed). Checked-in `inventory-items.json` / standalone HTML can be used as-is. To regenerate, add an export path in `AutoCore.DevTool` or re-run whatever clonebase export you prefer.
 
 Each item includes:
 
@@ -41,7 +29,8 @@ Each item includes:
 **Split JSON + HTML version:** the `index.html` page loads JSON with `fetch`, so serve the folder locally:
 
 ```powershell
-.\scripts\export-inventory-catalog.ps1 -Serve
+cd tools/inventory-catalog
+python -m http.server 8080
 ```
 
 Then open `http://localhost:8080/`.

@@ -110,13 +110,7 @@ Invoke-RestMethod -Method Delete http://127.0.0.1:27999/inventory-drop-log
 Invoke-RestMethod http://127.0.0.1:27999/inventory-drop-log
 ```
 
-Or run the live watcher (defaults to toss capture mode):
-
-```powershell
-dotnet run --project src/AutoCore.Dev -- inventory-drop-live --mode toss
-```
-
-Use `--mode cargo-move` to validate cargo slot moves instead. World tosses from cargo use the `ItemDrop` opcode (`0x2057`), not `InventoryDrop`. Check sector logs for decoded fields (`unknown`, coid, tail bytes, and candidate integers).
+World tosses from cargo use the `ItemDrop` opcode (`0x2057`), not `InventoryDrop`. Check sector logs for decoded fields (`unknown`, coid, tail bytes, and candidate integers).
 
 For how to implement and test client-compatible packet layouts (padding, TFID, `SendGamePacket`), see [docs/networking.md](docs/networking.md).
 

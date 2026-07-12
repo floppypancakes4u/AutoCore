@@ -31,7 +31,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AutoCore.Dev\AutoCore.Dev.csproj" />
     <ProjectReference Include="..\AutoCore.Game\AutoCore.Game.csproj" />
     <ProjectReference Include="..\AutoCore.Sector\AutoCore.Sector.csproj" />
   </ItemGroup>
