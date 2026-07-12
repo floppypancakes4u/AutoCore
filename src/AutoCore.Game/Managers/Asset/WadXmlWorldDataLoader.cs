@@ -157,6 +157,86 @@ public static class WadXmlWorldDataLoader
         return dict;
     }
 
+    /// <summary>tCreatureExperienceLevel → creature level → base XP.</summary>
+    public static IDictionary<int, int> LoadCreatureExperienceLevels(string wadXmlPath)
+    {
+        var doc = XDocument.Load(wadXmlPath);
+        var section = doc.Descendants("tCreatureExperienceLevel").FirstOrDefault();
+        if (section == null)
+            return new Dictionary<int, int>();
+
+        var dict = new Dictionary<int, int>();
+        foreach (var row in section.Elements("row"))
+        {
+            var level = GetInt(row, "IDCreatureLevel", defaultValue: -1);
+            if (level < 0)
+                continue;
+            dict[level] = Math.Max(0, GetInt(row, "intExperience", defaultValue: 0));
+        }
+
+        return dict;
+    }
+
+    /// <summary>tQuestXPLookup → index → rlLevelXP fraction.</summary>
+    public static IDictionary<int, float> LoadQuestXpLookup(string wadXmlPath)
+    {
+        var doc = XDocument.Load(wadXmlPath);
+        var section = doc.Descendants("tQuestXPLookup").FirstOrDefault();
+        if (section == null)
+            return new Dictionary<int, float>();
+
+        var dict = new Dictionary<int, float>();
+        foreach (var row in section.Elements("row"))
+        {
+            var index = GetInt(row, "IDQuestXPIndex", defaultValue: -1);
+            if (index < 0)
+                continue;
+            dict[index] = GetFloat(row, "rlLevelXP", defaultValue: 0f);
+        }
+
+        return dict;
+    }
+
+    /// <summary>tQuestCreditsLookup → CreditsIndex → rlLevelCredits multiplier.</summary>
+    public static IDictionary<int, float> LoadQuestCreditsLookup(string wadXmlPath)
+    {
+        var doc = XDocument.Load(wadXmlPath);
+        var section = doc.Descendants("tQuestCreditsLookup").FirstOrDefault();
+        if (section == null)
+            return new Dictionary<int, float>();
+
+        var dict = new Dictionary<int, float>();
+        foreach (var row in section.Elements("row"))
+        {
+            var index = GetInt(row, "IDQuestCreditsIndex", defaultValue: -1);
+            if (index < 0)
+                continue;
+            dict[index] = GetFloat(row, "rlLevelCredits", defaultValue: 0f);
+        }
+
+        return dict;
+    }
+
+    /// <summary>tQuestBaseCredits → TargetLevel → intBaseCredits.</summary>
+    public static IDictionary<int, int> LoadQuestBaseCredits(string wadXmlPath)
+    {
+        var doc = XDocument.Load(wadXmlPath);
+        var section = doc.Descendants("tQuestBaseCredits").FirstOrDefault();
+        if (section == null)
+            return new Dictionary<int, int>();
+
+        var dict = new Dictionary<int, int>();
+        foreach (var row in section.Elements("row"))
+        {
+            var level = GetInt(row, "IDTargetLevel", defaultValue: -1);
+            if (level < 0)
+                continue;
+            dict[level] = GetInt(row, "intBaseCredits", defaultValue: 0);
+        }
+
+        return dict;
+    }
+
     public static IDictionary<int, LootTable> LoadLootTables(string wadXmlPath)
     {
         var doc = XDocument.Load(wadXmlPath);

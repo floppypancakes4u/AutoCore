@@ -296,6 +296,9 @@ public class Reaction : ClonedObjectBase
             case ReactionType.SetPatrolDistance:
                 return HandleSetPatrolDistance(activator);
 
+            case ReactionType.AddXP:
+                return HandleAddXp(activator);
+
             default:
                 IncompleteHandlerLog.Warn(
                     "Reaction.Unhandled",
@@ -578,6 +581,27 @@ public class Reaction : ClonedObjectBase
     private bool HandleDeath(ClonedObjectBase activator)
     {
         return ApplyReactionMapRemove(activator, "Death");
+    }
+
+    /// <summary>
+    /// AddXP (type 28): absolute grant via <see cref="Experience.ExperienceService"/> (docs/XP.md).
+    /// GenericVar1 is treated as the XP amount.
+    /// </summary>
+    private bool HandleAddXp(ClonedObjectBase activator)
+    {
+        var character = GetCharacterFromActivator(activator);
+        if (character == null)
+            return true;
+
+        var amount = Template.GenericVar1;
+        if (amount == 0)
+            return true;
+
+        Experience.ExperienceService.Instance.GiveXp(
+            character,
+            amount,
+            Experience.XpSource.Reaction);
+        return true;
     }
 
     /// <summary>

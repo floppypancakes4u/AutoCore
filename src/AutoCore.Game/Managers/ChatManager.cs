@@ -419,34 +419,91 @@ public class ChatManager : Singleton<ChatManager>
                 }
                 break;
 
+            case "/getxp":
+            case "/xpinfo":
+            {
+                try
+                {
+                    // Prefer live memory; optionally re-read DB for comparison.
+                    var memLevel = character.Level;
+                    var memXp = character.Experience;
+                    var dbLevel = memLevel;
+                    var dbXp = memXp;
+                    try
+                    {
+                        if (character.ObjectId.Coid > 0)
+                        {
+                            var snap = Experience.CharacterProgressPersistence.Instance
+                                .LoadProgress(character.ObjectId.Coid);
+                            dbLevel = snap.Level;
+                            dbXp = snap.Experience;
+                        }
+                    }
+                    catch (System.Exception dbEx)
+                    {
+                        respPacket.Message =
+                            $"Level={memLevel} XP={memXp} skill={character.SkillPoints} attrib={character.AttributePoints} research={character.ResearchPoints} (DB read failed: {dbEx.Message})";
+                        break;
+                    }
+
+                    var thr = Experience.ExperienceService.Instance.GetThreshold(memLevel);
+                    var next = thr > 0 ? (int)thr - memXp : 0;
+                    respPacket.Message =
+                        $"Level={memLevel} XP={memXp} (next threshold={thr}, to next≈{Math.Max(0, next)}) " +
+                        $"skill={character.SkillPoints} attrib={character.AttributePoints} research={character.ResearchPoints} " +
+                        $"DB: level={dbLevel} xp={dbXp}";
+                }
+                catch (System.Exception ex)
+                {
+                    respPacket.Message = $"Failed /getxp: {ex.Message}";
+                }
+                break;
+            }
+
             case "/xp":
             case "/experience":
                 if (parts.Length < 2)
                 {
-                    respPacket.Message = "Invalid XP command! Usage: /xp <amount>";
-                    break;
-                }
-
-                if (!int.TryParse(parts[1], out var xpAmount))
-                {
-                    respPacket.Message = $"Invalid XP amount: {parts[1]}. Must be a number.";
+                    respPacket.Message = "Invalid XP command! Usage: /xp <amount>  (grants amount) or /xp set <total>  (see also /getxp)";
                     break;
                 }
 
                 try
                 {
-                    connection.SendGamePacket(new CharacterLevelPacket
+                    Experience.GiveXpResult xpResult;
+                    if (parts.Length >= 3 && parts[1].Equals("set", StringComparison.OrdinalIgnoreCase)
+                        && int.TryParse(parts[2], out var absoluteXp))
                     {
-                        CharacterId = character.ObjectId,
-                        Level = character.Level,
-                        Experience = xpAmount
-                    });
-                    respPacket.Message = $"Set Experience to {xpAmount}!";
+                        xpResult = Experience.ExperienceService.Instance.SetExperienceAbsolute(character, absoluteXp);
+                    }
+                    else if (int.TryParse(parts[1], out var xpAmount))
+                    {
+                        xpResult = Experience.ExperienceService.Instance.GiveXp(
+                            character,
+                            xpAmount,
+                            Experience.XpSource.Admin);
+                    }
+                    else
+                    {
+                        respPacket.Message = $"Invalid XP amount: {parts[1]}. Must be a number.";
+                        break;
+                    }
+
+                    // Packets already sent by service when connection present; ensure level snapshot for admin.
+                    if (xpResult.Success && xpResult.CharacterLevelPacket == null)
+                    {
+                        var snap = Experience.ExperienceService.Instance.BuildCharacterLevelPacket(character);
+                        connection.SendGamePacket(snap);
+                    }
+
+                    respPacket.Message = xpResult.Success
+                        ? $"{xpResult.Message} (level={character.Level} total={character.Experience})"
+                        : xpResult.Message;
                 }
                 catch (System.Exception ex)
                 {
-                    Logger.WriteLog(LogType.Error, $"Failed to send XP packet: {ex.Message}");
-                    respPacket.Message = $"Failed to set XP: {ex.Message}";
+                    Logger.WriteLog(LogType.Error, $"Failed XP command: {ex.Message}");
+                    respPacket.Message = $"Failed XP command: {ex.Message}";
                 }
                 break;
 
@@ -465,27 +522,51 @@ public class ChatManager : Singleton<ChatManager>
 
                 try
                 {
-                    connection.SendGamePacket(new CharacterLevelPacket
+                    // Place total XP at the start of the requested level (threshold of level-1, or 0 for L1).
+                    var svc = Experience.ExperienceService.Instance;
+                    int targetXp = level <= 1
+                        ? 0
+                        : (int)svc.GetThreshold((byte)(level - 1));
+                    var levelResult = svc.SetExperienceAbsolute(character, targetXp);
+                    // Force exact level if threshold map overshoots (edge max level).
+                    if (character.Level != level)
                     {
-                        CharacterId = character.ObjectId,
-                        Level = level
-                    });
-                    respPacket.Message = $"Set level to {level}!";
+                        character.SetLevel(level);
+                        Experience.CharacterProgressPersistence.Instance.SaveProgress(
+                            character.ObjectId.Coid,
+                            new Experience.CharacterProgressSnapshot(
+                                level,
+                                character.Experience,
+                                character.SkillPoints,
+                                character.AttributePoints,
+                                character.ResearchPoints));
+                    }
+
+                    connection.SendGamePacket(svc.BuildCharacterLevelPacket(character));
+                    respPacket.Message = levelResult.Success
+                        ? $"Set level to {character.Level} (xp={character.Experience})."
+                        : levelResult.Message;
                 }
                 catch (System.Exception ex)
                 {
-                    Logger.WriteLog(LogType.Error, $"Failed to send level packet: {ex.Message}");
+                    Logger.WriteLog(LogType.Error, $"Failed to set level: {ex.Message}");
                     respPacket.Message = $"Failed to set level: {ex.Message}";
                 }
                 break;
 
+            case "/credits":
             case "/currency":
             {
-                // Absolute set only: CharacterLevel (0x2017) + server persist.
-                var currency = CurrencySync.TryApplyCurrencyCommand(character, parts);
-                if (currency.Success && currency.Packet != null)
-                    connection.SendGamePacket(currency.Packet);
-                respPacket.Message = currency.Message;
+                // Query: /credits — mem + DB + Globes/Bars/Scrip/Clink.
+                // Set: /credits <globes> <bars> <scrip> <clink> — persist + full CharacterLevel (0x2017).
+                // /currency is an alias. Absolute client apply must include XP/points (not currency-only).
+                var credits = CurrencySync.TryApplyCreditsCommand(
+                    character,
+                    parts,
+                    InventoryPersistence.Instance);
+                if (credits.Success && credits.Packet != null)
+                    connection.SendGamePacket(credits.Packet);
+                respPacket.Message = credits.Message;
                 break;
             }
 

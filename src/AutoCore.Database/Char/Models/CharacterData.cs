@@ -39,6 +39,21 @@ public class CharacterData
     public byte Level { get; set; } = 1;
 
     /// <summary>
+    /// Cumulative experience total (client +0x730 / CharacterLevel.Experience).
+    /// Not "XP into current bar only" — thresholds come from tExperienceLevel.
+    /// </summary>
+    public int Experience { get; set; }
+
+    /// <summary>Unspent skill points granted on level-up (tExperienceLevel.iSkillPoints).</summary>
+    public short SkillPoints { get; set; }
+
+    /// <summary>Unspent attribute points granted on level-up.</summary>
+    public short AttributePoints { get; set; }
+
+    /// <summary>Unspent research points granted on level-up.</summary>
+    public short ResearchPoints { get; set; }
+
+    /// <summary>
     /// Server-authoritative money as a single int64 (Globes/Bars/Scrip/Clink groups of 1000).
     /// Client UI is restored after login via CharacterLevel (0x2017); do not write non-zero
     /// values into CreateCharacterExtended.Credits (that crashes the retail client).

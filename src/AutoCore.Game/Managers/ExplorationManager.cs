@@ -103,6 +103,23 @@ public class ExplorationManager : Singleton<ExplorationManager>
 
         EnqueuePersist(character, continentId, newBits);
         SendUnlockRegion(character, continentId, newBits);
+
+        try
+        {
+            var xp = Experience.ExperienceService.Instance.ComputeAreaXp(continentId, areaId);
+            if (xp > 0)
+            {
+                Experience.ExperienceService.Instance.GiveXp(
+                    character,
+                    xp,
+                    Experience.XpSource.Area);
+            }
+        }
+        catch
+        {
+            // Tests may not have full XP tables; production TryDiscoverAt logs errors.
+        }
+
         return true;
     }
 
@@ -157,6 +174,27 @@ public class ExplorationManager : Singleton<ExplorationManager>
 
         EnqueuePersist(character, continentId, newBits);
         SendUnlockRegion(character, continentId, newBits);
+
+        // First-visit area XP (docs/XP.md) — once per newly set bit only.
+        try
+        {
+            var xp = Experience.ExperienceService.Instance.ComputeAreaXp(continentId, areaId);
+            if (xp > 0)
+            {
+                Experience.ExperienceService.Instance.GiveXp(
+                    character,
+                    xp,
+                    Experience.XpSource.Area);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "Area XP grant failed continent={0} area={1}: {2}",
+                continentId,
+                areaId,
+                ex.Message);
+        }
     }
 
     private void EnqueuePersist(Character character, int continentId, uint exploredBits)

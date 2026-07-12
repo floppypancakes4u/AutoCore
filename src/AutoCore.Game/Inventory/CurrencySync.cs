@@ -1,6 +1,7 @@
 namespace AutoCore.Game.Inventory;
 
 using AutoCore.Game.Entities;
+using AutoCore.Game.Managers;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Utils;
 
@@ -9,12 +10,14 @@ using AutoCore.Utils;
 ///
 /// Client rules (retail):
 ///   - CreateCharacterExtended.Credits non-zero can crash — always clear on spawn.
-///   - Absolute UI set: CharacterLevel (0x2017) Currency field (same as /currency).
+///   - Absolute UI set: CharacterLevel (0x2017) Currency field (same as /currency / /credits).
+///     CharacterLevel is a full snapshot (Level/Currency/Experience/points) — partial packets
+///     zero other fields on the client (FUN_00810f00 apply ~0x00531fcb).
 ///   - Additive mid-session delta: GiveCredits (0x205E) via <see cref="AddCredits"/>.
 /// </summary>
 public static class CurrencySync
 {
-    /// <summary>Result of <see cref="TryApplyCurrencyCommand"/>.</summary>
+    /// <summary>Result of credits/currency chat commands.</summary>
     public sealed class CommandResult
     {
         public bool Success { get; init; }
@@ -37,27 +40,47 @@ public static class CurrencySync
     }
 
     /// <summary>
-    /// Build the CharacterLevel absolute packet used by both <c>/currency</c> and login restore.
-    /// This is the only client-facing absolute money update path (0x2017).
+    /// Build the CharacterLevel absolute packet used by <c>/credits</c>, <c>/currency</c>, and login restore.
+    /// Includes full progress fields so the client apply path does not wipe XP/points.
     /// </summary>
     public static CharacterLevelPacket CreateAbsoluteCurrencyPacket(Character character, long absoluteCredits)
     {
         if (character == null)
             throw new ArgumentNullException(nameof(character));
 
+        short currentMana = 100;
+        short maxMana = 100;
+        var coid = ResolveCharacterCoid(character);
+        if (coid > 0)
+        {
+            var mana = CharacterLevelManager.Instance.GetOrCreate(coid);
+            lock (mana)
+            {
+                currentMana = mana.CurrentMana;
+                maxMana = mana.MaxMana;
+            }
+        }
+
         return new CharacterLevelPacket
         {
             CharacterId = character.ObjectId,
             Level = character.Level,
-            Currency = absoluteCredits
+            Currency = absoluteCredits,
+            Experience = character.Experience,
+            SkillPoints = character.SkillPoints,
+            AttributePoints = character.AttributePoints,
+            ResearchPoints = character.ResearchPoints,
+            CurrentMana = currentMana,
+            MaxMana = maxMana
         };
     }
 
     /// <summary>
     /// Build CharacterLevel absolute restore when the character has a non-zero balance.
     /// When <paramref name="persistence"/> is provided, reloads the authoritative balance from
-    /// storage first (same ledger /currency writes) so login never depends on a stale in-memory value.
+    /// storage first (same ledger /credits writes) so login never depends on a stale in-memory value.
     /// Returns null when there is nothing to restore (avoids a no-op packet).
+    /// Login still always sends a full progress CharacterLevel via ExperienceService afterward.
     /// </summary>
     public static CharacterLevelPacket TryCreateLoginRestorePacket(
         Character character,
@@ -86,20 +109,101 @@ public static class CurrencySync
     }
 
     /// <summary>
-    /// Parse <c>/currency &lt;globes&gt; &lt;bars&gt; &lt;scrip&gt; &lt;clink&gt;</c>, persist absolute
-    /// balance, and build the CharacterLevel packet that updates the client UI.
+    /// <c>/credits</c> (and <c>/currency</c> alias):
+    /// <list type="bullet">
+    /// <item><description>No args — report memory + DB balance and denomination split.</description></item>
+    /// <item><description>Four args — set absolute Globes/Bars/Scrip/Clink, persist, full CharacterLevel.</description></item>
+    /// </list>
     /// </summary>
-    public static CommandResult TryApplyCurrencyCommand(Character character, string[] parts)
+    public static CommandResult TryApplyCreditsCommand(
+        Character character,
+        string[] parts,
+        IInventoryPersistence persistence = null)
     {
-        if (parts == null || parts.Length < 5)
+        if (character == null)
         {
             return new CommandResult
             {
                 Success = false,
-                Message = "Invalid currency command! Usage: /currency <globes> <bars> <scrip> <clink>"
+                Message = "No character."
             };
         }
 
+        if (parts == null || parts.Length == 0)
+        {
+            return new CommandResult
+            {
+                Success = false,
+                Message = "Invalid credits command! Usage: /credits  OR  /credits <globes> <bars> <scrip> <clink>"
+            };
+        }
+
+        if (parts.Length == 1)
+            return QueryCredits(character, persistence);
+
+        if (parts.Length < 5)
+        {
+            return new CommandResult
+            {
+                Success = false,
+                Message = "Invalid credits command! Usage: /credits <globes> <bars> <scrip> <clink>"
+            };
+        }
+
+        return SetCreditsFromDenominations(character, parts, persistence);
+    }
+
+    /// <summary>
+    /// Parse <c>/currency &lt;globes&gt; &lt;bars&gt; &lt;scrip&gt; &lt;clink&gt;</c> (or bare <c>/currency</c> query).
+    /// Delegates to <see cref="TryApplyCreditsCommand"/>.
+    /// </summary>
+    public static CommandResult TryApplyCurrencyCommand(Character character, string[] parts)
+    {
+        return TryApplyCreditsCommand(character, parts, persistence: null);
+    }
+
+    private static CommandResult QueryCredits(Character character, IInventoryPersistence persistence)
+    {
+        var mem = character.Credits;
+        long db = mem;
+        var coid = ResolveCharacterCoid(character);
+
+        if (persistence != null && coid > 0)
+        {
+            try
+            {
+                db = persistence.LoadCredits(coid);
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLog(LogType.Error, $"Failed to load credits: {ex.Message}");
+                return new CommandResult
+                {
+                    Success = false,
+                    Message = $"Failed to load credits from DB: {ex.Message}"
+                };
+            }
+        }
+        else if (persistence == null)
+        {
+            Logger.WriteLog(LogType.Error, "QueryCredits: no inventory persistence bound; reporting memory only");
+        }
+
+        var (globes, bars, scrip, clink) = CharacterLevelPacket.SplitCurrency(db);
+        return new CommandResult
+        {
+            Success = true,
+            Absolute = db,
+            Message =
+                $"Credits mem={mem} db={db}  =>  {globes} Globes, {bars} Bars, {scrip} Scrip, {clink} Clink"
+        };
+    }
+
+    private static CommandResult SetCreditsFromDenominations(
+        Character character,
+        string[] parts,
+        IInventoryPersistence persistence)
+    {
         if (!long.TryParse(parts[1], out var globes)
             || !int.TryParse(parts[2], out var bars)
             || !int.TryParse(parts[3], out var scrip)
@@ -112,20 +216,32 @@ public static class CurrencySync
             };
         }
 
-        if (character == null)
-        {
-            return new CommandResult
-            {
-                Success = false,
-                Message = "No character."
-            };
-        }
-
         try
         {
             var absolute = CharacterLevelPacket.BuildCurrency(globes, bars, scrip, clink);
-            character.Inventory.SetCreditsAbsolute(character, absolute);
+
+            // Explicit store (ChatManager passes InventoryPersistence.Instance); else inventory-bound store.
+            if (persistence != null)
+                SetCreditsAbsolute(persistence, character, absolute);
+            else
+                character.Inventory.SetCreditsAbsolute(character, absolute);
+
             var packet = CreateAbsoluteCurrencyPacket(character, absolute);
+
+            long db = character.Credits;
+            var coid = ResolveCharacterCoid(character);
+            if (persistence != null && coid > 0)
+            {
+                try
+                {
+                    db = persistence.LoadCredits(coid);
+                }
+                catch (Exception reEx)
+                {
+                    // Save already succeeded; surface in-memory balance if re-read fails.
+                    Logger.WriteLog(LogType.Error, $"Credits re-read after save failed: {reEx.Message}");
+                }
+            }
 
             return new CommandResult
             {
@@ -133,16 +249,17 @@ public static class CurrencySync
                 Absolute = absolute,
                 Packet = packet,
                 Message =
-                    $"Set currency to {globes} Globes, {bars} Bars, {scrip} Scrip, {clink} Clink! (persisted={character.Credits})"
+                    $"Set credits to {globes} Globes, {bars} Bars, {scrip} Scrip, {clink} Clink! " +
+                    $"(persisted={character.Credits} db={db})"
             };
         }
         catch (Exception ex)
         {
-            Logger.WriteLog(LogType.Error, $"Failed to set currency: {ex.Message}");
+            Logger.WriteLog(LogType.Error, $"Failed to set credits: {ex.Message}");
             return new CommandResult
             {
                 Success = false,
-                Message = $"Failed to set currency: {ex.Message}"
+                Message = $"Failed to set credits: {ex.Message}"
             };
         }
     }

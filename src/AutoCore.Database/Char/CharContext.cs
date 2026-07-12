@@ -50,6 +50,12 @@ public class CharContext : DbContext
     {
     }
 
+    /// <summary>Options-based constructor for unit tests (InMemory / SQLite) without MySQL.</summary>
+    public CharContext(DbContextOptions<CharContext> options)
+        : base(options)
+    {
+    }
+
     public static void InitializeConnectionString(string connectionString)
     {
         if (string.IsNullOrEmpty(connectionString))
@@ -67,6 +73,7 @@ public class CharContext : DbContext
         context.Database.EnsureCreated();
         context.EnsureInventorySchema();
         context.EnsureCharacterEconomySchema();
+        context.EnsureCharacterProgressSchema();
         context.EnsureMissionSchema();
     }
 
@@ -117,6 +124,30 @@ public class CharContext : DbContext
     }
 
     /// <summary>
+    /// Adds XP / level-up pool columns for existing character DBs (docs/XP.md).
+    /// Safe to call repeatedly.
+    /// </summary>
+    public void EnsureCharacterProgressSchema()
+    {
+        TryExecute("""
+            ALTER TABLE `character`
+            ADD COLUMN `Experience` INT NOT NULL DEFAULT 0
+            """);
+        TryExecute("""
+            ALTER TABLE `character`
+            ADD COLUMN `SkillPoints` SMALLINT NOT NULL DEFAULT 0
+            """);
+        TryExecute("""
+            ALTER TABLE `character`
+            ADD COLUMN `AttributePoints` SMALLINT NOT NULL DEFAULT 0
+            """);
+        TryExecute("""
+            ALTER TABLE `character`
+            ADD COLUMN `ResearchPoints` SMALLINT NOT NULL DEFAULT 0
+            """);
+    }
+
+    /// <summary>
     /// Adds mission-persistence tables to existing character DBs. Safe to call repeatedly.
     /// </summary>
     public void EnsureMissionSchema()
@@ -157,7 +188,14 @@ public class CharContext : DbContext
         }
     }
 
-    protected override void OnConfiguring(DbContextOptionsBuilder options) => options.UseMySql(ConnectionString, ServerVersion.AutoDetect(ConnectionString));
+    protected override void OnConfiguring(DbContextOptionsBuilder options)
+    {
+        // Skip when constructed with DbContextOptions (unit tests inject InMemory/SQLite).
+        if (options.IsConfigured)
+            return;
+
+        options.UseMySql(ConnectionString, ServerVersion.AutoDetect(ConnectionString));
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

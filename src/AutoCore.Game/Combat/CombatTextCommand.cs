@@ -154,8 +154,8 @@ public static class CombatTextCommand
                 case "credits":
                 case "givecredits":
                     return Msg(
-                        "Credits are not a combat-text visualization. Use /currency <globes> <bars> <scrip> <clink> " +
-                        "(CharacterLevel absolute set + server persist). No packet sent.");
+                        "Credits are not a combat-text visualization. Use /credits (query) or " +
+                        "/credits <globes> <bars> <scrip> <clink> (set + persist + CharacterLevel). No packet sent.");
 
                 default:
                     return Msg($"Unknown '{arg}'. Try /ct dmg 50 | /ct crit | /ct resist | /ct deflect | /ct xp 500");

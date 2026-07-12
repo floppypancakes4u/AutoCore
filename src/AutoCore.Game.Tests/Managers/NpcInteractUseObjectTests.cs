@@ -4,6 +4,8 @@ namespace AutoCore.Game.Tests.Managers;
 
 using AutoCore.Database.World.Models;
 using AutoCore.Game.Entities;
+using AutoCore.Game.Experience;
+using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
 using AutoCore.Game.Mission;
@@ -12,6 +14,8 @@ using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Global;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
+using AutoCore.Game.Tests.Experience.Fakes;
+using AutoCore.Game.Tests.Inventory.Fakes;
 using AutoCore.Game.TNL;
 
 /// <summary>
@@ -42,6 +46,7 @@ public class NpcInteractUseObjectTests
         NpcInteractHandler.InvalidateMissionIndex();
         // delay≤0 runs journal/re-eval synchronously (production default is 100ms).
         NpcInteractHandler.DialogTurnInFollowupDelayMs = 0;
+        ExperienceService.Instance.ResetForTests();
     }
 
     [TestCleanup]
@@ -51,6 +56,7 @@ public class NpcInteractUseObjectTests
         AssetManager.Instance.ClearTestMissions();
         NpcInteractHandler.InvalidateMissionIndex();
         NpcInteractHandler.ResetDialogTurnInFollowupForTests();
+        ExperienceService.Instance.ResetForTests();
         _sent.Clear();
     }
 
@@ -423,6 +429,171 @@ public class NpcInteractUseObjectTests
     }
 
     [TestMethod]
+    public void HandleMissionDialogResponse_DeliverTurnIn_PersistsMissionXpWithoutGiveXpPacket()
+    {
+        // TargetLevel 5 span=3200, XPIndex 5 → 10% → 320 XP (docs/XP.md worked example).
+        SeedDeliverMission(MissionA, ObjectiveA, NpcCbid, targetLevel: 5, xpIndex: 5, xpScaler: 1f, balance: 1f);
+
+        var persist = new RecordingProgressPersistence();
+        var xpSvc = ExperienceService.Instance;
+        xpSvc.Persistence = persist;
+        xpSvc.PersistOnGrant = true;
+        xpSvc.SendPacketsOnGrant = true;
+        xpSvc.ResolveThreshold = ExperienceService.DefaultRetailThreshold;
+        xpSvc.ResolveQuestFrac = ExperienceService.DefaultQuestFrac;
+
+        var (conn, character, map) = CreatePlayer();
+        character.AttachTestDataForTests("DeliverXp");
+        character.SetExperience(0);
+        character.SetLevel(1);
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        GiveQuest(character, MissionA);
+        _sent.Clear();
+
+        NpcInteractHandler.HandleMissionDialogResponse(conn, new MissionDialogResponsePacket
+        {
+            MissionId = MissionA,
+            Accepted = true,
+            MissionGiver = new TFID(NpcCoid, false),
+        });
+
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionA));
+        Assert.AreEqual(320, character.Experience, "memory XP after deliver turn-in");
+        Assert.AreEqual(1, persist.Saves.Count, "SaveProgress must run on deliver complete");
+        Assert.AreEqual(320, persist.Saves[0].Progress.Experience);
+        Assert.AreEqual(character.ObjectId.Coid, persist.Saves[0].Coid);
+        // Client already applied local XP — server must not re-send GiveXP (double-count).
+        Assert.AreEqual(0, _sent.OfType<GiveXPPacket>().Count());
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+        // 320 XP at L1 does not cross 1000 threshold — no CharacterLevel either.
+        Assert.AreEqual(0, _sent.OfType<CharacterLevelPacket>().Count());
+    }
+
+    [TestMethod]
+    public void HandleMissionDialogResponse_DeliverTurnIn_WhenLevels_SendsCharacterLevelNotGiveXp()
+    {
+        // Start near threshold; grant 320 → cross L1→L2 (threshold 1000).
+        SeedDeliverMission(MissionA, ObjectiveA, NpcCbid, targetLevel: 5, xpIndex: 5, xpScaler: 1f, balance: 1f);
+
+        var persist = new RecordingProgressPersistence();
+        var xpSvc = ExperienceService.Instance;
+        xpSvc.Persistence = persist;
+        xpSvc.PersistOnGrant = true;
+        xpSvc.SendPacketsOnGrant = true;
+        xpSvc.ResolveThreshold = ExperienceService.DefaultRetailThreshold;
+        xpSvc.ResolveQuestFrac = ExperienceService.DefaultQuestFrac;
+        xpSvc.ResolveLevelRow = level => new AutoCore.Database.World.Models.ExperienceLevel
+        {
+            Level = level,
+            Experience = ExperienceService.DefaultRetailThreshold(level),
+            SkillPoints = 1,
+            AttributePoints = 2,
+            ResearchPoints = 0
+        };
+
+        var (conn, character, map) = CreatePlayer();
+        character.AttachTestDataForTests("DeliverLevel");
+        character.SetExperience(900);
+        character.SetLevel(1);
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        GiveQuest(character, MissionA);
+        _sent.Clear();
+
+        NpcInteractHandler.HandleMissionDialogResponse(conn, new MissionDialogResponsePacket
+        {
+            MissionId = MissionA,
+            Accepted = true,
+            MissionGiver = new TFID(NpcCoid, false),
+        });
+
+        Assert.AreEqual(2, character.Level, "server level after deliver XP");
+        Assert.AreEqual(1220, character.Experience);
+        Assert.AreEqual(0, _sent.OfType<GiveXPPacket>().Count(), "no XP delta (client already applied)");
+        var levelPkt = _sent.OfType<CharacterLevelPacket>().SingleOrDefault();
+        Assert.IsNotNull(levelPkt, "must send CharacterLevel so client updates level mid-session");
+        Assert.AreEqual(2, levelPkt.Level);
+        Assert.AreEqual(1220, levelPkt.Experience);
+    }
+
+    [TestMethod]
+    public void HandleMissionDialogResponse_DeliverTurnIn_PersistsCreditsAndSendsAbsoluteNotGiveCredits()
+    {
+        // TargetLevel 2 base=10, CreditsIndex 4 frac=0.8 → 8 clink (client FUN_0059DF20).
+        SeedDeliverMission(
+            MissionA, ObjectiveA, NpcCbid,
+            targetLevel: 2,
+            creditsIndex: 4,
+            creditScaler: 1f);
+
+        var invPersist = new RecordingInventoryPersistence();
+        var xpSvc = ExperienceService.Instance;
+        xpSvc.ResolveQuestCreditsFrac = ExperienceService.DefaultQuestCreditsFrac;
+        xpSvc.ResolveQuestBaseCredits = ExperienceService.DefaultQuestBaseCredits;
+
+        var (conn, character, map) = CreatePlayer();
+        character.AttachTestDataForTests("DeliverCredits");
+        character.AttachInventoryForTests(new InventoryManager(invPersist));
+        character.SetCredits(0);
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        GiveQuest(character, MissionA);
+        _sent.Clear();
+
+        NpcInteractHandler.HandleMissionDialogResponse(conn, new MissionDialogResponsePacket
+        {
+            MissionId = MissionA,
+            Accepted = true,
+            MissionGiver = new TFID(NpcCoid, false),
+        });
+
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionA));
+        Assert.AreEqual(8L, character.Credits, "server memory credits after deliver");
+        Assert.AreEqual(1, invPersist.CreditsSaves.Count, "SaveCredits must run on deliver complete");
+        Assert.AreEqual(8L, invPersist.CreditsSaves[0].Credits);
+        // Client already applied CompleteObjective money — no additive GiveCredits (double-count).
+        Assert.AreEqual(0, _sent.OfType<GiveCreditsPacket>().Count());
+        // Absolute CharacterLevel required so money HUD updates (dialog notifyClient:false).
+        var levelPkt = _sent.OfType<CharacterLevelPacket>().SingleOrDefault(p => p.Currency == 8L)
+                       ?? _sent.OfType<CharacterLevelPacket>().LastOrDefault();
+        Assert.IsNotNull(levelPkt, "must send CharacterLevel with Currency for client money HUD");
+        Assert.AreEqual(8L, levelPkt.Currency);
+    }
+
+    [TestMethod]
+    public void HandleMissionDialogResponse_DeliverTurnIn_CreditsAdditiveToExistingBalance()
+    {
+        SeedDeliverMission(
+            MissionA, ObjectiveA, NpcCbid,
+            targetLevel: 2,
+            creditsIndex: 4,
+            creditScaler: 1f);
+
+        var invPersist = new RecordingInventoryPersistence();
+        var xpSvc = ExperienceService.Instance;
+        xpSvc.ResolveQuestCreditsFrac = ExperienceService.DefaultQuestCreditsFrac;
+        xpSvc.ResolveQuestBaseCredits = ExperienceService.DefaultQuestBaseCredits;
+
+        var (conn, character, map) = CreatePlayer();
+        character.AttachTestDataForTests("DeliverCreditsStack");
+        character.AttachInventoryForTests(new InventoryManager(invPersist));
+        character.SetCredits(100);
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        GiveQuest(character, MissionA);
+        _sent.Clear();
+
+        NpcInteractHandler.HandleMissionDialogResponse(conn, new MissionDialogResponsePacket
+        {
+            MissionId = MissionA,
+            Accepted = true,
+            MissionGiver = new TFID(NpcCoid, false),
+        });
+
+        Assert.AreEqual(108L, character.Credits);
+        Assert.AreEqual(108L, invPersist.CreditsSaves[0].Credits);
+        var levelPkt = _sent.OfType<CharacterLevelPacket>().Single(p => p.Currency == 108L);
+        Assert.AreEqual(108L, levelPkt.Currency);
+    }
+
+    [TestMethod]
     public void HandleMissionDialogResponse_ObjectiveIdEcho_RemapsToDeliverMission()
     {
         SeedDeliverMission(MissionA, ObjectiveA, NpcCbid);
@@ -789,7 +960,17 @@ public class NpcInteractUseObjectTests
         character.CurrentQuests.Add(quest);
     }
 
-    private static void SeedDeliverMission(int missionId, int objectiveId, int npcTargetCbid)
+    private static void SeedDeliverMission(
+        int missionId,
+        int objectiveId,
+        int npcTargetCbid,
+        short targetLevel = 0,
+        short xpIndex = 0,
+        float xpScaler = 0f,
+        float balance = 0f,
+        short creditsIndex = 0,
+        float creditScaler = 0f,
+        int staticCredits = 0)
     {
         var objective = MissionObjective.CreateForTests(objectiveId, 0, missionId, 1);
         var deliver = new ObjectiveRequirementDeliver(objective)
@@ -803,9 +984,23 @@ public class NpcInteractUseObjectTests
         };
         objective.Requirements.Add(deliver);
 
+        if (xpIndex != 0 || xpScaler != 0f || balance != 0f
+            || creditsIndex != 0 || creditScaler != 0f || staticCredits != 0)
+        {
+            var t = typeof(MissionObjective);
+            t.GetProperty(nameof(MissionObjective.XPIndex))!.SetValue(objective, xpIndex);
+            t.GetProperty(nameof(MissionObjective.XPScaler))!.SetValue(objective, xpScaler);
+            t.GetProperty(nameof(MissionObjective.XPBalanceScaler))!.SetValue(objective, balance);
+            t.GetProperty(nameof(MissionObjective.CreditsIndex))!.SetValue(objective, creditsIndex);
+            t.GetProperty(nameof(MissionObjective.CreditScaler))!.SetValue(objective, creditScaler);
+            t.GetProperty(nameof(MissionObjective.Credits))!.SetValue(objective, staticCredits);
+        }
+
         var mission = Mission.CreateForTests(missionId, objective);
         mission.NPC = npcTargetCbid;
         mission.ReqMissionId = new[] { -1, -1, -1, -1 };
+        if (targetLevel > 0)
+            mission.TargetLevel = targetLevel;
         AssetManager.Instance.SetTestMission(mission);
     }
 

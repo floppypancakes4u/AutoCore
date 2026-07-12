@@ -27,6 +27,27 @@ public class CharacterLevelPacketTests
     }
 
     [TestMethod]
+    public void SplitCurrency_RoundTripsBuildCurrency()
+    {
+        Assert.AreEqual((0L, 0, 0, 0), CharacterLevelPacket.SplitCurrency(0L));
+        Assert.AreEqual((0L, 0, 0, 4), CharacterLevelPacket.SplitCurrency(4L));
+        Assert.AreEqual((0L, 0, 3, 4), CharacterLevelPacket.SplitCurrency(3_004L));
+        Assert.AreEqual((0L, 2, 3, 4), CharacterLevelPacket.SplitCurrency(2_003_004L));
+        Assert.AreEqual((1L, 2, 3, 4), CharacterLevelPacket.SplitCurrency(1_002_003_004L));
+        Assert.AreEqual((123_999L, 888, 777, 666), CharacterLevelPacket.SplitCurrency(123_999_888_777_666L));
+
+        var packed = CharacterLevelPacket.BuildCurrency(9, 8, 7, 6);
+        var (g, b, s, c) = CharacterLevelPacket.SplitCurrency(packed);
+        Assert.AreEqual(packed, CharacterLevelPacket.BuildCurrency(g, b, s, c));
+    }
+
+    [TestMethod]
+    public void SplitCurrency_Negative_TreatedAsZero()
+    {
+        Assert.AreEqual((0L, 0, 0, 0), CharacterLevelPacket.SplitCurrency(-1L));
+    }
+
+    [TestMethod]
     public void Write_Layout_CurrencyAtOffset0x20()
     {
         var id = new TFID { Coid = 0x1122334455667788L, Global = true };
@@ -67,5 +88,8 @@ public class CharacterLevelPacketTests
         Assert.AreEqual(12345, BitConverter.ToInt32(bytes, 0x24));
         Assert.AreEqual((short)10, BitConverter.ToInt16(bytes, 0x30));
         Assert.AreEqual((short)20, BitConverter.ToInt16(bytes, 0x32));
+        // Pad after level must be zero (WriteZeros)
+        for (var i = 0x15; i < 0x1C; i++)
+            Assert.AreEqual(0, bytes[i], $"pad byte at {i}");
     }
 }

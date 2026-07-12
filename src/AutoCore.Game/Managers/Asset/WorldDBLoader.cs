@@ -12,6 +12,10 @@ public class WorldDBLoader
     public IDictionary<Tuple<int, byte>, ContinentArea> ContinentAreas { get; set; }
     public IDictionary<int, ContinentObject> ContinentObjects { get; set; }
     public IDictionary<byte, ExperienceLevel> ExperienceLevels { get; set; }
+    public IDictionary<int, int> CreatureExperienceLevels { get; set; }
+    public IDictionary<int, float> QuestXpLookup { get; set; }
+    public IDictionary<int, float> QuestCreditsLookup { get; set; }
+    public IDictionary<int, int> QuestBaseCredits { get; set; }
     public IDictionary<int, LootTable> LootTables { get; set; }
 
     // wad.xml-only tables (no World DB equivalent).
@@ -71,6 +75,30 @@ public class WorldDBLoader
                     {
                         ExperienceLevels = WadXmlWorldDataLoader.LoadExperienceLevels(wadXmlPath);
                         Logger.WriteLog(LogType.Initialize, $"WorldDBLoader: Loaded {ExperienceLevels.Count} ExperienceLevels from wad.xml");
+                    }
+
+                    if (CreatureExperienceLevels == null || CreatureExperienceLevels.Count == 0)
+                    {
+                        CreatureExperienceLevels = WadXmlWorldDataLoader.LoadCreatureExperienceLevels(wadXmlPath);
+                        Logger.WriteLog(LogType.Initialize, $"WorldDBLoader: Loaded {CreatureExperienceLevels.Count} CreatureExperienceLevels from wad.xml");
+                    }
+
+                    if (QuestXpLookup == null || QuestXpLookup.Count == 0)
+                    {
+                        QuestXpLookup = WadXmlWorldDataLoader.LoadQuestXpLookup(wadXmlPath);
+                        Logger.WriteLog(LogType.Initialize, $"WorldDBLoader: Loaded {QuestXpLookup.Count} QuestXpLookup rows from wad.xml");
+                    }
+
+                    if (QuestCreditsLookup == null || QuestCreditsLookup.Count == 0)
+                    {
+                        QuestCreditsLookup = WadXmlWorldDataLoader.LoadQuestCreditsLookup(wadXmlPath);
+                        Logger.WriteLog(LogType.Initialize, $"WorldDBLoader: Loaded {QuestCreditsLookup.Count} QuestCreditsLookup rows from wad.xml");
+                    }
+
+                    if (QuestBaseCredits == null || QuestBaseCredits.Count == 0)
+                    {
+                        QuestBaseCredits = WadXmlWorldDataLoader.LoadQuestBaseCredits(wadXmlPath);
+                        Logger.WriteLog(LogType.Initialize, $"WorldDBLoader: Loaded {QuestBaseCredits.Count} QuestBaseCredits rows from wad.xml");
                     }
 
                     if (LootTables == null || LootTables.Count == 0)

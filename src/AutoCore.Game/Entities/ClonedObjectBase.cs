@@ -183,6 +183,9 @@ public abstract class ClonedObjectBase
         Murderer = new();
     }
 
+    /// <summary>Unit-test seam to attach a clonebase without AssetManager/wad.</summary>
+    internal void AssignCloneBaseForTests(CloneBaseObject cloneBase) => CloneBaseObject = cloneBase;
+
     public void LoadCloneBase(int cbid)
     {
         CloneBaseObject = AssetManager.Instance.GetCloneBase<CloneBaseObject>(cbid);
@@ -281,6 +284,19 @@ public abstract class ClonedObjectBase
         {
             Logger.WriteLog(LogType.Error,
                 "NotifyObjectKilled failed for coid={0}: {1}",
+                ObjectId.Coid,
+                ex.Message);
+        }
+
+        // Kill XP (docs/XP.md) — murderer full credit, grey/hard level diff.
+        try
+        {
+            Experience.KillXpAward.TryAward(this);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "KillXpAward failed for coid={0}: {1}",
                 ObjectId.Coid,
                 ex.Message);
         }

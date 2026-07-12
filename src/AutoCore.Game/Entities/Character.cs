@@ -41,6 +41,18 @@ public partial class Character : Creature
     public int LastStationId => DBData?.LastStationId ?? -1;
     public new byte Level => DBData?.Level ?? 1;
 
+    /// <summary>Cumulative experience total (persisted). See docs/XP.md.</summary>
+    public int Experience => DBData?.Experience ?? 0;
+
+    /// <summary>Unspent skill points (persisted).</summary>
+    public short SkillPoints => DBData?.SkillPoints ?? 0;
+
+    /// <summary>Unspent attribute points (persisted).</summary>
+    public short AttributePoints => DBData?.AttributePoints ?? 0;
+
+    /// <summary>Unspent research points (persisted).</summary>
+    public short ResearchPoints => DBData?.ResearchPoints ?? 0;
+
     /// <summary>Absolute money balance (persisted). Client UI splits into Globes/Bars/Scrip/Clink.</summary>
     public long Credits => DBData?.Credits ?? 0L;
 
@@ -103,6 +115,43 @@ public partial class Character : Creature
     }
 
     public override byte GetLevel() => Level;
+
+    /// <summary>Update in-memory level (caller persists via CharacterProgressPersistence).</summary>
+    public void SetLevel(byte level)
+    {
+        if (DBData == null)
+            return;
+        DBData.Level = level < 1 ? (byte)1 : level;
+    }
+
+    /// <summary>Update in-memory cumulative experience (caller persists).</summary>
+    public void SetExperience(int experience)
+    {
+        if (DBData == null)
+            return;
+        DBData.Experience = experience < 0 ? 0 : experience;
+    }
+
+    public void SetSkillPoints(short points)
+    {
+        if (DBData == null)
+            return;
+        DBData.SkillPoints = points < 0 ? (short)0 : points;
+    }
+
+    public void SetAttributePoints(short points)
+    {
+        if (DBData == null)
+            return;
+        DBData.AttributePoints = points < 0 ? (short)0 : points;
+    }
+
+    public void SetResearchPoints(short points)
+    {
+        if (DBData == null)
+            return;
+        DBData.ResearchPoints = points < 0 ? (short)0 : points;
+    }
 
     /// <summary>Update in-memory credits (caller persists via InventoryManager).</summary>
     public void SetCredits(long credits)

@@ -384,6 +384,65 @@ public class AssetManager : Singleton<AssetManager>
         return null;
     }
 
+    /// <summary>Player level threshold row (tExperienceLevel).</summary>
+    public ExperienceLevel GetExperienceLevel(byte level)
+    {
+        if (WorldDBLoader.ExperienceLevels == null)
+            return null;
+        return WorldDBLoader.ExperienceLevels.TryGetValue(level, out var row) ? row : null;
+    }
+
+    /// <summary>Cumulative XP threshold for a player level, or 0 if unknown.</summary>
+    public uint GetExperienceThreshold(byte level)
+    {
+        var row = GetExperienceLevel(level);
+        return row?.Experience ?? 0u;
+    }
+
+    /// <summary>Base kill XP for a creature level (tCreatureExperienceLevel).</summary>
+    public int GetCreatureExperience(int creatureLevel)
+    {
+        if (WorldDBLoader.CreatureExperienceLevels == null)
+            return 0;
+        return WorldDBLoader.CreatureExperienceLevels.TryGetValue(creatureLevel, out var xp) ? xp : 0;
+    }
+
+    /// <summary>Mission XP fraction for XPIndex (tQuestXPLookup).</summary>
+    public float GetQuestXpFraction(int xpIndex)
+    {
+        if (WorldDBLoader.QuestXpLookup == null)
+            return 0f;
+        return WorldDBLoader.QuestXpLookup.TryGetValue(xpIndex, out var frac) ? frac : 0f;
+    }
+
+    /// <summary>Mission credit multiplier for CreditsIndex (tQuestCreditsLookup.rlLevelCredits).</summary>
+    public float GetQuestCreditsFraction(int creditsIndex)
+    {
+        if (WorldDBLoader.QuestCreditsLookup == null)
+            return 0f;
+        return WorldDBLoader.QuestCreditsLookup.TryGetValue(creditsIndex, out var frac) ? frac : 0f;
+    }
+
+    /// <summary>Base mission credits for TargetLevel (tQuestBaseCredits.intBaseCredits).</summary>
+    public int GetQuestBaseCredits(int targetLevel)
+    {
+        if (WorldDBLoader.QuestBaseCredits == null)
+            return 0;
+        return WorldDBLoader.QuestBaseCredits.TryGetValue(targetLevel, out var bas) ? bas : 0;
+    }
+
+    /// <summary>
+    /// First-visit area reward level index (ContinentArea.XPLevel). 0 = no XP.
+    /// </summary>
+    public int GetContinentAreaXpLevel(int continentObjectId, byte areaId)
+    {
+        if (WorldDBLoader.ContinentAreas == null)
+            return 0;
+        if (!WorldDBLoader.ContinentAreas.TryGetValue(Tuple.Create(continentObjectId, areaId), out var area))
+            return 0;
+        return area.XPLevel;
+    }
+
     public IEnumerable<ContinentObject> GetContinentObjects()
     {
         if (WorldDBLoader.ContinentObjects == null)

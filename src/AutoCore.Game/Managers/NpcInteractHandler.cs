@@ -2,6 +2,7 @@ namespace AutoCore.Game.Managers;
 
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.Entities;
+using AutoCore.Game.Inventory;
 using AutoCore.Game.Map;
 using AutoCore.Game.Mission;
 using AutoCore.Game.Mission.Requirements;
@@ -851,6 +852,9 @@ public static class NpcInteractHandler
         character.CompletedMissionIds.Add(missionId);
         MissionPersistence.Instance.OnMissionCompleted(character.ObjectId.Coid, missionId);
 
+        var mission = AssetManager.Instance.GetMission(missionId);
+        ApplyMissionCompleteRewards(character, mission, objective, source: "ForceCompleteMission");
+
         if (conn != null)
         {
             conn.SendGamePacket(new CompleteDynamicObjectivePacket
@@ -1000,6 +1004,17 @@ public static class NpcInteractHandler
         character.CurrentQuests.Remove(quest);
         character.CompletedMissionIds.Add(missionId);
         MissionPersistence.Instance.OnMissionCompleted(character.ObjectId.Coid, missionId);
+
+        // Client already applied local CompleteObjective XP VFX; server must still persist rewards
+        // without re-sending GiveXP delta (would double-count). If the grant levels the character,
+        // GiveXp still sends CharacterLevel so mid-session level updates without relog.
+        // No 0x2070 — soft-pedal below.
+        ApplyMissionCompleteRewards(
+            character,
+            mission,
+            objective,
+            source: "DeliverTurnIn",
+            notifyClient: false);
 
         // Do NOT send CompleteDynamicObjective (0x2070) on dialog turn-in.
         // Client already ran CVOGReaction_CompleteObjective; that also unlocks next CoreMission
@@ -1295,15 +1310,184 @@ public static class NpcInteractHandler
             quest.MissionId,
             objective.ObjectiveId);
 
-        IncompleteHandlerLog.Warn(
-            "AdvanceOrCompleteObjective",
-            context,
-            "Mission complete: no XP/credits/items/medals applied; quest state not persisted to DB",
-            "On final objective: grant mission rewards (client CompleteObjective path), inventory rewards, persist CurrentQuests/CompletedMissionIds, send FailMission/complete UI packets as needed.");
+        ApplyMissionCompleteRewards(character, mission, objective, source);
 
         PushJournalMissionList(conn, character);
         TriggerManager.Instance.OnMissionStateChanged(
             character.CurrentVehicle ?? (ClonedObjectBase)character);
+    }
+
+    /// <summary>
+    /// Server-authoritative mission complete rewards (XP + credits + skill/attrib pools).
+    /// Shared by dialog deliver turn-in (no 0x2070), <see cref="AdvanceOrCompleteObjective"/>,
+    /// and <see cref="ForceCompleteMission"/>.
+    /// </summary>
+    /// <param name="notifyClient">
+    /// False for dialog deliver turn-in (client already applied local CompleteObjective XP/credits).
+    /// True for server-driven completes that need GiveXP / GiveCredits packets.
+    /// </param>
+    internal static void ApplyMissionCompleteRewards(
+        Character character,
+        Mission mission,
+        MissionObjective objective,
+        string source = "MissionComplete",
+        bool notifyClient = true)
+    {
+        if (character == null)
+            return;
+
+        // Prefer the finishing objective; if null, use last sequence on the mission template.
+        if (objective == null && mission?.Objectives != null && mission.Objectives.Count > 0)
+        {
+            var maxSeq = mission.Objectives.Values.Max(o => o.Sequence);
+            mission.Objectives.TryGetValue(maxSeq, out objective);
+        }
+
+        if (mission == null || objective == null)
+        {
+            Logger.WriteLog(LogType.Error,
+                "ApplyMissionCompleteRewards: missing mission/objective source={0} char={1}",
+                source,
+                character.ObjectId.Coid);
+            return;
+        }
+
+        try
+        {
+            var xpAmount = Experience.ExperienceService.Instance.ComputeMissionXp(mission, objective);
+            Experience.GiveXpResult xpResult = null;
+
+            if (xpAmount != 0)
+            {
+                xpResult = Experience.ExperienceService.Instance.GiveXp(
+                    character,
+                    xpAmount,
+                    Experience.XpSource.Mission,
+                    levelHint: -1,
+                    notifyClient: notifyClient);
+
+                if (xpResult == null || !xpResult.Success)
+                {
+                    Logger.WriteLog(LogType.Error,
+                        "Mission reward XP failed source={0} mission={1} obj={2} amount={3} msg={4}",
+                        source,
+                        mission.Id,
+                        objective.ObjectiveId,
+                        xpAmount,
+                        xpResult?.Message ?? "null");
+                }
+                else
+                {
+                    Logger.WriteLog(LogType.Network,
+                        "Mission reward: source={0} coid={1} mission={2} obj={3} xp={4} total={5} level={6} notify={7}",
+                        source,
+                        character.ObjectId.Coid,
+                        mission.Id,
+                        objective.ObjectiveId,
+                        xpResult.AppliedAmount,
+                        xpResult.TotalExperience,
+                        xpResult.Level,
+                        notifyClient);
+                }
+            }
+            else
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "Mission reward: source={0} mission={1} obj={2} xpAmount=0 (index={3} targetLevel={4})",
+                    source,
+                    mission.Id,
+                    objective.ObjectiveId,
+                    objective.XPIndex,
+                    mission.TargetLevel);
+            }
+
+            // Credits (client FUN_0059DF20 on final complete). Always persist on server.
+            // Do NOT send GiveCredits (0x205E) here: dialog CompleteObjective and S2C 0x2070
+            // already add the delta client-side; a second GiveCredits would double-count.
+            // Always push absolute CharacterLevel (0x2017) so the money HUD matches the
+            // server balance (CompleteObjective does not always refresh credit UI).
+            var creditAmount = Experience.ExperienceService.Instance.ComputeMissionCredits(mission, objective);
+            if (creditAmount != 0)
+            {
+                try
+                {
+                    var creditResult = character.Inventory.AddCredits(character, creditAmount);
+                    SyncMissionCreditsToClient(character, creditResult.NewBalance);
+
+                    Logger.WriteLog(LogType.Network,
+                        "Mission reward credits: source={0} coid={1} mission={2} obj={3} amount={4} balance={5} notify={6}",
+                        source,
+                        character.ObjectId.Coid,
+                        mission.Id,
+                        objective.ObjectiveId,
+                        creditResult.AppliedDelta,
+                        creditResult.NewBalance,
+                        notifyClient);
+                }
+                catch (Exception creditEx)
+                {
+                    Logger.WriteLog(LogType.Error,
+                        "Mission reward credits failed source={0} mission={1} obj={2} amount={3}: {4}",
+                        source,
+                        mission.Id,
+                        objective.ObjectiveId,
+                        creditAmount,
+                        creditEx.Message);
+                }
+            }
+
+            var poolsChanged = false;
+            if (objective.SkillPoints != 0)
+            {
+                character.SetSkillPoints((short)Math.Min(short.MaxValue, character.SkillPoints + objective.SkillPoints));
+                poolsChanged = true;
+            }
+
+            if (objective.AttribPoints != 0)
+            {
+                character.SetAttributePoints((short)Math.Min(short.MaxValue, character.AttributePoints + objective.AttribPoints));
+                poolsChanged = true;
+            }
+
+            // Persist pools when XP was zero (GiveXp already persists when amount != 0).
+            // Use ExperienceService.Persistence so unit tests can inject RecordingProgressPersistence.
+            if (poolsChanged && xpAmount == 0 && character.ObjectId.Coid > 0)
+            {
+                var xpSvc = Experience.ExperienceService.Instance;
+                if (xpSvc.PersistOnGrant)
+                {
+                    xpSvc.Persistence.SaveProgress(
+                        character.ObjectId.Coid,
+                        new Experience.CharacterProgressSnapshot(
+                            character.Level,
+                            character.Experience,
+                            character.SkillPoints,
+                            character.AttributePoints,
+                            character.ResearchPoints));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "ApplyMissionCompleteRewards failed source={0} mission={1}: {2}",
+                source,
+                mission.Id,
+                ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Absolute money UI sync after mission credit grant (CharacterLevel Currency field).
+    /// Extracted for tests; no-op without an owning connection.
+    /// </summary>
+    internal static void SyncMissionCreditsToClient(Character character, long absoluteCredits)
+    {
+        if (character?.OwningConnection == null)
+            return;
+
+        var packet = CurrencySync.CreateAbsoluteCurrencyPacket(character, absoluteCredits);
+        character.OwningConnection.SendGamePacket(packet);
     }
 
     internal static void PushJournalMissionList(TNLConnection conn, Character character)

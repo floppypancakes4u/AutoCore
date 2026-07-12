@@ -196,19 +196,26 @@ public partial class TNLConnection
         character.Map?.ApplyMissionPhaseWorldState(
             character.CurrentVehicle ?? (ClonedObjectBase)character);
 
-        // CreateCharacterExtended.Credits stay 0 (login-safe). Restore absolute money the same
-        // way /currency does (CharacterLevel 0x2017), after create so the client object exists.
-        // Reload from DB so restore always uses the ledger /currency persists.
+        // CreateCharacterExtended.Credits stay 0 (login-safe). Reload money + progress from DB,
+        // then push client state: GiveXP seed (local player, no TFID) + absolute CharacterLevel.
         var currencyRestore = CurrencySync.TryCreateLoginRestorePacket(
             character,
             InventoryPersistence.Instance);
         if (currencyRestore != null)
         {
+            // Credits already applied to character via CurrencySync reload.
             Logger.WriteLog(
                 LogType.Network,
-                $"Login currency restore: character={character.ObjectId.Coid} credits={currencyRestore.Currency}");
-            SendGamePacket(currencyRestore);
+                $"Login currency reloaded: character={character.ObjectId.Coid} credits={character.Credits}");
         }
+
+        var xpSvc = AutoCore.Game.Experience.ExperienceService.Instance;
+        xpSvc.TryCreateLoginRestorePacket(
+            character,
+            AutoCore.Game.Experience.CharacterProgressPersistence.Instance);
+
+        // Always push Level/XP/currency/points after create (client XP starts at 0).
+        xpSvc.SendLoginProgressToClient(character);
     }
 
     private void SendInventoryLoginObjectPackets(Character character)

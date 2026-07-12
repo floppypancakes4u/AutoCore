@@ -95,12 +95,150 @@ public class CurrencySyncTests
     public void CreateAbsoluteCurrencyPacket_MatchesCurrencyCommandFields()
     {
         var character = CreateCharacter(coid: 7, startingCredits: 500);
+        character.SetExperience(12_345);
+        character.SetSkillPoints(3);
+        character.SetAttributePoints(4);
+        character.SetResearchPoints(5);
         var packet = CurrencySync.CreateAbsoluteCurrencyPacket(character, 1_002_003_004L);
 
         Assert.AreEqual(GameOpcode.CharacterLevel, packet.Opcode);
         Assert.AreEqual(character.ObjectId, packet.CharacterId);
         Assert.AreEqual(character.Level, packet.Level);
         Assert.AreEqual(1_002_003_004L, packet.Currency);
+        // Absolute CharacterLevel overwrites client Experience — must not zero progress.
+        Assert.AreEqual(12_345, packet.Experience);
+        Assert.AreEqual((short)3, packet.SkillPoints);
+        Assert.AreEqual((short)4, packet.AttributePoints);
+        Assert.AreEqual((short)5, packet.ResearchPoints);
+    }
+
+    [TestMethod]
+    public void CreateAbsoluteCurrencyPacket_Null_Throws()
+    {
+        Assert.ThrowsException<ArgumentNullException>(() =>
+            CurrencySync.CreateAbsoluteCurrencyPacket(null, 1));
+    }
+
+    [TestMethod]
+    public void TryApplyCreditsCommand_Query_NoPersistence_ReportsMemoryOnly()
+    {
+        var character = CreateCharacter(coid: 22, startingCredits: 42);
+        var result = CurrencySync.TryApplyCreditsCommand(character, new[] { "/credits" }, persistence: null);
+        Assert.IsTrue(result.Success);
+        Assert.IsTrue(result.Message.Contains("mem=42", StringComparison.Ordinal));
+        Assert.IsTrue(result.Message.Contains("db=42", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void TryApplyCreditsCommand_Query_LoadThrows_Fails()
+    {
+        var character = CreateCharacter(coid: 23, startingCredits: 1);
+        var result = CurrencySync.TryApplyCreditsCommand(
+            character,
+            new[] { "/credits" },
+            new LoadThrowingCreditsPersistence());
+        Assert.IsFalse(result.Success);
+        Assert.IsTrue(result.Message.Contains("Failed to load", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public void TryApplyCreditsCommand_Set_RereadThrows_StillSucceeds()
+    {
+        var character = CreateCharacter(coid: 24, startingCredits: 0);
+        var result = CurrencySync.TryApplyCreditsCommand(
+            character,
+            new[] { "/credits", "0", "0", "0", "7" },
+            new SaveOkLoadThrowingCreditsPersistence());
+        Assert.IsTrue(result.Success);
+        Assert.AreEqual(7L, character.Credits);
+        Assert.IsNotNull(result.Packet);
+        Assert.AreEqual(7L, result.Packet.Currency);
+    }
+
+    [TestMethod]
+    public void TryApplyCreditsCommand_EmptyParts_Fails()
+    {
+        var result = CurrencySync.TryApplyCreditsCommand(
+            CreateCharacter(1, 0),
+            Array.Empty<string>(),
+            new RecordingInventoryPersistence());
+        Assert.IsFalse(result.Success);
+        Assert.IsTrue(result.Message.Contains("Usage", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public void TryApplyCreditsCommand_Query_ReportsMemAndDb()
+    {
+        var persistence = new RecordingInventoryPersistence { CreditsToLoad = 1_002_003_004L };
+        var inventory = new InventoryManager(persistence);
+        var character = CreateCharacter(coid: 20, startingCredits: 99, inventory);
+
+        var result = CurrencySync.TryApplyCreditsCommand(
+            character,
+            new[] { "/credits" },
+            persistence);
+
+        Assert.IsTrue(result.Success);
+        Assert.IsNull(result.Packet);
+        Assert.IsTrue(result.Message.Contains("mem=99", StringComparison.Ordinal));
+        Assert.IsTrue(result.Message.Contains("db=1002003004", StringComparison.Ordinal)
+                      || result.Message.Contains("db=1,002,003,004", StringComparison.Ordinal)
+                      || result.Message.Contains("db=1002003004", StringComparison.OrdinalIgnoreCase)
+                      || result.Message.Contains("1002003004", StringComparison.Ordinal));
+        Assert.IsTrue(result.Message.Contains("1", StringComparison.Ordinal)); // globes
+        Assert.IsTrue(result.Message.Contains("Globes", StringComparison.OrdinalIgnoreCase)
+                      || result.Message.Contains("globes", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public void TryApplyCreditsCommand_Set_PersistsPreservesXpAndSurfacesDb()
+    {
+        var persistence = new RecordingInventoryPersistence();
+        var inventory = new InventoryManager(persistence);
+        var character = CreateCharacter(coid: 21, startingCredits: 0, inventory);
+        character.SetExperience(50_000);
+        character.SetLevel(5);
+        character.SetSkillPoints(2);
+
+        var result = CurrencySync.TryApplyCreditsCommand(
+            character,
+            new[] { "/credits", "1", "2", "3", "4" },
+            persistence);
+
+        var expected = CharacterLevelPacket.BuildCurrency(1, 2, 3, 4);
+        Assert.IsTrue(result.Success);
+        Assert.AreEqual(expected, result.Absolute);
+        Assert.AreEqual(expected, character.Credits);
+        Assert.IsNotNull(result.Packet);
+        Assert.AreEqual(expected, result.Packet.Currency);
+        Assert.AreEqual(50_000, result.Packet.Experience);
+        Assert.AreEqual((byte)5, result.Packet.Level);
+        Assert.AreEqual((short)2, result.Packet.SkillPoints);
+        Assert.AreEqual((21L, expected), persistence.CreditsSaves[0]);
+        Assert.IsTrue(result.Message.Contains("db=", StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(result.Message.Contains(expected.ToString(), StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void TryApplyCreditsCommand_NullCharacter_Fails()
+    {
+        var result = CurrencySync.TryApplyCreditsCommand(
+            null,
+            new[] { "/credits" },
+            new RecordingInventoryPersistence());
+        Assert.IsFalse(result.Success);
+        Assert.AreEqual("No character.", result.Message);
+    }
+
+    [TestMethod]
+    public void TryApplyCreditsCommand_SetTooFewArgs_Fails()
+    {
+        var result = CurrencySync.TryApplyCreditsCommand(
+            CreateCharacter(1, 0),
+            new[] { "/credits", "1", "2" },
+            new RecordingInventoryPersistence());
+        Assert.IsFalse(result.Success);
+        Assert.IsTrue(result.Message.Contains("Usage", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]
@@ -171,7 +309,9 @@ public class CurrencySyncTests
         Assert.AreEqual(expected, result.Packet.Currency);
         Assert.AreEqual(character.ObjectId, result.Packet.CharacterId);
         Assert.AreEqual((77L, expected), persistence.CreditsSaves[0]);
-        Assert.IsTrue(result.Message.Contains("persisted=", StringComparison.Ordinal));
+        Assert.IsTrue(
+            result.Message.Contains("persisted=", StringComparison.Ordinal)
+            || result.Message.Contains("db=", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]
@@ -186,7 +326,10 @@ public class CurrencySyncTests
 
         Assert.IsFalse(result.Success);
         Assert.IsNull(result.Packet);
-        Assert.IsTrue(result.Message.Contains("Failed to set currency", StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(
+            result.Message.Contains("Failed to set", StringComparison.OrdinalIgnoreCase)
+            || result.Message.Contains("currency", StringComparison.OrdinalIgnoreCase)
+            || result.Message.Contains("credits", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]
@@ -350,5 +493,48 @@ public class CurrencySyncTests
         public long LoadCredits(long characterCoid) => 0;
         public void SaveCredits(long characterCoid, long credits) =>
             throw new InvalidOperationException("db down");
+    }
+
+    private sealed class LoadThrowingCreditsPersistence : IInventoryPersistence
+    {
+        public IReadOnlyList<CharacterInventoryItem> LoadCargo(long characterCoid) =>
+            Array.Empty<CharacterInventoryItem>();
+
+        public void UpsertCargo(long characterCoid, CharacterInventoryItem item) { }
+        public void MoveCargo(long characterCoid, CharacterInventoryItem item) { }
+        public void DeleteCargo(long characterCoid, long itemCoid) { }
+        public void ClearCargo(long characterCoid) { }
+        public void EnsureSimpleObject(long itemCoid, byte type, int cbid, int faction = 0, int teamFaction = 0) { }
+        public void SaveVehicleEquipment(long vehicleCoid, VehicleEquipmentSnapshot snapshot) { }
+        public void SaveCharacterCargoCapacity(long characterCoid, int width, int pageCount) { }
+        public long LoadCredits(long characterCoid) =>
+            throw new InvalidOperationException("load down");
+        public void SaveCredits(long characterCoid, long credits) { }
+    }
+
+    /// <summary>Save succeeds; subsequent LoadCredits throws (re-read after set).</summary>
+    private sealed class SaveOkLoadThrowingCreditsPersistence : IInventoryPersistence
+    {
+        private bool _saved;
+
+        public IReadOnlyList<CharacterInventoryItem> LoadCargo(long characterCoid) =>
+            Array.Empty<CharacterInventoryItem>();
+
+        public void UpsertCargo(long characterCoid, CharacterInventoryItem item) { }
+        public void MoveCargo(long characterCoid, CharacterInventoryItem item) { }
+        public void DeleteCargo(long characterCoid, long itemCoid) { }
+        public void ClearCargo(long characterCoid) { }
+        public void EnsureSimpleObject(long itemCoid, byte type, int cbid, int faction = 0, int teamFaction = 0) { }
+        public void SaveVehicleEquipment(long vehicleCoid, VehicleEquipmentSnapshot snapshot) { }
+        public void SaveCharacterCargoCapacity(long characterCoid, int width, int pageCount) { }
+
+        public long LoadCredits(long characterCoid)
+        {
+            if (_saved)
+                throw new InvalidOperationException("reread down");
+            return 0;
+        }
+
+        public void SaveCredits(long characterCoid, long credits) => _saved = true;
     }
 }

@@ -67,20 +67,37 @@ public class CharacterLevelPacket : BasePacket
         return (globes * 1_000_000_000L) + (bars * 1_000_000L) + (scrip * 1_000L) + clink;
     }
 
+    /// <summary>
+    /// Split absolute credits into Globes / Bars / Scrip / Clink (base-1000 groups).
+    /// Negative balances are treated as zero for display.
+    /// </summary>
+    public static (long Globes, int Bars, int Scrip, int Clink) SplitCurrency(long absolute)
+    {
+        if (absolute < 0)
+            absolute = 0;
+
+        var clink = (int)(absolute % 1000L);
+        var scrip = (int)((absolute / 1000L) % 1000L);
+        var bars = (int)((absolute / 1_000_000L) % 1000L);
+        var globes = absolute / 1_000_000_000L;
+        return (globes, bars, scrip, clink);
+    }
+
     public override void Write(BinaryWriter writer)
     {
         writer.Write(UnknownHeader);
         writer.WriteTFID(CharacterId);
         writer.Write(Level);
-        
-        // Padding (7 bytes to align to 0x20)
-        writer.BaseStream.Position += 7;
-        
-        // Currency/XP fields
+
+        // Padding (7 bytes) to put Currency at absolute packet offset 0x20 (with opcode).
+        // Use WriteZeros so gaps are defined (Position+= leaves MemoryStream gaps fragile).
+        writer.WriteZeros(7);
+
+        // Currency/XP fields — client apply FUN_00531fcb: Level@0x18, Currency@0x20, Experience@0x28
         writer.Write(Currency);
         writer.Write(Experience);
         writer.Write(Unknown_0x2C);
-        
+
         // Short fields
         writer.Write(CurrentMana);
         writer.Write(MaxMana);

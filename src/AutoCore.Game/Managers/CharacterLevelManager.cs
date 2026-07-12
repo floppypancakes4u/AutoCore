@@ -36,6 +36,11 @@ public class CharacterLevelManager : Singleton<CharacterLevelManager>
             {
                 CharacterId = character.ObjectId,
                 Level = character.Level,
+                Experience = character.Experience,
+                Currency = character.Credits,
+                SkillPoints = character.SkillPoints,
+                AttributePoints = character.AttributePoints,
+                ResearchPoints = character.ResearchPoints,
                 CurrentMana = state.CurrentMana,
                 MaxMana = state.MaxMana
             };
