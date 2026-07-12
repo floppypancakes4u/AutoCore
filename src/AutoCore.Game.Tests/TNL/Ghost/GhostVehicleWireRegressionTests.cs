@@ -595,9 +595,10 @@ public class GhostVehicleWireRegressionTests
             stream.Read(out float _); // rot
         for (var i = 0; i < 6; ++i)
             stream.Read(out float _); // vel + ang
-        stream.Read(out byte _); // flags
+        // Wire order: Firing byte first (client weapon-enable set), driving-flags byte second.
         stream.Read(out byte firing);
         Assert.AreEqual((byte)1, firing);
+        stream.Read(out byte _); // driving flags (VehicleMovedFlags)
         stream.ReadSignedFloat(6); // accel
         stream.ReadSignedFloat(6); // steering
         stream.Read(out float turret);
@@ -617,6 +618,44 @@ public class GhostVehicleWireRegressionTests
         stream.Read(out uint _);
         Assert.IsTrue(stream.ReadFlag()); // Token
         Assert.IsFalse(stream.ReadFlag()); // GivesToken
+    }
+
+    /// <summary>
+    /// Regression: the two pose flag-bytes must be emitted Firing-first, VehicleFlags-second so the
+    /// retail client reads byte #1 as the weapon-hardpoint enable set and byte #2 as the driving
+    /// flags (Handbreak = bit0 -> vehicle+0x61C). Emitting VehicleFlags first mis-delivered the
+    /// front-fire bit (Firing &amp; 1) into the client handbrake input, making firing path NPCs "drive
+    /// with the brakes on" (rear drive torque halved by calcWheelTorque). Guards the field order:
+    /// the fire bit must never appear in the driving-flags/Handbreak slot.
+    /// </summary>
+    [TestMethod]
+    public void PackUpdate_NonInitial_PoseFlagBytes_FiringFirst_HandbrakeNotSetByFiring()
+    {
+        var vehicle = CreateVehicleWithMap(20_070);
+        vehicle.Position = new Vector3(1, 2, 3);
+        vehicle.Rotation = new Quaternion(0, 0, 0, 1);
+        vehicle.Firing = 1;              // front weapon firing
+        vehicle.VehicleFlags = 0;        // server never sets Handbreak for NPCs
+
+        var stream = PackUpdateNonInitial(vehicle, GhostObject.PositionMask);
+
+        // Skills + 7 equip + GM + Clan + Pet + Murderer + Health + HealthMax + State = 15 false, then Position.
+        for (var i = 0; i < 15; ++i)
+            Assert.IsFalse(stream.ReadFlag());
+        Assert.IsTrue(stream.ReadFlag()); // Position
+        for (var i = 0; i < 3; ++i)
+            stream.Read(out float _); // pos
+        for (var i = 0; i < 4; ++i)
+            stream.Read(out float _); // rot
+        for (var i = 0; i < 6; ++i)
+            stream.Read(out float _); // vel + ang
+
+        stream.Read(out byte firing);       // wire byte #1
+        stream.Read(out byte drivingFlags); // wire byte #2
+
+        Assert.AreEqual((byte)1, firing, "Firing must be the FIRST pose flag byte (client weapon-enable set).");
+        Assert.AreEqual((byte)0, drivingFlags, "VehicleFlags must be the SECOND pose flag byte.");
+        Assert.AreEqual(0, drivingFlags & 0x1, "Handbreak bit (0x1) must be clear — the fire bit must not leak into the handbrake input.");
     }
 
     [TestMethod]

@@ -469,8 +469,16 @@ public class GhostVehicle : GhostObject
             stream.Write(parentVehicle.AngularVelocity.Y);
             stream.Write(parentVehicle.AngularVelocity.Z);
 
-            stream.Write((byte)parentVehicle.VehicleFlags);
+            // Wire order matters: the retail client's pose unpack (VehicleNet_UnpackGhostVehicle
+            // @0x5F7720) reads the FIRST flag byte as the weapon-hardpoint enable set (Firing:
+            // bit0 front / bit1 turret / bit2 rear) and the SECOND as the driving-flags byte
+            // (VehicleMovedFlags: bit0 Handbreak -> vehicle+0x61C, bit2 Corpse). Emitting
+            // VehicleFlags first mis-delivered Firing&1 (front-fire bit) into the handbrake input
+            // (+0x61C), which calcWheelTorque @0x598040 reads to halve rear-wheel drive torque and
+            // FUN_004FBC10 @0x4FBC10 asserts as the Havok handbrake -> path NPCs "drove with the
+            // brakes on". Firing must be byte #1, VehicleFlags byte #2.
             stream.Write(parentVehicle.Firing);
+            stream.Write((byte)parentVehicle.VehicleFlags);
 
             stream.WriteSignedFloat(parentVehicle.Acceleration, 6);
             stream.WriteSignedFloat(parentVehicle.Steering, 6);
