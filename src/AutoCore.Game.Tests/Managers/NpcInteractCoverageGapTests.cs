@@ -41,6 +41,7 @@ public class NpcInteractCoverageGapTests
         AssetManager.Instance.ClearTestMissions();
         TriggerManager.Instance.ClearAllForTests();
         NpcInteractHandler.InvalidateMissionIndex();
+        NpcInteractHandler.DialogTurnInFollowupDelayMs = 0;
     }
 
     [TestCleanup]
@@ -50,6 +51,7 @@ public class NpcInteractCoverageGapTests
         AssetManager.Instance.ClearTestMissions();
         TriggerManager.Instance.ClearAllForTests();
         NpcInteractHandler.InvalidateMissionIndex();
+        NpcInteractHandler.ResetDialogTurnInFollowupForTests();
         _sent.Clear();
     }
 

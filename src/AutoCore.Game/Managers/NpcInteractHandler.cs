@@ -20,6 +20,25 @@ public static class NpcInteractHandler
     // Client click range ~25f (DAT_00aaa6fc); allow small latency slack.
     private const float MaxInteractDistance = 30f;
 
+    /// <summary>
+    /// Delay before journal + OnMissionStateChanged after dialog deliver turn-in.
+    /// Gives the client time to finish local CompleteObjective / dialog teardown / MSXML UI
+    /// loads (and interact FX for new core offers) before we push more mission packets
+    /// (mitigates AV @ 0x007B6DB0). Set to 0 in unit tests for synchronous follow-up.
+    /// </summary>
+    internal static int DialogTurnInFollowupDelayMs { get; set; } = 250;
+
+    /// <summary>
+    /// Schedules delayed work. Default: sync when delay≤0, else cancelled Task.Delay.
+    /// Tests may replace to capture/flush without sleeping.
+    /// Signature: (action, delayMs, cancellationToken).
+    /// </summary>
+    internal static Action<Action, int, CancellationToken> ScheduleDelayedWork { get; set; }
+        = DefaultScheduleDelayedWork;
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<long, CancellationTokenSource>
+        PendingDialogTurnInFollowups = new();
+
     private static Dictionary<int, List<int>> _missionsByNpc;
     private static HashSet<int> _missionGiverCbids;
     private static readonly object IndexLock = new();
@@ -32,6 +51,110 @@ public static class NpcInteractHandler
             _missionsByNpc = null;
             _missionGiverCbids = null;
         }
+    }
+
+    /// <summary>Reset delay/scheduler hooks and cancel pending follow-ups (unit tests).</summary>
+    internal static void ResetDialogTurnInFollowupForTests()
+    {
+        DialogTurnInFollowupDelayMs = 250;
+        ScheduleDelayedWork = DefaultScheduleDelayedWork;
+        foreach (var kv in PendingDialogTurnInFollowups)
+        {
+            kv.Value.Cancel();
+            kv.Value.Dispose();
+        }
+
+        PendingDialogTurnInFollowups.Clear();
+        MissionClientSoftPedal.ResetForTests();
+    }
+
+    private static void DefaultScheduleDelayedWork(Action action, int delayMs, CancellationToken token)
+    {
+        if (action == null)
+            return;
+
+        if (delayMs <= 0)
+        {
+            if (!token.IsCancellationRequested)
+                action();
+            return;
+        }
+
+        _ = RunDelayedWorkAsync(action, delayMs, token);
+    }
+
+    private static async Task RunDelayedWorkAsync(Action action, int delayMs, CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(delayMs, token).ConfigureAwait(false);
+            if (!token.IsCancellationRequested)
+                action();
+        }
+        catch (OperationCanceledException)
+        {
+            // superseded or test cleanup
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "NpcInteract: delayed dialog turn-in follow-up failed: {0}",
+                ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// After dialog deliver: wait briefly, then journal resync + mission-state trigger re-eval.
+    /// Server state (quest removed / completed) is already applied before this is scheduled.
+    /// </summary>
+    private static void ScheduleDialogTurnInFollowup(TNLConnection conn, Character character, int missionId)
+    {
+        if (conn == null || character == null)
+            return;
+
+        var coid = character.ObjectId.Coid;
+        var cts = new CancellationTokenSource();
+        if (PendingDialogTurnInFollowups.TryRemove(coid, out var previous))
+        {
+            previous.Cancel();
+            previous.Dispose();
+        }
+
+        PendingDialogTurnInFollowups[coid] = cts;
+        var delayMs = Math.Max(0, DialogTurnInFollowupDelayMs);
+        var token = cts.Token;
+        var schedule = ScheduleDelayedWork ?? DefaultScheduleDelayedWork;
+
+        schedule(
+            () =>
+            {
+                try
+                {
+                    if (token.IsCancellationRequested)
+                        return;
+
+                    // Drop work if the connection no longer owns this character.
+                    if (conn.CurrentCharacter != character)
+                        return;
+
+                    PushJournalMissionList(conn, character);
+                    TriggerManager.Instance.OnMissionStateChanged(
+                        character.CurrentVehicle ?? (ClonedObjectBase)character);
+
+                    Logger.WriteLog(LogType.Debug,
+                        "MissionDialogResponse: delayed follow-up after deliver mission={0} coid={1} delayMs={2}",
+                        missionId,
+                        coid,
+                        delayMs);
+                }
+                finally
+                {
+                    if (PendingDialogTurnInFollowups.TryRemove(coid, out var done) && ReferenceEquals(done, cts))
+                        cts.Dispose();
+                }
+            },
+            delayMs,
+            token);
     }
 
     /// <summary>
@@ -314,44 +437,85 @@ public static class NpcInteractHandler
         var npc = FindNpcByCoid(character.Map, packet.MissionGiver?.Coid ?? -1);
         var npcCbid = npc?.CBID ?? 0;
 
+        // Client may echo mission id OR an objective id (same pattern as deliver turn-in).
+        var resolvedOfferMissionId = ResolveMissionIdForGrant(packet.MissionId);
+
         foreach (var missionId in ResolveDialogResponseMissions(character, packet.MissionId, npcCbid))
         {
             if (TryCompleteDeliverFromDialog(conn, character, missionId, npcCbid, npc?.ObjectId))
                 return;
         }
 
-        if (packet.MissionId <= 0)
+        if (resolvedOfferMissionId <= 0)
             return;
 
         // Do not grant when the packet id is an objective id for an active deliver here.
-        if (IsActiveObjectiveIdForDeliver(character, packet.MissionId, npcCbid))
+        if (IsActiveObjectiveIdForDeliver(character, packet.MissionId, npcCbid)
+            || IsActiveObjectiveIdForDeliver(character, resolvedOfferMissionId, npcCbid))
             return;
 
-        if (!CanOfferMission(character, packet.MissionId, npcCbid))
+        // Already active: resync journal/objective so the client shows "accepted" even when
+        // create-packet restore or a prior grant left UI empty, then re-eval map triggers.
+        var activeQuest = character.CurrentQuests.FirstOrDefault(q => q.MissionId == resolvedOfferMissionId);
+        if (activeQuest != null)
         {
-            var activeQuest = character.CurrentQuests.FirstOrDefault(q => q.MissionId == packet.MissionId);
-            if (activeQuest != null)
-            {
-                Logger.WriteLog(LogType.Debug,
-                    "MissionDialogResponse: turn-in/offer failed for active mission={0} charCoid={1} npcCbid={2} activeSeq={3}",
-                    packet.MissionId,
-                    character.ObjectId.Coid,
-                    npcCbid,
-                    activeQuest.ActiveObjectiveSequence);
-            }
-            else
-            {
-                Logger.WriteLog(LogType.Debug,
-                    "MissionDialogResponse: mission {0} not offerable for charCoid={1} npcCbid={2}",
-                    packet.MissionId,
-                    character.ObjectId.Coid,
-                    npcCbid);
-            }
-
+            Logger.WriteLog(LogType.Debug,
+                "MissionDialogResponse: mission {0} already active for charCoid={1} — resync client + re-eval triggers",
+                resolvedOfferMissionId,
+                character.ObjectId.Coid);
+            ResyncActiveMissionToClient(conn, character, activeQuest);
+            TriggerManager.Instance.OnMissionStateChanged(
+                character.CurrentVehicle ?? (ClonedObjectBase)character);
             return;
         }
 
-        GrantMission(conn, character, packet.MissionId);
+        if (!CanOfferMission(character, resolvedOfferMissionId, npcCbid))
+        {
+            Logger.WriteLog(LogType.Debug,
+                "MissionDialogResponse: mission {0} (packet={1}) not offerable for charCoid={2} npcCbid={3}",
+                resolvedOfferMissionId,
+                packet.MissionId,
+                character.ObjectId.Coid,
+                npcCbid);
+            return;
+        }
+
+        GrantMission(conn, character, resolvedOfferMissionId);
+    }
+
+    /// <summary>
+    /// Map a dialog packet id to a mission id. Retail clients sometimes echo the first
+    /// objective id (e.g. 5422) instead of the mission id (3037) on accept.
+    /// </summary>
+    internal static int ResolveMissionIdForGrant(int packetMissionId)
+    {
+        if (packetMissionId <= 0)
+            return packetMissionId;
+
+        if (AssetManager.Instance.GetMission(packetMissionId) != null)
+            return packetMissionId;
+
+        var byObjective = AssetManager.Instance.GetMissionByObjectiveId(packetMissionId);
+        return byObjective?.Id ?? packetMissionId;
+    }
+
+    /// <summary>Push journal + active objective state for a quest the server already tracks.</summary>
+    internal static void ResyncActiveMissionToClient(TNLConnection conn, Character character, CharacterQuest quest)
+    {
+        if (conn == null || character == null || quest == null)
+            return;
+
+        var objective = GetActiveObjective(quest);
+        if (objective != null)
+        {
+            conn.SendGamePacket(new ObjectiveStatePacket
+            {
+                ObjectiveBitmask = 0u,
+                ObjectiveId = objective.ObjectiveId,
+            });
+        }
+
+        PushJournalMissionList(conn, character);
     }
 
     private static List<int> ResolveDialogResponseMissions(Character character, int packetMissionId, int npcCbid)
@@ -644,7 +808,14 @@ public static class NpcInteractHandler
     internal static void GrantMission(TNLConnection conn, Character character, int missionId)
     {
         if (character.CurrentQuests.Any(q => q.MissionId == missionId))
+        {
+            // Duplicate grant path: still resync UI (journal may be empty after bad restore).
+            var existing = character.CurrentQuests.First(q => q.MissionId == missionId);
+            ResyncActiveMissionToClient(conn, character, existing);
+            TriggerManager.Instance.OnMissionStateChanged(
+                character.CurrentVehicle ?? (ClonedObjectBase)character);
             return;
+        }
 
         var quest = new CharacterQuest(missionId, 0);
         quest.PopulateFromAssets();
@@ -652,17 +823,7 @@ public static class NpcInteractHandler
         MissionPersistence.Instance.OnQuestChanged(character, quest);
 
         // Seed client objective state so journal can show the new objective.
-        var objective = GetActiveObjective(quest);
-        if (objective != null)
-        {
-            conn.SendGamePacket(new ObjectiveStatePacket
-            {
-                ObjectiveBitmask = 0u,
-                ObjectiveId = objective.ObjectiveId,
-            });
-        }
-
-        PushJournalMissionList(conn, character);
+        ResyncActiveMissionToClient(conn, character, quest);
 
         Logger.WriteLog(LogType.Debug,
             "MissionDialogResponse: granted mission {0} to charCoid={1}",
@@ -671,6 +832,42 @@ public static class NpcInteractHandler
 
         // Mission-computed logic vars (type 11/12) may unlock gates / remote triggers.
         TriggerManager.Instance.OnMissionStateChanged(character.CurrentVehicle ?? (ClonedObjectBase)character);
+    }
+
+    /// <summary>
+    /// Force-complete an active mission: drop from CurrentQuests, record completed, persist,
+    /// and push CompleteDynamicObjective + journal to the client. Used by /completeMission.
+    /// </summary>
+    internal static void ForceCompleteMission(TNLConnection conn, Character character, int missionId)
+    {
+        var quest = character.CurrentQuests.FirstOrDefault(q => q.MissionId == missionId);
+        if (quest == null)
+            return;
+
+        var objective = GetActiveObjective(quest);
+        var objectiveId = objective?.ObjectiveId ?? 0;
+
+        character.CurrentQuests.Remove(quest);
+        character.CompletedMissionIds.Add(missionId);
+        MissionPersistence.Instance.OnMissionCompleted(character.ObjectId.Coid, missionId);
+
+        if (conn != null)
+        {
+            conn.SendGamePacket(new CompleteDynamicObjectivePacket
+            {
+                MissionId = missionId,
+                ObjectiveId = objectiveId,
+            });
+            PushJournalMissionList(conn, character);
+        }
+
+        Logger.WriteLog(LogType.Debug,
+            "ForceCompleteMission: completed mission {0} for charCoid={1}",
+            missionId,
+            character.ObjectId.Coid);
+
+        TriggerManager.Instance.OnMissionStateChanged(
+            character.CurrentVehicle ?? (ClonedObjectBase)character);
     }
 
     private static bool HasDeliverTurnIn(CharacterQuest quest, int npcCbid)
@@ -804,34 +1001,34 @@ public static class NpcInteractHandler
         character.CompletedMissionIds.Add(missionId);
         MissionPersistence.Instance.OnMissionCompleted(character.ObjectId.Coid, missionId);
 
-        conn.SendGamePacket(new CompleteDynamicObjectivePacket
-        {
-            MissionId = missionId,
-            ObjectiveId = objectiveId,
-        });
-
-        PushJournalMissionList(conn, character);
+        // Do NOT send CompleteDynamicObjective (0x2070) on dialog turn-in.
+        // Client already ran CVOGReaction_CompleteObjective; that also unlocks next CoreMission
+        // offers and loads interact FX (interact_npc_available_new_mission_core → NDSpecialFX XML).
+        // Stacking 0x2070 / journal / GroupReactionCall (0x206C) during that window → AV @ 0x007B6DB0.
+        // Soft-pedal: no 0x2070, suppress 0x206C briefly, defer journal + OnMissionStateChanged.
+        // Server-driven completes (kill/patrol/useitem) still use AdvanceOrCompleteObjective → 0x2070.
+        MissionClientSoftPedal.ArmAfterDialogTurnIn(character.ObjectId.Coid);
 
         Logger.WriteLog(LogType.Debug,
-            "MissionDialogResponse: completed deliver mission={0} objective={1} npcCbid={2}",
+            "MissionDialogResponse: completed deliver mission={0} objective={1} npcCbid={2} (no 0x2070; follow-up delay {3}ms; GRC suppress {4}ms)",
             missionId,
             objectiveId,
-            npcCbid);
+            npcCbid,
+            DialogTurnInFollowupDelayMs,
+            MissionClientSoftPedal.GroupReactionSuppressMs);
 
-        // Type-9 "has completed mission" vars and type-11 active-mission vars both change.
-        TriggerManager.Instance.OnMissionStateChanged(character.CurrentVehicle ?? (ClonedObjectBase)character);
+        ScheduleDialogTurnInFollowup(conn, character, missionId);
 
-        // Open follow-up offers unlocked by completing this mission (ReqMissionId prereqs).
-        if (npcTfid != null && npcCbid > 0)
+        // Do not auto-open follow-up offer dialog — player re-interacts (UseObject).
+        if (npcCbid > 0)
         {
             var followUps = GetOfferableMissions(character, npcCbid);
             if (followUps.Count > 0)
             {
                 Logger.WriteLog(LogType.Debug,
-                    "MissionDialogResponse: opening follow-up offers [{0}] after completing {1}",
+                    "MissionDialogResponse: follow-up offers [{0}] unlocked after {1} — available on next NPC interact",
                     string.Join(',', followUps),
                     missionId);
-                SendNpcMissionDialog(conn, npcTfid, followUps);
             }
         }
 
@@ -996,10 +1193,11 @@ public static class NpcInteractHandler
     }
 
     /// <summary>
-    /// Finish the current objective: advance to the next sequence, or complete the mission.
-    /// Sends CompleteDynamicObjective so the client retargets UI / waypoints.
+    /// Shared objective advance/complete path for <b>server-driven</b> finishes
+    /// (UseItem, AutoPatrol, Kill, …). Sends CompleteDynamicObjective (0x2070) so the client
+    /// force-completes and retargets UI. Dialog deliver turn-in must <b>not</b> use this packet
+    /// (see <see cref="TryCompleteDeliverFromDialog"/>) — the client already completed locally.
     /// </summary>
-    /// <summary>Shared objective advance/complete path (UseItem, AutoPatrol, Kill, …).</summary>
     internal static void AdvanceOrCompleteObjective(
         TNLConnection conn,
         Character character,
@@ -1121,8 +1319,42 @@ public static class NpcInteractHandler
         if (map == null || coid <= 0)
             return null;
 
-        if (map.GetObjectByCoid(coid) is Creature creature && IsNpc(creature))
+        var obj = map.GetObjectByCoid(coid);
+        if (obj is Creature creature && IsNpc(creature))
             return creature;
+
+        // Dialog may send vehicle TFID for a seated NPC.
+        if (obj is Vehicle vehicle)
+        {
+            var driver = vehicle.Owner as Creature ?? vehicle.GetSuperCharacter(false);
+            if (driver != null && driver is not Character && IsNpc(driver))
+                return driver;
+        }
+
+        // Or spawn-point COID (map template id) while the live child has a different global COID.
+        if (obj is SpawnPoint spawn && spawn.HasLiveSpawn())
+        {
+            var child = map.GetObjectByCoid(spawn.LastSpawnedCoid);
+            if (child is Creature childNpc && IsNpc(childNpc))
+                return childNpc;
+            if (child is Vehicle childVehicle)
+            {
+                var driver = childVehicle.Owner as Creature ?? childVehicle.GetSuperCharacter(false);
+                if (driver != null && driver is not Character && IsNpc(driver))
+                    return driver;
+            }
+        }
+
+        // Fallback: creature that still lists this coid as spawn owner (spawn marker deleted).
+        foreach (var kvp in map.Objects)
+        {
+            if (kvp.Value is Creature owned
+                && owned.SpawnOwner == coid
+                && IsNpc(owned))
+            {
+                return owned;
+            }
+        }
 
         return null;
     }

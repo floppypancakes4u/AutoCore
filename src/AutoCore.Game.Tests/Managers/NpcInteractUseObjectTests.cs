@@ -40,6 +40,8 @@ public class NpcInteractUseObjectTests
         TNLConnection.TestPacketSink = (_, packet) => _sent.Add(packet);
         AssetManager.Instance.ClearTestMissions();
         NpcInteractHandler.InvalidateMissionIndex();
+        // delay≤0 runs journal/re-eval synchronously (production default is 100ms).
+        NpcInteractHandler.DialogTurnInFollowupDelayMs = 0;
     }
 
     [TestCleanup]
@@ -48,6 +50,7 @@ public class NpcInteractUseObjectTests
         TNLConnection.TestPacketSink = null;
         AssetManager.Instance.ClearTestMissions();
         NpcInteractHandler.InvalidateMissionIndex();
+        NpcInteractHandler.ResetDialogTurnInFollowupForTests();
         _sent.Clear();
     }
 
@@ -339,7 +342,9 @@ public class NpcInteractUseObjectTests
 
         Assert.AreEqual(0, character.CurrentQuests.Count, "Deliver turn-in must complete after client-ahead reconcile");
         Assert.IsTrue(character.CompletedMissionIds.Contains(MissionA));
-        Assert.IsTrue(_sent.OfType<CompleteDynamicObjectivePacket>().Any());
+        // Client already ran CompleteObjective on dialog button; 0x2070 would force-complete again
+        // and rebuild UI (client AV @ 0x007B6DB0 MSXML Release during re-entrant interface load).
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
         Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
     }
 
@@ -412,7 +417,8 @@ public class NpcInteractUseObjectTests
 
         Assert.AreEqual(0, character.CurrentQuests.Count);
         Assert.IsTrue(character.CompletedMissionIds.Contains(MissionA));
-        Assert.IsTrue(_sent.OfType<CompleteDynamicObjectivePacket>().Any());
+        // Dialog turn-in: journal resync only — no 0x2070 (client already completed locally).
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
         Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
     }
 
@@ -455,8 +461,11 @@ public class NpcInteractUseObjectTests
     }
 
     [TestMethod]
-    public void HandleMissionDialogResponse_TurnIn_OpensFollowUpOfferDialog()
+    public void HandleMissionDialogResponse_TurnIn_DoesNotOpenImmediateFollowUpDialog()
     {
+        // Immediate 0x206D after dialog close reloads many interface XMLs while the client still
+        // tears down mission UI → random AV in MSXML COM Release (0x007B6DB0). Follow-ups open
+        // on the next UseObject (see HandleUseObject_AfterPrereqComplete_OffersNextMission).
         SeedDeliverMission(MissionA, ObjectiveA, NpcCbid);
         SeedOfferMission(MissionB, NpcCbid, reqMissionId: MissionA, continentId: ContinentId, objectiveId: ObjectiveB);
 
@@ -473,9 +482,83 @@ public class NpcInteractUseObjectTests
         });
 
         Assert.IsTrue(character.CompletedMissionIds.Contains(MissionA));
-        Assert.IsTrue(
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
+        Assert.IsFalse(
             _sent.OfType<NpcMissionDialogPacket>().Any(d => d.MissionIds.Contains(MissionB)),
-            "After turn-in, NPC should open offer dialog for prereq-unlocked mission");
+            "Must not auto-open follow-up offer dialog on the same turn-in flush");
+    }
+
+    [TestMethod]
+    public void HandleMissionDialogResponse_TurnIn_DefersJournalUntilScheduledFollowup()
+    {
+        // Production waits before journal/re-eval so client dialog + interact FX MSXML can settle.
+        SeedDeliverMission(MissionA, ObjectiveA, NpcCbid);
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        GiveQuest(character, MissionA);
+        _sent.Clear();
+
+        Action pending = null;
+        var seenDelay = -1;
+        NpcInteractHandler.DialogTurnInFollowupDelayMs = 250;
+        NpcInteractHandler.ScheduleDelayedWork = (action, delayMs, token) =>
+        {
+            seenDelay = delayMs;
+            pending = action;
+        };
+
+        NpcInteractHandler.HandleMissionDialogResponse(conn, new MissionDialogResponsePacket
+        {
+            MissionId = MissionA,
+            Accepted = true,
+            MissionGiver = new TFID(NpcCoid, false),
+        });
+
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionA), "Server complete is immediate");
+        Assert.AreEqual(250, seenDelay);
+        Assert.IsNotNull(pending);
+        Assert.IsTrue(MissionClientSoftPedal.HasPendingSuppressForTests(character.ObjectId.Coid),
+            "GroupReactionCall soft-pedal must arm on dialog turn-in");
+        Assert.IsTrue(MissionClientSoftPedal.ShouldSuppressGroupReactionCall(character.ObjectId.Coid));
+        Assert.AreEqual(0, _sent.OfType<ConvoyMissionsResponsePacket>().Count(),
+            "Journal must wait for delayed follow-up");
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+
+        pending();
+
+        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any(),
+            "Journal sends after delayed follow-up runs");
+    }
+
+    [TestMethod]
+    public void HandleMissionDialogResponse_TurnIn_ThenUseObject_OffersFollowUpMission()
+    {
+        SeedDeliverMission(MissionA, ObjectiveA, NpcCbid);
+        SeedOfferMission(MissionB, NpcCbid, reqMissionId: MissionA, continentId: ContinentId, objectiveId: ObjectiveB);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+
+        NpcInteractHandler.HandleMissionDialogResponse(conn, new MissionDialogResponsePacket
+        {
+            MissionId = MissionA,
+            Accepted = true,
+            MissionGiver = new TFID(NpcCoid, false),
+        });
+        _sent.Clear();
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = -1,
+        });
+
+        var dialog = _sent.OfType<NpcMissionDialogPacket>().SingleOrDefault();
+        Assert.IsNotNull(dialog);
+        CollectionAssert.Contains(dialog.MissionIds, MissionB);
     }
 
     [TestMethod]
@@ -499,6 +582,64 @@ public class NpcInteractUseObjectTests
         Assert.AreEqual(MissionB, character.CurrentQuests[0].MissionId);
         Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
         Assert.IsTrue(_sent.OfType<ObjectiveStatePacket>().Any(p => p.ObjectiveId == ObjectiveB));
+    }
+
+    [TestMethod]
+    public void HandleMissionDialogResponse_AcceptWithObjectiveId_GrantsParentMission()
+    {
+        // Retail Final Exam-style accept: dialog packet may echo first objective id (5422)
+        // instead of mission id (3037).
+        SeedOfferMission(MissionB, NpcCbid, reqMissionId: MissionA, continentId: ContinentId, objectiveId: ObjectiveB);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CompletedMissionIds.Add(MissionA);
+        _sent.Clear();
+
+        NpcInteractHandler.HandleMissionDialogResponse(conn, new MissionDialogResponsePacket
+        {
+            MissionId = ObjectiveB, // objective id, not mission id
+            Accepted = true,
+            MissionGiver = new TFID(NpcCoid, false),
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests.Count);
+        Assert.AreEqual(MissionB, character.CurrentQuests[0].MissionId);
+        Assert.IsTrue(_sent.OfType<ObjectiveStatePacket>().Any(p => p.ObjectiveId == ObjectiveB));
+        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
+    }
+
+    [TestMethod]
+    public void HandleMissionDialogResponse_AlreadyActive_ResyncsClientJournal()
+    {
+        SeedOfferMission(MissionB, NpcCbid, reqMissionId: MissionA, continentId: ContinentId, objectiveId: ObjectiveB);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CompletedMissionIds.Add(MissionA);
+        GiveQuest(character, MissionB);
+        _sent.Clear();
+
+        NpcInteractHandler.HandleMissionDialogResponse(conn, new MissionDialogResponsePacket
+        {
+            MissionId = MissionB,
+            Accepted = true,
+            MissionGiver = new TFID(NpcCoid, false),
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests.Count, "Must not duplicate the active quest");
+        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any(),
+            "Already-active accept must still push journal so client shows the mission");
+        Assert.IsTrue(_sent.OfType<ObjectiveStatePacket>().Any(p => p.ObjectiveId == ObjectiveB));
+    }
+
+    [TestMethod]
+    public void ResolveMissionIdForGrant_MapsObjectiveIdToMission()
+    {
+        SeedOfferMission(MissionB, NpcCbid, objectiveId: ObjectiveB);
+        Assert.AreEqual(MissionB, NpcInteractHandler.ResolveMissionIdForGrant(ObjectiveB));
+        Assert.AreEqual(MissionB, NpcInteractHandler.ResolveMissionIdForGrant(MissionB));
+        Assert.AreEqual(99999, NpcInteractHandler.ResolveMissionIdForGrant(99999));
     }
 
     [TestMethod]

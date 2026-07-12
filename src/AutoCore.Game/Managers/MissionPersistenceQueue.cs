@@ -97,4 +97,17 @@ public sealed class MissionPersistenceQueue
         foreach (var key in _pending.Keys.Where(k => k.Coid == coid).ToArray())
             _pending.TryRemove(key, out _);
     }
+
+    /// <summary>
+    /// Drop pending Upsert ops for a character so active rows are not re-created after
+    /// /removeCurrentMission. Leaves Complete ops so unflushed completions are not lost.
+    /// </summary>
+    public void RemoveUpsertsForCharacter(long coid)
+    {
+        foreach (var key in _pending.Keys.Where(k => k.Coid == coid).ToArray())
+        {
+            if (_pending.TryGetValue(key, out var op) && op.Kind == QuestPersistKind.Upsert)
+                _pending.TryRemove(key, out _);
+        }
+    }
 }

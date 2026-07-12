@@ -14,7 +14,21 @@ public class ObjectTemplate
     public int COID { get; set; }
     public int Faction { get; set; }
     public long[] TriggerEvents { get; set; }
+
+    /// <summary>
+    /// Runtime / create-time active flag. Must not be treated as fam-authored for map load —
+    /// Create/Activate used to set this true on the shared <see cref="MapData"/> template and
+    /// permanently broke inactive spawns (combat Gunny visible before mission).
+    /// Prefer <see cref="OriginalIsActive"/> for load-time decisions.
+    /// </summary>
     public bool IsActive { get; set; }
+
+    /// <summary>
+    /// Fam-authored IsActive captured at map load. Map load and map reset always use this;
+    /// reaction Create/Activate must not mutate it.
+    /// </summary>
+    public bool OriginalIsActive { get; set; }
+
     public float Scale { get; set; }
     public float TerrainOffset { get; set; }
 

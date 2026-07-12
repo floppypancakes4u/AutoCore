@@ -4,8 +4,10 @@ using AutoCore.Game.Constants;
 
 /// <summary>
 /// Server→client objective progress (opcode 0x2071).
-/// Client Client_RecvObjectiveState @ 0x0080ff00 / FUN_00809460 style layout (opcode at +0):
-///   +0x10 bitmask, +0x14 objective id (lookup key), +0x18..+0x24 four per-slot progress floats.
+/// Client handler: FUN_00809460 (progress slots only — does not complete the objective).
+/// Layout (opcode at +0): +0x10 bitmask, +0x14 objective id (lookup key),
+/// +0x18..+0x24 four per-slot progress floats.
+/// Note: 0x2070 CompleteDynamicObjective is the force-complete path (0x0080FF00), not this opcode.
 /// </summary>
 public class ObjectiveStatePacket : BasePacket
 {

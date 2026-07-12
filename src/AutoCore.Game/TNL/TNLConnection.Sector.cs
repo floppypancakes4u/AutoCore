@@ -4,12 +4,14 @@ using System.Linq;
 using AutoCore.Database.Char;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
+using AutoCore.Game.Extensions;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Global;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
+using AutoCore.Game.TNL.Ghost;
 using AutoCore.Utils;
 
 public partial class TNLConnection
@@ -281,6 +283,147 @@ public partial class TNLConnection
         }
 
         NpcInteractHandler.HandleMissionDialogResponse(this, packet);
+    }
+
+    /// <summary>
+    /// C2S RequestObject (0x2011): client wants full create payload for TFIDs it is missing
+    /// (common after destroy/respawn races or ghost-only scope). Resend CreateVehicle/Creature/SimpleObject.
+    /// Layout after opcode: u8 count + 3 pad + count × TFID16 (Ghidra FUN_0091da70).
+    /// </summary>
+    private void HandleRequestObjectPacket(BinaryReader reader)
+    {
+        if (CurrentCharacter?.Map == null)
+            return;
+
+        RequestObjectPacket request;
+        try
+        {
+            request = new RequestObjectPacket();
+            request.Read(reader);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error, "HandleRequestObject: parse failed: {0}", ex.Message);
+            return;
+        }
+
+        foreach (var tfid in request.Objects)
+            ResendObjectCreate(tfid);
+    }
+
+    private void ResendObjectCreate(TFID tfid)
+    {
+        if (tfid == null || tfid.Coid <= 0 || CurrentCharacter?.Map == null)
+            return;
+
+        var obj = CurrentCharacter.Map.GetObjectByCoid(tfid.Coid);
+        if (obj == null)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "RequestObject: coid={0} global={1} not on map for char={2}",
+                tfid.Coid,
+                tfid.Global ? 1 : 0,
+                CurrentCharacter.ObjectId.Coid);
+            return;
+        }
+
+        try
+        {
+            switch (obj)
+            {
+                case Vehicle vehicle:
+                {
+                    vehicle.EnsureDefaultWheelSetForWire();
+                    var packet = new CreateVehiclePacket();
+                    vehicle.WriteToPacket(packet);
+                    SendGamePacket(packet);
+                    ForeignNpcDriverWire.TrySendDriverCreate(this, vehicle);
+                    Logger.WriteLog(LogType.Debug,
+                        "RequestObject: resent CreateVehicle coid={0} cbid={1} templateId={2}",
+                        vehicle.ObjectId.Coid,
+                        vehicle.CBID,
+                        vehicle.TemplateId);
+                    break;
+                }
+                case Creature creature:
+                {
+                    var packet = new CreateCreaturePacket();
+                    creature.WriteToPacket(packet);
+                    SendGamePacket(packet);
+                    Logger.WriteLog(LogType.Debug,
+                        "RequestObject: resent CreateCreature coid={0} cbid={1}",
+                        creature.ObjectId.Coid,
+                        creature.CBID);
+                    break;
+                }
+                case GraphicsObject graphics:
+                {
+                    var packet = new CreateSimpleObjectPacket();
+                    graphics.WriteToPacket(packet);
+                    SendGamePacket(packet);
+                    Logger.WriteLog(LogType.Debug,
+                        "RequestObject: resent CreateSimpleObject coid={0} cbid={1}",
+                        graphics.ObjectId.Coid,
+                        graphics.CBID);
+                    break;
+                }
+                default:
+                    Logger.WriteLog(LogType.Debug,
+                        "RequestObject: unsupported type {0} coid={1}",
+                        obj.GetType().Name,
+                        tfid.Coid);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "RequestObject: failed to re-create coid={0}: {1}",
+                tfid.Coid,
+                ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// C2S Firing (0x2022): fire state without a full VehicleMoved. Layout mirrors the VehicleMoved
+    /// fire/target tail: u8 firing, u16 reserved, TFID target (best-effort; extra trailing bytes ignored).
+    /// </summary>
+    private void HandleFiringPacket(BinaryReader reader)
+    {
+        var vehicle = CurrentCharacter?.CurrentVehicle;
+        if (vehicle == null || vehicle.Map == null)
+            return;
+
+        try
+        {
+            var remaining = reader.BaseStream.Length - reader.BaseStream.Position;
+            if (remaining < 1)
+                return;
+
+            vehicle.Firing = reader.ReadByte();
+            if (remaining >= 1 + 2 + 16)
+            {
+                _ = reader.ReadUInt16();
+                var target = reader.ReadTFID();
+                if (target.Coid > 0)
+                {
+                    var targetObj = vehicle.Map.GetObjectByCoid(target.Coid)
+                        ?? vehicle.Map.GetObject(target.Coid)
+                        ?? ObjectManager.Instance?.GetObject(target);
+                    vehicle.SetTargetObject(targetObj);
+                }
+                else
+                {
+                    vehicle.SetTargetObject(null);
+                }
+            }
+
+            vehicle.ProcessCombatIfFiring();
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error, "HandleFiringPacket: {0}", ex.Message);
+        }
     }
 
     private void HandleItemPickupPacket(BinaryReader reader)

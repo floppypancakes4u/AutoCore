@@ -94,10 +94,19 @@ public class TriggerManager : Singleton<TriggerManager>
 
         var objectCoid = clonedObject.ObjectId.Coid;
 
+        // Flush deferred SpawnPoint TriggerEvents when the player approaches Create targets
+        // (air-drop / pad setup created by combat-spawn TE, etc.).
+        FlushDeferredSpawnTriggerEvents(clonedObject);
+
         // Snapshot keys — a reaction may mutate Triggers during fire.
         var triggers = map.Triggers.Values.ToList();
         foreach (var trigger in triggers)
         {
+            // Movement / volume path only. DoOnActivate remotes (e.g. l1_rem_gunnysioux_initiator)
+            // must not fire when the player merely stands near them — only via Activate cascade.
+            if (!trigger.Template.DoCollision)
+                continue;
+
             var triggerCoid = trigger.ObjectId.Coid;
             var key = (objectCoid, triggerCoid);
 
@@ -116,6 +125,24 @@ public class TriggerManager : Singleton<TriggerManager>
             {
                 _activeTriggers.TryRemove(key, out _);
             }
+        }
+    }
+
+    /// <summary>
+    /// SpawnPoints may defer TriggerEvents when Create targets are out of proximity.
+    /// Flush when a player/vehicle activator moves into range.
+    /// </summary>
+    void FlushDeferredSpawnTriggerEvents(ClonedObjectBase activator)
+    {
+        if (activator?.Map == null)
+            return;
+
+        // Snapshot — flush may Create objects and mutate map collections.
+        var objects = activator.Map.Objects.Values.ToList();
+        foreach (var obj in objects)
+        {
+            if (obj is SpawnPoint spawn && spawn.HasDeferredAuthoredTriggerEvents)
+                spawn.TryFlushDeferredAuthoredTriggerEvents(activator);
         }
     }
 
@@ -206,8 +233,24 @@ public class TriggerManager : Singleton<TriggerManager>
             if (trigger.Template.Conditions.Count == 0)
                 continue;
 
+            // Collision volumes are handled by CheckTriggersFor, not mission re-eval.
+            if (trigger.Template.DoCollision)
+                continue;
+
+            // Pure Activate targets (DoOnActivate, no conditionals) are only fired by
+            // ReactionType.Activate cascades — not by objective progress. Ark Bay 14134
+            // (l1_rem_gunnysioux_initiator, scale=2, doColl=0, doCond=0) was wrongly
+            // classified as a "remote logic watcher" and deleted standing Gunny + created
+            // combat pathing car whenever any mission objective advanced.
+            if (trigger.Template.DoOnActivate && !trigger.Template.DoConditionals)
+                continue;
+
             // Remote logic watchers are small; large spheres are pure collision volumes.
             if (trigger.Scale > 2.0f)
+                continue;
+
+            // Prefer triggers that actually evaluate conditionals (mission/var watchers).
+            if (!trigger.Template.DoConditionals)
                 continue;
 
             if (watchVarId.HasValue

@@ -825,12 +825,17 @@ public partial class TNLConnection : GhostConnection
                     HandleInventoryDestroyItemPacket(reader);
                     break;
 
+                case GameOpcode.RequestObject:
+                    HandleRequestObjectPacket(reader);
+                    break;
+
                 case GameOpcode.Firing:
-                    Logger.WriteLog(LogType.Error, "Unhandled Opcode: {0}", gameOpcode);
+                    // Client may send fire state without a VehicleMoved (stationary shooting).
+                    HandleFiringPacket(reader);
                     break;
 
                 case GameOpcode.Damage:
-                    Logger.WriteLog(LogType.Error, "Unhandled Opcode: {0}", gameOpcode);
+                    // C2S damage is not used; combat is server-authoritative via VehicleMoved/Firing.
                     break;
 
                 default:

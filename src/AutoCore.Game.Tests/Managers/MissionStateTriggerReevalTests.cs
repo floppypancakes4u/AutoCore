@@ -220,6 +220,98 @@ public class MissionStateTriggerReevalTests
     }
 
     [TestMethod]
+    public void OnMissionStateChanged_DoesNotFirePureActivateTarget_GunnyInitiatorStyle()
+    {
+        // Ark Bay 14134: scale=2, doColl=0, doCond=0, doOnAct=1, conds hasdeleted==0.
+        // Must NOT fire on objective progress — only via Activate cascade after Final Exam
+        // initiate volume. False fire deleted standing Gunny and spawned pathing combat car.
+        var (character, vehicle, map) = CreatePlayer();
+        PlaceDeletableObject(map, GateObjectCoid, new Vector3(0, 0, 0));
+        PlaceDeleteReaction(map, DeleteReactionCoid, GateObjectCoid);
+
+        // Latch-style condition (const 0 == const 0) always true — like hasdeleted==0.
+        map.MapData.Variables[VarConstZero] = Variable.CreateForTests(
+            VarConstZero, LogicVariableStore.TypeConstant, 0f, 0f, "zero");
+        character.EnsureLogicVariables();
+
+        var remTpl = new TriggerTemplate
+        {
+            COID = (int)RemoteTriggerCoid,
+            Name = "l1_rem_gunnysioux_initiator",
+            TargetType = TriggerTargetType.Players,
+            Scale = 2f,
+            DoCollision = false,
+            DoConditionals = false,
+            DoOnActivate = true,
+            AllConditionsNeeded = false,
+            ActivationCount = -1,
+        };
+        remTpl.Reactions.Add(DeleteReactionCoid);
+        remTpl.Conditions.Add(new TriggerConditional
+        {
+            LeftId = VarConstZero,
+            RightId = VarConstZero,
+            Type = ConditionalType.EqualTo,
+        });
+        var rem = new Trigger(remTpl);
+        rem.SetCoid(RemoteTriggerCoid, false);
+        rem.Position = new Vector3(0, 0, 0);
+        rem.Scale = 2f;
+        rem.SetMap(map);
+
+        vehicle.Position = new Vector3(0, 0, 0);
+        character.CurrentQuests.Add(new CharacterQuest(MissionId, 0));
+        TriggerManager.Instance.OnMissionStateChanged(vehicle);
+
+        Assert.IsNotNull(map.GetObjectByCoid(GateObjectCoid),
+            "Pure Activate-target trigger must not fire on mission re-eval");
+        Assert.AreEqual(0, rem.FireCount);
+
+        // Activate cascade still works (Final Exam initiate path).
+        var actTpl = new ReactionTemplate
+        {
+            COID = 98050,
+            ReactionType = ReactionType.Activate,
+        };
+        actTpl.Objects.Add(RemoteTriggerCoid);
+        var act = new Reaction(actTpl);
+        act.SetCoid(98050L, false);
+        act.SetMap(map);
+        Assert.IsTrue(act.TriggerIfPossible(vehicle));
+        Assert.IsNull(map.GetObjectByCoid(GateObjectCoid),
+            "Activate cascade must still fire the rem initiator");
+    }
+
+    [TestMethod]
+    public void CheckTriggersFor_IgnoresNonCollisionTriggers()
+    {
+        var (character, vehicle, map) = CreatePlayer();
+        PlaceDeletableObject(map, GateObjectCoid, new Vector3(0, 0, 0));
+        PlaceDeleteReaction(map, DeleteReactionCoid, GateObjectCoid);
+
+        var remTpl = new TriggerTemplate
+        {
+            COID = (int)RemoteTriggerCoid,
+            TargetType = TriggerTargetType.Players,
+            Scale = 50f,
+            DoCollision = false,
+            DoOnActivate = true,
+            ActivationCount = -1,
+        };
+        remTpl.Reactions.Add(DeleteReactionCoid);
+        var rem = new Trigger(remTpl);
+        rem.SetCoid(RemoteTriggerCoid, false);
+        rem.Position = new Vector3(0, 0, 0);
+        rem.Scale = 50f;
+        rem.SetMap(map);
+
+        vehicle.Position = new Vector3(0, 0, 0);
+        TriggerManager.Instance.CheckTriggersFor(vehicle);
+        Assert.IsNotNull(map.GetObjectByCoid(GateObjectCoid));
+        Assert.AreEqual(0, rem.FireCount);
+    }
+
+    [TestMethod]
     public void Activate_CascadesToTriggerReactions()
     {
         var (character, vehicle, map) = CreatePlayer();
@@ -321,6 +413,7 @@ public class MissionStateTriggerReevalTests
             COID = (int)condTriggerCoid,
             TargetType = TriggerTargetType.Players,
             Scale = 50f,
+            DoCollision = true,
             DoConditionals = true,
             AllConditionsNeeded = true,
             ActivationCount = -1,
@@ -379,6 +472,8 @@ public class MissionStateTriggerReevalTests
             COID = (int)triggerCoid,
             TargetType = TriggerTargetType.Players,
             Scale = scale,
+            // Large scale → collision volume; small scale → remote condition watcher.
+            DoCollision = scale > 2f,
             DoConditionals = true,
             AllConditionsNeeded = true,
             ActivationCount = -1,

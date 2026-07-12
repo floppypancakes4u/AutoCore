@@ -377,6 +377,8 @@ public class Reaction : ClonedObjectBase
     /// <summary>
     /// Activate targeting a Trigger COID fires that trigger's reactions server-side
     /// (client 0x206C alone does not run nested map trigger graphs).
+    /// Activate targeting a SpawnPoint materializes children if missing (client
+    /// CVOGSpawnPoint_SetObjectActiveState).
     /// </summary>
     private void HandleActivateCascade(ClonedObjectBase activator)
     {
@@ -386,18 +388,34 @@ public class Reaction : ClonedObjectBase
 
         foreach (var objectCoid in Template.Objects)
         {
-            if (!map.Triggers.TryGetValue(new TFID(objectCoid, false), out var trigger))
-                continue;
+            if (map.Triggers.TryGetValue(new TFID(objectCoid, false), out var trigger))
+            {
+                if (trigger.Template.Reactions.Count == 0)
+                    continue;
 
-            if (trigger.Template.Reactions.Count == 0)
+                Logger.WriteLog(LogType.Debug,
+                    "Activate reaction {0}: cascade trigger {1} reactions=[{2}]",
+                    Template.COID,
+                    objectCoid,
+                    string.Join(',', trigger.Template.Reactions));
+                TriggerManager.Instance.FireTriggerReactions(activator, trigger);
                 continue;
+            }
 
-            Logger.WriteLog(LogType.Debug,
-                "Activate reaction {0}: cascade trigger {1} reactions=[{2}]",
-                Template.COID,
-                objectCoid,
-                string.Join(',', trigger.Template.Reactions));
-            TriggerManager.Instance.FireTriggerReactions(activator, trigger);
+            // SpawnPoint activate: ensure children exist (Create may have only placed the marker).
+            if (map.GetObjectByCoid(objectCoid) is SpawnPoint spawnPoint)
+            {
+                // Do not mutate shared MapData.IsActive (see Create path).
+                if (!spawnPoint.HasLiveSpawn())
+                {
+                    // Activate is reaction-driven — fire TriggerEvents (combat → pad setup).
+                    spawnPoint.Spawn(fireTriggerEvents: true, triggerActivator: activator);
+                    Logger.WriteLog(LogType.Debug,
+                        "Activate reaction {0}: SpawnPoint coid={1} spawned children",
+                        Template.COID,
+                        objectCoid);
+                }
+            }
         }
     }
 
@@ -466,12 +484,30 @@ public class Reaction : ClonedObjectBase
 
         foreach (var objectCoid in Template.Objects)
         {
-            if (map.GetObjectByCoid(objectCoid) != null)
+            var existing = map.GetObjectByCoid(objectCoid);
+            if (existing != null)
             {
-                Logger.WriteLog(LogType.Debug,
-                    "Create reaction {0}: object {1} already on map — skip",
-                    Template.COID,
-                    objectCoid);
+                // Inactive spawn points may already sit on the map without a live child
+                // (or after a prior despawn). Create must re-Spawn, not skip.
+                if (existing is SpawnPoint existingSpawn && !existingSpawn.HasLiveSpawn())
+                {
+                    // Do not mutate shared MapData template.IsActive — that is process-global
+                    // and leaves combat spawns permanently "active" after one Create.
+                    // fireTriggerEvents: Create is reaction-driven (pad Gunny TE, etc.).
+                    existingSpawn.Spawn(fireTriggerEvents: true, triggerActivator: activator);
+                    Logger.WriteLog(LogType.Debug,
+                        "Create reaction {0}: re-spawned children for existing SpawnPoint coid={1}",
+                        Template.COID,
+                        objectCoid);
+                }
+                else
+                {
+                    Logger.WriteLog(LogType.Debug,
+                        "Create reaction {0}: object {1} already on map — skip",
+                        Template.COID,
+                        objectCoid);
+                }
+
                 continue;
             }
 
@@ -508,16 +544,16 @@ public class Reaction : ClonedObjectBase
                 continue;
             }
 
-            if (obj.ObjectId.Coid == 0)
+            // Fresh template.Create() leaves TFID at default Coid=-1; assign map template COID.
+            if (obj.ObjectId.Coid <= 0)
                 obj.SetCoid(template.COID != 0 ? template.COID : objectCoid, false);
 
-            // Mark template active for any load-time IsActive consumers.
-            template.IsActive = true;
+            // Never set shared template.IsActive — map load uses OriginalIsActive only.
 
             obj.SetMap(map);
 
             if (obj is SpawnPoint spawnPoint)
-                spawnPoint.Spawn();
+                spawnPoint.Spawn(fireTriggerEvents: true, triggerActivator: activator);
 
             Logger.WriteLog(LogType.Debug,
                 "Create reaction {0}: spawned coid={1} type={2} on map {3}",
@@ -584,6 +620,11 @@ public class Reaction : ClonedObjectBase
 
             if (!CanReactionRemoveFromMap(obj, label, isActivator: false))
                 continue;
+
+            // SpawnPoints own spawned creatures/vehicles (SpawnOwner / SpawnOwnerCoid).
+            // Client RemoveObject tears down the whole spawn presence; mirror that here.
+            if (obj is SpawnPoint spawnPoint)
+                spawnPoint.DespawnOwnedEntities();
 
             Logger.WriteLog(LogType.Debug,
                 "{0} reaction {1}: removing object coid={2} type={3} from map (no DestroyObject; client 0x206C)",
@@ -759,6 +800,12 @@ public class Reaction : ClonedObjectBase
             "GiveMission: tracked mission {0} on server for coid={1}",
             missionId,
             character.ObjectId.Coid);
+
+        // 0x206C still tells the client to apply GiveMission; also push journal/objective
+        // state so sector UI matches server authority even if the reaction batch is dropped.
+        var conn = character.OwningConnection;
+        if (conn != null)
+            NpcInteractHandler.ResyncActiveMissionToClient(conn, character, quest);
 
         TriggerManager.Instance.OnMissionStateChanged(character.CurrentVehicle ?? (ClonedObjectBase)character);
         return true;

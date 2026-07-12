@@ -1103,6 +1103,17 @@ public class Vehicle : SimpleObject
     /// </summary>
     public override void OnDeath(DeathType deathType)
     {
+        Logger.WriteLog(LogType.Debug,
+            "Vehicle.OnDeath coid={0} cbid={1} templateId={2} npcAi={3} murderer={4} inv={5} hp={6}/{7}",
+            ObjectId.Coid,
+            CBID,
+            TemplateId,
+            NpcAi != null ? 1 : 0,
+            Murderer?.Coid ?? -1,
+            IsInvincible ? 1 : 0,
+            GetCurrentHP(),
+            GetMaximumHP());
+
         if (NpcAi == null)
         {
             base.OnDeath(deathType);
@@ -1122,12 +1133,31 @@ public class Vehicle : SimpleObject
         if (Murderer.Coid > 0)
             killerCharacter = ObjectManager.Instance.GetObject(Murderer)?.GetSuperCharacter(false);
 
+        // SpawnPoint TriggerEvents (pad Create after combat vehicle dies, etc.) before leave-map.
+        NotifySpawnOwnerTriggerEventsOnDeath(map, killerCharacter);
+
         GenerateAndSpawnTemplateLoot(killerCharacter);
 
         // Leave the map first so the destroy-broadcast iteration stays consistent.
         SetMap(null);
 
         BroadcastDestroy(map, vehicleObjectId);
+    }
+
+    void NotifySpawnOwnerTriggerEventsOnDeath(SectorMap map, Character killerCharacter)
+    {
+        if (SpawnOwnerCoid <= 0)
+            return;
+
+        if (map.GetObjectByCoid(SpawnOwnerCoid) is not SpawnPoint spawn)
+            return;
+
+        ClonedObjectBase activator = killerCharacter?.CurrentVehicle != null
+            ? killerCharacter.CurrentVehicle
+            : killerCharacter != null
+                ? killerCharacter
+                : this;
+        spawn.NotifySpawnedChildDied(this, activator);
     }
 
     private void GenerateAndSpawnTemplateLoot(Character killerCharacter)

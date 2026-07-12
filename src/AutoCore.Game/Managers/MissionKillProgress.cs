@@ -30,6 +30,8 @@ public static class MissionKillProgress
         var victimCbid = victim.CBID;
         var victimCoid = victim.ObjectId.Coid;
         var victimFaction = victim.Faction;
+        // Final Exam style: kill req CBID is tVehicleTemplate id when TargetIsTemplateVehicle=1.
+        var victimTemplateId = victim is Vehicle vehicle ? vehicle.TemplateId : -1;
         var continentId = killer.Map?.ContinentId ?? -1;
 
         foreach (var quest in killer.CurrentQuests.ToList())
@@ -44,7 +46,14 @@ public static class MissionKillProgress
                 continue;
             }
 
-            if (!TryMatchKillRequirement(objective, victimCbid, victimCoid, victimFaction, continentId, out var numToKill))
+            if (!TryMatchKillRequirement(
+                    objective,
+                    victimCbid,
+                    victimCoid,
+                    victimFaction,
+                    continentId,
+                    victimTemplateId,
+                    out var numToKill))
                 continue;
 
             var seq = quest.ActiveObjectiveSequence;
@@ -59,14 +68,15 @@ public static class MissionKillProgress
                 needed = quest.ObjectiveMax[seq];
 
             Logger.WriteLog(LogType.Debug,
-                "Kill progress: mission={0} seq={1} objective={2} progress={3}/{4} victim coid={5} cbid={6}",
+                "Kill progress: mission={0} seq={1} objective={2} progress={3}/{4} victim coid={5} cbid={6} templateId={7}",
                 quest.MissionId,
                 seq,
                 objective.ObjectiveId,
                 quest.ObjectiveProgress[seq],
                 needed,
                 victimCoid,
-                victimCbid);
+                victimCbid,
+                victimTemplateId);
 
             if (quest.ObjectiveProgress[seq] < needed)
             {
@@ -107,6 +117,22 @@ public static class MissionKillProgress
         {
             murdererObj = victim.Map.GetObjectByCoid(murderer.Coid)
                 ?? victim.Map.GetObject(murderer.Coid);
+
+            // Player vehicles are global TFID; also match by CurrentVehicle coid.
+            if (murdererObj is null)
+            {
+                foreach (var player in victim.Map.Players)
+                {
+                    if (player?.CurrentVehicle != null
+                        && player.CurrentVehicle.ObjectId.Coid == murderer.Coid)
+                    {
+                        return player;
+                    }
+
+                    if (player != null && player.ObjectId.Coid == murderer.Coid)
+                        return player;
+                }
+            }
         }
 
         if (murdererObj is null)
@@ -133,6 +159,17 @@ public static class MissionKillProgress
         int victimFaction,
         int continentId,
         out int numToKill)
+        => TryMatchKillRequirement(
+            objective, victimCbid, victimCoid, victimFaction, continentId, victimTemplateId: -1, out numToKill);
+
+    internal static bool TryMatchKillRequirement(
+        MissionObjective objective,
+        int victimCbid,
+        long victimCoid,
+        int victimFaction,
+        int continentId,
+        int victimTemplateId,
+        out int numToKill)
     {
         numToKill = 1;
         if (objective?.Requirements == null)
@@ -143,7 +180,7 @@ public static class MissionKillProgress
             switch (req)
             {
                 case ObjectiveRequirementKill kill:
-                    if (!KillMatches(kill, victimCbid, victimFaction, continentId))
+                    if (!KillMatches(kill, victimCbid, victimFaction, continentId, victimTemplateId))
                         continue;
                     numToKill = kill.NumToKill > 0 ? kill.NumToKill : 1;
                     return true;
@@ -164,6 +201,14 @@ public static class MissionKillProgress
         int victimCbid,
         int victimFaction,
         int continentId)
+        => KillMatches(kill, victimCbid, victimFaction, continentId, victimTemplateId: -1);
+
+    internal static bool KillMatches(
+        ObjectiveRequirementKill kill,
+        int victimCbid,
+        int victimFaction,
+        int continentId,
+        int victimTemplateId)
     {
         if (kill == null)
             return false;
@@ -179,6 +224,20 @@ public static class MissionKillProgress
 
         if (kill.TargetIsFaction)
             return kill.TargetCBID >= 0 && victimFaction == kill.TargetCBID;
+
+        // Final Exam / many tutorial kills: CBID field is tVehicleTemplate id, not clonebase CBID.
+        if (kill.TargetIsTemplateVehicle)
+        {
+            if (kill.TargetCBID < 0)
+                return false;
+
+            if (victimTemplateId == kill.TargetCBID)
+                return true;
+
+            // Fallback: template row may be missing TemplateId on the vehicle but chassis CBID matches.
+            var template = AssetManager.Instance.GetVehicleTemplate(kill.TargetCBID);
+            return template != null && template.VehicleCbid > 0 && victimCbid == template.VehicleCbid;
+        }
 
         if (kill.TargetCBID >= 0)
             return victimCbid == kill.TargetCBID;

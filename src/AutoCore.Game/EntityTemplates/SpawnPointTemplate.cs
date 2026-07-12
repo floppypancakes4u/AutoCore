@@ -60,6 +60,8 @@ public class SpawnPointTemplate : GraphicsObjectTemplate
         ChampionChance = reader.ReadByte();
         SpawnChance = reader.ReadByte();
         IsActive = reader.ReadBoolean();
+        // Shared MapData is mutated by Create/Activate if they write IsActive; keep fam default.
+        OriginalIsActive = IsActive;
 
         if (mapVersion >= 31)
             RandomlyOffsetSpawnPosition = reader.ReadBoolean();

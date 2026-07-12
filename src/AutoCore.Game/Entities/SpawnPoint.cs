@@ -16,6 +16,40 @@ public class SpawnPoint : ClonedObjectBase
     public SpawnPointTemplate Template { get; }
 
     /// <summary>
+    /// COID of the most recent creature/vehicle produced by <see cref="Spawn"/> (0 if none).
+    /// Used by Create/Delete lifecycle to know whether a live child still exists.
+    /// </summary>
+    public long LastSpawnedCoid { get; private set; }
+
+    /// <summary>
+    /// True when the last <see cref="Spawn"/> call requested TriggerEvents fire
+    /// (Create/Activate only; map load leaves this false).
+    /// </summary>
+    internal bool LastSpawnRequestedFireTriggerEvents { get; private set; }
+
+    /// <summary>
+    /// True when children were materialized by a Create/Activate reaction this map session
+    /// (not fam map-load). Used to detect leaked combat spawns after a previous visit.
+    /// </summary>
+    internal bool MaterializedByReaction { get; private set; }
+
+    /// <summary>
+    /// Distance (world units) at which deferred TriggerEvents may flush. Create reactions that
+    /// place objects farther than this from the activator wait until a player approaches —
+    /// so drop-in / air-drop Create animations play near the target, not off-screen at combat
+    /// start (e.g. combat spawn TE → pad Create while the player is still ~90u away).
+    /// </summary>
+    internal const float TriggerEventProximity = 45f;
+
+    /// <summary>True after TriggerEvents have been dispatched (or determined empty).</summary>
+    internal bool AuthoredTriggerEventsConsumed { get; private set; }
+
+    /// <summary>True while Create targets are out of range and TE is waiting for approach.</summary>
+    internal bool HasDeferredAuthoredTriggerEvents { get; private set; }
+
+    long _deferredTeActivatorCoid;
+
+    /// <summary>
     /// Foot-to-origin height for the shared humanoid body (<c>creature.cache</c> /
     /// <c>humanoid.cache</c> in physics.glm). Half-extent ≈ 1.1803. See
     /// <c>Documentation/NPC_SPAWN_HEIGHT.md</c> and client
@@ -37,8 +71,67 @@ public class SpawnPoint : ClonedObjectBase
         // NO GHOST!
     }
 
-    public bool Spawn()
+    /// <summary>True when <see cref="LastSpawnedCoid"/> still resolves to an object on the current map.</summary>
+    public bool HasLiveSpawn()
     {
+        if (LastSpawnedCoid == 0 || Map == null)
+            return false;
+
+        return Map.GetObjectByCoid(LastSpawnedCoid) != null;
+    }
+
+    /// <summary>Unit-test helper when spawn runs without clonebase-backed <see cref="Spawn"/>.</summary>
+    internal void SetLastSpawnedCoidForTests(long coid) => LastSpawnedCoid = coid;
+
+    /// <summary>
+    /// Remove creatures/vehicles that list this spawn COID as their spawn owner.
+    /// Called when a Delete reaction removes the SpawnPoint (client RemoveObject path).
+    /// Includes dialog IsNPC / mission givers — Final Exam deletes standing Gunny with the
+    /// spawn marker (l1_del_gunnysioux1). Preserving them left the human prop after accept.
+    /// </summary>
+    public void DespawnOwnedEntities()
+    {
+        if (Map == null)
+            return;
+
+        var spawnCoid = ObjectId.Coid;
+        // Snapshot: SetMap(null) mutates Map.Objects while we iterate.
+        var owned = new List<ClonedObjectBase>();
+        foreach (var kvp in Map.Objects)
+        {
+            var obj = kvp.Value;
+            if (obj is Creature creature && creature.SpawnOwner == spawnCoid)
+                owned.Add(creature);
+            else if (obj is Vehicle vehicle && vehicle.SpawnOwnerCoid == spawnCoid)
+                owned.Add(vehicle);
+        }
+
+        foreach (var obj in owned)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "SpawnPoint {0}: despawning owned {1} coid={2}",
+                spawnCoid,
+                obj.GetType().Name,
+                obj.ObjectId.Coid);
+            obj.SetMap(null);
+        }
+
+        LastSpawnedCoid = 0;
+    }
+
+    /// <summary>
+    /// Materialize spawn children. Map load uses defaults (no TriggerEvents).
+    /// Create/Activate reactions pass <paramref name="fireTriggerEvents"/> true so authored
+    /// events run only for reaction-driven spawns (e.g. 14138 → 15818 Create pad Gunny).
+    /// Firing TriggerEvents on every map-load Spawn can cascade Delete of active dialog NPCs
+    /// (standing Gunny 14090) before the player accepts the mission.
+    /// </summary>
+    /// <param name="fireTriggerEvents">When true, fire template TriggerEvents after success.</param>
+    /// <param name="triggerActivator">Reaction activator (player/vehicle) for condition context.</param>
+    public bool Spawn(bool fireTriggerEvents = false, ClonedObjectBase triggerActivator = null)
+    {
+        LastSpawnRequestedFireTriggerEvents = fireTriggerEvents;
+
         var spawnList = Template.GetSpawn();
         if (spawnList == null)
             return false;
@@ -49,7 +142,18 @@ public class SpawnPoint : ClonedObjectBase
             if (vehicleTemplate == null)
                 return false;
 
-            return SpawnTemplateVehicle(vehicleTemplate, spawnList) != null;
+            var templateVehicle = SpawnTemplateVehicle(vehicleTemplate, spawnList);
+            if (templateVehicle == null)
+                return false;
+
+            LastSpawnedCoid = templateVehicle.ObjectId.Coid;
+            if (fireTriggerEvents)
+            {
+                MaterializedByReaction = true;
+                FireAuthoredTriggerEvents(triggerActivator ?? templateVehicle);
+            }
+
+            return true;
         }
 
         var cloneBase = AssetManager.Instance.GetCloneBase(spawnList.SpawnType);
@@ -58,18 +162,231 @@ public class SpawnPoint : ClonedObjectBase
 
         if (cloneBase.Type == CloneBaseObjectType.Creature)
         {
-            if (SpawnCreature(cloneBase.CloneBaseSpecific.CloneBaseId, spawnList) == null)
+            var creature = SpawnCreature(cloneBase.CloneBaseSpecific.CloneBaseId, spawnList);
+            if (creature == null)
                 return false;
-        }
-        else if (cloneBase.Type == CloneBaseObjectType.Vehicle)
-        {
-            if (SpawnVehicle(cloneBase.CloneBaseSpecific.CloneBaseId, spawnList) == null)
-                return false;
-        }
-        else
-            Logger.WriteLog(LogType.Error, $"SpawnPoint {Template.COID} wants to spawn object with type {cloneBase.Type}!");
 
-        return true;
+            LastSpawnedCoid = creature.ObjectId.Coid;
+            if (fireTriggerEvents)
+            {
+                MaterializedByReaction = true;
+                FireAuthoredTriggerEvents(triggerActivator ?? creature);
+            }
+
+            return true;
+        }
+
+        if (cloneBase.Type == CloneBaseObjectType.Vehicle)
+        {
+            var vehicle = SpawnVehicle(cloneBase.CloneBaseSpecific.CloneBaseId, spawnList);
+            if (vehicle == null)
+                return false;
+
+            LastSpawnedCoid = vehicle.ObjectId.Coid;
+            if (fireTriggerEvents)
+            {
+                MaterializedByReaction = true;
+                FireAuthoredTriggerEvents(triggerActivator ?? vehicle);
+            }
+
+            return true;
+        }
+
+        Logger.WriteLog(LogType.Error, $"SpawnPoint {Template.COID} wants to spawn object with type {cloneBase.Type}!");
+        return false;
+    }
+
+    /// <summary>Clear reaction-materialization bookkeeping after a hygiene despawn.</summary>
+    internal void ClearReactionMaterializationState()
+    {
+        MaterializedByReaction = false;
+        AuthoredTriggerEventsConsumed = false;
+        HasDeferredAuthoredTriggerEvents = false;
+        _deferredTeActivatorCoid = 0;
+        LastSpawnedCoid = 0;
+    }
+
+    /// <summary>
+    /// Fire map-authored <see cref="ObjectTemplate.TriggerEvents"/> (reaction-driven spawn only).
+    /// Each positive COID is resolved as a map <see cref="Trigger"/> and dispatched via
+    /// <see cref="TriggerManager.FireTriggerReactions"/> (e.g. Final Exam combat spawn 14138 →
+    /// trigger 15818 Create pad Gunny 15820). Negative / zero slots are ignored.
+    /// <para>
+    /// When any Create target lies farther than <see cref="TriggerEventProximity"/> from the
+    /// activator, the fire is deferred until <see cref="TryFlushDeferredAuthoredTriggerEvents"/>
+    /// (player movement) so client Create animations (air-drop, etc.) play on approach.
+    /// </para>
+    /// </summary>
+    /// <param name="activator">Prefer the reaction activator (player); falls back to this spawn marker.</param>
+    /// <param name="forceImmediate">Skip proximity deferral (used after approach flush).</param>
+    public void FireAuthoredTriggerEvents(ClonedObjectBase activator = null, bool forceImmediate = false)
+    {
+        if (AuthoredTriggerEventsConsumed)
+            return;
+
+        var events = Template?.TriggerEvents;
+        if (events == null || events.Length == 0 || Map == null)
+        {
+            AuthoredTriggerEventsConsumed = true;
+            HasDeferredAuthoredTriggerEvents = false;
+            return;
+        }
+
+        var act = activator ?? this;
+        if (act.Map == null)
+            act = this;
+
+        if (!forceImmediate && ShouldDeferAuthoredTriggerEvents(act, events))
+        {
+            HasDeferredAuthoredTriggerEvents = true;
+            _deferredTeActivatorCoid = act.ObjectId?.Coid ?? 0;
+            Logger.WriteLog(LogType.Debug,
+                "SpawnPoint {0}: deferring TriggerEvents until activator within {1:0} of Create targets (activatorCoid={2})",
+                ObjectId?.Coid ?? Template.COID,
+                TriggerEventProximity,
+                _deferredTeActivatorCoid);
+            return;
+        }
+
+        AuthoredTriggerEventsConsumed = true;
+        HasDeferredAuthoredTriggerEvents = false;
+        _deferredTeActivatorCoid = 0;
+
+        for (var i = 0; i < events.Length; i++)
+        {
+            var triggerCoid = events[i];
+            if (triggerCoid <= 0)
+                continue;
+
+            var trigger = Map.GetObjectByCoid(triggerCoid) as Trigger
+                ?? (Map.Triggers.TryGetValue(new TFID(triggerCoid, false), out var t) ? t : null);
+            if (trigger == null)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "SpawnPoint {0}: TriggerEvent[{1}] coid={2} not on map — skip",
+                    ObjectId?.Coid ?? Template.COID,
+                    i,
+                    triggerCoid);
+                continue;
+            }
+
+            if (trigger.Template?.Reactions == null || trigger.Template.Reactions.Count == 0)
+                continue;
+
+            Logger.WriteLog(LogType.Debug,
+                "SpawnPoint {0}: firing TriggerEvent[{1}] trigger={2} reactions=[{3}]",
+                ObjectId?.Coid ?? Template.COID,
+                i,
+                triggerCoid,
+                string.Join(',', trigger.Template.Reactions));
+            TriggerManager.Instance.FireTriggerReactions(act, trigger);
+        }
+    }
+
+    /// <summary>
+    /// If TriggerEvents were deferred (Create targets out of range), fire them when
+    /// <paramref name="activator"/> is now close enough.
+    /// </summary>
+    public void TryFlushDeferredAuthoredTriggerEvents(ClonedObjectBase activator)
+    {
+        if (AuthoredTriggerEventsConsumed || !HasDeferredAuthoredTriggerEvents || activator == null)
+            return;
+
+        var events = Template?.TriggerEvents;
+        if (events == null || events.Length == 0)
+        {
+            AuthoredTriggerEventsConsumed = true;
+            HasDeferredAuthoredTriggerEvents = false;
+            return;
+        }
+
+        if (ShouldDeferAuthoredTriggerEvents(activator, events))
+            return;
+
+        Logger.WriteLog(LogType.Debug,
+            "SpawnPoint {0}: flushing deferred TriggerEvents (activatorCoid={1})",
+            ObjectId?.Coid ?? Template.COID,
+            activator.ObjectId?.Coid ?? -1);
+        FireAuthoredTriggerEvents(activator, forceImmediate: true);
+    }
+
+    /// <summary>
+    /// Spawn-child death path: request authored TE if not yet consumed (deferred or immediate).
+    /// Generic — any spawn with TriggerEvents can stage follow-up Creates after the child dies.
+    /// </summary>
+    public void NotifySpawnedChildDied(ClonedObjectBase dyingChild, ClonedObjectBase killerOrActivator)
+    {
+        if (AuthoredTriggerEventsConsumed)
+            return;
+
+        var act = killerOrActivator ?? dyingChild ?? this;
+        FireAuthoredTriggerEvents(act);
+    }
+
+    bool ShouldDeferAuthoredTriggerEvents(ClonedObjectBase activator, long[] events)
+    {
+        if (activator?.Map == null || Map == null || events == null)
+            return false;
+
+        var nearestCreateSq = float.MaxValue;
+        var foundCreateTarget = false;
+
+        for (var i = 0; i < events.Length; i++)
+        {
+            var triggerCoid = events[i];
+            if (triggerCoid <= 0)
+                continue;
+
+            var trigger = Map.GetObjectByCoid(triggerCoid) as Trigger
+                ?? (Map.Triggers.TryGetValue(new TFID(triggerCoid, false), out var t) ? t : null);
+            if (trigger?.Template?.Reactions == null)
+                continue;
+
+            foreach (var reactionCoid in trigger.Template.Reactions)
+            {
+                if (Map.GetObjectByCoid(reactionCoid) is not Reaction reaction)
+                    continue;
+                if (reaction.Template?.ReactionType != ReactionType.Create)
+                    continue;
+
+                foreach (var objectCoid in reaction.Template.Objects)
+                {
+                    if (!TryGetMapTemplatePosition(Map, objectCoid, out var pos))
+                        continue;
+
+                    foundCreateTarget = true;
+                    var dSq = activator.Position.DistSq(pos);
+                    if (dSq < nearestCreateSq)
+                        nearestCreateSq = dSq;
+                }
+            }
+        }
+
+        if (!foundCreateTarget)
+            return false;
+
+        var limit = TriggerEventProximity;
+        return nearestCreateSq > limit * limit;
+    }
+
+    static bool TryGetMapTemplatePosition(SectorMap map, long coid, out Vector3 position)
+    {
+        var live = map.GetObjectByCoid(coid);
+        if (live != null)
+        {
+            position = live.Position;
+            return true;
+        }
+
+        if (map.MapData.Templates.TryGetValue(coid, out var template)
+            && template is GraphicsObjectTemplate graphics)
+        {
+            position = graphics.Location.ToVector3();
+            return true;
+        }
+
+        position = default;
+        return false;
     }
 
     /// <summary>
@@ -289,6 +606,9 @@ public class SpawnPoint : ClonedObjectBase
         vehicle.Position = Position;
         vehicle.Rotation = Rotation;
         vehicle.ApplyTemplateBaseHp(template.BaseHp);
+        // Clonebase may flag chassis as invincible; template NPC vehicles are combat targets
+        // (e.g. Final Exam Gunny). Client MakeNotInvincible is not always authored — clear here.
+        vehicle.SetInvincible(false);
 
         var cloneBaseVehicle = vehicle.CloneBaseObject as CloneBaseVehicle;
         EquipDefaultWheelSet(vehicle, cloneBaseVehicle);

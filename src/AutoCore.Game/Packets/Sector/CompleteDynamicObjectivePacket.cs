@@ -4,7 +4,10 @@ using AutoCore.Game.Constants;
 
 /// <summary>
 /// Server→client mission/objective finish (opcode 0x2070).
-/// Client finishes by lookup id at packet+0x10 (objective id preferred over mission id).
+/// Client dispatch: Client_RecvObjectiveState @ 0x0080FF00 always calls
+/// CVOGReaction_CompleteObjective(lookupId @ +0x10, -1, -1, force=1) then bulk UI refresh.
+/// Prefer objective id over mission id for the lookup field. Do not send on dialog turn-in
+/// (client already completed locally via MissionDialogHandleButton).
 /// </summary>
 public class CompleteDynamicObjectivePacket : BasePacket
 {

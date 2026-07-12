@@ -277,6 +277,80 @@ public class MissionKillProgressUnitTests
         Assert.IsFalse(MissionKillProgress.KillMatches(kill, 5, 0, 1));
     }
 
+    [TestMethod]
+    public void KillMatches_TargetIsTemplateVehicle_MatchesTemplateIdNotCbid()
+    {
+        // Retail Final Exam: <CBID>580</CBID><TargetIsTemplateVehicle>1</TargetIsTemplateVehicle>
+        // Victim vehicle CBID is 12425; TemplateId is 580.
+        var kill = new ObjectiveRequirementKill(MissionObjective.CreateForTests(1, 0, 1))
+        {
+            TargetCBID = 580,
+            TargetIsTemplateVehicle = true,
+            ContinentId = ContId,
+            NumToKill = 1,
+        };
+
+        Assert.IsFalse(
+            MissionKillProgress.KillMatches(kill, victimCbid: 1, victimFaction: 0, continentId: ContId, victimTemplateId: -1),
+            "Must not match arbitrary CBID without template id or template chassis lookup");
+        Assert.IsFalse(
+            MissionKillProgress.KillMatches(kill, 12425, 0, continentId: ContId, victimTemplateId: 999),
+            "Wrong template id must not match");
+        Assert.IsTrue(
+            MissionKillProgress.KillMatches(kill, 12425, 0, continentId: ContId, victimTemplateId: 580),
+            "Template id 580 must match Final Exam kill requirement");
+    }
+
+    [TestMethod]
+    public void KillMatches_TargetIsTemplateVehicle_FallbackMatchesTemplateChassisCbid()
+    {
+        AssetManager.Instance.SetTestVehicleTemplates(new[]
+        {
+            new VehicleTemplate { Id = 580, VehicleCbid = 12425 },
+        });
+
+        var kill = new ObjectiveRequirementKill(MissionObjective.CreateForTests(1, 0, 1))
+        {
+            TargetCBID = 580,
+            TargetIsTemplateVehicle = true,
+            NumToKill = 1,
+        };
+
+        Assert.IsTrue(
+            MissionKillProgress.KillMatches(kill, victimCbid: 12425, victimFaction: 0, continentId: ContId, victimTemplateId: -1),
+            "When TemplateId is missing, chassis CBID from vehicle template row must still match");
+    }
+
+    [TestMethod]
+    public void NotifyObjectKilled_TemplateVehicle_CompletesObjective()
+    {
+        var obj = MissionObjective.CreateForTests(ObjectiveId, 0, MissionId, 1);
+        obj.Requirements.Add(new ObjectiveRequirementKill(obj)
+        {
+            TargetCBID = 580,
+            TargetIsTemplateVehicle = true,
+            NumToKill = 1,
+            ContinentId = ContId,
+        });
+        AssetManager.Instance.SetTestMission(Mission.CreateForTests(MissionId, obj));
+
+        var (conn, character, map) = CreatePlayer();
+        var quest = new CharacterQuest(MissionId, 0);
+        quest.PopulateFromAssets();
+        character.CurrentQuests.Add(quest);
+
+        var npcVehicle = new Vehicle();
+        npcVehicle.SetCoid(7001, true);
+        npcVehicle.SetCbidForTests(12425);
+        npcVehicle.TemplateId = 580;
+        npcVehicle.SetMap(map);
+        npcVehicle.SetMurderer(character.CurrentVehicle);
+        npcVehicle.OnDeath(DeathType.Silent);
+
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId),
+            "Template-vehicle kill must complete the single kill objective");
+    }
+
     private void SeedKillCbid(int cbid)
     {
         var obj = MissionObjective.CreateForTests(ObjectiveId, 0, MissionId, 1);

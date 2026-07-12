@@ -30,7 +30,10 @@ public abstract class ClonedObjectBase
     /// </summary>
     public void SetMurderer(TFID murderer)
     {
-        Murderer = murderer;
+        // Copy — never share TFID references with live entities (ObjectId can be reassigned).
+        Murderer = murderer == null
+            ? new TFID()
+            : new TFID(murderer.Coid, murderer.Global);
     }
 
     /// <summary>
@@ -38,8 +41,8 @@ public abstract class ClonedObjectBase
     /// </summary>
     public void SetMurderer(ClonedObjectBase murderer)
     {
-        if (murderer != null)
-            Murderer = murderer.ObjectId;
+        if (murderer?.ObjectId != null)
+            Murderer = new TFID(murderer.ObjectId.Coid, murderer.ObjectId.Global);
     }
     //public TFID LastMurderer { get; protected set; }
     //public float DamageByMurderer { get; protected set; }

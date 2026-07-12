@@ -10,6 +10,7 @@ using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
 using AutoCore.Game.Mission;
 using AutoCore.Game.Packets;
+using AutoCore.Game.Packets.Global;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL;
@@ -98,6 +99,25 @@ public class MissionPersistenceTests
         var remaining = new List<long>();
         queue.Flush((coid, _, _) => remaining.Add(coid));
         CollectionAssert.AreEqual(new[] { 11L }, remaining);
+    }
+
+    [TestMethod]
+    public void Queue_RemoveUpsertsForCharacter_LeavesCompleteOps()
+    {
+        var queue = new MissionPersistenceQueue();
+        queue.Enqueue(10, 100, QuestPersistOp.Upsert(0, 0, Array.Empty<byte>()));
+        queue.Enqueue(10, 200, QuestPersistOp.Complete());
+        queue.Enqueue(11, 100, QuestPersistOp.Upsert(1, 0, Array.Empty<byte>()));
+
+        queue.RemoveUpsertsForCharacter(10);
+
+        Assert.AreEqual(2, queue.PendingCount);
+        var ops = new List<(long Coid, int MissionId, QuestPersistKind Kind)>();
+        queue.Flush((coid, missionId, op) => ops.Add((coid, missionId, op.Kind)));
+
+        CollectionAssert.Contains(ops, (10L, 200, QuestPersistKind.Complete));
+        CollectionAssert.Contains(ops, (11L, 100, QuestPersistKind.Upsert));
+        CollectionAssert.DoesNotContain(ops, (10L, 100, QuestPersistKind.Upsert));
     }
 
     [TestMethod]
@@ -534,6 +554,219 @@ public class MissionPersistenceTests
         Assert.AreEqual(0, character.CompletedMissionIds.Count);
         Assert.AreEqual(0, character.CurrentQuests.Count);
         Assert.AreEqual(7200L, deleted);
+    }
+
+    [TestMethod]
+    public void RemoveCurrentMission_ClearsActiveOnlyAndInvokesActiveDbDelete()
+    {
+        long? activeDeleted = null;
+        long? allDeleted = null;
+        MissionPersistence.Instance.DeleteActiveRows = coid => activeDeleted = coid;
+        MissionPersistence.Instance.DeleteAllRows = coid => allDeleted = coid;
+
+        var character = new Character();
+        character.SetCoid(7300, true);
+        character.CompletedMissionIds.Add(554);
+        character.CurrentQuests.Add(new CharacterQuest(700, 0));
+
+        var result = AutoCore.Game.Chat.ChatCommandService.Instance.Execute(character, "/removeCurrentMission");
+
+        Assert.IsTrue(result.Handled);
+        Assert.AreEqual(0, character.CurrentQuests.Count);
+        Assert.AreEqual(1, character.CompletedMissionIds.Count);
+        Assert.IsTrue(character.CompletedMissionIds.Contains(554));
+        Assert.AreEqual(7300L, activeDeleted);
+        Assert.IsNull(allDeleted);
+        StringAssert.Contains(result.Message, "Completed missions preserved");
+    }
+
+    [TestMethod]
+    public void RemoveCurrentMission_NoCharacter_ReturnsMessage()
+    {
+        var result = AutoCore.Game.Chat.ChatCommandService.Instance.Execute(null, "/removecurrentmission");
+
+        Assert.IsTrue(result.Handled);
+        Assert.AreEqual("No character loaded.", result.Message);
+    }
+
+    [TestMethod]
+    public void GiveMission_AddsActiveQuestPersistsAndSendsClientPackets()
+    {
+        SeedMission(554, repeatable: 0, (5540, 0, 1));
+        var manager = MissionPersistence.Instance;
+        var writes = new List<(long Coid, int MissionId, QuestPersistKind Kind)>();
+        manager.PersistQuestRow = (coid, missionId, op) => writes.Add((coid, missionId, op.Kind));
+
+        var character = new Character();
+        character.SetCoid(7400, true);
+        var connection = new TNLConnection();
+        character.SetOwningConnection(connection);
+
+        var sent = new List<BasePacket>();
+        TNLConnection.TestPacketSink = (_, p) => sent.Add(p);
+        try
+        {
+            var result = AutoCore.Game.Chat.ChatCommandService.Instance.Execute(character, "/giveMission 554");
+
+            Assert.IsTrue(result.Handled);
+            StringAssert.Contains(result.Message, "554");
+            Assert.AreEqual(1, character.CurrentQuests.Count);
+            Assert.AreEqual(554, character.CurrentQuests[0].MissionId);
+
+            Assert.AreEqual(1, manager.FlushPending());
+            CollectionAssert.AreEqual(
+                new[] { (7400L, 554, QuestPersistKind.Upsert) },
+                writes);
+
+            Assert.IsTrue(sent.OfType<ConvoyMissionsResponsePacket>().Any(),
+                "client journal must be pushed");
+            Assert.IsTrue(sent.OfType<ObjectiveStatePacket>().Any(),
+                "active objective state must be pushed");
+        }
+        finally
+        {
+            TNLConnection.TestPacketSink = null;
+        }
+    }
+
+    [TestMethod]
+    public void GiveMission_UnknownMission_DoesNotGrant()
+    {
+        var character = new Character();
+        character.SetCoid(7401, true);
+
+        var result = AutoCore.Game.Chat.ChatCommandService.Instance.Execute(character, "/giveMission 999999");
+
+        Assert.IsTrue(result.Handled);
+        Assert.AreEqual(0, character.CurrentQuests.Count);
+        StringAssert.Contains(result.Message, "Unknown");
+    }
+
+    [TestMethod]
+    public void GiveMission_UsageAndNoCharacter()
+    {
+        var usage = AutoCore.Game.Chat.ChatCommandService.Instance.Execute(new Character(), "/giveMission");
+        Assert.IsTrue(usage.Handled);
+        StringAssert.Contains(usage.Message, "Usage");
+
+        var invalid = AutoCore.Game.Chat.ChatCommandService.Instance.Execute(new Character(), "/giveMission notanumber");
+        Assert.IsTrue(invalid.Handled);
+        StringAssert.Contains(invalid.Message, "Usage");
+
+        var noChar = AutoCore.Game.Chat.ChatCommandService.Instance.Execute(null, "/givemission 1");
+        Assert.IsTrue(noChar.Handled);
+        Assert.AreEqual("No character loaded.", noChar.Message);
+    }
+
+    [TestMethod]
+    public void GiveMission_AlreadyActive_ResyncsWithoutDuplicate()
+    {
+        SeedMission(555, repeatable: 0, (5550, 0, 1));
+        var character = new Character();
+        character.SetCoid(7402, true);
+        var quest = new CharacterQuest(555, 0);
+        quest.PopulateFromAssets();
+        character.CurrentQuests.Add(quest);
+
+        var connection = new TNLConnection();
+        character.SetOwningConnection(connection);
+        var sent = new List<BasePacket>();
+        TNLConnection.TestPacketSink = (_, p) => sent.Add(p);
+        try
+        {
+            var result = AutoCore.Game.Chat.ChatCommandService.Instance.Execute(character, "/givemission 555");
+
+            Assert.IsTrue(result.Handled);
+            Assert.AreEqual(1, character.CurrentQuests.Count);
+            StringAssert.Contains(result.Message, "already active");
+            Assert.IsTrue(sent.OfType<ConvoyMissionsResponsePacket>().Any());
+        }
+        finally
+        {
+            TNLConnection.TestPacketSink = null;
+        }
+    }
+
+    [TestMethod]
+    public void CompleteMission_RemovesActivePersistsAndSendsClientPackets()
+    {
+        SeedMission(560, repeatable: 0, (5600, 0, 1));
+        var manager = MissionPersistence.Instance;
+        var writes = new List<(long Coid, int MissionId, QuestPersistKind Kind)>();
+        manager.PersistQuestRow = (coid, missionId, op) => writes.Add((coid, missionId, op.Kind));
+
+        var character = new Character();
+        character.SetCoid(7500, true);
+        var quest = new CharacterQuest(560, 0);
+        quest.PopulateFromAssets();
+        character.CurrentQuests.Add(quest);
+
+        var connection = new TNLConnection();
+        character.SetOwningConnection(connection);
+        var sent = new List<BasePacket>();
+        TNLConnection.TestPacketSink = (_, p) => sent.Add(p);
+        try
+        {
+            var result = AutoCore.Game.Chat.ChatCommandService.Instance.Execute(character, "/completeMission 560");
+
+            Assert.IsTrue(result.Handled);
+            StringAssert.Contains(result.Message, "560");
+            Assert.AreEqual(0, character.CurrentQuests.Count);
+            Assert.IsTrue(character.CompletedMissionIds.Contains(560));
+
+            Assert.AreEqual(1, manager.FlushPending());
+            CollectionAssert.AreEqual(
+                new[] { (7500L, 560, QuestPersistKind.Complete) },
+                writes);
+
+            Assert.IsTrue(sent.OfType<CompleteDynamicObjectivePacket>().Any(),
+                "client complete-objective packet required");
+            Assert.IsTrue(sent.OfType<ConvoyMissionsResponsePacket>().Any(),
+                "client journal must be pushed");
+        }
+        finally
+        {
+            TNLConnection.TestPacketSink = null;
+        }
+    }
+
+    [TestMethod]
+    public void CompleteMission_NotActive_DoesNotComplete()
+    {
+        SeedMission(561, repeatable: 0, (5610, 0, 1));
+        var character = new Character();
+        character.SetCoid(7501, true);
+
+        var result = AutoCore.Game.Chat.ChatCommandService.Instance.Execute(character, "/completeMission 561");
+
+        Assert.IsTrue(result.Handled);
+        Assert.IsFalse(character.CompletedMissionIds.Contains(561));
+        StringAssert.Contains(result.Message, "not active");
+    }
+
+    [TestMethod]
+    public void CompleteMission_AlreadyCompleted_ReportsStatus()
+    {
+        var character = new Character();
+        character.SetCoid(7502, true);
+        character.CompletedMissionIds.Add(562);
+
+        var result = AutoCore.Game.Chat.ChatCommandService.Instance.Execute(character, "/completeMission 562");
+
+        Assert.IsTrue(result.Handled);
+        StringAssert.Contains(result.Message, "already completed");
+    }
+
+    [TestMethod]
+    public void CompleteMission_UsageAndNoCharacter()
+    {
+        var usage = AutoCore.Game.Chat.ChatCommandService.Instance.Execute(new Character(), "/completeMission");
+        Assert.IsTrue(usage.Handled);
+        StringAssert.Contains(usage.Message, "Usage");
+
+        var noChar = AutoCore.Game.Chat.ChatCommandService.Instance.Execute(null, "/completemission 1");
+        Assert.IsTrue(noChar.Handled);
+        Assert.AreEqual("No character loaded.", noChar.Message);
     }
 
     // ---- helpers ----

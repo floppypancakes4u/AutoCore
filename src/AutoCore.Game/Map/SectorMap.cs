@@ -104,6 +104,23 @@ public class SectorMap
         return map;
     }
 
+    /// <summary>
+    /// Whether a map-load placement should call <see cref="SpawnPoint.Spawn"/> immediately.
+    /// Inactive spawn points are still placed (so Create/Activate can find them) but do not
+    /// materialize children until Create/Activate (client CVOGReaction_SpawnObject / SetObjectActiveState).
+    /// Non-spawn templates always "spawn" in the sense of full placement.
+    /// </summary>
+    internal static bool ShouldSpawnChildrenAtMapLoad(ObjectTemplate template)
+    {
+        if (template is SpawnPointTemplate spawn)
+            return spawn.OriginalIsActive;
+
+        return true;
+    }
+
+    /// <summary>Unit-test seam for <see cref="InitializeLocalObjects"/> without AssetManager map load.</summary>
+    internal void InitializeLocalObjectsForTests() => InitializeLocalObjects();
+
     private void InitializeLocalObjects()
     {
         // TODO: some objects are only needed on Sector? Global? Both?
@@ -114,7 +131,10 @@ public class SectorMap
             if (obj == null)
                 continue;
 
-            obj.LoadCloneBase(template.Value.CBID);
+            // CBID 0: map-logic objects (tests / incomplete templates) skip clonebase materialization.
+            if (template.Value.CBID > 0)
+                obj.LoadCloneBase(template.Value.CBID);
+
             obj.SetCoid(template.Value.COID, false);
             obj.Faction = template.Value.Faction;
             obj.Layer = template.Value.Layer;
@@ -124,7 +144,8 @@ public class SectorMap
             // with every map prop exhausts client ghost slots and NPCs stop appearing.
             // Combat props get ghosts lazily via MakeNotInvincible / first TakeDamage.
 
-            if (obj is SpawnPoint sp)
+            // Always place the SpawnPoint entity; only materialize children when IsActive.
+            if (obj is SpawnPoint sp && ShouldSpawnChildrenAtMapLoad(template.Value))
             {
                 sp.Spawn();
             }
@@ -220,6 +241,11 @@ public class SectorMap
         {
             PlayerCount++;
             Players.Add(character);
+
+            // Solo enter: scrub leaked Final Exam combat vehicles and restore dialog NPCs.
+            // Map-leave reset can miss if PlayerCount never hit 0 (stuck session / order bugs).
+            if (PlayerCount == 1)
+                ApplyAuthoredSpawnHygiene();
         }
 
         if (HasNpcAi(clonedObject))
@@ -330,6 +356,160 @@ public class SectorMap
 
         // Clear any trigger states for this object when it leaves the map
         TriggerManager.Instance.ClearTriggersFor(clonedObject.ObjectId.Coid);
+
+        // Reaction Create/Delete mutate the live sector (delete standing Gunny, spawn combat
+        // vehicle). MapData templates are process-global, so without a reset the next visitor
+        // sees Final Exam mid-state while turning in earlier missions (Guns of the Expansion).
+        if (clonedObject is Character && PlayerCount == 0 && !_resettingLocalWorld)
+            ResetLocalWorldToAuthored();
+    }
+
+    bool _resettingLocalWorld;
+
+    /// <summary>
+    /// Solo-player hygiene: despawn children of fam-inactive spawns (combat Gunny pathing car)
+    /// and re-materialize fam-active dialog spawns (standing Gunny) if missing.
+    /// Does not re-run full map rebuild — safe while the entering character is already on the map.
+    /// </summary>
+    internal void ApplyAuthoredSpawnHygiene()
+    {
+        // 1) Despawn leaked reaction children from fam-inactive spawns (always on solo enter).
+        foreach (var obj in Objects.Values.ToList())
+        {
+            if (obj is not SpawnPoint spawn)
+                continue;
+
+            if (spawn.Template.OriginalIsActive)
+                continue;
+
+            if (!spawn.HasLiveSpawn() && !spawn.MaterializedByReaction)
+                continue;
+
+            Logger.WriteLog(LogType.Debug,
+                "SectorMap {0}: hygiene despawn children of inactive spawn coid={1} (reaction={2})",
+                ContinentId,
+                spawn.ObjectId.Coid,
+                spawn.MaterializedByReaction ? 1 : 0);
+            spawn.DespawnOwnedEntities();
+            spawn.ClearReactionMaterializationState();
+        }
+
+        // 2) Restore fam-active dialog/mission spawns deleted by a prior initiate cascade.
+        foreach (var kvp in MapData.Templates)
+        {
+            if (kvp.Value is not SpawnPointTemplate tpl || !tpl.OriginalIsActive)
+                continue;
+
+            var coid = kvp.Key;
+            if (GetObjectByCoid(coid) is SpawnPoint existing)
+            {
+                if (!existing.HasLiveSpawn())
+                {
+                    Logger.WriteLog(LogType.Debug,
+                        "SectorMap {0}: hygiene re-Spawn fam-active spawn coid={1}",
+                        ContinentId,
+                        coid);
+                    existing.Spawn();
+                }
+
+                continue;
+            }
+
+            Logger.WriteLog(LogType.Debug,
+                "SectorMap {0}: hygiene re-place fam-active spawn coid={1}",
+                ContinentId,
+                coid);
+
+            ClonedObjectBase placed;
+            try
+            {
+                placed = tpl.Create();
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLog(LogType.Error,
+                    "SectorMap {0}: hygiene Create failed coid={1}: {2}",
+                    ContinentId,
+                    coid,
+                    ex.Message);
+                continue;
+            }
+
+            if (placed == null)
+                continue;
+
+            if (tpl.CBID > 0)
+                placed.LoadCloneBase(tpl.CBID);
+
+            placed.SetCoid(tpl.COID != 0 ? tpl.COID : coid, false);
+            placed.Faction = tpl.Faction;
+            placed.Layer = tpl.Layer;
+            placed.SetMap(this);
+
+            if (placed is SpawnPoint restored)
+                restored.Spawn();
+        }
+    }
+
+    /// <summary>
+    /// Rebuild map-local objects from fam-authored state. Call when the last player leaves so
+    /// Create/Delete reaction side-effects do not persist for the next visit.
+    /// </summary>
+    internal void ResetLocalWorldToAuthored()
+    {
+        if (_resettingLocalWorld)
+            return;
+
+        _resettingLocalWorld = true;
+        try
+        {
+            // Snapshot: SetMap(null) mutates Objects via LeaveMap.
+            var snapshot = Objects.Values.ToList();
+            foreach (var obj in snapshot)
+            {
+                if (obj is Character)
+                    continue;
+
+                try
+                {
+                    obj.SetMap(null);
+                }
+                catch (Exception ex)
+                {
+                    Logger.WriteLog(LogType.Error,
+                        "SectorMap {0}: reset remove coid={1} failed: {2}",
+                        ContinentId,
+                        obj.ObjectId?.Coid ?? -1,
+                        ex.Message);
+                }
+            }
+
+            Objects.Clear();
+            Triggers.Clear();
+            Reactions.Clear();
+            NpcAiEntities.Clear();
+            Players.Clear();
+            PlayerCount = 0;
+            Grid = new SpatialHashGrid();
+            LocalCoidCounter = MapData.HighestCoid + 1;
+
+            // Undo shared-template IsActive writes from older Create/Activate paths.
+            foreach (var tpl in MapData.Templates.Values)
+            {
+                if (tpl is SpawnPointTemplate spawnTpl)
+                    spawnTpl.IsActive = spawnTpl.OriginalIsActive;
+            }
+
+            InitializeLocalObjects();
+
+            Logger.WriteLog(LogType.Debug,
+                "SectorMap {0}: reset local world to fam-authored state (last player left)",
+                ContinentId);
+        }
+        finally
+        {
+            _resettingLocalWorld = false;
+        }
     }
 
     // Reusable per-map scratch buffers for the scope query. The scope query runs per connection per
@@ -608,10 +788,23 @@ public class SectorMap
         // Vehicle activators must resolve to owning character; empty batches skip send.
         // skipOpcode: true — client bitstream parser (0x6374F0) reads RPC payload from byte 0
         // as entry count; opcode is carried by TNL RPC type (same as MapInfoPacket).
+        // Soft-pedal: after dialog turn-in, hold 0x206C briefly so client interact FX / dialog
+        // MSXML loads are not stacked with reaction UI (AV @ 0x007B6DB0). Server reactions already ran.
         if (SendGroupReactionCall && clientPacket.Count > 0)
         {
             var character = ResolveCharacter(activator);
-            character?.OwningConnection?.SendGamePacket(clientPacket, skipOpcode: true);
+            if (character != null
+                && MissionClientSoftPedal.ShouldSuppressGroupReactionCall(character.ObjectId.Coid))
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "GroupReactionCall suppressed (mission UI soft-pedal) charCoid={0} entries={1}",
+                    character.ObjectId.Coid,
+                    clientPacket.Count);
+            }
+            else
+            {
+                character?.OwningConnection?.SendGamePacket(clientPacket, skipOpcode: true);
+            }
         }
 
         // Process child reactions after sending the parent reaction packets
@@ -626,6 +819,8 @@ public class SectorMap
             foreach (var character in Objects.Values.OfType<Character>())
             {
                 if (exclude is not null && ReferenceEquals(character, exclude))
+                    continue;
+                if (MissionClientSoftPedal.ShouldSuppressGroupReactionCall(character.ObjectId.Coid))
                     continue;
                 character.OwningConnection?.SendGamePacket(broadcastPacket, skipOpcode: true);
             }

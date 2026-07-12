@@ -85,7 +85,8 @@ eval, `+0x20` action + LogicUI packet); the "type 3" evaluator is the use-object
 | `CVOGCharacter_CheckMissionRequirements` | `0x005462B0` | Race/faction/level/currency/flag gate. |
 | `CVOGCharacter_CompleteMissionObjectives` | `0x00536080` | Bulk complete. |
 | `CVOGCharacter_EvaluatePendingObjectives` | `0x00534920` | Re-evaluate pending objective set. |
-| `Client_RecvObjectiveState` | `0x0080FF00` | Handles `0x2071`: looks up objective at packet `+0x10`, applies progress, may complete + auto-`UseObject` on the matching world target. |
+| `Client_RecvObjectiveState` | `0x0080FF00` | Handles **`0x2070` CompleteDynamicObjective**: lookup id at packet `+0x10`, always `CVOGReaction_CompleteObjective(..., force=1)`, bulk UI refresh `FUN_0093a940`. **Do not send on dialog turn-in** (client already completed). |
+| `FUN_00809460` | `0x00809460` | Handles **`0x2071` ObjectiveState**: progress bitmask + 4 slot floats only (no complete). |
 | `Client_RecvNpcMissionDialog` | `0x00815070` | Handles `0x206D` (NPC mission dialog). |
 | `Client_MissionDialogHandleButton` | `0x008AE7C0` | Dialog buttons: state 0=accept-request, 1=accept/claim reward, 2=abandon confirm, 3=NPC dialog. |
 | `Client_UpdateMissionJournal` | `0x008AE130` | Refresh journal UI. |
@@ -309,8 +310,15 @@ dialog gate** — no separate trigger/logic persistence is required. Type-0 cons
 |---|---|---|---|---|
 | `NpcMissionDialogPacket` | `0x206D` | S→C | +8 NPC TFID(16B); +24 count(i32); per entry stride 40: missionId(i32) @base, 8× itemCOID(i32) @base+8 (-1=empty) | Open NPC mission dialog. Client `Client_RecvNpcMissionDialog` @0x815070. |
 | `MissionDialogResponsePacket` | `0x206E` | C→S | MissionId(i32); Accepted(bool)+pad; MissionGiver TFID | Player OK/Accept. |
-| `CompleteDynamicObjectivePacket` | `0x2070` | S→C | +16 lookup id = `ObjectiveId>0 ? ObjectiveId : MissionId` (i32) | Objective advanced / mission complete. |
-| `ObjectiveStatePacket` | `0x2071` | S→C | +16 ObjectiveBitmask(u32); +20 ObjectiveId(i32); +24 4× SlotProgress(float) | Objective progress / active-objective change. Client `Client_RecvObjectiveState` @0x80FF00. |
+| `CompleteDynamicObjectivePacket` | `0x2070` | S→C | +16 lookup id = `ObjectiveId>0 ? ObjectiveId : MissionId` (i32) | Server-driven objective/mission complete. Client `0x0080FF00` force-completes + UI refresh. **Not sent on dialog deliver turn-in.** |
+| `ObjectiveStatePacket` | `0x2071` | S→C | +16 ObjectiveBitmask(u32); +20 ObjectiveId(i32); +24 4× SlotProgress(float) | Progress only. Client `FUN_00809460`. |
+
+**Dialog turn-in soft-pedal (client AV @ `0x007B6DB0`):** After deliver complete the client loads
+interact FX for newly available **core** missions (`interact_npc_available_new_mission_core`,
+state 7 from `FUN_0091b8d0` / `FUN_004d5aa0`, XML via `FUN_004a61b0` NDSpecialFX). AutoCore:
+no `0x2070`, no immediate follow-up `0x206D`, journal + `OnMissionStateChanged` delayed (~250ms),
+and **GroupReactionCall `0x206C` suppressed ~500ms** for that character (`MissionClientSoftPedal`)
+while server reactions still run.
 | `FailMissionPacket` | `0x20B2` | S→C | +4 pad; CharacterCoid(i64); MissionId(i32); +4 pad | Mission failed. **Defined but not wired to any sender.** |
 | `GroupReactionCallPacket` | `0x206C` | S→C | count(8b); per entry type(8b); Reaction→coid(19b)+activatorCoid(u64)+Global(1b)+SingleClientOnly(1b); Variable→varId(16b)+float. Bit-packed, LSB-first. | Trigger/reaction visual+UI effects. Client name `EMSG_Sector_MissionDialog`. |
 | `LogicStateChangePacket` | `0x206B` | S→C | (as above; single entry) | Individual logic-state change. |

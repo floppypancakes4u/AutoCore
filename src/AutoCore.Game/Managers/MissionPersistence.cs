@@ -30,6 +30,7 @@ public class MissionPersistence : Singleton<MissionPersistence>
     {
         PersistQuestRow = PersistQuestRowToDatabase;
         DeleteAllRows = DeleteAllRowsFromDatabase;
+        DeleteActiveRows = DeleteActiveRowsFromDatabase;
     }
 
     /// <summary>Enqueue an upsert of the quest's current active objective + progress.</summary>
@@ -70,8 +71,22 @@ public class MissionPersistence : Singleton<MissionPersistence>
         DeleteAllRows?.Invoke(coid);
     }
 
+    /// <summary>
+    /// Delete active mission rows only for a character and drop pending Upserts that would
+    /// re-create them. Completed-mission rows and pending Complete ops are preserved.
+    /// Used by the /removeCurrentMission diagnostic command.
+    /// </summary>
+    public void DeleteActiveForCharacter(long coid)
+    {
+        _persistQueue.RemoveUpsertsForCharacter(coid);
+        DeleteActiveRows?.Invoke(coid);
+    }
+
     /// <summary>DB delete seam (overridable in tests). Defaults to the EF CharContext delete.</summary>
     internal Action<long> DeleteAllRows { get; set; }
+
+    /// <summary>DB active-only delete seam (overridable in tests). Defaults to EF CharacterQuests delete.</summary>
+    internal Action<long> DeleteActiveRows { get; set; }
 
     /// <summary>Reset queue and test hooks (unit tests).</summary>
     internal void ResetPersistenceForTests()
@@ -79,6 +94,7 @@ public class MissionPersistence : Singleton<MissionPersistence>
         AutoFlushOnEnqueue = false;
         PersistQuestRow = PersistQuestRowToDatabase;
         DeleteAllRows = DeleteAllRowsFromDatabase;
+        DeleteActiveRows = DeleteActiveRowsFromDatabase;
         _persistQueue.Clear();
         Interlocked.Exchange(ref _backgroundFlushScheduled, 0);
     }
@@ -233,6 +249,24 @@ public class MissionPersistence : Singleton<MissionPersistence>
         catch (Exception ex)
         {
             Logger.WriteLog(LogType.Error, "Mission: failed to clear coid={0}: {1}", coid, ex.Message);
+        }
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "EF CharContext I/O; unit tests inject DeleteActiveRows.")]
+    private static void DeleteActiveRowsFromDatabase(long coid)
+    {
+        if (string.IsNullOrEmpty(CharContext.ConnectionString))
+            return;
+
+        try
+        {
+            using var context = new CharContext();
+            context.CharacterQuests.RemoveRange(context.CharacterQuests.Where(q => q.CharacterCoid == coid));
+            context.SaveChanges();
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error, "Mission: failed to clear active missions coid={0}: {1}", coid, ex.Message);
         }
     }
 }

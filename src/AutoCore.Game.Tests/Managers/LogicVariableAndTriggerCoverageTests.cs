@@ -355,6 +355,7 @@ public class LogicVariableAndTriggerCoverageTests
             COID = 6,
             TargetType = TriggerTargetType.Players,
             Scale = 10f,
+            DoCollision = true,
             ActivationCount = -1,
         };
         tpl.Reactions.Add(reactionCoid);
@@ -391,6 +392,7 @@ public class LogicVariableAndTriggerCoverageTests
             COID = 7,
             TargetType = TriggerTargetType.Players,
             Scale = 10f,
+            DoCollision = true,
             ActivationCount = -1,
         };
         var trigger = new Trigger(tpl);
@@ -564,6 +566,8 @@ public class LogicVariableAndTriggerCoverageTests
             COID = 11,
             TargetType = TriggerTargetType.Players,
             Scale = 1f,
+            DoCollision = false,
+            DoConditionals = true,
             ActivationCount = -1,
             AllConditionsNeeded = true,
         };

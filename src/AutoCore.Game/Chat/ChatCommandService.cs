@@ -64,6 +64,18 @@ public sealed class ChatCommandService
             case "/clearallmissions":
                 return ClearAllMissions(character);
 
+            case "/removeCurrentMission":
+            case "/removecurrentmission":
+                return RemoveCurrentMission(character);
+
+            case "/giveMission":
+            case "/givemission":
+                return GiveMission(character, parts);
+
+            case "/completeMission":
+            case "/completemission":
+                return CompleteMission(character, parts);
+
             default:
                 return new ChatCommandExecutionResult(false, string.Empty);
         }
@@ -151,6 +163,78 @@ public sealed class ChatCommandService
         return new ChatCommandExecutionResult(
             true,
             $"Cleared {activeCount} active and {completedCount} completed mission(s) for coid {coid} (memory + DB). Relog to reset the client journal.");
+    }
+
+    /// <summary>
+    /// Remove this character's active missions from memory AND the char DB, preserving completed
+    /// missions. Client journal updates on the next relog via the create packet.
+    /// </summary>
+    private static ChatCommandExecutionResult RemoveCurrentMission(Character character)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        var coid = character.ObjectId.Coid;
+        var activeCount = character.CurrentQuests.Count;
+
+        character.CurrentQuests.Clear();
+        MissionPersistence.Instance.DeleteActiveForCharacter(coid);
+
+        return new ChatCommandExecutionResult(
+            true,
+            $"Removed {activeCount} active mission(s) for coid {coid} (memory + DB). Completed missions preserved. Relog to reset the client journal.");
+    }
+
+    /// <summary>
+    /// Force-grant a mission by id onto this character's active list and push journal/objective
+    /// state to the client. Uses the same path as NPC dialog acceptance.
+    /// </summary>
+    private static ChatCommandExecutionResult GiveMission(Character character, string[] parts)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        if (parts.Length < 2 || !int.TryParse(parts[1], out var missionId) || missionId <= 0)
+            return new ChatCommandExecutionResult(true, "Usage: /giveMission <id>");
+
+        if (AssetManager.Instance.GetMission(missionId) == null)
+            return new ChatCommandExecutionResult(true, $"Unknown mission id {missionId}.");
+
+        var alreadyActive = character.CurrentQuests.Any(q => q.MissionId == missionId);
+        NpcInteractHandler.GrantMission(character.OwningConnection, character, missionId);
+
+        return new ChatCommandExecutionResult(
+            true,
+            alreadyActive
+                ? $"Mission {missionId} already active; resent to client."
+                : $"Granted mission {missionId} (active + client sync).");
+    }
+
+    /// <summary>
+    /// Force-complete an active mission by id: move to completed, persist, and push client
+    /// complete + journal packets.
+    /// </summary>
+    private static ChatCommandExecutionResult CompleteMission(Character character, string[] parts)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        if (parts.Length < 2 || !int.TryParse(parts[1], out var missionId) || missionId <= 0)
+            return new ChatCommandExecutionResult(true, "Usage: /completeMission <id>");
+
+        if (character.CurrentQuests.All(q => q.MissionId != missionId))
+        {
+            if (character.CompletedMissionIds.Contains(missionId))
+                return new ChatCommandExecutionResult(true, $"Mission {missionId} is already completed.");
+
+            return new ChatCommandExecutionResult(true, $"Mission {missionId} is not active.");
+        }
+
+        NpcInteractHandler.ForceCompleteMission(character.OwningConnection, character, missionId);
+
+        return new ChatCommandExecutionResult(
+            true,
+            $"Completed mission {missionId} (removed from active + client sync).");
     }
 
     private static ChatCommandExecutionResult SetCargo(Character character, string[] parts)

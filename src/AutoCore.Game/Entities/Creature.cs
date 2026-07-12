@@ -130,6 +130,17 @@ public class Creature : SimpleObject
             killerCharacter = murdererObj?.GetSuperCharacter(false);
         }
 
+        // SpawnPoint TriggerEvents before leave-map (same pattern as Vehicle).
+        if (map != null && SpawnOwner > 0 && map.GetObjectByCoid(SpawnOwner) is SpawnPoint spawn)
+        {
+            ClonedObjectBase activator = killerCharacter?.CurrentVehicle != null
+                ? killerCharacter.CurrentVehicle
+                : killerCharacter != null
+                    ? killerCharacter
+                    : this;
+            spawn.NotifySpawnedChildDied(this, activator);
+        }
+
         // Generate loot for this creature
         if (map != null)
         {
