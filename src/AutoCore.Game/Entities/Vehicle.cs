@@ -65,6 +65,74 @@ public class Vehicle : SimpleObject
     public VehicleMovedFlags VehicleFlags { get; set; }
     public InventoryManager Inventory => Owner?.GetAsCharacter()?.Inventory;
 
+    public int CurrentShield { get; private set; }
+    public int MaxShield { get; private set; }
+    public int ShieldRegenRate { get; private set; }
+
+    /// <inheritdoc />
+    /// Vehicles must scope the ghost before dirtying or SetMaskBits is discarded.
+    protected override void DirtyHealthMasks(ulong mask) => EnsureGhostMaskDelivery(mask);
+
+    /// <summary>
+    /// Sets current shield and dirties <see cref="GhostVehicle.ShieldMask"/> for client sync.
+    /// </summary>
+    public void SetCurrentShield(int shield, bool triggerGhostUpdate = true)
+    {
+        var newShield = Math.Clamp(shield, 0, Math.Max(MaxShield, 0));
+        if (CurrentShield == newShield)
+            return;
+
+        CurrentShield = newShield;
+
+        if (triggerGhostUpdate)
+            EnsureGhostMaskDelivery(GhostVehicle.ShieldMask);
+    }
+
+    /// <summary>
+    /// Sets maximum shield, clamps current if needed, and dirties shield ghost masks.
+    /// </summary>
+    public void SetMaximumShield(int maxShield, bool triggerGhostUpdate = true)
+    {
+        var newMax = Math.Max(maxShield, 0);
+
+        if (MaxShield == newMax)
+        {
+            if (CurrentShield > MaxShield)
+                SetCurrentShield(MaxShield, triggerGhostUpdate);
+            return;
+        }
+
+        MaxShield = newMax;
+        var oldShield = CurrentShield;
+        CurrentShield = Math.Clamp(CurrentShield, 0, MaxShield);
+
+        if (!triggerGhostUpdate)
+            return;
+
+        EnsureGhostMaskDelivery(GhostVehicle.ShieldMaxMask);
+        if (CurrentShield != oldShield)
+            EnsureGhostMaskDelivery(GhostVehicle.ShieldMask);
+    }
+
+    /// <summary>
+    /// Seeds shield capacity from equipped race-item clonebase fields (or zeroes if none).
+    /// </summary>
+    public void ApplyRaceItemShieldFromEquipped(bool startAtFull = true)
+    {
+        if (RaceItem?.CloneBaseObject != null)
+        {
+            MaxShield = Math.Max(0, (int)RaceItem.CloneBaseObject.SimpleObjectSpecific.RaceShieldFactor);
+            ShieldRegenRate = Math.Max(0, (int)RaceItem.CloneBaseObject.SimpleObjectSpecific.RaceShieldRegenerate);
+            CurrentShield = startAtFull ? MaxShield : Math.Clamp(CurrentShield, 0, MaxShield);
+        }
+        else
+        {
+            MaxShield = 0;
+            CurrentShield = 0;
+            ShieldRegenRate = 0;
+        }
+    }
+
     // Server-side combat state (very lightweight)
     private long _lastFireMsFront;
     private long _lastFireMsTurret;
@@ -601,6 +669,9 @@ public class Vehicle : SimpleObject
                 return false;
             }
         }
+
+        // Shield from equipped shielding (RaceItem) RaceShieldFactor, or 0.
+        ApplyRaceItemShieldFromEquipped(startAtFull: true);
 
         if (DBData.PowerPlant != 0)
         {

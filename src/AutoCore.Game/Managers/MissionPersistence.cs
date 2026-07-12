@@ -220,8 +220,8 @@ public class MissionPersistence : Singleton<MissionPersistence>
 
             context.SaveChanges();
 
-            Logger.WriteLog(LogType.Debug,
-                "Mission: persisted {0} coid={1} mission={2}", op.Kind, coid, missionId);
+            //Logger.WriteLog(LogType.Debug,
+            //    "Mission: persisted {0} coid={1} mission={2}", op.Kind, coid, missionId);
         }
         catch (Exception ex)
         {

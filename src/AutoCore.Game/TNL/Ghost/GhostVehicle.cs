@@ -507,17 +507,22 @@ public class GhostVehicle : GhostObject
 
         if (stream.WriteFlag((updateMask & ShieldMaxMask) != 0))
         {
-            stream.WriteBits(32, BitConverter.GetBytes(100)); // MaxShield
+            stream.WriteBits(32, BitConverter.GetBytes(parentVehicle.MaxShield));
         }
 
         if (stream.WriteFlag((updateMask & ShieldMask) != 0))
         {
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // Shield
+            stream.WriteBits(32, BitConverter.GetBytes(parentVehicle.CurrentShield));
         }
 
-        if (stream.WriteFlag((updateMask & PowerMask) != 0)) // TODO
+        // Current mana/power. Max mana is replicated via CharacterLevelPacket, not this ghost field.
+        if (stream.WriteFlag((updateMask & PowerMask) != 0))
         {
-            stream.WriteBits(32, BitConverter.GetBytes(100)); // Power
+            var currentMana = 0;
+            if (owner is Character ownerChar)
+                currentMana = Managers.CharacterLevelManager.Instance.GetCurrentMana(ownerChar.ObjectId.Coid);
+
+            stream.WriteBits(32, BitConverter.GetBytes(currentMana));
         }
 
         if (stream.WriteFlag((updateMask & TokenMask) != 0))

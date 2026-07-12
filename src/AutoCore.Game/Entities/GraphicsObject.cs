@@ -2,6 +2,7 @@
 using AutoCore.Game.Constants;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.Structures;
 using AutoCore.Game.TNL.Ghost;
 using AutoCore.Utils;
 
@@ -82,10 +83,30 @@ public class GraphicsObject : ClonedObjectBase
 
     public override int RestoreHealth(int amount)
     {
-        if (amount <= 0 || IsCorpse)
+        if (amount <= 0)
             return 0;
 
         EnsureHealthInitialized();
+
+        if (IsCorpse)
+        {
+            // Some scripted mission damage leaves the player vehicle at positive HP while the
+            // death flag remains latched. That state is alive on the wire (e.g. 1/100) and must
+            // be repairable, but a genuinely dead zero-HP entity must not be resurrected here.
+            if (HP <= 0)
+                return 0;
+
+            Logger.WriteLog(LogType.Debug,
+                "RestoreHealth: clearing stale corpse state for {0} coid={1} hp={2}/{3}",
+                GetType().Name,
+                ObjectId.Coid,
+                HP,
+                MaxHP);
+            IsCorpse = false;
+            DeathType = DeathType.Silent;
+            Murderer = new TFID();
+        }
+
         var restored = Math.Min(amount, Math.Max(0, MaxHP - HP));
         if (restored == 0)
             return 0;

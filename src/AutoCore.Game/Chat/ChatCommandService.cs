@@ -76,6 +76,36 @@ public sealed class ChatCommandService
             case "/completemission":
                 return CompleteMission(character, parts);
 
+            case "/setHP":
+            case "/sethp":
+            case "/hp":
+                return SetHP(character, parts);
+
+            case "/setMaxHP":
+            case "/setmaxhp":
+            case "/mhp":
+                return SetMaxHP(character, parts);
+
+            case "/shield":
+            case "/setShield":
+            case "/setshield":
+                return SetShield(character, parts);
+
+            case "/mshield":
+            case "/setMaxShield":
+            case "/setmaxshield":
+                return SetMaxShield(character, parts);
+
+            case "/power":
+            case "/setPower":
+            case "/setpower":
+                return SetPower(character, parts);
+
+            case "/mpower":
+            case "/setMaxPower":
+            case "/setmaxpower":
+                return SetMaxPower(character, parts);
+
             default:
                 return new ChatCommandExecutionResult(false, string.Empty);
         }
@@ -235,6 +265,109 @@ public sealed class ChatCommandService
         return new ChatCommandExecutionResult(
             true,
             $"Completed mission {missionId} (removed from active + client sync).");
+    }
+
+    private static ChatCommandExecutionResult SetHP(Character character, string[] parts)
+    {
+        if (parts.Length < 2 || !int.TryParse(parts[1], out var hp))
+            return new ChatCommandExecutionResult(true, "Usage: /setHP <value> (alias /hp). Example: /hp 250");
+
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        var vehicle = character.CurrentVehicle;
+        if (vehicle == null)
+            return new ChatCommandExecutionResult(true, "You are not in a vehicle!");
+
+        vehicle.SetCurrentHP(hp);
+        return new ChatCommandExecutionResult(
+            true,
+            $"HP set to {vehicle.GetCurrentHP()}/{vehicle.GetMaximumHP()}.");
+    }
+
+    private static ChatCommandExecutionResult SetMaxHP(Character character, string[] parts)
+    {
+        if (parts.Length < 2 || !int.TryParse(parts[1], out var maxHp))
+            return new ChatCommandExecutionResult(true, "Usage: /setMaxHP <value> (alias /mhp). Example: /mhp 2000");
+
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        var vehicle = character.CurrentVehicle;
+        if (vehicle == null)
+            return new ChatCommandExecutionResult(true, "You are not in a vehicle!");
+
+        vehicle.SetMaximumHP(maxHp);
+        return new ChatCommandExecutionResult(
+            true,
+            $"Max HP set to {vehicle.GetCurrentHP()}/{vehicle.GetMaximumHP()}.");
+    }
+
+    private static ChatCommandExecutionResult SetShield(Character character, string[] parts)
+    {
+        if (parts.Length < 2 || !int.TryParse(parts[1], out var shield))
+            return new ChatCommandExecutionResult(true, "Usage: /shield <value>. Example: /shield 250");
+
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        var vehicle = character.CurrentVehicle;
+        if (vehicle == null)
+            return new ChatCommandExecutionResult(true, "You are not in a vehicle!");
+
+        vehicle.SetCurrentShield(shield);
+        return new ChatCommandExecutionResult(
+            true,
+            $"Shield set to {vehicle.CurrentShield}/{vehicle.MaxShield}.");
+    }
+
+    private static ChatCommandExecutionResult SetMaxShield(Character character, string[] parts)
+    {
+        if (parts.Length < 2 || !int.TryParse(parts[1], out var maxShield))
+            return new ChatCommandExecutionResult(true, "Usage: /mshield <value>. Example: /mshield 500");
+
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        var vehicle = character.CurrentVehicle;
+        if (vehicle == null)
+            return new ChatCommandExecutionResult(true, "You are not in a vehicle!");
+
+        vehicle.SetMaximumShield(maxShield);
+        return new ChatCommandExecutionResult(
+            true,
+            $"Max shield set to {vehicle.CurrentShield}/{vehicle.MaxShield}.");
+    }
+
+    private static ChatCommandExecutionResult SetPower(Character character, string[] parts)
+    {
+        if (parts.Length < 2 || !short.TryParse(parts[1], out var power))
+            return new ChatCommandExecutionResult(true, "Usage: /power <value>. Example: /power 50");
+
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        // sendPacket: false — ChatManager delivers via ChatCommandExecutionResult.Packets.
+        var packet = CharacterLevelManager.Instance.SetCurrentMana(character, power, sendPacket: false);
+        return new ChatCommandExecutionResult(
+            true,
+            $"Power set to {packet.CurrentMana}/{packet.MaxMana}.",
+            new BasePacket[] { packet });
+    }
+
+    private static ChatCommandExecutionResult SetMaxPower(Character character, string[] parts)
+    {
+        if (parts.Length < 2 || !short.TryParse(parts[1], out var maxPower))
+            return new ChatCommandExecutionResult(true, "Usage: /mpower <value>. Example: /mpower 200");
+
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        var packet = CharacterLevelManager.Instance.SetMaxMana(character, maxPower, sendPacket: false);
+        return new ChatCommandExecutionResult(
+            true,
+            $"Max power set to {packet.CurrentMana}/{packet.MaxMana}.",
+            new BasePacket[] { packet });
     }
 
     private static ChatCommandExecutionResult SetCargo(Character character, string[] parts)

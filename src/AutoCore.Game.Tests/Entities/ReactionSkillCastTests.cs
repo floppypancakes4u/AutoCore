@@ -3,6 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace AutoCore.Game.Tests.Entities;
 
 using AutoCore.Database.World.Models;
+using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
@@ -120,6 +121,42 @@ public class ReactionSkillCastTests
         Assert.IsTrue(reaction.TriggerIfPossible(vehicle));
 
         Assert.AreEqual(76, vehicle.GetCurrentHP(), "15% of the vehicle's 500 max HP should restore 75 HP");
+    }
+
+    [TestMethod]
+    public void SkillCast_LivingHpWithStaleCorpseFlag_ClearsCorpseAndHeals()
+    {
+        AssetManager.Instance.SetTestSkill(new Skill
+        {
+            Id = 857,
+            Name = "INC Repair station heal",
+            Elements = new List<SkillElement>
+            {
+                new() { ElementType = 10, EquationType = 1, ValueBase = 0.15f }
+            }
+        });
+        var (_, vehicle, map) = CreatePlayer();
+        vehicle.SetMaximumHP(100, triggerGhostUpdate: false);
+        vehicle.SetCurrentHP(0, triggerGhostUpdate: false);
+        vehicle.OnDeath(DeathType.Silent);
+        vehicle.SetCurrentHP(1, triggerGhostUpdate: false);
+        Assert.IsTrue(vehicle.IsCorpse, "Arrange the live-HP/stale-corpse state observed on SCAB");
+
+        var reaction = new Reaction(new ReactionTemplate
+        {
+            COID = 16446,
+            Name = "l1_skillcast_heal",
+            ReactionType = ReactionType.SkillCast,
+            GenericVar1 = 857,
+            GenericVar3 = 1,
+        });
+        reaction.SetCoid(16446, false);
+        reaction.SetMap(map);
+
+        Assert.IsTrue(reaction.TriggerIfPossible(vehicle));
+
+        Assert.AreEqual(16, vehicle.GetCurrentHP());
+        Assert.IsFalse(vehicle.IsCorpse, "A positive-HP player vehicle must be recoverable by the pad");
     }
 
     private static (Character Character, Vehicle Vehicle, AutoCore.Game.Map.SectorMap Map) CreatePlayer()
