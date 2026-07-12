@@ -9,6 +9,7 @@
 ## Core systems
 
 - [Networking and packet layout](networking.md) — how to build client-compatible game packets (login, sector, inventory)
+- [Experience (XP)](XP.md) — kill / mission / area formulas, GiveXP packet, server gaps
 
 ## Tools
 
