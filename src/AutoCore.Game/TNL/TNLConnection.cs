@@ -1132,14 +1132,41 @@ public partial class TNLConnection : GhostConnection
 
         // SS-04: drop ownership before teardown so chat/send paths cannot use a dead connection.
         character.SetOwningConnection(null);
-        character.SetMap(null);
-        character.CurrentVehicle?.SetMap(null);
-        character.ClearGhost();
-        character.CurrentVehicle?.ClearGhost();
-        // Drop living entities from the global registry before clearing the connection
-        // binding so reconnect loads a fresh character/vehicle (SS-03).
-        ObjectManager.Instance.UnregisterCharacterSession(character);
-        CurrentCharacter = null;
+
+        // Best-effort teardown: this runs on the MainLoop tick during OnConnectionTerminated, so
+        // no single step may throw and abort the rest (which would leak a ghost + a stale registry
+        // entry and leave a half-torn-down character). Isolate the steps so ClearGhost and the
+        // registry unregister always run, and always clear CurrentCharacter in the finally.
+        try
+        {
+            SafeTeardownStep(character, "SetMap(null)", c => c.SetMap(null));
+            SafeTeardownStep(character, "vehicle.SetMap(null)", c => c.CurrentVehicle?.SetMap(null));
+            SafeTeardownStep(character, "ClearGhost", c => c.ClearGhost());
+            SafeTeardownStep(character, "vehicle.ClearGhost", c => c.CurrentVehicle?.ClearGhost());
+            // Drop living entities from the global registry before clearing the connection
+            // binding so reconnect loads a fresh character/vehicle (SS-03).
+            SafeTeardownStep(character, "UnregisterCharacterSession",
+                c => ObjectManager.Instance.UnregisterCharacterSession(c));
+        }
+        finally
+        {
+            CurrentCharacter = null;
+        }
+    }
+
+    /// <summary>Runs one disconnect-teardown step, logging and swallowing any failure so a single
+    /// bad step cannot abort the rest of <see cref="EndCharacterSession"/> on the MainLoop tick.</summary>
+    private static void SafeTeardownStep(Character character, string step, Action<Character> action)
+    {
+        try
+        {
+            action(character);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                $"EndCharacterSession: teardown step '{step}' failed for coid {character.ObjectId.Coid}: {ex}");
+        }
     }
 
     public override void PrepareWritePacket()

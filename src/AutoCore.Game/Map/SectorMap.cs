@@ -231,6 +231,17 @@ public class SectorMap
 
     public void EnterMap(ClonedObjectBase clonedObject)
     {
+        // Idempotent entry: a re-enter/reconnect desync must not crash the tick. Check presence
+        // first and no-op if already here, so PlayerCount/Players/Grid are not double-counted.
+        if (Objects.ContainsKey(clonedObject.ObjectId))
+        {
+            Logger.WriteLog(LogType.Error,
+                "SectorMap {0}: EnterMap ignoring object coid={1}; already on the map",
+                ContinentId,
+                clonedObject.ObjectId?.Coid ?? -1);
+            return;
+        }
+
         if (clonedObject is Trigger trigger)
             Triggers.Add(trigger.ObjectId, trigger);
 
@@ -252,9 +263,6 @@ public class SectorMap
             NpcAiEntities.Add(clonedObject);
 
         Grid.Add(clonedObject);
-
-        if (Objects.ContainsKey(clonedObject.ObjectId))
-            throw new InvalidOperationException("This object is already on the map!");
 
         Objects.Add(clonedObject.ObjectId, clonedObject);
     }
@@ -332,6 +340,21 @@ public class SectorMap
 
     public void LeaveMap(ClonedObjectBase clonedObject)
     {
+        // Idempotent teardown: an object whose Map still points here but which is no longer in
+        // Objects (e.g. dropped by a ResetLocalWorldToAuthored Objects.Clear under PlayerCount
+        // drift) is already in the desired state. Never throw — a throw here propagates through
+        // SetMap -> EndCharacterSession -> OnConnectionTerminated into the MainLoop tick and
+        // aborts the rest of the disconnect teardown. Gate all mutation behind presence so we
+        // do not spuriously decrement PlayerCount or remove a live sibling's bookkeeping.
+        if (!Objects.ContainsKey(clonedObject.ObjectId))
+        {
+            Logger.WriteLog(LogType.Error,
+                "SectorMap {0}: LeaveMap ignoring object coid={1}; not on the map (already removed)",
+                ContinentId,
+                clonedObject.ObjectId?.Coid ?? -1);
+            return;
+        }
+
         if (clonedObject is Trigger trigger)
             Triggers.Remove(trigger.ObjectId);
 
@@ -348,9 +371,6 @@ public class SectorMap
         NpcAiEntities.Remove(clonedObject);
 
         Grid.Remove(clonedObject);
-
-        if (!Objects.ContainsKey(clonedObject.ObjectId))
-            throw new InvalidOperationException("This object is not on the map!");
 
         Objects.Remove(clonedObject.ObjectId);
 
@@ -459,6 +479,22 @@ public class SectorMap
     {
         if (_resettingLocalWorld)
             return;
+
+        // Root-cause guard: the wholesale Objects.Clear() below drops every entry, and the loop
+        // deliberately skips SetMap(null) for Characters — so running while a Character is still
+        // present would orphan it (Map set, but absent from Objects) and crash the next
+        // SetMap(null). PlayerCount can drift out of sync with the real character set (see the
+        // EnterMap PlayerCount==1 hygiene hook), so never trust PlayerCount==0 alone. Skipped
+        // authored-state cleanup is recovered on the next solo enter via ApplyAuthoredSpawnHygiene.
+        var stragglerCharacters = Objects.Values.Count(o => o is Character);
+        if (stragglerCharacters > 0)
+        {
+            Logger.WriteLog(LogType.Error,
+                "SectorMap {0}: skipping local-world reset; {1} character(s) still present (PlayerCount desync)",
+                ContinentId,
+                stragglerCharacters);
+            return;
+        }
 
         _resettingLocalWorld = true;
         try
