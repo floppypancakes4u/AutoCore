@@ -1,0 +1,40 @@
+{
+  "stryker-config": {
+    "project": "src/AutoCore.Game/AutoCore.Game.csproj",
+    "test-projects": [
+      "src/AutoCore.Game.Tests/AutoCore.Game.Tests.csproj"
+    ],
+    "mutate": [
+      "**/Managers/MissionPersistence.cs",
+      "**/Managers/MissionPersistenceQueue.cs",
+      "**/Managers/MissionKillProgress.cs",
+      "**/Structures/CharacterQuest.cs",
+      "**/Managers/NpcInteractHandler.cs"
+    ],
+    "ignore-mutations": [
+      "string"
+    ],
+    "ignore-methods": [
+      "ToString",
+      "ConfigureAwait",
+      "WriteLog",
+      "IncompleteHandlerLog*",
+      "Log*",
+      "Warn"
+    ],
+    "test-case-filter": "FullyQualifiedName~Mission|FullyQualifiedName~NpcInteract|FullyQualifiedName~ApplyMission|FullyQualifiedName~MissionKill|FullyQualifiedName~PerPlayerLoad|FullyQualifiedName~AutoPatrol|FullyQualifiedName~Deliver|FullyQualifiedName~UseObject|FullyQualifiedName~TutorialNpc|FullyQualifiedName~HealthGated",
+    "reporters": [
+      "html",
+      "cleartext",
+      "json"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 60,
+      "break": 50
+    },
+    "concurrency": 4,
+    "coverage-analysis": "perTest",
+    "disable-bail": false
+  }
+}

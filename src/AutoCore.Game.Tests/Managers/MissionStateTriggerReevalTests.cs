@@ -108,7 +108,10 @@ public class MissionStateTriggerReevalTests
         character.CurrentQuests.Add(new CharacterQuest(MissionId, 0));
         TriggerManager.Instance.OnMissionStateChanged(vehicle);
 
-        Assert.IsNull(map.GetObjectByCoid(GateObjectCoid), "Gate object should be deleted by mission-gated trigger");
+        // Delete without DoForAllPlayers is personal presence suppress (shared map unchanged).
+        Assert.IsNotNull(map.GetObjectByCoid(GateObjectCoid), "Shared map keeps gate object");
+        Assert.IsTrue(character.MapPresence.IsSuppressed(GateObjectCoid),
+            "Gate object should be personally suppressed by mission-gated trigger");
         Assert.IsTrue(_sent.OfType<GroupReactionCallPacket>().Any());
     }
 
@@ -136,7 +139,8 @@ public class MissionStateTriggerReevalTests
         character.CompletedMissionIds.Add(MissionId);
         TriggerManager.Instance.OnMissionStateChanged(vehicle);
 
-        Assert.IsNull(map.GetObjectByCoid(GateObjectCoid));
+        Assert.IsNotNull(map.GetObjectByCoid(GateObjectCoid));
+        Assert.IsTrue(character.MapPresence.IsSuppressed(GateObjectCoid));
     }
 
     [TestMethod]
@@ -181,7 +185,9 @@ public class MissionStateTriggerReevalTests
         });
 
         Assert.AreEqual(1, character.CurrentQuests.Count);
-        Assert.IsNull(map.GetObjectByCoid(GateObjectCoid), "Accept should re-eval mission triggers");
+        Assert.IsNotNull(map.GetObjectByCoid(GateObjectCoid));
+        Assert.IsTrue(character.MapPresence.IsSuppressed(GateObjectCoid),
+            "Accept should re-eval mission triggers and personally suppress gate");
     }
 
     [TestMethod]
@@ -216,7 +222,8 @@ public class MissionStateTriggerReevalTests
         setReaction.SetMap(map);
 
         Assert.IsTrue(setReaction.TriggerIfPossible(vehicle));
-        Assert.IsNull(map.GetObjectByCoid(GateObjectCoid));
+        Assert.IsNotNull(map.GetObjectByCoid(GateObjectCoid));
+        Assert.IsTrue(character.MapPresence.IsSuppressed(GateObjectCoid));
     }
 
     [TestMethod]
@@ -278,8 +285,9 @@ public class MissionStateTriggerReevalTests
         act.SetCoid(98050L, false);
         act.SetMap(map);
         Assert.IsTrue(act.TriggerIfPossible(vehicle));
-        Assert.IsNull(map.GetObjectByCoid(GateObjectCoid),
-            "Activate cascade must still fire the rem initiator");
+        Assert.IsNotNull(map.GetObjectByCoid(GateObjectCoid));
+        Assert.IsTrue(character.MapPresence.IsSuppressed(GateObjectCoid),
+            "Activate cascade must still fire the rem initiator (personal suppress)");
     }
 
     [TestMethod]
@@ -345,7 +353,8 @@ public class MissionStateTriggerReevalTests
         activate.SetMap(map);
 
         Assert.IsTrue(activate.TriggerIfPossible(vehicle));
-        Assert.IsNull(map.GetObjectByCoid(GateObjectCoid));
+        Assert.IsNotNull(map.GetObjectByCoid(GateObjectCoid));
+        Assert.IsTrue(character.MapPresence.IsSuppressed(GateObjectCoid));
     }
 
     [TestMethod]

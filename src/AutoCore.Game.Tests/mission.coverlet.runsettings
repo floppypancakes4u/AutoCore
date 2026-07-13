@@ -9,10 +9,16 @@
           <Include>
             [AutoCore.Game]AutoCore.Game.Managers.NpcInteractHandler|
             [AutoCore.Game]AutoCore.Game.Managers.MissionKillProgress|
+            [AutoCore.Game]AutoCore.Game.Managers.MissionPersistence|
+            [AutoCore.Game]AutoCore.Game.Managers.MissionPersistenceQueue|
+            [AutoCore.Game]AutoCore.Game.Managers.MissionWorldPhaseRules|
+            [AutoCore.Game]AutoCore.Game.Managers.MissionClientSoftPedal|
+            [AutoCore.Game]AutoCore.Game.Managers.TriggerManager|
             [AutoCore.Game]AutoCore.Game.Managers.IncompleteHandlerLog|
             [AutoCore.Game]AutoCore.Game.Structures.CharacterQuest|
             [AutoCore.Game]AutoCore.Game.Mission.Requirements*|
             [AutoCore.Game]AutoCore.Game.Mission.MissionString|
+            [AutoCore.Game]AutoCore.Game.Chat.ChatCommandService|
             [AutoCore.Game]AutoCore.Game.Packets.Sector.UseObjectPacket|
             [AutoCore.Game]AutoCore.Game.Packets.Sector.AutoPatrolPacket|
             [AutoCore.Game]AutoCore.Game.Packets.Sector.NpcMissionDialogPacket|

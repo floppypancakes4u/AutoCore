@@ -1401,6 +1401,20 @@ public static class NpcInteractHandler
         MissionObjective objective,
         string source = "Objective")
     {
+        // Stale references after complete/abandon must not re-advance, re-persist, or re-reward.
+        // List membership is reference-based; callers hold the live CharacterQuest instance.
+        if (character == null || quest == null || mission == null || objective == null)
+            return;
+        if (!character.CurrentQuests.Contains(quest))
+        {
+            Logger.WriteLog(LogType.Debug,
+                "AdvanceOrCompleteObjective: ignoring stale quest mission={0} source={1} coid={2}",
+                quest.MissionId,
+                source,
+                character.ObjectId.Coid);
+            return;
+        }
+
         var seq = quest.ActiveObjectiveSequence;
         var hasNext = mission.Objectives.Values.Any(o => o.Sequence > seq);
         var context =
@@ -1425,7 +1439,8 @@ public static class NpcInteractHandler
                 "Increment ObjectiveProgress[seq] per event; emit ObjectiveState; complete only at CompleteCount.");
         }
 
-        conn.SendGamePacket(new CompleteDynamicObjectivePacket
+        // Server state transitions must succeed without a connection (disconnect mid-complete).
+        conn?.SendGamePacket(new CompleteDynamicObjectivePacket
         {
             MissionId = quest.MissionId,
             ObjectiveId = objective.ObjectiveId,
@@ -1458,7 +1473,7 @@ public static class NpcInteractHandler
                     "ObjectiveState sent with Bitmask=0 and SlotProgress all 0 — client partial progress/UI may be wrong",
                     "Build bitmask + FirstStateSlot floats from active requirement progress; map ObjectiveId correctly for client hash lookup.");
 
-                conn.SendGamePacket(new ObjectiveStatePacket
+                conn?.SendGamePacket(new ObjectiveStatePacket
                 {
                     ObjectiveBitmask = 0u,
                     ObjectiveId = nextObjective.ObjectiveId,
@@ -1474,7 +1489,8 @@ public static class NpcInteractHandler
                     "Apply MissionObjective reward fields (and mission-level rewards on final complete) via character economy APIs.");
             }
 
-            PushJournalMissionList(conn, character);
+            if (conn != null)
+                PushJournalMissionList(conn, character);
             var phaseActivator = character.CurrentVehicle ?? (ClonedObjectBase)character;
             TriggerManager.Instance.OnMissionStateChanged(phaseActivator);
             // Kill→deliver (or any advance): re-apply Create for new active deliver/kill targets
@@ -1495,7 +1511,8 @@ public static class NpcInteractHandler
 
         ApplyMissionCompleteRewards(character, mission, objective, source);
 
-        PushJournalMissionList(conn, character);
+        if (conn != null)
+            PushJournalMissionList(conn, character);
         var completeActivator = character.CurrentVehicle ?? (ClonedObjectBase)character;
         TriggerManager.Instance.OnMissionStateChanged(completeActivator);
         // Post-complete pad form / giver suppress (personal presence).
