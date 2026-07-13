@@ -2,7 +2,9 @@
 
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
+using AutoCore.Game.Constants;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.Structures;
 using AutoCore.Game.TNL.Ghost;
 using AutoCore.Utils;
 
@@ -49,6 +51,7 @@ public class SimpleObject : GraphicsObject
         HP = Math.Max(0, HP - actualDamage);
 
         DirtyHealthMasks(GhostObject.HealthMask | GhostObject.HealthMaxMask);
+        NotifyOwnerHealthHud();
 
         return actualDamage;
     }
@@ -75,18 +78,38 @@ public class SimpleObject : GraphicsObject
 
     /// <summary>
     /// Absolute current HP set. Clamps to [0, MaxHP] and dirties <see cref="GhostObject.HealthMask"/>.
+    /// Restoring HP above 0 clears corpse state (same idea as <see cref="GraphicsObject.RestoreHealth"/>)
+    /// so combat pools, targeting, and living client state resume after /hp or script heals.
+    /// When <paramref name="triggerGhostUpdate"/> is true, dirties the ghost. When
+    /// <paramref name="notifyOwnerHud"/> is true (default), also notifies the owner HUD
+    /// (<see cref="NotifyOwnerHealthHud"/> — CharacterLevel for vehicles).
+    /// Chat commands set <paramref name="notifyOwnerHud"/> false and return the packet themselves
+    /// so ChatManager is the single send path (same pattern as /power).
     /// </summary>
-    public void SetCurrentHP(int hp, bool triggerGhostUpdate = true)
+    public void SetCurrentHP(int hp, bool triggerGhostUpdate = true, bool notifyOwnerHud = true)
     {
         var newHp = Math.Clamp(hp, 0, Math.Max(MaxHP, 0));
-        if (HP == newHp)
+        var wasCorpse = IsCorpse;
+        if (HP == newHp && !(newHp > 0 && wasCorpse))
             return;
 
         var increased = newHp > HP;
         HP = newHp;
 
+        // Death sets IsCorpse; /hp and admin heals only call SetCurrentHP (not Revive).
+        // Sector combat-pool Advance skips corpses, so leave corpse stuck forever without this.
+        if (newHp > 0 && wasCorpse)
+        {
+            IsCorpse = false;
+            DeathType = DeathType.Silent;
+            Murderer = new TFID();
+            increased = true;
+        }
+
         if (triggerGhostUpdate)
             DirtyHealthMasks(GhostObject.HealthMask);
+        if (notifyOwnerHud && triggerGhostUpdate)
+            NotifyOwnerHealthHud();
 
         // Chat / admin / scripts that raise HP must also open type-7 health gates.
         if (increased)
@@ -97,14 +120,14 @@ public class SimpleObject : GraphicsObject
     /// Absolute max HP set. Clamps to [1, MaxWireHP], pulls current HP down when needed,
     /// and dirties <see cref="GhostObject.HealthMaxMask"/> (and Health if current changed).
     /// </summary>
-    public void SetMaximumHP(int maxHp, bool triggerGhostUpdate = true)
+    public void SetMaximumHP(int maxHp, bool triggerGhostUpdate = true, bool notifyOwnerHud = true)
     {
         var newMax = Math.Clamp(maxHp, 1, MaxWireHP);
 
         if (MaxHP == newMax)
         {
             if (HP > MaxHP)
-                SetCurrentHP(MaxHP, triggerGhostUpdate);
+                SetCurrentHP(MaxHP, triggerGhostUpdate, notifyOwnerHud);
             return;
         }
 
@@ -118,6 +141,15 @@ public class SimpleObject : GraphicsObject
         DirtyHealthMasks(GhostObject.HealthMaxMask);
         if (HP != oldHp)
             DirtyHealthMasks(GhostObject.HealthMask);
+        if (notifyOwnerHud)
+            NotifyOwnerHealthHud();
+    }
+
+    /// <summary>
+    /// Owner-facing absolute HUD sync after HP changes. Vehicles send CharacterLevel (0x2017).
+    /// </summary>
+    protected virtual void NotifyOwnerHealthHud(bool sendPacket = true)
+    {
     }
 
     /// <summary>

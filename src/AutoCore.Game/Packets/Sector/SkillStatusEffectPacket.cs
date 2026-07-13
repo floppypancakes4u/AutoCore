@@ -21,7 +21,8 @@ using AutoCore.Game.Structures;
 ///   +0x15 pad (3)
 ///   +0x18 position XYZ (3×float)
 ///   +0x24 pad (int32)
-///   +0x28 caster TFID (4 dwords / 16 bytes, vehicle+0x160 layout)
+///   +0x28 source-owner TFID (4 dwords / 16 bytes). For a learned player skill this is the
+///         character TFID, which the client matches to its local character and resolves to vehicle.
 ///   +0x38 flag (byte) — packer sets (param5 == 0)
 ///   +0x39 pad (3)
 ///   +0x3C diceSeed (int32, optional)
@@ -56,13 +57,13 @@ public class SkillStatusEffectPacket : BasePacket
 
     public List<SkillStatusTarget> Targets { get; } = new();
 
-    public void AddTarget(TFID target, short powerDelta = 0, short aux = 0)
+    public void AddTarget(TFID target, short mana = 0, short maxMana = 0)
     {
         Targets.Add(new SkillStatusTarget
         {
             Target = target ?? new TFID(),
-            PowerDelta = powerDelta,
-            Aux = aux
+            Mana = mana,
+            MaxMana = maxMana
         });
     }
 
@@ -101,7 +102,7 @@ public class SkillStatusEffectPacket : BasePacket
         writer.Write(DiceSeed);
 
         foreach (var t in Targets.Take(targetCount))
-            WriteTarget(writer, t.Target, t.PowerDelta, t.Aux);
+            WriteTarget(writer, t.Target, t.Mana, t.MaxMana);
 
         // Terminator: 4 dwords of invalid TFID (DAT_009CBF68 = -1,-1,0,0).
         // Packer only writes 0x10 bytes here; remaining 8 of the 0x18 slot stay zero.
@@ -109,21 +110,24 @@ public class SkillStatusEffectPacket : BasePacket
         writer.Write(-1);
         writer.Write(0);
         writer.Write(0);
+        // The terminator occupies a full 0x18-byte target slot. Its TFID is 0x10 bytes;
+        // the final two shorts and pad remain zero in the retail fixed-size structure.
+        writer.WriteZeros(8);
     }
 
-    private static void WriteTarget(BinaryWriter writer, TFID tfid, short powerDelta, short aux)
+    private static void WriteTarget(BinaryWriter writer, TFID tfid, short mana, short maxMana)
     {
         // 0x18 bytes matching packer: 4 dwords TFID + 2 shorts + pad.
         writer.WriteTFID(tfid ?? new TFID());
-        writer.Write(powerDelta);
-        writer.Write(aux);
+        writer.Write(mana);
+        writer.Write(maxMana);
         writer.Write(0);
     }
 
     public sealed class SkillStatusTarget
     {
         public TFID Target { get; set; } = new();
-        public short PowerDelta { get; set; }
-        public short Aux { get; set; }
+        public short Mana { get; set; }
+        public short MaxMana { get; set; }
     }
 }

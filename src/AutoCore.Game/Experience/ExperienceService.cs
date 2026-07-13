@@ -198,7 +198,8 @@ public sealed class ExperienceService : Singleton<ExperienceService>
         character.SetAttributePoints(attrib);
         character.SetResearchPoints(research);
 
-        var snapshot = new CharacterProgressSnapshot(level, total, skill, attrib, research);
+        // Include spent attributes so XP saves do not zero Tech/Combat/Theory/Perception.
+        var snapshot = character.ToProgressSnapshot();
 
         if (PersistOnGrant)
         {
@@ -300,12 +301,7 @@ public sealed class ExperienceService : Singleton<ExperienceService>
         character.SetExperience(absoluteExperience);
         character.SetLevel(level);
 
-        var snapshot = new CharacterProgressSnapshot(
-            level,
-            absoluteExperience,
-            character.SkillPoints,
-            character.AttributePoints,
-            character.ResearchPoints);
+        var snapshot = character.ToProgressSnapshot();
 
         if (PersistOnGrant)
         {
@@ -345,32 +341,18 @@ public sealed class ExperienceService : Singleton<ExperienceService>
         };
     }
 
+    /// <summary>
+    /// Absolute CharacterLevel snapshot for login, level-up, and admin restore.
+    /// Delegates to <see cref="CharacterLevelManager.BuildPacket"/> so Health/HealthMaximum
+    /// (vehicle pools) and mana stay consistent with /power and /hp — omitting Health leaves
+    /// client defaults that clamp the HUD to 1 until a manual /hp.
+    /// </summary>
     public CharacterLevelPacket BuildCharacterLevelPacket(Character character)
     {
         if (character == null)
             throw new ArgumentNullException(nameof(character));
 
-        var mana = CharacterLevelManager.Instance.GetOrCreate(character.ObjectId.Coid);
-        short currentMana;
-        short maxMana;
-        lock (mana)
-        {
-            currentMana = mana.CurrentMana;
-            maxMana = mana.MaxMana;
-        }
-
-        return new CharacterLevelPacket
-        {
-            CharacterId = character.ObjectId,
-            Level = character.Level,
-            Experience = character.Experience,
-            Currency = character.Credits,
-            SkillPoints = character.SkillPoints,
-            AttributePoints = character.AttributePoints,
-            ResearchPoints = character.ResearchPoints,
-            CurrentMana = currentMana,
-            MaxMana = maxMana
-        };
+        return CharacterLevelManager.Instance.BuildPacket(character);
     }
 
     /// <summary>
@@ -397,10 +379,15 @@ public sealed class ExperienceService : Singleton<ExperienceService>
             character.SetSkillPoints(loaded.SkillPoints);
             character.SetAttributePoints(loaded.AttributePoints);
             character.SetResearchPoints(loaded.ResearchPoints);
+            character.SetAttributeTech(loaded.AttributeTech);
+            character.SetAttributeCombat(loaded.AttributeCombat);
+            character.SetAttributeTheory(loaded.AttributeTheory);
+            character.SetAttributePerception(loaded.AttributePerception);
 
             Logger.WriteLog(
                 LogType.Network,
                 $"Login progress loaded: coid={coid} level={loaded.Level} xp={loaded.Experience} " +
+                $"tech={loaded.AttributeTech} combat={loaded.AttributeCombat} theory={loaded.AttributeTheory} perception={loaded.AttributePerception} " +
                 $"(memory now level={character.Level} xp={character.Experience})");
         }
         catch (Exception ex)

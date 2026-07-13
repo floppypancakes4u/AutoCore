@@ -103,6 +103,20 @@ public partial class SectorServer : BaseServer, ILoopable
             // Live WireDiag after rate floor still showed only ~4 pose packs per Gunny then silence.
             var pathPoseDirty = MapManager.Instance.ForcePathVehiclePoseDirty();
 
+            // Player pose dead reckoning between C2S VehicleMoved: keep-dirty rebroadcasts an
+            // advancing pose so remote observers do not hard-snap to a frozen server position
+            // every TNL period (choppy remote vehicles). Must run before Pulse for the same reason
+            // as TickNpcs. NPC path pose is advanced by TickNpcs above.
+            var poseDt = SectorPlayerPoseTick.ClampPoseDtSeconds(delta);
+            var poseEntries = new List<(long Coid, Action AdvancePose)>(Interface.MapConnections.Count);
+            foreach (var kvp in Interface.MapConnections)
+            {
+                var conn = kvp.Value;
+                var coid = conn != null ? conn.GetPlayerCOID() : kvp.Key;
+                poseEntries.Add((coid, () => conn?.CurrentCharacter?.CurrentVehicle?.AdvanceNetworkPose(poseDt)));
+            }
+            SectorPlayerPoseTick.ProcessAll(poseEntries);
+
             Interface.Pulse();
 
             if ((Environment.TickCount64 / 2000) != _lastPathPoseDiagBucket)
@@ -136,6 +150,30 @@ public partial class SectorServer : BaseServer, ILoopable
                 combatEntries.Add((coid, () => conn?.CurrentCharacter?.CurrentVehicle?.ProcessCombatIfFiring()));
             }
             SectorCombatTick.ProcessAll(combatEntries);
+
+            // Combat pools (heat cool / shield / power / HP regen) — CVOGHBRegeneration @ 3000 ms.
+            // Accumulate MainLoop delta into discrete 3000 ms pulses per player vehicle.
+            var poolDeltaMs = (int)Math.Clamp(delta, 1, 250);
+            foreach (var kvp in Interface.MapConnections)
+            {
+                var character = kvp.Value?.CurrentCharacter;
+                var vehicle = character?.CurrentVehicle;
+                if (vehicle == null || vehicle.GetIsCorpse())
+                    continue;
+
+                var weaponsFiring = vehicle.Firing != 0;
+                try
+                {
+                    AutoCore.Game.Combat.VehicleCombatPool.Advance(
+                        vehicle, character, poolDeltaMs, weaponsFiring);
+                }
+                catch (Exception ex)
+                {
+                    Logger.WriteLog(LogType.Error,
+                        "VehicleCombatPool.Advance failed coid={0}: {1}",
+                        vehicle.ObjectId?.Coid ?? 0, ex.Message);
+                }
+            }
         }
     }
 

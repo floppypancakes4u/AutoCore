@@ -195,6 +195,14 @@ public class GhostVehicle : GhostObject
     public const ulong MeleeWeaponMask  = 0x2000000000ul;
     public const ulong OrnamentMask     = 0x4000000000ul;
 
+    /// <summary>
+    /// Masks safe to ship on a local-owner vehicle ghost initial. CreateVehicleExtended already
+    /// materialised the body; a full GhostVehicle initial can clear wheels (+0x258). Combat pools
+    /// (HP/heat/shield/power) still need ghost delivery for the owning client.
+    /// </summary>
+    public const ulong OwnerCombatInitialMask =
+        HealthMask | HealthMaxMask | HeatMask | ShieldMaxMask | ShieldMask | PowerMask;
+
     public override NetClassRep GetClassRep()
     {
         return _dynClassRep;
@@ -234,8 +242,18 @@ public class GhostVehicle : GhostObject
         var sourceUpdateMask = updateMask;
 
         var parentVehicle = Parent.GetAsVehicle();
+        var owner = parentVehicle.Owner;
+
+        // Controlling connection for this vehicle: CreateVehicle already built the live object.
+        // First ghost scope must not re-run equipment/pose create paths that zero +0x258.
+        var isOwnerControlConnection = connection is TNLConnection tnlOwner
+            && tnlOwner.CurrentCharacter?.CurrentVehicle != null
+            && ReferenceEquals(tnlOwner.CurrentCharacter.CurrentVehicle, parentVehicle);
+        var useOwnerCombatInitial = isInitial && isOwnerControlConnection;
+
         var useMinimalForeignInitialProfile = Parent.ObjectId.Global
-            && EnableMinimalForeignInitialProfile;
+            && EnableMinimalForeignInitialProfile
+            && !useOwnerCombatInitial;
 
         // Minimal foreign: initial packs pose-only (optional initial blocks are separate levers).
         // Deltas also admit WheelSetMask so a hardpoint can materialize +0x258 when Path A equip
@@ -245,7 +263,12 @@ public class GhostVehicle : GhostObject
         // EnableDeferredForeignPose strips PositionMask from foreign initial (activate race).
         var deferForeignPose = Parent.ObjectId.Global && EnableDeferredForeignPose;
         var minimalHealthBits = EnableMinimalForeignHealthBlock ? HealthMask | HealthMaxMask : 0UL;
-        if (useMinimalForeignInitialProfile)
+        if (useOwnerCombatInitial)
+        {
+            // Always seed full combat pools on first owner ghost pack (first-scope is all-bits dirty).
+            updateMask = OwnerCombatInitialMask;
+        }
+        else if (useMinimalForeignInitialProfile)
         {
             var initialPose = deferForeignPose ? 0UL : PositionMask;
             updateMask = isInitial
@@ -262,27 +285,29 @@ public class GhostVehicle : GhostObject
         // player or for later deltas.
         if (isInitial
             && Parent.ObjectId.Global
+            && !useOwnerCombatInitial
             && connection is TNLConnection { ForeignVehicleInitialMaskOverrideForTests: ulong overrideMask })
         {
             updateMask = overrideMask;
         }
 
-        var owner = parentVehicle.Owner;
-
         var wouldPackPath = parentVehicle.CoidCurrentPath > 0;
         var wouldPackOwner = owner != null;
         var wouldPackTemplate = parentVehicle.TemplateId != -1;
         var wouldPackSpawnOwner = parentVehicle.SpawnOwnerCoid != -1;
-        var packPath = (!useMinimalForeignInitialProfile || EnableMinimalForeignPathBlock)
+        var packPath = !useOwnerCombatInitial
+            && (!useMinimalForeignInitialProfile || EnableMinimalForeignPathBlock)
             && EnablePathWire
             && wouldPackPath;
         var suppressOwnerForReghost = connection is TNLConnection reghostConn
             && reghostConn.ShouldSuppressForeignOwnerOnPack(Parent.ObjectId.Coid);
-        var packOwner = (!useMinimalForeignInitialProfile || EnableMinimalForeignOwnerBlock)
+        var packOwner = !useOwnerCombatInitial
+            && (!useMinimalForeignInitialProfile || EnableMinimalForeignOwnerBlock)
             && EnableOwnerWire
             && wouldPackOwner
             && !suppressOwnerForReghost;
-        var allowTemplateSpawn = !useMinimalForeignInitialProfile || EnableMinimalForeignTemplateSpawnBlock;
+        var allowTemplateSpawn = !useOwnerCombatInitial
+            && (!useMinimalForeignInitialProfile || EnableMinimalForeignTemplateSpawnBlock);
         var packTemplate = allowTemplateSpawn && EnableTemplateSpawnWire && wouldPackTemplate;
         var packSpawnOwner = allowTemplateSpawn && EnableTemplateSpawnWire && wouldPackSpawnOwner;
 
@@ -520,7 +545,7 @@ public class GhostVehicle : GhostObject
 
         if (stream.WriteFlag((updateMask & HeatMask) != 0))
         {
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // TODO
+            stream.WriteBits(32, BitConverter.GetBytes(parentVehicle.CurrentHeat));
         }
 
         if (stream.WriteFlag((updateMask & ShieldMaxMask) != 0))

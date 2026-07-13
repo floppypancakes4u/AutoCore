@@ -41,6 +41,8 @@ public class CharContext : DbContext
     public DbSet<CharacterCompletedMissionData> CharacterCompletedMissions { get; set; }
     public DbSet<CharacterSocial> CharacterSocials { get; set; }
     public DbSet<CharacterInventoryData> CharacterInventories { get; set; }
+    public DbSet<CharacterLearnedSkillData> CharacterLearnedSkills { get; set; }
+    public DbSet<CharacterQuickBarSlotData> CharacterQuickBarSlots { get; set; }
     public DbSet<VehicleData> Vehicles { get; set; }
     public DbSet<Clan> Clans { get; set; }
     public DbSet<ClanMember> ClanMembers { get; set; }
@@ -75,6 +77,7 @@ public class CharContext : DbContext
         context.EnsureCharacterEconomySchema();
         context.EnsureCharacterProgressSchema();
         context.EnsureMissionSchema();
+        context.EnsureSkillSchema();
     }
 
     /// <summary>
@@ -145,6 +148,22 @@ public class CharContext : DbContext
             ALTER TABLE `character`
             ADD COLUMN `ResearchPoints` SMALLINT NOT NULL DEFAULT 0
             """);
+        TryExecute("""
+            ALTER TABLE `character`
+            ADD COLUMN `AttributeTech` SMALLINT NOT NULL DEFAULT 0
+            """);
+        TryExecute("""
+            ALTER TABLE `character`
+            ADD COLUMN `AttributeCombat` SMALLINT NOT NULL DEFAULT 0
+            """);
+        TryExecute("""
+            ALTER TABLE `character`
+            ADD COLUMN `AttributeTheory` SMALLINT NOT NULL DEFAULT 0
+            """);
+        TryExecute("""
+            ALTER TABLE `character`
+            ADD COLUMN `AttributePerception` SMALLINT NOT NULL DEFAULT 0
+            """);
     }
 
     /// <summary>
@@ -176,6 +195,23 @@ public class CharContext : DbContext
             TryExecute(sql);
     }
 
+    public void EnsureSkillSchema()
+    {
+        TryExecute("""
+            CREATE TABLE IF NOT EXISTS `character_learned_skill` (
+                `CharacterCoid` BIGINT NOT NULL, `SkillId` INT NOT NULL, `Rank` TINYINT UNSIGNED NOT NULL,
+                PRIMARY KEY (`CharacterCoid`, `SkillId`)
+            )
+            """);
+        TryExecute("""
+            CREATE TABLE IF NOT EXISTS `character_quickbar` (
+                `CharacterCoid` BIGINT NOT NULL, `Slot` TINYINT UNSIGNED NOT NULL,
+                `ItemCoid` BIGINT NOT NULL DEFAULT -1, `SkillId` INT NOT NULL DEFAULT 0,
+                PRIMARY KEY (`CharacterCoid`, `Slot`)
+            )
+            """);
+    }
+
     private void TryExecute(string sql)
     {
         try
@@ -200,6 +236,10 @@ public class CharContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        modelBuilder.Entity<CharacterLearnedSkillData>()
+            .HasKey(x => new { x.CharacterCoid, x.SkillId });
+        modelBuilder.Entity<CharacterQuickBarSlotData>()
+            .HasKey(x => new { x.CharacterCoid, x.Slot });
 
         modelBuilder.Entity<CharacterExploration>().HasKey(ce => new { ce.CharacterCoid, ce.ContinentId });
         modelBuilder.Entity<CharacterQuestData>().HasKey(cq => new { cq.CharacterCoid, cq.MissionId });

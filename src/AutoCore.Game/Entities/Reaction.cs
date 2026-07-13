@@ -503,17 +503,19 @@ public class Reaction : ClonedObjectBase
             var existing = map.GetObjectByCoid(objectCoid);
             if (existing != null)
             {
-                // Shared combat materialization only when DoForAllPlayers (rare).
-                // Personal Create: client SpawnObject + Phase 3 private combat; keep marker.
-                if (sharedWorld
-                    && existing is SpawnPoint existingSpawn
-                    && !existingSpawn.HasLiveSpawn())
+                // Re-materialize missing children: shared world always; personal Create for
+                // dialog/deliver NPC spawns (non-template) so UseObject turn-in works.
+                // Template-vehicle combat stays marker-only under personal Create.
+                if (existing is SpawnPoint existingSpawn
+                    && !existingSpawn.HasLiveSpawn()
+                    && (sharedWorld || SpawnListIsDialogNpc(existingSpawn.Template)))
                 {
                     existingSpawn.Spawn(fireTriggerEvents: true, triggerActivator: activator);
                     Logger.WriteLog(LogType.Debug,
-                        "Create reaction {0}: re-spawned children for existing SpawnPoint coid={1} (DoForAllPlayers)",
+                        "Create reaction {0}: re-spawned children for existing SpawnPoint coid={1} shared={2}",
                         Template.COID,
-                        objectCoid);
+                        objectCoid,
+                        sharedWorld ? 1 : 0);
                 }
                 else
                 {
@@ -567,13 +569,17 @@ public class Reaction : ClonedObjectBase
 
             obj.SetMap(map);
 
-            // Shared DoForAllPlayers: materialize spawn children for everyone.
-            // Personal Create: place marker only — combat children are private (Phase 3).
-            if (sharedWorld && obj is SpawnPoint spawnPoint)
+            // Shared DoForAllPlayers: materialize all spawn children.
+            // Personal Create: materialize dialog/deliver NPCs (non-template) for UseObject;
+            // template-vehicle combat remains marker-only (private combat / Activate path).
+            if (obj is SpawnPoint spawnPoint
+                && (sharedWorld || SpawnListIsDialogNpc(spawnPoint.Template)))
+            {
                 spawnPoint.Spawn(fireTriggerEvents: true, triggerActivator: activator);
+            }
 
             Logger.WriteLog(LogType.Debug,
-                "Create reaction {0}: placed coid={1} type={2} on map {3} sharedChildren={4}",
+                "Create reaction {0}: placed coid={1} type={2} on map {3} shared={4}",
                 Template.COID,
                 objectCoid,
                 obj.GetType().Name,
@@ -582,6 +588,24 @@ public class Reaction : ClonedObjectBase
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// True when the spawn list is a world NPC/creature (not a combat template vehicle).
+    /// Personal Create must spawn these so deliver turn-in has a server-side Creature.
+    /// </summary>
+    static bool SpawnListIsDialogNpc(SpawnPointTemplate template)
+    {
+        if (template?.Spawns == null || template.Spawns.Count == 0)
+            return false;
+
+        foreach (var entry in template.Spawns)
+        {
+            if (entry.SpawnType > 0 && !entry.IsTemplate)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>

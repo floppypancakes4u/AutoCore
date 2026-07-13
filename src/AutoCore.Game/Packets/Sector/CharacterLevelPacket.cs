@@ -22,7 +22,8 @@ using AutoCore.Game.Structures;
 ///   Offset 0x19: Padding (7 bytes)
 ///   Offset 0x20: Currency (8 bytes) - Globes/Bars/Scrip/Clink
 ///   Offset 0x28: Experience (4 bytes)
-///   Offset 0x2C: Unknown_0x2C (8 bytes)
+///   Offset 0x2C: Health (4 bytes)
+///   Offset 0x30: HealthMaximum (4 bytes)
 ///   Offset 0x34: CurrentMana (2 bytes)
 ///   Offset 0x36: MaxMana (2 bytes)
 ///   Offset 0x38: AttributeTech (2 bytes)
@@ -45,7 +46,8 @@ public class CharacterLevelPacket : BasePacket
     // Currency: single long split as Globes,Bars,Scrip,Clink (groups of 1000)
     public long Currency { get; set; } = 0;
     public int Experience { get; set; } = 0;
-    public long Unknown_0x2C { get; set; } = 0;
+    public int Health { get; set; }
+    public int HealthMaximum { get; set; }
     
     // Attributes and stats
     public short CurrentMana { get; set; } = 100;
@@ -96,7 +98,8 @@ public class CharacterLevelPacket : BasePacket
         // Currency/XP fields — client apply FUN_00531fcb: Level@0x18, Currency@0x20, Experience@0x28
         writer.Write(Currency);
         writer.Write(Experience);
-        writer.Write(Unknown_0x2C);
+        writer.Write(Health);
+        writer.Write(HealthMaximum);
 
         // Short fields
         writer.Write(CurrentMana);

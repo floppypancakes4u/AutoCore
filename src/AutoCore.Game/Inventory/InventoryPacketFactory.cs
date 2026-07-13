@@ -6,16 +6,20 @@ public static class InventoryPacketFactory
 {
     public static void ConfigureVehicleCargo(CreateVehiclePacket packet, InventoryManager inventory = null)
     {
-        var slotCount = inventory?.SlotCount ?? InventoryManager.DefaultCargoSlotCount;
+        // CreateVehicle short InventorySlots = UI page count (client FUN_004F3A30).
+        var height = inventory?.PageCount ?? InventoryManager.DefaultCargoPageCount;
         var width = inventory?.Width ?? InventoryManager.DefaultCargoWidth;
+        var uiPages = VehicleCargoCapacity.UiPagesFromHeight(height);
+        var slotCount = inventory?.SlotCount ?? InventoryManager.DefaultCargoSlotCount;
 
-        packet.InventorySlots = (short)slotCount;
+        packet.InventorySlots = (short)uiPages;
 
         if (packet is not CreateVehicleExtendedPacket extendedPacket)
             return;
 
-        extendedPacket.NumInventorySlots = (short)slotCount;
-        extendedPacket.InventorySize = (ushort)slotCount;
+        // Extended: NumInventorySlots = pages; InventorySize = how many COID slots to scan.
+        extendedPacket.NumInventorySlots = (short)uiPages;
+        extendedPacket.InventorySize = (ushort)Math.Min(slotCount, extendedPacket.InventoryCoids.Length);
 
         if (inventory == null)
             return;
@@ -32,13 +36,15 @@ public static class InventoryPacketFactory
 
     public static InventoryCargoSendAllPacket CreateCargoSendAll(InventoryManager inventory)
     {
-        var pageCount = inventory?.PageCount ?? InventoryManager.DefaultCargoPageCount;
+        var height = inventory?.PageCount ?? InventoryManager.DefaultCargoPageCount;
         var width = inventory?.Width ?? InventoryManager.DefaultCargoWidth;
         var slotCount = inventory?.SlotCount ?? InventoryManager.DefaultCargoSlotCount;
+        var uiPages = VehicleCargoCapacity.UiPagesFromHeight(height);
 
         var packet = new InventoryCargoSendAllPacket
         {
-            InventorySize = (byte)Math.Min(byte.MaxValue, pageCount)
+            // Client cargo tab count ("Number of Cargo Pages").
+            InventorySize = (byte)Math.Min(byte.MaxValue, uiPages)
         };
 
         if (inventory == null)

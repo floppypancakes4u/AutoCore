@@ -29,7 +29,7 @@ public class InventoryCargoSendAllPacketTests
 
         Assert.AreEqual(0x1388, bytes.Length);
         Assert.AreEqual((uint)GameOpcode.InventoryCargoSendAll, BitConverter.ToUInt32(bytes, 0));
-        Assert.AreEqual(InventoryCargoSendAllPacket.DefaultCargoPageCount, bytes[4]);
+        Assert.AreEqual((byte)1, bytes[4], "default UI page count is 1 (starter chassis)");
         CollectionAssert.AreEqual(new byte[3], bytes[5..8]);
 
         Assert.AreEqual(-1, BitConverter.ToInt64(bytes, 8));

@@ -6,6 +6,7 @@ using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.Skills;
 
 namespace AutoCore.Game.Chat;
 
@@ -106,6 +107,13 @@ public sealed class ChatCommandService
             case "/setmaxpower":
                 return SetMaxPower(character, parts);
 
+            case "/skills":
+                return Skills(character, parts);
+
+            case "/resetSkills":
+            case "/resetskills":
+                return ResetSkills(character);
+
             default:
                 // Case-insensitive account-create aliases (client steals bare /player for //playerrename).
                 var cmd = parts[0].ToLowerInvariant();
@@ -152,6 +160,25 @@ public sealed class ChatCommandService
             return new ChatCommandExecutionResult(true, message);
 
         return new ChatCommandExecutionResult(true, message);
+    }
+
+    private static ChatCommandExecutionResult Skills(Character character, string[] parts)
+    {
+        if (character == null) return new ChatCommandExecutionResult(true, "No character loaded.");
+        if (parts.Length == 1) return new ChatCommandExecutionResult(true, $"Skill points available: {character.SkillPoints}.");
+        if (parts.Length != 3 || !string.Equals(parts[1], "set", StringComparison.OrdinalIgnoreCase) ||
+            !short.TryParse(parts[2], out var points) || points < 0)
+            return new ChatCommandExecutionResult(true, "Usage: /skills or /skills set <0-32767>");
+        CharacterSkillService.Instance.SetPoints(character, points);
+        return new ChatCommandExecutionResult(true, $"Skill points set to {points}.", new BasePacket[] { CharacterLevelManager.Instance.BuildPacket(character) });
+    }
+
+    private static ChatCommandExecutionResult ResetSkills(Character character)
+    {
+        if (character == null) return new ChatCommandExecutionResult(true, "No character loaded.");
+        var count = character.LearnedSkills.Count;
+        CharacterSkillService.Instance.Reset(character);
+        return new ChatCommandExecutionResult(true, $"Removed {count} learned skill(s) without refunding points. Relog to refresh the skill tree.");
     }
 
     /// <summary>
@@ -298,10 +325,13 @@ public sealed class ChatCommandService
         if (vehicle == null)
             return new ChatCommandExecutionResult(true, "You are not in a vehicle!");
 
-        vehicle.SetCurrentHP(hp);
+        // Ghost dirty; CharacterLevel via Packets (ChatManager) — same as /power sendPacket:false.
+        vehicle.SetCurrentHP(hp, triggerGhostUpdate: true, notifyOwnerHud: false);
+        var packet = CharacterLevelManager.Instance.SyncOwnedCombatHud(character, sendPacket: false);
         return new ChatCommandExecutionResult(
             true,
-            $"HP set to {vehicle.GetCurrentHP()}/{vehicle.GetMaximumHP()}.");
+            $"HP set to {vehicle.GetCurrentHP()}/{vehicle.GetMaximumHP()}.",
+            new BasePacket[] { packet });
     }
 
     private static ChatCommandExecutionResult SetMaxHP(Character character, string[] parts)
@@ -316,10 +346,12 @@ public sealed class ChatCommandService
         if (vehicle == null)
             return new ChatCommandExecutionResult(true, "You are not in a vehicle!");
 
-        vehicle.SetMaximumHP(maxHp);
+        vehicle.SetMaximumHP(maxHp, triggerGhostUpdate: true, notifyOwnerHud: false);
+        var packet = CharacterLevelManager.Instance.SyncOwnedCombatHud(character, sendPacket: false);
         return new ChatCommandExecutionResult(
             true,
-            $"Max HP set to {vehicle.GetCurrentHP()}/{vehicle.GetMaximumHP()}.");
+            $"Max HP set to {vehicle.GetCurrentHP()}/{vehicle.GetMaximumHP()}.",
+            new BasePacket[] { packet });
     }
 
     private static ChatCommandExecutionResult SetShield(Character character, string[] parts)
@@ -334,6 +366,7 @@ public sealed class ChatCommandService
         if (vehicle == null)
             return new ChatCommandExecutionResult(true, "You are not in a vehicle!");
 
+        // Shield is ghost-only on the retail client (vehicle+0x144 / ShieldMask).
         vehicle.SetCurrentShield(shield);
         return new ChatCommandExecutionResult(
             true,
@@ -360,14 +393,20 @@ public sealed class ChatCommandService
 
     private static ChatCommandExecutionResult SetPower(Character character, string[] parts)
     {
-        if (parts.Length < 2 || !short.TryParse(parts[1], out var power))
-            return new ChatCommandExecutionResult(true, "Usage: /power <value>. Example: /power 50");
-
         if (character == null)
             return new ChatCommandExecutionResult(true, "No character loaded.");
 
+        if (parts.Length < 2)
+        {
+            var powerState = CharacterLevelManager.Instance.GetPower(character.ObjectId.Coid);
+            return new ChatCommandExecutionResult(true, $"Server power: {powerState.Current}/{powerState.Maximum}.");
+        }
+
+        if (!short.TryParse(parts[1], out var power))
+            return new ChatCommandExecutionResult(true, "Usage: /power <value>. Example: /power 50");
+
         // sendPacket: false — ChatManager delivers via ChatCommandExecutionResult.Packets.
-        var packet = CharacterLevelManager.Instance.SetCurrentMana(character, power, sendPacket: false);
+        var packet = CharacterLevelManager.Instance.SetPower(character, power, sendPacket: false);
         return new ChatCommandExecutionResult(
             true,
             $"Power set to {packet.CurrentMana}/{packet.MaxMana}.",

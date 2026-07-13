@@ -1,7 +1,10 @@
 using AutoCore.Game.Chat;
+using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.TNL;
 using AutoCore.Game.TNL.Ghost;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -71,7 +74,10 @@ public class SetHpCommandTests
         Assert.AreEqual(100, vehicle.GetCurrentHP());
         Assert.AreEqual(500, vehicle.GetMaximumHP());
         StringAssert.Contains(result.Message, "100/500");
-        Assert.AreEqual(0, result.Packets.Count);
+        // Owner HUD uses CharacterLevel (0x2017) absolute Health fields — same path as /power.
+        var level = result.Packets.OfType<CharacterLevelPacket>().Single();
+        Assert.AreEqual(100, level.Health);
+        Assert.AreEqual(500, level.HealthMaximum);
     }
 
     [TestMethod]
@@ -97,6 +103,22 @@ public class SetHpCommandTests
 
         Assert.IsTrue(result.Handled);
         Assert.AreEqual(42, vehicle.GetCurrentHP());
+    }
+
+    [TestMethod]
+    public void SetHP_AfterDeath_ClearsCorpseFlag()
+    {
+        var character = CharacterWithVehicle(out var vehicle);
+        vehicle.SetCurrentHP(0);
+        vehicle.OnDeath(DeathType.Silent);
+        Assert.IsTrue(vehicle.IsCorpse);
+
+        var result = ChatCommandService.Instance.Execute(character, "/hp 250");
+
+        Assert.IsTrue(result.Handled);
+        Assert.AreEqual(250, vehicle.GetCurrentHP());
+        Assert.IsFalse(vehicle.IsCorpse,
+            "/hp after death must clear corpse so combat pools and living state resume");
     }
 
     [TestMethod]
@@ -137,7 +159,7 @@ public class SetHpCommandTests
     public void SetMaxHP_SetsMaxAndReportsValues()
     {
         var character = CharacterWithVehicle(out var vehicle);
-        vehicle.SetCurrentHP(200);
+        vehicle.SetCurrentHP(200, triggerGhostUpdate: false);
 
         var result = ChatCommandService.Instance.Execute(character, "/setMaxHP 1000");
 
@@ -145,7 +167,9 @@ public class SetHpCommandTests
         Assert.AreEqual(1000, vehicle.GetMaximumHP());
         Assert.AreEqual(200, vehicle.GetCurrentHP());
         StringAssert.Contains(result.Message, "200/1000");
-        Assert.AreEqual(0, result.Packets.Count);
+        var level = result.Packets.OfType<CharacterLevelPacket>().Single();
+        Assert.AreEqual(200, level.Health);
+        Assert.AreEqual(1000, level.HealthMaximum);
     }
 
     [TestMethod]
@@ -222,6 +246,58 @@ public class SetHpCommandTests
     }
 
     [TestMethod]
+    public void Vehicle_SetCurrentHP_WithOwningConnection_SendsCharacterLevelPacket()
+    {
+        var character = CharacterWithVehicle(out var vehicle);
+        vehicle.SetOwner(character);
+        var connection = new TNLConnection();
+        character.SetOwningConnection(connection);
+        connection.CurrentCharacter = character;
+
+        var sent = new System.Collections.Generic.List<BasePacket>();
+        TNLConnection.TestPacketSink = (_, packet) => sent.Add(packet);
+        try
+        {
+            vehicle.SetCurrentHP(77);
+
+            var level = sent.OfType<CharacterLevelPacket>().Single();
+            Assert.AreEqual(77, level.Health);
+            Assert.AreEqual(vehicle.GetMaximumHP(), level.HealthMaximum);
+        }
+        finally
+        {
+            TNLConnection.TestPacketSink = null;
+        }
+    }
+
+    [TestMethod]
+    public void Vehicle_TakeDamage_WithOwningConnection_SendsCharacterLevelPacket()
+    {
+        var character = CharacterWithVehicle(out var vehicle);
+        vehicle.SetOwner(character);
+        vehicle.SetMaximumHP(500, triggerGhostUpdate: false);
+        vehicle.SetCurrentHP(200, triggerGhostUpdate: false);
+        var connection = new TNLConnection();
+        character.SetOwningConnection(connection);
+        connection.CurrentCharacter = character;
+
+        var sent = new System.Collections.Generic.List<BasePacket>();
+        TNLConnection.TestPacketSink = (_, packet) => sent.Add(packet);
+        try
+        {
+            vehicle.TakeDamage(40);
+
+            Assert.AreEqual(160, vehicle.GetCurrentHP());
+            var level = sent.OfType<CharacterLevelPacket>().Single();
+            Assert.AreEqual(160, level.Health);
+        }
+        finally
+        {
+            TNLConnection.TestPacketSink = null;
+        }
+    }
+
+    [TestMethod]
     public void Shield_SetMaxThenCurrent_ClampsAndReports()
     {
         var character = CharacterWithVehicle(out var vehicle);
@@ -230,6 +306,7 @@ public class SetHpCommandTests
         Assert.IsTrue(maxResult.Handled);
         Assert.AreEqual(500, vehicle.MaxShield);
         StringAssert.Contains(maxResult.Message, "500");
+        Assert.IsNotNull(vehicle.Ghost, "shield max dirty must ensure ghost for ShieldMaxMask delivery");
 
         var curResult = ChatCommandService.Instance.Execute(character, "/shield 250");
         Assert.IsTrue(curResult.Handled);
@@ -254,7 +331,7 @@ public class SetHpCommandTests
     }
 
     [TestMethod]
-    public void Power_SetMaxThenCurrent_UpdatesStateAndSendsLevelPacket()
+    public void Power_SetsUnifiedCurrentAndMaximumState_AndSendsLevelPacket()
     {
         var character = CharacterWithVehicle(out var vehicle);
 
@@ -267,21 +344,23 @@ public class SetHpCommandTests
         var curResult = ChatCommandService.Instance.Execute(character, "/power 50");
         Assert.IsTrue(curResult.Handled);
         Assert.AreEqual((short)50, state.CurrentMana);
+        Assert.AreEqual((short)50, state.MaxMana);
         var packet = curResult.Packets.OfType<CharacterLevelPacket>().Single();
         Assert.AreEqual((short)50, packet.CurrentMana);
-        Assert.AreEqual((short)200, packet.MaxMana);
-        StringAssert.Contains(curResult.Message, "50/200");
+        Assert.AreEqual((short)50, packet.MaxMana);
+        StringAssert.Contains(curResult.Message, "50/50");
     }
 
     [TestMethod]
-    public void Power_ClampsCurrentToMax()
+    public void Power_ReplacesExistingMaximum()
     {
         var character = CharacterWithVehicle(out _);
         ChatCommandService.Instance.Execute(character, "/mpower 30");
         ChatCommandService.Instance.Execute(character, "/power 100");
 
         var state = CharacterLevelManager.Instance.GetOrCreate(character.ObjectId.Coid);
-        Assert.AreEqual((short)30, state.CurrentMana);
+        Assert.AreEqual((short)100, state.CurrentMana);
+        Assert.AreEqual((short)100, state.MaxMana);
     }
 
     [TestMethod]
@@ -290,5 +369,18 @@ public class SetHpCommandTests
         var result = ChatCommandService.Instance.Execute(null, "/power 10");
         Assert.IsTrue(result.Handled);
         Assert.AreEqual("No character loaded.", result.Message);
+    }
+
+    [TestMethod]
+    public void Power_WithoutValue_ReportsServerState()
+    {
+        var character = CharacterWithVehicle(out _);
+        CharacterLevelManager.Instance.SetPower(character, 100, sendPacket: false);
+
+        var result = ChatCommandService.Instance.Execute(character, "/power");
+
+        Assert.IsTrue(result.Handled);
+        Assert.AreEqual("Server power: 100/100.", result.Message);
+        Assert.AreEqual(0, result.Packets.Count);
     }
 }

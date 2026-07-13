@@ -10,6 +10,7 @@ namespace AutoCore.Game.Entities;
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.CloneBases;
+using AutoCore.Game.Combat;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
@@ -69,9 +70,96 @@ public class Vehicle : SimpleObject
     public int MaxShield { get; private set; }
     public int ShieldRegenRate { get; private set; }
 
+    /// <summary>Current chassis heat (client vehicle+0x150).</summary>
+    public int CurrentHeat { get; private set; }
+
+    /// <summary>Heat capacity from power plant (client vehicle+0x244).</summary>
+    public int MaxHeat { get; private set; }
+
+    /// <summary>Cool rate per 3000 ms pool pulse (PP CoolRate + vehicle adjust).</summary>
+    public int CoolRate { get; private set; }
+
+    /// <summary>Power regen per 3000 ms pool pulse from power plant.</summary>
+    public int PowerRegenRate { get; private set; }
+
+    /// <summary>HP regen per 3000 ms pool pulse from RaceItem RaceRegenRate (Tribe Locus).</summary>
+    public int HpRegenRate { get; private set; }
+
+    /// <summary>Wall-clock ms accumulated toward the next 3000 ms client pool pulse.</summary>
+    internal int PoolTickAccumulatorMs { get; set; }
+
+    /// <summary>Empty-shield debounce counter (client action +0x25).</summary>
+    internal int ShieldEmptyDebounce { get; set; }
+
+    /// <summary>Heat-at-max debounce counter (client action +0x24).</summary>
+    internal int HeatAtMaxDebounce { get; set; }
+
     /// <inheritdoc />
     /// Vehicles must scope the ghost before dirtying or SetMaskBits is discarded.
     protected override void DirtyHealthMasks(ulong mask) => EnsureGhostMaskDelivery(mask);
+
+    /// <summary>
+    /// Absolute CharacterLevel Health snapshot for the owning client (0x2017), matching /power.
+    /// Heat/shield stay on ghost masks only.
+    /// </summary>
+    protected override void NotifyOwnerHealthHud(bool sendPacket = true)
+    {
+        if (Owner is Character owner)
+            CharacterLevelManager.Instance.SyncOwnedCombatHud(owner, sendPacket);
+    }
+
+    /// <summary>
+    /// Recompute MaxHP/HP from chassis ArmorAdd + equipped armor ArmorFactor + owner Tech/level/race/class.
+    /// Retail: <c>Vehicle_CalcMaxHitPoints</c> @ 0x005002D0 (clonebase MaxHitPoint is almost always 1).
+    /// </summary>
+    /// <param name="refillCurrent">When true, set current HP to the new maximum (login / equip).</param>
+    public void RecalculateMaximumHitPoints(bool refillCurrent = true, bool triggerGhostUpdate = true)
+    {
+        var chassisArmorAdd = (CloneBaseObject as CloneBaseVehicle)?.VehicleSpecific.ArmorAdd ?? 0;
+        short armorFactor = 0;
+        if (Armor?.CloneBaseArmor?.ArmorSpecific != null)
+            armorFactor = Armor.CloneBaseArmor.ArmorSpecific.ArmorFactor;
+
+        var max = 1;
+        if (Owner is Character owner)
+        {
+            byte race = 0;
+            byte classId = 0;
+            if (owner.CloneBaseObject is CloneBaseCharacter charCb)
+            {
+                race = charCb.CharacterSpecific.Race;
+                classId = charCb.CharacterSpecific.Class;
+            }
+
+            max = VehicleHitPointCalculator.CalculatePlayerMaxHp(
+                race,
+                classId,
+                owner.Level,
+                owner.AttributeTech,
+                armorFactor,
+                chassisArmorAdd);
+        }
+        else
+        {
+            // NPC / unowned: keep clonebase stub unless armor adds something usable.
+            max = Math.Max(1, GetMaximumHP());
+            if (armorFactor > 0 || chassisArmorAdd > 0)
+                max = Math.Max(1, armorFactor + chassisArmorAdd);
+        }
+
+        var ratio = MaxHP > 0 ? (double)HP / MaxHP : 1.0;
+        SetMaximumHP(max, triggerGhostUpdate: false);
+        if (refillCurrent)
+            SetCurrentHP(max, triggerGhostUpdate: false, notifyOwnerHud: false);
+        else
+            SetCurrentHP((int)Math.Round(max * ratio), triggerGhostUpdate: false, notifyOwnerHud: false);
+
+        if (triggerGhostUpdate)
+        {
+            DirtyHealthMasks(GhostObject.HealthMask | GhostObject.HealthMaxMask);
+            NotifyOwnerHealthHud();
+        }
+    }
 
     /// <summary>
     /// Sets current shield and dirties <see cref="GhostVehicle.ShieldMask"/> for client sync.
@@ -116,13 +204,16 @@ public class Vehicle : SimpleObject
 
     /// <summary>
     /// Seeds shield capacity from equipped race-item clonebase fields (or zeroes if none).
+    /// Also caches HP regen rate from the same RaceItem (Tribe Locus).
     /// </summary>
     public void ApplyRaceItemShieldFromEquipped(bool startAtFull = true)
     {
         if (RaceItem?.CloneBaseObject != null)
         {
-            MaxShield = Math.Max(0, (int)RaceItem.CloneBaseObject.SimpleObjectSpecific.RaceShieldFactor);
-            ShieldRegenRate = Math.Max(0, (int)RaceItem.CloneBaseObject.SimpleObjectSpecific.RaceShieldRegenerate);
+            var so = RaceItem.CloneBaseObject.SimpleObjectSpecific;
+            MaxShield = Math.Max(0, (int)so.RaceShieldFactor);
+            ShieldRegenRate = Math.Max(0, (int)so.RaceShieldRegenerate);
+            HpRegenRate = Math.Max(0, (int)so.RaceRegenRate);
             CurrentShield = startAtFull ? MaxShield : Math.Clamp(CurrentShield, 0, MaxShield);
         }
         else
@@ -130,8 +221,140 @@ public class Vehicle : SimpleObject
             MaxShield = 0;
             CurrentShield = 0;
             ShieldRegenRate = 0;
+            HpRegenRate = 0;
         }
+
+        ShieldEmptyDebounce = 0;
     }
+
+    /// <summary>
+    /// Seeds heat capacity / cool rate and character power pool from the equipped power plant.
+    /// Client: equip PP → FUN_004fe1b0 sets heat max via FUN_004f7360; power max from PP PowerMaximum.
+    /// </summary>
+    public void ApplyPowerPlantCapacities(bool startPowerAtFull = true, bool clearHeat = true)
+    {
+        var specific = PowerPlant?.CloneBasePowerPlant?.PowerPlantSpecific;
+        if (specific != null)
+        {
+            CoolRate = Math.Max(0, (int)specific.CoolRate);
+            PowerRegenRate = Math.Max(0, (int)specific.PowerRegenRate);
+        }
+        else
+        {
+            CoolRate = 1; // client FUN_004f3840 default when no PP
+            PowerRegenRate = 1;
+        }
+
+        // Retail: Vehicle_CalcHeatMaximum (tech + race/class + PP HeatMaximum + HeatMaxAdd).
+        RecalculateMaximumHeat(triggerGhostUpdate: false);
+
+        if (clearHeat)
+        {
+            CurrentHeat = 0;
+            HeatAtMaxDebounce = 0;
+        }
+        else
+        {
+            CurrentHeat = Math.Clamp(CurrentHeat, 0, GetHeatHardCap());
+        }
+
+        var owner = Owner as Character;
+        if (owner != null && specific != null && specific.PowerMaximum > 0)
+        {
+            var max = (short)Math.Clamp(specific.PowerMaximum, 0, short.MaxValue);
+            CharacterLevelManager.Instance.SetMaxMana(owner, max, sendPacket: false);
+            if (startPowerAtFull)
+                CharacterLevelManager.Instance.SetCurrentMana(owner, max, sendPacket: false);
+            EnsureGhostMaskDelivery(GhostVehicle.PowerMask);
+        }
+
+        EnsureGhostMaskDelivery(GhostVehicle.HeatMask);
+    }
+
+    /// <summary>
+    /// Recompute MaxHeat from power plant, chassis HeatMaxAdd, owner Tech/level/race/class.
+    /// Retail: <c>Vehicle_CalcHeatMaximum</c> @ 0x004F7360.
+    /// </summary>
+    public void RecalculateMaximumHeat(bool triggerGhostUpdate = true)
+    {
+        var specific = PowerPlant?.CloneBasePowerPlant?.PowerPlantSpecific;
+        var ppHeat = specific?.HeatMaximum ?? 0;
+        var heatMaxAdd = (CloneBaseObject as CloneBaseVehicle)?.VehicleSpecific.HeatMaxAdd ?? 0;
+
+        int maxHeat;
+        if (Owner is Character owner)
+        {
+            byte race = 0;
+            byte classId = 0;
+            if (owner.CloneBaseObject is CloneBaseCharacter charCb)
+            {
+                race = charCb.CharacterSpecific.Race;
+                classId = charCb.CharacterSpecific.Class;
+            }
+
+            maxHeat = VehicleHeatCalculator.CalculatePlayerMaxHeat(
+                race,
+                classId,
+                owner.Level,
+                owner.AttributeTech,
+                ppHeat,
+                heatMaxAdd);
+        }
+        else
+        {
+            // NPC / unowned: power-plant heat only (no Tech term).
+            maxHeat = Math.Max(0, ppHeat + heatMaxAdd);
+        }
+
+        SetMaximumHeat(maxHeat, triggerGhostUpdate);
+    }
+
+    /// <summary>Hard cap is 2× max heat (client FUN_004f7210).</summary>
+    public int GetHeatHardCap() => Math.Max(0, MaxHeat * 2);
+
+    /// <summary>
+    /// Absolute heat set. Clamps to [0, 2×MaxHeat] (or ≥0 when max is unset) and dirties HeatMask.
+    /// </summary>
+    public void SetCurrentHeat(int heat, bool triggerGhostUpdate = true)
+    {
+        var hardCap = GetHeatHardCap();
+        var newHeat = hardCap > 0 ? Math.Clamp(heat, 0, hardCap) : Math.Max(0, heat);
+
+        if (CurrentHeat == newHeat)
+            return;
+
+        CurrentHeat = newHeat;
+
+        // Client arms the 2-tick hold only when heat equals max (not when already over max).
+        if (MaxHeat > 0 && CurrentHeat == MaxHeat)
+            HeatAtMaxDebounce = Combat.VehicleCombatPool.EmptyShieldDebounceTicks;
+
+        if (triggerGhostUpdate)
+            EnsureGhostMaskDelivery(GhostVehicle.HeatMask);
+    }
+
+    public void SetMaximumHeat(int maxHeat, bool triggerGhostUpdate = true)
+    {
+        MaxHeat = Math.Max(0, maxHeat);
+        var hardCap = GetHeatHardCap();
+        if (hardCap > 0 && CurrentHeat > hardCap)
+            SetCurrentHeat(hardCap, triggerGhostUpdate);
+        else if (triggerGhostUpdate)
+            EnsureGhostMaskDelivery(GhostVehicle.HeatMask);
+    }
+
+    /// <summary>Add (or subtract) heat; used by weapons and the cool tick.</summary>
+    public void AddHeat(int delta, bool triggerGhostUpdate = true)
+    {
+        if (delta == 0)
+            return;
+        SetCurrentHeat(CurrentHeat + delta, triggerGhostUpdate);
+    }
+
+    internal void SetCoolRateForTests(int rate) => CoolRate = Math.Max(0, rate);
+    internal void SetPowerRegenRateForTests(int rate) => PowerRegenRate = Math.Max(0, rate);
+    internal void SetHpRegenRateForTests(int rate) => HpRegenRate = Math.Max(0, rate);
+    internal void SetShieldRegenRateForTests(int rate) => ShieldRegenRate = Math.Max(0, rate);
 
     // Server-side combat state (very lightweight)
     private long _lastFireMsFront;
@@ -198,6 +421,66 @@ public class Vehicle : SimpleObject
     }
 
     public override Vehicle GetAsVehicle() => this;
+
+    /// <summary>
+    /// Minimum speed (linear or angular, units/s or rad/s) that arms network pose extrapolation.
+    /// Matches <see cref="GhostVehicle.IsMovingForPoseStream"/> epsilon family.
+    /// </summary>
+    internal const float NetworkPoseMotionEpsilon = 0.05f;
+
+    /// <summary>
+    /// Dead-reckons this vehicle's pose for one sector tick so TNL keep-dirty rebroadcasts
+    /// an <b>advancing</b> pose between C2S <c>VehicleMoved</c> packets. Without this, remotes
+    /// hard-snap (client <c>FUN_0053EEC0</c> full-physics path) to the same frozen server pose
+    /// every send period and fight local Havok — the choppy remote-player look.
+    /// Preserves last C2S throttle/steer. Safe before ghost exists. Returns true when pose moved.
+    /// </summary>
+    /// <param name="dt">Seconds since last tick; must be in (0, 1).</param>
+    public bool AdvanceNetworkPose(float dt)
+    {
+        if (dt <= 0f || dt >= 1f)
+            return false;
+
+        if (IsCorpse)
+            return false;
+
+        var v = Velocity;
+        var w = AngularVelocity;
+        var speedSq = (v.X * v.X) + (v.Y * v.Y) + (v.Z * v.Z);
+        var angSq = (w.X * w.X) + (w.Y * w.Y) + (w.Z * w.Z);
+        var eps = NetworkPoseMotionEpsilon;
+        if (speedSq <= eps * eps && angSq <= eps * eps)
+            return false;
+
+        if (speedSq > eps * eps)
+        {
+            Position = new Vector3(
+                Position.X + (v.X * dt),
+                Position.Y + (v.Y * dt),
+                Position.Z + (v.Z * dt));
+        }
+
+        // Integrate yaw about world Y from angular velocity (C2S typically fills Y only).
+        // Compose a yaw delta so pitch/roll from the last C2S pose are preserved.
+        if (MathF.Abs(w.Y) > eps)
+        {
+            var half = w.Y * dt * 0.5f;
+            var yawDelta = new Quaternion(0f, MathF.Sin(half), 0f, MathF.Cos(half));
+            Rotation = MultiplyQuaternion(yawDelta, Rotation);
+        }
+
+        Ghost?.SetMaskBits(GhostObject.PositionMask);
+        return true;
+    }
+
+    private static Quaternion MultiplyQuaternion(Quaternion a, Quaternion b)
+    {
+        return new Quaternion(
+            (a.W * b.X) + (a.X * b.W) + (a.Y * b.Z) - (a.Z * b.Y),
+            (a.W * b.Y) - (a.X * b.Z) + (a.Y * b.W) + (a.Z * b.X),
+            (a.W * b.Z) + (a.X * b.Y) - (a.Y * b.X) + (a.Z * b.W),
+            (a.W * b.W) - (a.X * b.X) - (a.Y * b.Y) - (a.Z * b.Z));
+    }
 
     /// <summary>
     /// Applies a server-authoritative pose/velocity update (NPC movement tick) and marks the
@@ -381,12 +664,14 @@ public class Vehicle : SimpleObject
             case VehicleEquipmentSlot.Armor:
                 Armor = null;
                 if (DBData != null) DBData.Armor = 0;
+                RecalculateMaximumHitPoints(refillCurrent: false, triggerGhostUpdate: true);
                 EnsureGhostMaskDelivery(GhostVehicle.ChangeArmor);
                 return true;
 
             case VehicleEquipmentSlot.PowerPlant:
                 PowerPlant = null;
                 if (DBData != null) DBData.PowerPlant = 0;
+                ApplyPowerPlantCapacities(startPowerAtFull: false, clearHeat: false);
                 return true;
 
             case VehicleEquipmentSlot.Ornament:
@@ -398,6 +683,8 @@ public class Vehicle : SimpleObject
             case VehicleEquipmentSlot.RaceItem:
                 RaceItem = null;
                 if (DBData != null) DBData.RaceItem = 0;
+                ApplyRaceItemShieldFromEquipped(startAtFull: false);
+                EnsureGhostMaskDelivery(GhostVehicle.ShieldMaxMask | GhostVehicle.ShieldMask);
                 return true;
 
             case VehicleEquipmentSlot.WeaponMelee:
@@ -445,6 +732,7 @@ public class Vehicle : SimpleObject
                     return false;
                 Armor = armor;
                 if (DBData != null) DBData.Armor = coid;
+                RecalculateMaximumHitPoints(refillCurrent: false, triggerGhostUpdate: true);
                 EnsureGhostMaskDelivery(GhostVehicle.ChangeArmor);
                 return true;
 
@@ -453,6 +741,7 @@ public class Vehicle : SimpleObject
                     return false;
                 PowerPlant = powerPlant;
                 if (DBData != null) DBData.PowerPlant = coid;
+                ApplyPowerPlantCapacities(startPowerAtFull: true, clearHeat: true);
                 return true;
 
             case VehicleEquipmentSlot.Ornament:
@@ -464,6 +753,8 @@ public class Vehicle : SimpleObject
             case VehicleEquipmentSlot.RaceItem:
                 RaceItem = item;
                 if (DBData != null) DBData.RaceItem = coid;
+                ApplyRaceItemShieldFromEquipped(startAtFull: true);
+                EnsureGhostMaskDelivery(GhostVehicle.ShieldMaxMask | GhostVehicle.ShieldMask);
                 return true;
 
             case VehicleEquipmentSlot.WeaponMelee:
@@ -682,6 +973,14 @@ public class Vehicle : SimpleObject
             }
         }
 
+        // Heat/power capacity from PP (owner Character may be attached later at sector enter).
+        ApplyPowerPlantCapacities(startPowerAtFull: true, clearHeat: true);
+
+        // Chassis MaxHitPoint is almost always 1 in WAD; real max needs owner + armor.
+        // Owner is set by Character.LoadCurrentVehicle before LoadFromDB.
+        if (Owner is Character)
+            RecalculateMaximumHitPoints(refillCurrent: true, triggerGhostUpdate: false);
+
         return true;
     }
 
@@ -777,10 +1076,11 @@ public class Vehicle : SimpleObject
 
             vehiclePacket.PrimaryColor = PrimaryColor;
             vehiclePacket.SecondaryColor = SecondaryColor;
-            vehiclePacket.ArmorAdd = 0;
-            vehiclePacket.PowerMaxAdd = 0;
-            vehiclePacket.HeatMaxAdd = 0;
-            vehiclePacket.CooldownAdd = 0;
+            var vehicleSpecific = (CloneBaseObject as CloneBaseVehicle)?.VehicleSpecific;
+            vehiclePacket.ArmorAdd = vehicleSpecific?.ArmorAdd ?? 0;
+            vehiclePacket.PowerMaxAdd = vehicleSpecific?.PowerMaxAdd ?? 0;
+            vehiclePacket.HeatMaxAdd = vehicleSpecific?.HeatMaxAdd ?? 0;
+            vehiclePacket.CooldownAdd = vehicleSpecific?.CooldownAdd ?? 0;
             InventoryPacketFactory.ConfigureVehicleCargo(vehiclePacket, Inventory);
             vehiclePacket.MaxWeightWeaponFront = 0.0f;
             vehiclePacket.MaxWeightWeaponTurret = 0.0f;
@@ -940,6 +1240,12 @@ public class Vehicle : SimpleObject
     internal float GetDbRotationYForTests() => DBData?.RotationY ?? float.NaN;
     internal float GetDbRotationWForTests() => DBData?.RotationW ?? float.NaN;
 
+    /// <summary>Test hook: stamps angular velocity without going through ApplyServerMove.</summary>
+    internal void SetAngularVelocityForTests(Vector3 angularVelocity) => AngularVelocity = angularVelocity;
+
+    /// <summary>Test hook: stamps linear velocity without going through ApplyServerMove.</summary>
+    internal void SetVelocityForTests(Vector3 velocity) => Velocity = velocity;
+
     [ExcludeFromCodeCoverage]
     public void HandleMovement(VehicleMovedPacket packet)
     {
@@ -1076,7 +1382,16 @@ public class Vehicle : SimpleObject
         var cooldownMs = weaponSpec.RechargeTime > 0 ? weaponSpec.RechargeTime : 500;
         if (nowMs - lastFireRef < cooldownMs)
             return;
+
+        // Overheat lock: client FUN_0056aca0 blocks fire while heat >= max.
+        if (MaxHeat > 0 && CurrentHeat >= MaxHeat)
+            return;
+
         lastFireRef = nowMs;
+
+        // Weapon heat per shot (client FUN_0056ad00 → FUN_004f7210).
+        if (weaponSpec.Heat > 0)
+            AddHeat(weaponSpec.Heat);
 
         // Range gating
         var dist = Position.Dist(Target.Position);

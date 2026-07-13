@@ -101,7 +101,7 @@ span(1) = Experience[1]
 
 Examples: `span(1)=1000`, `span(5)=12000-8800=3200`.
 
-Lookup client-side: `FUN_0052c860` @ `0x0052C860` (map keyed by level → `intExperience` at record `+0x10`).
+Lookup client-side: `Experience_GetCumulativeThreshold` @ `0x0052C860` (map keyed by level → `intExperience` at record `+0x10`).
 
 ### `tCreatureExperienceLevel` — kill base XP
 
@@ -127,7 +127,7 @@ Lookup client-side: `FUN_0052c860` @ `0x0052C860` (map keyed by level → `intEx
 
 126 rows in retail data (0..125).
 
-Lookup: `FUN_004c97b0` @ `0x004C97B0`.
+Lookup: `Experience_GetCreatureXpForLevel` @ `0x004C97B0`.
 
 ### `tQuestXPLookup` — mission XP fraction
 
@@ -218,7 +218,7 @@ if isKillPath:
   else:
     spree = 0
   lastKillTs = now
-  if weaponContextAllowsBonus(FUN_004ce340):
+  if CVOGCharacter_WeaponAllowsKillXpBonus():
     // scale amount by (table[spreeClamped] + 1.0f); spree clamped to 0..15
     amount = round((table[i] + 1.0f) * amount)
 
@@ -236,9 +236,9 @@ if scaled == 0: return false
 totalXp(+0x730) += scaled
 
 // 6) Level up / down loops (guard ~300 iterations)
-while totalXp >= threshold(currentLevel):  // FUN_0052c860
-  LevelUp(FUN_00532d30)                   // points from tExperienceLevel
-// negative XP can de-level via FUN_005330e0
+while totalXp >= Experience_GetCumulativeThreshold(currentLevel):
+  CVOGCharacter_LevelUp(...)                   // points from tExperienceLevel
+// negative XP can de-level via CVOGCharacter_LevelDown
 
 return true
 ```
@@ -262,7 +262,7 @@ For AutoCore, prefer: **server computes final integer amount** (including spree 
 | `+0x738` | Spree / level-hint byte |
 | `+0x6b4` | Special mode flag (affects cap) |
 
-#### Level-up: `FUN_00532d30` @ `0x00532D30`
+#### Level-up: `CVOGCharacter_LevelUp` @ `0x00532D30`
 
 On each level gained:
 
@@ -270,7 +270,7 @@ On each level gained:
 - Add `iSkillPoints`, `iAttributePoints`, `iResearchPoints` from `tExperienceLevel` for the new level.
 - Dirty flags, skill refresh, `CVOGCharacter_SearchAutoMissions`, optional LogicUI type `0x2D`.
 
-De-level: `FUN_005330e0` reverses point grants.
+De-level: `CVOGCharacter_LevelDown` @ `0x005330E0` reverses point grants.
 
 ---
 
@@ -300,9 +300,9 @@ Call-site product (simplified):
 mult = XPPercent * participation * convoyShareOrOne
 ```
 
-### Level-difference base — `FUN_004c9800` @ `0x004C9800`
+### Level-difference base — `Experience_LevelDiffBaseXp` @ `0x004C9800`
 
-Uses `tCreatureExperienceLevel` via `FUN_004c97b0`.
+Uses `tCreatureExperienceLevel` via `Experience_GetCreatureXpForLevel`.
 
 Prep in kill XP (before lookup): if the high side of the level pair exceeds the low by more than **3**, clamp the high side to `low + 3`.
 
@@ -338,7 +338,7 @@ Victim higher than player: lookup a higher creature-level row (difference clampe
 base' = CreatureXP[boostedLevel] + floor(abs(extraDiff) * CreatureXP[...] * 0.005)
 ```
 
-(Exact intermediate clamp matches `FUN_004c9800` negative branch — port from assembly if tests disagree.)
+(Exact intermediate clamp matches `Experience_LevelDiffBaseXp` negative branch — port from assembly if tests disagree.)
 
 ### Final kill amount — `CVOGCombat_CalculateAndAwardKillXP`
 
@@ -361,11 +361,11 @@ AddExperience(character, xp, isKillPath=1)
 // local player may also emit combat floater type 3
 ```
 
-### Open issue: `GLOBAL_KILL_SCALAR` (`DAT_00b037f8`)
+### Open issue: `GLOBAL_KILL_SCALAR` (`g_flGlobalKillXpScalar` @ `0x00B037F8`)
 
 | Fact | Detail |
 |------|--------|
-| Use site | `0x004D8142` — `FMUL dword ptr [0x00B037F8]` |
+| Use site | `0x004D8142` — `FMUL dword ptr [g_flGlobalKillXpScalar]` |
 | Static image | BSS dword **0** |
 | Writers in binary | **None** found |
 | Effect | Client-local kill awards always compute **0** XP in this build |
@@ -408,11 +408,11 @@ GiveXp(killer, amount, source=Kill)
 
 | Situation | XP | Skill/attrib on objective |
 |-----------|----|---------------------------|
-| Advance to next objective | **No** `AddExperience` in this path | Yes (`FUN_005312c0` / `FUN_00531250`) |
-| **Final** objective (mission complete) | **Yes** — `FUN_0059DDE0` then `AddExperience(calc, 0)` | Yes on complete branch |
-| Credits on complete | `FUN_0059DF20` | added to currency fields |
+| Advance to next objective | **No** `AddExperience` in this path | Yes (`FUN_005312c0` / `FUN_00531250` point grants) |
+| **Final** objective (mission complete) | **Yes** — `Mission_ComputeObjectiveXp` then `AddExperience(calc, 0)` | Yes on complete branch |
+| Credits on complete | `Mission_ComputeObjectiveCredits` | added to currency fields |
 
-### Calculator — `FUN_0059DDE0` @ `0x0059DDE0`
+### Calculator — `Mission_ComputeObjectiveXp` @ `0x0059DDE0`
 
 ```
 frac     = tQuestXPLookup[objective.XPIndex].rlLevelXP
@@ -428,7 +428,7 @@ else:
 xp = (int)(levelSpan * spanMult)        // trunc toward zero in decompile
 ```
 
-Complete path then applies a **±0.5001** style adjust (`DAT_00aaa6d0 ≈ 0.5001`) before int cast when packaging the grant (nearest-int behavior).
+Complete path then applies a **±0.5001** style adjust (`g_flMissionXpRoundBias` @ `0x00AAA6D0` ≈ 0.5001) before int cast when packaging the grant (nearest-int behavior).
 
 **Worked example:**
 
@@ -444,7 +444,7 @@ Parsed and logged by AutoCore (`NpcInteractHandler` incomplete-handler text). Cl
 - fallback only if `XPIndex == 0` and calc returns 0 **and** live missions prove they need it, or  
 - data for special requirement types (e.g. crazy-taxi `ExpReward` tables — separate XML export path @ `FUN_005acf10`).
 
-### Credits sibling — `FUN_0059DF20`
+### Credits sibling — `Mission_ComputeObjectiveCredits` @ `0x0059DF20`
 
 Same shape as XP but uses credit lookup tables / `CreditsIndex` + `CreditScaler`. Implement beside mission XP when economy is wired.
 
@@ -503,7 +503,7 @@ Template fields (`ReactionTemplate`): `GenericVar1` (int), `GenericVar2` (float)
 
 Client sites near `0x0057DF4B` / `0x0057DFFA` convert a float amount to int and call `AddExperience(..., 0)`.
 
-**XP needed to reach relative level** — `FUN_0052DEC0` @ `0x0052DEC0`:
+**XP needed to reach relative level** — `Experience_XpToReachRelativeLevel` @ `0x0052DEC0`:
 
 ```
 need = (int)(ExperienceThreshold(level + delta - 1) / personalXpGain) - currentXp + 1
@@ -517,13 +517,13 @@ AutoCore: type 28 is **not** handled in `Reaction.TriggerCore` (falls through / 
 
 ## Outpost pulse XP
 
-`FUN_00607830` @ `0x00607830`:
+`Outpost_ComputePulseXp` @ `0x00607830`:
 
 ```
 if outpostState[+0x238] < 1: return 0
 
 levelSpan = Exp(playerLevel) - Exp(playerLevel - 1)   // 0 if level <= 1 edge cases
-percent   = pulseTable[fPercentLevelXP]                 // FUN_006075b0
+percent   = Outpost_GetPulseXpPercent(...)             // 0x006075B0
 scalar    = outpost[+0x21c]
 
 amount = round_to_int(levelSpan * percent * scalar)
@@ -882,25 +882,44 @@ When implementing (TDD):
 
 ## Ghidra anchors
 
+Human-readable names, plate comments, prototypes, structs, and enums live in the Ghidra DB on `autoassault.exe` (function tag **`XP`**).
+
+**Naming convention:** suffixes `_INFERRED` (or plate notes “INFERRED”) mean layout/name is reverse-engineered from use, not confirmed by retail symbols. Unsuffixed names are high-confidence from consistent use / packet wire.
+
+**Types (Ghidra):** `GiveXpPacketBody`, `ExperienceLevelMapEntry_INFERRED`, `CreatureXpMapEntry_INFERRED`, `QuestXpLookupMapEntry_INFERRED`, enums `CombatFloaterType` (`XP=3`), `XpIsKillPath`.
+
 | Address | Name / role |
 |---------|-------------|
-| `0x0080AE70` | `Client_AwardKillExperience` — S2C `GiveXP` |
-| `0x00533C30` | `CVOGReaction_AddExperience` — apply + level loops |
-| `0x004D80B0` | `CVOGCombat_CalculateAndAwardKillXP` |
-| `0x004DA630` | Death/loot → kill XP / convoy |
-| `0x004C9800` | Level-diff base (grey/hard) |
-| `0x004C97B0` | Creature XP table lookup |
-| `0x0052C860` | Player XP threshold lookup |
-| `0x00532D30` | Level-up (+ points) |
-| `0x005330E0` | De-level |
+| `0x0080AE70` | `Client_AwardKillExperience` — S2C `GiveXP` (0x205F) handler |
+| `0x00533C30` | `CVOGReaction_AddExperience` — apply XP + level-up/down loops |
+| `0x004D80B0` | `CVOGCombat_CalculateAndAwardKillXP` — kill formula + award |
+| `0x004DA630` | `CVOGCombat_OnDeathAwardKillXp` — death/loot → kill XP / convoy |
+| `0x004C9800` | `Experience_LevelDiffBaseXp` — grey/hard level-diff base |
+| `0x004C97B0` | `Experience_GetCreatureXpForLevel` — `tCreatureExperienceLevel` |
+| `0x0052C860` | `Experience_GetCumulativeThreshold` — `tExperienceLevel` |
+| `0x00532D30` | `CVOGCharacter_LevelUp` — +skill/attrib/research points |
+| `0x005330E0` | `CVOGCharacter_LevelDown` — reverse one level |
+| `0x004CE340` | `CVOGCharacter_WeaponAllowsKillXpBonus` — kill-path spree gate |
 | `0x00533F90` | `CVOGReaction_CompleteObjective` |
-| `0x0059DDE0` | Mission XP calculator |
-| `0x0059DF20` | Mission credits calculator |
-| `0x0052DEC0` | XP required for relative level |
-| `0x00607830` | Outpost pulse XP amount |
-| `0x006075B0` | Outpost pulse percent table pick |
+| `0x0059DDE0` | `Mission_ComputeObjectiveXp` — mission complete XP |
+| `0x0059DF20` | `Mission_ComputeObjectiveCredits` — mission credits sibling |
+| `0x0052DEC0` | `Experience_XpToReachRelativeLevel` — reaction SetLevel helper |
+| `0x00607830` | `Outpost_ComputePulseXp` — outpost pulse amount |
+| `0x006075B0` | `Outpost_GetPulseXpPercent` — pulse percent table pick |
 | `0x005326B0` | `CVOGCharacter_SetAreaExploredBit` (no XP) |
 | `0x005D6C60` | `Client_LocalDiscoveryTick` (no XP) |
+
+### Named globals (kill / mission formula constants)
+
+| Address | Name | Value / note |
+|---------|------|--------------|
+| `0x00B037F8` | `g_flGlobalKillXpScalar` | BSS **0** in retail image (client kill XP always 0) |
+| `0x009CBF80` | `g_flKillSpreeBonusPerStack` | `0.05f` |
+| `0x00AAA6A4` | `g_flHardKillInterpolate` | `0.005f` |
+| `0x00AAA6D0` | `g_flMissionXpRoundBias` | `≈ 0.5001f` nearest-int bias |
+| `0x00A0F730` | `g_flMultiKillCountBlend` | `0.1f` convoy blend |
+| `0x009CBB68` | `g_GreyKillSlopeA` | `1.5` (double) |
+| `0x009CBB60` | `g_GreyKillSlopeB` | `-0.1` (double) |
 
 ---
 

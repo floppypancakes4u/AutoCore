@@ -514,6 +514,25 @@ public class ExperienceServiceRegressionTests
         Assert.AreEqual(character.ObjectId.Coid, packet.CharacterId.Coid);
     }
 
+    [TestMethod]
+    public void BuildCharacterLevelPacket_IncludesVehicleHealth_ForLoginHud()
+    {
+        // Login progress sends ExperienceService.BuildCharacterLevelPacket after CreateVehicle.
+        // Client CVOGCharacter_ApplyCharacterLevelPacket applies Health/HealthMaximum to the
+        // vehicle; omitting them leaves 0 and the bar clamps to 1 until /hp.
+        var character = MakeCharacter(3020, xp: 100, level: 2);
+        var vehicle = new Vehicle();
+        vehicle.SetCoid(3021, true);
+        vehicle.SetMaximumHP(850, triggerGhostUpdate: false);
+        vehicle.SetCurrentHP(640, triggerGhostUpdate: false);
+        character.SetCurrentVehicleForTests(vehicle);
+
+        var packet = _svc.BuildCharacterLevelPacket(character);
+
+        Assert.AreEqual(640, packet.Health, "login CharacterLevel must carry current vehicle HP");
+        Assert.AreEqual(850, packet.HealthMaximum, "login CharacterLevel must carry max vehicle HP");
+    }
+
     // --- Threshold / creature / quest fallbacks when injectables null ---
 
     [TestMethod]

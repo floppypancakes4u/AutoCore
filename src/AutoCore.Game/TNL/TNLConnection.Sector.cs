@@ -7,6 +7,7 @@ using AutoCore.Game.Entities;
 using AutoCore.Game.Extensions;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Skills;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Global;
 using AutoCore.Game.Packets.Sector;
@@ -16,6 +17,120 @@ using AutoCore.Utils;
 
 public partial class TNLConnection
 {
+    private void HandleSkillIncrementPacket(BinaryReader reader)
+    {
+        var packet = new SkillIncrementPacket();
+        packet.Read(reader);
+        if (!packet.SkillId.HasValue)
+        {
+            Logger.WriteLog(LogType.Network, "SkillIncrement capture: bodyLength={0} body={1}", packet.RawBody.Length, Convert.ToHexString(packet.RawBody));
+            return;
+        }
+        if (!CharacterSkillService.Instance.TryIncrement(CurrentCharacter, packet.SkillId.Value, out var error))
+            Logger.WriteLog(LogType.Debug, "Rejected skill increment {0}: {1}", packet.SkillId, error);
+        else
+            SendGamePacket(CharacterLevelManager.Instance.BuildPacket(CurrentCharacter));
+    }
+
+    private void HandleAttributeIncrementPacket(BinaryReader reader)
+    {
+        var packet = new AttributeIncrementPacket();
+        packet.Read(reader);
+        if (CurrentCharacter == null)
+        {
+            Logger.WriteLog(LogType.Debug, "Rejected attribute increment: no character");
+            return;
+        }
+
+        if (!CharacterAttributeService.Instance.TryIncrement(CurrentCharacter, packet.AttributeMask, out var error))
+        {
+            Logger.WriteLog(LogType.Debug, "Rejected attribute increment mask=0x{0:X8}: {1}", packet.AttributeMask, error);
+            return;
+        }
+
+        // Client already applied optimistically; push absolute CharacterLevel (attrs + HP).
+        SendGamePacket(CharacterLevelManager.Instance.BuildPacket(CurrentCharacter));
+    }
+
+    private void HandleRequestCastSkillPacket(BinaryReader reader)
+    {
+        var packet = new RequestCastSkillPacket();
+        packet.Read(reader);
+        if (CurrentCharacter == null || !CurrentCharacter.LearnedSkills.TryGetValue(packet.SkillId, out var rank))
+        {
+            if (CurrentCharacter != null)
+            {
+                SendGamePacket(new SkillStatusEffectPacket
+                {
+                    SkillId = packet.SkillId,
+                    SkillLevel = 0,
+                    ApplyPower = 0,
+                    Status = (byte)SkillResponse.ServerChecksFailed,
+                    Caster = CurrentCharacter.ObjectId,
+                    PosX = packet.TargetPosition.X,
+                    PosY = packet.TargetPosition.Y,
+                    PosZ = packet.TargetPosition.Z,
+                    Flag = 0,
+                });
+                // Client already spent optimistically; push server current so the HUD can restore.
+                CharacterLevelManager.Instance.SyncCurrentPowerGhost(CurrentCharacter);
+            }
+            Logger.WriteLog(LogType.Debug, "Rejected RequestCastSkill skill={0}: skill is not learned", packet.SkillId);
+            return;
+        }
+
+        if (!SkillService.TryCastPlayer(
+                CurrentCharacter,
+                packet.SkillId,
+                rank,
+                packet.Target,
+                packet.TargetPosition,
+                out var response))
+        {
+            SendGamePacket(new SkillStatusEffectPacket
+            {
+                SkillId = packet.SkillId,
+                SkillLevel = rank,
+                ApplyPower = 0,
+                Status = (byte)response,
+                Caster = CurrentCharacter.ObjectId,
+                PosX = packet.TargetPosition.X,
+                PosY = packet.TargetPosition.Y,
+                PosZ = packet.TargetPosition.Z,
+                Flag = 0,
+            });
+            // Client spent optimistically; server often did not (CD/range/power). Resync current.
+            CharacterLevelManager.Instance.SyncCurrentPowerGhost(CurrentCharacter);
+            Logger.WriteLog(LogType.Debug,
+                "RequestCastSkill failed: skill={0} rank={1} response={2} target={3} pos={4}",
+                packet.SkillId, rank, response, packet.Target, packet.TargetPosition);
+        }
+    }
+
+    private void HandleQuickBarUpdatePacket(BinaryReader reader)
+    {
+        var packet = new QuickBarUpdatePacket();
+        packet.Read(reader);
+        if (!packet.IsValid)
+        {
+            Logger.WriteLog(LogType.Network, "QuickBarUpdate short body: bodyLength={0} body={1}",
+                packet.RawBody.Length, Convert.ToHexString(packet.RawBody));
+            return;
+        }
+
+        if (CurrentCharacter == null)
+            return;
+
+        // Mutual exclusivity: skill place clears item; item place/clear clears skill.
+        if (!CharacterSkillService.Instance.TryUpdateQuickBar(
+                CurrentCharacter, packet.Slot, packet.ItemCoid, packet.SkillId, out var error))
+            Logger.WriteLog(LogType.Debug, "Rejected QuickBarUpdate slot={0} isItem={1} value={2}: {3}",
+                packet.Slot, packet.IsItem, packet.Value, error);
+        else
+            Logger.WriteLog(LogType.Network, "QuickBarUpdate applied: slot={0} isItem={1} skill={2} item={3}",
+                packet.Slot, packet.IsItem, packet.SkillId, packet.ItemCoid);
+    }
+
     private void HandleTransferFromGlobalPacket(BinaryReader reader)
     {
         var packet = new TransferFromGlobalPacket();
@@ -100,11 +215,16 @@ public partial class TNLConnection
 
         SetScopeObject(character.Ghost);
 
-        // Local character always in scope. Do not ObjectLocalScopeAlways the vehicle — the client
-        // constructs it from CreateVehicleExtended; a GhostVehicle initial clears +0x258.
+        // Local character always in scope.
         ObjectLocalScopeAlways(character.Ghost);
 
         SendLocalPlayerCreatePackets(character);
+
+        // Scope the local vehicle after CreateVehicleExtended so combat ghost masks
+        // (Heat/Shield/HP/Power) can reach the owner. GhostVehicle.PackUpdate uses an
+        // owner-combat initial profile (no equipment/pose) to avoid clearing +0x258.
+        if (character.CurrentVehicle?.Ghost != null)
+            ObjectLocalScopeAlways(character.CurrentVehicle.Ghost);
     }
 
     /// <summary>
@@ -152,6 +272,8 @@ public partial class TNLConnection
         SetScopeObject(character.Ghost);
 
         ObjectLocalScopeAlways(character.Ghost);
+        if (character.CurrentVehicle?.Ghost != null)
+            ObjectLocalScopeAlways(character.CurrentVehicle.Ghost);
     }
 
     /// <summary>
@@ -174,6 +296,34 @@ public partial class TNLConnection
         var charPacket = new CreateCharacterExtendedPacket();
         var vehiclePacket = new CreateVehicleExtendedPacket();
 
+        // Load XP / unspent pools / spent attributes before create packets so Tech feeds
+        // HP+heat recalcs and CreateCharacterExtended attribute fields.
+        var xpSvc = AutoCore.Game.Experience.ExperienceService.Instance;
+        xpSvc.TryCreateLoginRestorePacket(
+            character,
+            AutoCore.Game.Experience.CharacterProgressPersistence.Instance);
+
+        // CreateCharacterExtended.Credits stay 0 (login-safe). Reload money from DB now so
+        // later CharacterLevel restore has the live balance.
+        var currencyRestore = CurrencySync.TryCreateLoginRestorePacket(
+            character,
+            InventoryPersistence.Instance);
+        if (currencyRestore != null)
+        {
+            Logger.WriteLog(
+                LogType.Network,
+                $"Login currency reloaded: character={character.ObjectId.Coid} credits={character.Credits}");
+        }
+
+        // Re-seed heat/power from equipped PP now that Owner is the Character (LoadFromDB
+        // may have run before ownership was attached). Uses loaded Tech for heat max.
+        character.CurrentVehicle.ApplyPowerPlantCapacities(startPowerAtFull: true, clearHeat: true);
+        character.CurrentVehicle.ApplyRaceItemShieldFromEquipped(startAtFull: true);
+        // Clonebase MaxHitPoint is stub 1 — recompute retail max before create + CharacterLevel.
+        character.CurrentVehicle.RecalculateMaximumHitPoints(refillCurrent: true, triggerGhostUpdate: false);
+        // Ensure cargo matches chassis InventorySlots (retail 6×13×pages) before create packets.
+        character.ApplyCargoCapacityFromCurrentVehicle(persist: false);
+
         character.WriteToPacket(charPacket);
         character.CurrentVehicle.WriteToPacket(vehiclePacket);
 
@@ -195,24 +345,6 @@ public partial class TNLConnection
         // gates now that quests are loaded and both character + vehicle are on the map.
         character.Map?.ApplyMissionPhaseWorldState(
             character.CurrentVehicle ?? (ClonedObjectBase)character);
-
-        // CreateCharacterExtended.Credits stay 0 (login-safe). Reload money + progress from DB,
-        // then push client state: GiveXP seed (local player, no TFID) + absolute CharacterLevel.
-        var currencyRestore = CurrencySync.TryCreateLoginRestorePacket(
-            character,
-            InventoryPersistence.Instance);
-        if (currencyRestore != null)
-        {
-            // Credits already applied to character via CurrencySync reload.
-            Logger.WriteLog(
-                LogType.Network,
-                $"Login currency reloaded: character={character.ObjectId.Coid} credits={character.Credits}");
-        }
-
-        var xpSvc = AutoCore.Game.Experience.ExperienceService.Instance;
-        xpSvc.TryCreateLoginRestorePacket(
-            character,
-            AutoCore.Game.Experience.CharacterProgressPersistence.Instance);
 
         // Always push Level/XP/currency/points after create (client XP starts at 0).
         xpSvc.SendLoginProgressToClient(character);

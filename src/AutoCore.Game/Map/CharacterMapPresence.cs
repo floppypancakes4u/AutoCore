@@ -11,6 +11,8 @@ public sealed class CharacterMapPresence
     readonly HashSet<long> _suppressed = new();
     readonly HashSet<long> _materialized = new();
     readonly HashSet<long> _ownedCombat = new();
+    /// <summary>Deliver CBIDs that already received Create+CreateCreature this continent visit.</summary>
+    readonly HashSet<int> _deliverTurnInReady = new();
 
     public int ContinentId { get; private set; } = -1;
 
@@ -35,6 +37,7 @@ public sealed class CharacterMapPresence
         _suppressed.Clear();
         _materialized.Clear();
         _ownedCombat.Clear();
+        _deliverTurnInReady.Clear();
     }
 
     public void Clear()
@@ -43,6 +46,20 @@ public sealed class CharacterMapPresence
         _suppressed.Clear();
         _materialized.Clear();
         _ownedCombat.Clear();
+        _deliverTurnInReady.Clear();
+    }
+
+    /// <summary>
+    /// True after a successful one-shot deliver turn-in setup (Create + CreateCreature) for this CBID.
+    /// Prevents AutoPatrol (client spam while in pad volume) from re-firing every tick.
+    /// </summary>
+    public bool IsDeliverTurnInReady(int deliverCbid)
+        => deliverCbid > 0 && _deliverTurnInReady.Contains(deliverCbid);
+
+    public void MarkDeliverTurnInReady(int deliverCbid)
+    {
+        if (deliverCbid > 0)
+            _deliverTurnInReady.Add(deliverCbid);
     }
 
     public bool IsSuppressed(long coid) => coid > 0 && _suppressed.Contains(coid);
@@ -72,6 +89,17 @@ public sealed class CharacterMapPresence
             return;
         _suppressed.Add(coid);
         _materialized.Remove(coid);
+    }
+
+    /// <summary>
+    /// Clears personal suppress so a fam-default (or later re-materialized) COID is interactable again.
+    /// Used when phase rules previously suppressed a same-NPC deliver giver incorrectly.
+    /// </summary>
+    public void Unsuppress(long coid)
+    {
+        if (coid <= 0)
+            return;
+        _suppressed.Remove(coid);
     }
 
     public void Materialize(long coid)

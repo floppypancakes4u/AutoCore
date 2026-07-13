@@ -108,7 +108,12 @@ public static class NpcInteractHandler
     /// After dialog deliver: wait briefly, then journal resync + mission-state trigger re-eval.
     /// Server state (quest removed / completed) is already applied before this is scheduled.
     /// </summary>
-    private static void ScheduleDialogTurnInFollowup(TNLConnection conn, Character character, int missionId)
+    private static void ScheduleDialogTurnInFollowup(
+        TNLConnection conn,
+        Character character,
+        int missionId,
+        int objectiveId = 0,
+        bool forceClientObjectiveComplete = false)
     {
         if (conn == null || character == null)
             return;
@@ -122,7 +127,11 @@ public static class NpcInteractHandler
         }
 
         PendingDialogTurnInFollowups[coid] = cts;
+        // When forcing 0x2070 (multi-req patrol+deliver), wait at least for GRC soft-pedal so
+        // CompleteDynamicObjective does not stack with core-mission interact FX MSXML.
         var delayMs = Math.Max(0, DialogTurnInFollowupDelayMs);
+        if (forceClientObjectiveComplete)
+            delayMs = Math.Max(delayMs, Math.Max(0, MissionClientSoftPedal.GroupReactionSuppressMs));
         var token = cts.Token;
         var schedule = ScheduleDelayedWork ?? DefaultScheduleDelayedWork;
 
@@ -138,15 +147,34 @@ public static class NpcInteractHandler
                     if (conn.CurrentCharacter != character)
                         return;
 
+                    // Multi-req objectives (patrol + deliver, Final Exam class): dialog turn-in
+                    // completes server-side without 0x2070, but the client can leave AutoPatrol
+                    // waypoints active. Force-complete after soft-pedal so journal/waypoints clear.
+                    if (forceClientObjectiveComplete && objectiveId > 0)
+                    {
+                        conn.SendGamePacket(new CompleteDynamicObjectivePacket
+                        {
+                            MissionId = missionId,
+                            ObjectiveId = objectiveId,
+                        });
+                        Logger.WriteLog(LogType.Debug,
+                            "MissionDialogResponse: delayed 0x2070 force-complete mission={0} objective={1}",
+                            missionId,
+                            objectiveId);
+                    }
+
                     PushJournalMissionList(conn, character);
-                    TriggerManager.Instance.OnMissionStateChanged(
-                        character.CurrentVehicle ?? (ClonedObjectBase)character);
+                    var phaseActivator = character.CurrentVehicle ?? (ClonedObjectBase)character;
+                    TriggerManager.Instance.OnMissionStateChanged(phaseActivator);
+                    // Keep pad form / suppress original giver after turn-in (personal presence).
+                    character.Map?.ReplayMissionWorldSetup(phaseActivator);
 
                     Logger.WriteLog(LogType.Debug,
-                        "MissionDialogResponse: delayed follow-up after deliver mission={0} coid={1} delayMs={2}",
+                        "MissionDialogResponse: delayed follow-up after deliver mission={0} coid={1} delayMs={2} forceComplete={3}",
                         missionId,
                         coid,
-                        delayMs);
+                        delayMs,
+                        forceClientObjectiveComplete ? 1 : 0);
                 }
                 finally
                 {
@@ -157,6 +185,13 @@ public static class NpcInteractHandler
             delayMs,
             token);
     }
+
+    /// <summary>
+    /// True when the objective has non-deliver requirements (e.g. AutoComplete patrol) that the
+    /// client may still track after dialog turn-in, so a delayed 0x2070 is needed to clear UI.
+    /// </summary>
+    internal static bool ObjectiveNeedsForceClientCompleteAfterDeliver(MissionObjective objective)
+        => MissionWorldPhaseRules.NeedsForceClientCompleteAfterDeliver(objective);
 
     /// <summary>
     /// True when an NPC CBID is involved in any mission as either the giver (<see cref="Mission.NPC"/>)
@@ -200,33 +235,43 @@ public static class NpcInteractHandler
             return;
         }
 
-        // Prefer live object; fall back to map template pose for client-only world objects.
-        var targetObj = character.Map.GetObjectByCoid(targetCoid);
-        if (!TryGetWorldPosition(character.Map, targetCoid, out var targetPos))
-        {
-            Logger.WriteLog(LogType.Debug, "UseObject: no object/template for coid {0}", targetCoid);
-            return;
-        }
-
         var playerPos = character.CurrentVehicle?.Position ?? character.Position;
-        if (playerPos.DistSq(targetPos) > MaxInteractDistance * MaxInteractDistance)
-        {
-            Logger.WriteLog(LogType.Debug,
-                "UseObject: rejected out of range charCoid={0} target={1}",
-                character.ObjectId.Coid,
-                targetCoid);
-            return;
-        }
 
         // World-object interact (use-item / use-object objectives) before NPC dialog.
         if (TryCompleteUseItemObjective(conn, character, targetCoid, packet.ObjectiveId))
             return;
 
-        if (targetObj is not Creature npc || !IsNpc(npc))
+        // Resolve NPC: live creature, spawn-marker → child, or nearby active deliver target.
+        // Client 0x206C Create often uses map-local COIDs while server pad NPCs use global
+        // MapNpcIdentity TFIDs — direct GetObjectByCoid then fails; fall back by CBID+range.
+        var npc = FindNpcByCoid(character, character.Map, targetCoid)
+            ?? TryResolveNearbyDeliverNpc(character, packet.ObjectiveId, playerPos, targetCoid);
+
+        if (npc == null)
         {
             Logger.WriteLog(LogType.Debug,
-                "UseObject: target {0} is not an NPC and no matching use-item objective",
-                targetCoid);
+                "UseObject: no NPC resolved for target={0} objectiveId={1}",
+                targetCoid,
+                packet.ObjectiveId);
+            return;
+        }
+
+        if (character.MapPresence.IsSuppressed(npc.ObjectId.Coid))
+        {
+            Logger.WriteLog(LogType.Debug,
+                "UseObject: resolved NPC coid={0} is suppressed for char={1}",
+                npc.ObjectId.Coid,
+                character.ObjectId.Coid);
+            return;
+        }
+
+        var targetPos = npc.Position;
+        if (playerPos.DistSq(targetPos) > MaxInteractDistance * MaxInteractDistance)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "UseObject: rejected out of range charCoid={0} npc={1}",
+                character.ObjectId.Coid,
+                npc.ObjectId.Coid);
             return;
         }
 
@@ -252,6 +297,82 @@ public static class NpcInteractHandler
 
         PrepareClientTurnInDialog(conn, character, npcCbid, dialogMissions);
         SendNpcMissionDialog(conn, npc.ObjectId, dialogMissions);
+    }
+
+    /// <summary>
+    /// When the client clicks a map-local Create body that has no matching server COID, resolve
+    /// an active deliver-turn-in NPC by CBID near the player (Final Exam pad Gunny class).
+    /// </summary>
+    internal static Creature TryResolveNearbyDeliverNpc(
+        Character character,
+        int objectiveId,
+        Vector3 playerPos,
+        long clickedCoid)
+    {
+        if (character?.Map == null)
+            return null;
+
+        var rangeSq = MaxInteractDistance * MaxInteractDistance;
+        Creature best = null;
+        var bestDist = float.MaxValue;
+
+        foreach (var quest in character.CurrentQuests)
+        {
+            if (character.CompletedMissionIds.Contains(quest.MissionId))
+                continue;
+
+            var mission = AssetManager.Instance.GetMission(quest.MissionId);
+            if (mission == null
+                || !mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var objective)
+                || objective?.Requirements == null)
+            {
+                continue;
+            }
+
+            // Prefer the objective the client named when it belongs to this mission.
+            MissionObjective scanObjective = objective;
+            if (objectiveId > 0 && objective.ObjectiveId != objectiveId)
+            {
+                var hinted = AssetManager.Instance.GetObjectiveById(objectiveId);
+                if (hinted != null && hinted.QuestId == quest.MissionId)
+                    scanObjective = hinted;
+                // else keep active objective (client hint may be stale)
+            }
+
+            foreach (var deliver in scanObjective.Requirements.OfType<ObjectiveRequirementDeliver>())
+            {
+                if (!deliver.NPCTargetCompletes || deliver.NPCTargetCBID <= 0)
+                    continue;
+
+                foreach (var obj in character.Map.Objects.Values)
+                {
+                    if (obj is not Creature creature || creature is Character)
+                        continue;
+                    if (creature.CBID != deliver.NPCTargetCBID || !IsNpc(creature))
+                        continue;
+                    if (IsSuppressedFor(character, creature.ObjectId.Coid))
+                        continue;
+
+                    var dist = playerPos.DistSq(creature.Position);
+                    if (dist > rangeSq || dist >= bestDist)
+                        continue;
+
+                    bestDist = dist;
+                    best = creature;
+                }
+            }
+        }
+
+        if (best != null)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "UseObject: resolved deliver NPC cbid={0} coid={1} from click coid={2} (client/server TFID mismatch)",
+                best.CBID,
+                best.ObjectId.Coid,
+                clickedCoid);
+        }
+
+        return best;
     }
 
     /// <summary>
@@ -1035,15 +1156,22 @@ public static class NpcInteractHandler
         // Server-driven completes (kill/patrol/useitem) still use AdvanceOrCompleteObjective → 0x2070.
         MissionClientSoftPedal.ArmAfterDialogTurnIn(character.ObjectId.Coid);
 
+        var forceClientComplete = ObjectiveNeedsForceClientCompleteAfterDeliver(objective);
         Logger.WriteLog(LogType.Debug,
-            "MissionDialogResponse: completed deliver mission={0} objective={1} npcCbid={2} (no 0x2070; follow-up delay {3}ms; GRC suppress {4}ms)",
+            "MissionDialogResponse: completed deliver mission={0} objective={1} npcCbid={2} (immediate 0x2070={3}; follow-up forceComplete={4}; GRC suppress {5}ms)",
             missionId,
             objectiveId,
             npcCbid,
-            DialogTurnInFollowupDelayMs,
+            0,
+            forceClientComplete ? 1 : 0,
             MissionClientSoftPedal.GroupReactionSuppressMs);
 
-        ScheduleDialogTurnInFollowup(conn, character, missionId);
+        ScheduleDialogTurnInFollowup(
+            conn,
+            character,
+            missionId,
+            objectiveId,
+            forceClientObjectiveComplete: forceClientComplete);
 
         // Do not auto-open follow-up offer dialog — player re-interacts (UseObject).
         if (npcCbid > 0)
@@ -1106,11 +1234,52 @@ public static class NpcInteractHandler
             if (vehicle.Position.DistSq(targetPos) > radius * radius)
                 continue;
 
+            // Patrol + deliver on same objective (Final Exam class): reaching the pad waypoint
+            // must not finish the mission — NPC deliver still required. Client sends AutoPatrol
+            // every tick while in volume; EnsureDeliverTurnInNpc is idempotent after first setup.
+            if (ObjectiveHasBlockingSiblingRequirements(objective, RequirementType.Patrol))
+            {
+                foreach (var deliver in objective.Requirements.OfType<ObjectiveRequirementDeliver>())
+                {
+                    if (!deliver.NPCTargetCompletes || deliver.NPCTargetCBID <= 0)
+                        continue;
+
+                    // Skip all work (and logging) once pad NPC is live and client was notified.
+                    if (character.Map != null
+                        && character.MapPresence.IsDeliverTurnInReady(deliver.NPCTargetCBID)
+                        && character.Map.MapHasPresentEntityWithCbidForTests(
+                            character, deliver.NPCTargetCBID))
+                    {
+                        continue;
+                    }
+
+                    Logger.WriteLog(LogType.Debug,
+                        "AutoPatrol: patrol target={0} mission={1} seq={2} — sibling deliver; ensuring pad NPC cbid={3} once",
+                        targetCoid,
+                        quest.MissionId,
+                        quest.ActiveObjectiveSequence,
+                        deliver.NPCTargetCBID);
+
+                    character.Map?.EnsureDeliverTurnInNpc(vehicle, deliver.NPCTargetCBID);
+                }
+
+                return;
+            }
+
             LogPatrolIncomplete(patrol, quest, objective, targetCoid);
             AdvanceOrCompleteObjective(conn, character, quest, mission, objective, source: "AutoPatrol");
             return;
         }
     }
+
+    /// <summary>
+    /// True when the objective has other requirements that still need a separate server event
+    /// before the objective may advance/complete (e.g. deliver turn-in alongside patrol).
+    /// </summary>
+    internal static bool ObjectiveHasBlockingSiblingRequirements(
+        MissionObjective objective,
+        RequirementType satisfiedType)
+        => MissionWorldPhaseRules.HasBlockingDeliverSibling(objective, satisfiedType);
 
     private static int CountPatrolTargets(ObjectiveRequirementPatrol patrol)
     {
@@ -1306,8 +1475,11 @@ public static class NpcInteractHandler
             }
 
             PushJournalMissionList(conn, character);
-            TriggerManager.Instance.OnMissionStateChanged(
-                character.CurrentVehicle ?? (ClonedObjectBase)character);
+            var phaseActivator = character.CurrentVehicle ?? (ClonedObjectBase)character;
+            TriggerManager.Instance.OnMissionStateChanged(phaseActivator);
+            // Kill→deliver (or any advance): re-apply Create for new active deliver/kill targets
+            // even if spawn TriggerEvents bookkeeping was lost.
+            character.Map?.ReplayMissionWorldSetup(phaseActivator);
             return;
         }
 
@@ -1324,8 +1496,10 @@ public static class NpcInteractHandler
         ApplyMissionCompleteRewards(character, mission, objective, source);
 
         PushJournalMissionList(conn, character);
-        TriggerManager.Instance.OnMissionStateChanged(
-            character.CurrentVehicle ?? (ClonedObjectBase)character);
+        var completeActivator = character.CurrentVehicle ?? (ClonedObjectBase)character;
+        TriggerManager.Instance.OnMissionStateChanged(completeActivator);
+        // Post-complete pad form / giver suppress (personal presence).
+        character.Map?.ReplayMissionWorldSetup(completeActivator);
     }
 
     /// <summary>
@@ -1469,12 +1643,7 @@ public static class NpcInteractHandler
                 {
                     xpSvc.Persistence.SaveProgress(
                         character.ObjectId.Coid,
-                        new Experience.CharacterProgressSnapshot(
-                            character.Level,
-                            character.Experience,
-                            character.SkillPoints,
-                            character.AttributePoints,
-                            character.ResearchPoints));
+                        character.ToProgressSnapshot());
                 }
             }
         }

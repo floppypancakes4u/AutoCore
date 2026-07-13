@@ -4,6 +4,7 @@ namespace AutoCore.Game.Entities;
 
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
+using AutoCore.Game.CloneBases;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
@@ -52,6 +53,79 @@ public partial class Character : Creature
 
     /// <summary>Unspent research points (persisted).</summary>
     public short ResearchPoints => DBData?.ResearchPoints ?? 0;
+
+    // Fallback fields when DBData is not attached (unit tests without CharacterData).
+    private short _attributeTech;
+    private short _attributeCombat;
+    private short _attributeTheory;
+    private short _attributePerception;
+
+    /// <summary>
+    /// Spent Tech attribute (client char+0x13C). Used by vehicle max-HP / heat formulas.
+    /// Persisted on <see cref="CharacterData.AttributeTech"/>.
+    /// </summary>
+    public short AttributeTech => DBData?.AttributeTech ?? _attributeTech;
+
+    /// <summary>Spent Combat attribute (client char+0x13E). Persisted.</summary>
+    public short AttributeCombat => DBData?.AttributeCombat ?? _attributeCombat;
+
+    /// <summary>Spent Theory attribute (client char+0x140). Persisted.</summary>
+    public short AttributeTheory => DBData?.AttributeTheory ?? _attributeTheory;
+
+    /// <summary>Spent Perception attribute (client char+0x142). Persisted.</summary>
+    public short AttributePerception => DBData?.AttributePerception ?? _attributePerception;
+
+    public void SetAttributeTech(short value)
+    {
+        value = Math.Max((short)0, value);
+        if (DBData != null)
+            DBData.AttributeTech = value;
+        else
+            _attributeTech = value;
+    }
+
+    public void SetAttributeCombat(short value)
+    {
+        value = Math.Max((short)0, value);
+        if (DBData != null)
+            DBData.AttributeCombat = value;
+        else
+            _attributeCombat = value;
+    }
+
+    public void SetAttributeTheory(short value)
+    {
+        value = Math.Max((short)0, value);
+        if (DBData != null)
+            DBData.AttributeTheory = value;
+        else
+            _attributeTheory = value;
+    }
+
+    public void SetAttributePerception(short value)
+    {
+        value = Math.Max((short)0, value);
+        if (DBData != null)
+            DBData.AttributePerception = value;
+        else
+            _attributePerception = value;
+    }
+
+    /// <summary>Build a full progress snapshot including spent attributes for persistence.</summary>
+    public Experience.CharacterProgressSnapshot ToProgressSnapshot() =>
+        new(
+            Level,
+            Experience,
+            SkillPoints,
+            AttributePoints,
+            ResearchPoints,
+            AttributeTech,
+            AttributeCombat,
+            AttributeTheory,
+            AttributePerception);
+    public Dictionary<int, byte> LearnedSkills { get; } = new();
+    public long[] QuickBarItemCoids { get; } = Enumerable.Repeat(-1L, 100).ToArray();
+    public int[] QuickBarSkills { get; } = new int[100];
 
     /// <summary>Absolute money balance (persisted). Client UI splits into Globes/Bars/Scrip/Clink.</summary>
     public long Credits => DBData?.Credits ?? 0L;
@@ -284,18 +358,12 @@ public partial class Character : Creature
         TeamFaction = CloneBaseObject.SimpleObjectSpecific.Faction;
 
         LoadExplorations(context);
+        LoadSkills(context);
 
-        var width = DBData.CargoWidth > 0 ? DBData.CargoWidth : InventoryManager.DefaultCargoWidth;
-        var pageCount = DBData.CargoPageCount > 0 ? DBData.CargoPageCount : InventoryManager.DefaultCargoPageCount;
-        Inventory.SetCapacity(width, pageCount);
-
+        // Capacity is applied after the vehicle is loaded (chassis InventorySlots).
+        // Cargo items load in LoadCurrentVehicle once the retail grid size is known.
         if (!isInCharacterSelection)
-        {
-            var cargoItems = InventoryPersistence.Instance.LoadCargo(coid);
-            Inventory.LoadItems(cargoItems);
-
             LoadMissions(context);
-        }
 
         // TODO: set up stuff, fields, baseclasses, etc
 
@@ -307,7 +375,39 @@ public partial class Character : Creature
         CurrentVehicle = new();
         CurrentVehicle.SetOwner(this);
 
-        return CurrentVehicle.LoadFromDB(context, ActiveVehicleCoid, isInCharacterSelection);
+        if (!CurrentVehicle.LoadFromDB(context, ActiveVehicleCoid, isInCharacterSelection))
+            return false;
+
+        // Retail cargo size from chassis (FUN_004F3A30): width 6, height pages×13.
+        ApplyCargoCapacityFromCurrentVehicle(persist: !isInCharacterSelection);
+
+        if (!isInCharacterSelection)
+        {
+            var cargoItems = InventoryPersistence.Instance.LoadCargo(ObjectId.Coid);
+            Inventory.LoadItems(cargoItems);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Sets cargo grid from the equipped chassis <c>VehicleSpecific.InventorySlots</c>
+    /// (UI pages). Retail: width 6, height pages×13 (client FUN_004F3A30).
+    /// </summary>
+    public void ApplyCargoCapacityFromCurrentVehicle(bool persist = false)
+    {
+        var chassisSlots = 1;
+        if (CurrentVehicle?.CloneBaseObject is CloneBaseVehicle veh)
+            chassisSlots = Math.Max(1, (int)veh.VehicleSpecific.InventorySlots);
+
+        VehicleCargoCapacity.ApplyTo(Inventory, chassisSlots);
+
+        if (persist && DBData != null)
+        {
+            DBData.CargoWidth = Inventory.Width;
+            DBData.CargoPageCount = Inventory.PageCount;
+            Inventory.SaveCapacity(ObjectId.Coid);
+        }
     }
 
     public override void CreateGhost()
@@ -365,10 +465,23 @@ public partial class Character : Creature
             extendedCharPacket.NumAchievements = 0;
             extendedCharPacket.NumDisciplines = 0;
             extendedCharPacket.NumSkills = 0;
+            extendedCharPacket.LearnedSkills = LearnedSkills.OrderBy(x => x.Key).Select(x => (x.Key, x.Value)).ToList();
+            extendedCharPacket.NumSkills = checked((byte)extendedCharPacket.LearnedSkills.Count);
+            Array.Copy(QuickBarItemCoids, extendedCharPacket.QuickBarItemCoids, 100);
+            Array.Copy(QuickBarSkills, extendedCharPacket.QuickBarSkills, 100);
 
             // Do NOT write live Credits into CreateCharacterExtended — non-zero values crash
             // the retail client. Restore after spawn via CurrencySync / CharacterLevel.
             CurrencySync.ClearCreateCharacterCredits(extendedCharPacket);
+
+            extendedCharPacket.AttributePoints = AttributePoints;
+            extendedCharPacket.AttributeTech = AttributeTech;
+            extendedCharPacket.AttributeCombat = AttributeCombat;
+            extendedCharPacket.AttributeTheory = AttributeTheory;
+            extendedCharPacket.AttributePerception = AttributePerception;
+            extendedCharPacket.SkillPoints = SkillPoints;
+            // Extended short HP field is character body HP, not vehicle chassis pool.
+            extendedCharPacket.CurrentHealth = GetCurrentHP();
 
             WriteFirstTimeFlags(extendedCharPacket);
             WriteExploration(extendedCharPacket);
@@ -376,6 +489,20 @@ public partial class Character : Creature
             AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Debug,
                 $"Character.WriteToPacket: coid={ObjectId.Coid} sending {CurrentQuests.Count} current quests [{string.Join(",", CurrentQuests.Select(q => q.MissionId))}], "
                 + $"{extendedCharPacket.NumCompletedQuests} completed [{string.Join(",", extendedCharPacket.CompletedMissionIds)}]");
+        }
+    }
+
+    private void LoadSkills(CharContext context)
+    {
+        LearnedSkills.Clear();
+        Array.Fill(QuickBarItemCoids, -1L);
+        Array.Clear(QuickBarSkills);
+        foreach (var skill in context.CharacterLearnedSkills.Where(x => x.CharacterCoid == ObjectId.Coid))
+            LearnedSkills[skill.SkillId] = skill.Rank;
+        foreach (var slot in context.CharacterQuickBarSlots.Where(x => x.CharacterCoid == ObjectId.Coid && x.Slot < 100))
+        {
+            QuickBarItemCoids[slot.Slot] = slot.ItemCoid;
+            QuickBarSkills[slot.Slot] = slot.SkillId;
         }
     }
 

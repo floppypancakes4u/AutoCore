@@ -14,10 +14,19 @@ using AutoCore.Utils;
 
 public sealed class InventoryManager
 {
-    public const int DefaultCargoWidth = 24;
-    public const int DefaultCargoPageCount = 13;
-    public const int DefaultCargoSlotCount = DefaultCargoWidth * DefaultCargoPageCount;
-    public const int MaxCargoSlotCount = 512;
+    /// <summary>
+    /// Default column count. Retail cargo width is 6 (<see cref="VehicleCargoCapacity.GridWidth"/>);
+    /// kept as aliases for older tests that still expect the constant names.
+    /// </summary>
+    public const int DefaultCargoWidth = VehicleCargoCapacity.GridWidth;
+
+    /// <summary>
+    /// Default grid height (rows). One retail cargo page is 13 rows; starter Callisto is 1 page.
+    /// </summary>
+    public const int DefaultCargoPageCount = VehicleCargoCapacity.RowsPerPage;
+
+    public const int DefaultCargoSlotCount = DefaultCargoWidth * DefaultCargoPageCount; // 78 (1 page)
+    public const int MaxCargoSlotCount = VehicleCargoCapacity.MaxWireSlotCount;
 
     /// <summary>Legacy alias for default width; prefer <see cref="Width"/> on instances.</summary>
     public const int CargoWidth = DefaultCargoWidth;

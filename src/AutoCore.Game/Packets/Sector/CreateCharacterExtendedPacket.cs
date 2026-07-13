@@ -29,6 +29,7 @@ public class CreateCharacterExtendedPacket : CreateCharacterPacket
     public short NumAchievements { get; set; }
     public short NumDisciplines { get; set; }
     public byte NumSkills { get; set; }
+    public List<(int SkillId, byte Rank)> LearnedSkills { get; set; } = new();
     public CharacterExploration[] ContinentUnlocked { get; set; } = new CharacterExploration[50];
     public long[] QuickBarItemCoids { get; set; } = new long[100];
     public int[] QuickBarSkills { get; set; } = new int[100];
@@ -141,8 +142,13 @@ public class CreateCharacterExtendedPacket : CreateCharacterPacket
 
         if (NumSkills > 0)
         {
-            // TODO: write skills ({skillid, skilllevel, 2B padding}[])
-            writer.WriteZeros(8 * NumSkills);
+            for (var i = 0; i < NumSkills; i++)
+            {
+                var skill = i < LearnedSkills.Count ? LearnedSkills[i] : default;
+                writer.Write(skill.SkillId);
+                writer.Write(skill.Rank);
+                writer.WriteZeros(3);
+            }
         }
 
         if (NumCompletedQuests > 0)

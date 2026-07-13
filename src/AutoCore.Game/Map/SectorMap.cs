@@ -8,6 +8,7 @@ using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Mission;
 using AutoCore.Game.Mission.Requirements;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
@@ -260,10 +261,10 @@ public class SectorMap
             if (PlayerCount == 1)
                 ApplyAuthoredSpawnHygiene();
 
-            // Mid-mission relog: after fam baseline, re-apply Creates for active deliver NPCs
-            // and mission-conditioned setup. Vehicle may join the map a tick later — login path
-            // also calls ApplyMissionPhaseWorldState after both character and vehicle SetMap.
-            if (character.CurrentQuests.Count > 0)
+            // Mid-mission / post-complete relog: after fam baseline, re-apply Creates for
+            // deliver/kill targets and giver suppress. Vehicle may join a tick later — login
+            // path also calls ApplyMissionPhaseWorldState after both character and vehicle SetMap.
+            if (character.CurrentQuests.Count > 0 || character.CompletedMissionIds.Count > 0)
                 ApplyMissionPhaseWorldState(character.CurrentVehicle ?? (ClonedObjectBase)character);
         }
 
@@ -496,16 +497,19 @@ public class SectorMap
 
     /// <summary>
     /// After fam hygiene (or login), recreate map actors that retail left mid-mission via
-    /// reaction Creates. Generic rules:
+    /// reaction Creates. Generic rules (no mission-specific hardcoding):
     /// <list type="number">
     /// <item>Mission-conditioned triggers (non-empty conditions that pass) listing Create
     /// reactions — fire those Creates so type 9/11/12 gates re-apply without movement.</item>
-    /// <item>Active deliver objectives (<see cref="ObjectiveRequirementDeliver"/> with
-    /// <c>NPCTargetCompletes</c>): if no live map entity has that CBID, fire Create reactions
-    /// whose target SpawnPoint spawn-list type matches the CBID (pad turn-in NPCs created only
-    /// via TE / DoOnActivate in continuous play).</item>
+    /// <item>Active deliver objectives: Create fam-inactive spawns matching deliver CBID
+    /// (pad turn-in NPCs created only via TE / DoOnActivate in continuous play).</item>
+    /// <item>Active kill objectives: Create fam-inactive spawns matching kill CBID / template id
+    /// so mid-fight login restores combat targets.</item>
+    /// <item>Completed missions: same deliver-CBID Create for pad-class NPCs so the post-mission
+    /// face stays the turn-in form, not the original fam-active giver.</item>
+    /// <item>Suppress fam-active giver spawns (<see cref="Mission.NPC"/>) for deliver-phase and
+    /// completed missions for this character only.</item>
     /// </list>
-    /// Does not create combat spawns unless their Create is condition-gated and currently true.
     /// </summary>
     /// <returns>Number of Create reactions dispatched.</returns>
     internal int ReplayMissionWorldSetup(ClonedObjectBase activator)
@@ -514,65 +518,71 @@ public class SectorMap
             return 0;
 
         var character = activator.GetAsCharacter() ?? activator.GetSuperCharacter(false);
-        if (character == null || character.CurrentQuests.Count == 0)
+        if (character == null)
+            return 0;
+
+        var deliverCbids = CollectDeliverCbidsForWorldPhase(character).ToList();
+        var killSpawnTypes = CollectActiveKillSpawnTypes(character).ToList();
+        var hasActiveQuests = character.CurrentQuests.Count > 0;
+        if (!hasActiveQuests && deliverCbids.Count == 0)
             return 0;
 
         character.EnsureLogicVariables();
+        character.MapPresence.EnsureContinent(ContinentId);
 
         var fired = 0;
         var firedCreateCoids = new HashSet<long>();
 
-        // 1) Condition-gated Creates (mission vars). Require DoConditionals so pure Activate
-        // remotes (e.g. l1_rem_gunnysioux_initiator with latch leftovers) are not re-fired.
-        foreach (var trigger in Triggers.Values.ToList())
+        // 1) Condition-gated Creates (mission vars type 9/11/12). Require DoConditionals so pure
+        // Activate remotes are not re-fired. Callers that only need a deliver NPC (AutoPatrol)
+        // should use EnsureDeliverTurnInNpc instead of full ReplayMissionWorldSetup.
+        if (hasActiveQuests)
         {
-            if (!trigger.Template.DoConditionals || trigger.Template.Conditions.Count == 0)
-                continue;
-
-            if (!trigger.ConditionsPass(activator))
-                continue;
-
-            var createCoids = CollectCreateReactionCoids(trigger.Template.Reactions);
-            if (createCoids.Count == 0)
-                continue;
-
-            foreach (var coid in createCoids)
+            foreach (var trigger in Triggers.Values.ToList())
             {
-                if (!firedCreateCoids.Add(coid))
+                if (!trigger.Template.DoConditionals || trigger.Template.Conditions.Count == 0)
                     continue;
 
-                TriggerReactions(activator, new List<long> { coid });
-                fired++;
+                if (!trigger.ConditionsPass(activator))
+                    continue;
+
+                var createCoids = CollectCreateReactionCoids(trigger.Template.Reactions);
+                if (createCoids.Count == 0)
+                    continue;
+
+                foreach (var coid in createCoids)
+                {
+                    if (!firedCreateCoids.Add(coid))
+                        continue;
+
+                    TriggerReactions(activator, new List<long> { coid });
+                    fired++;
+                }
             }
         }
 
-        // 2) Deliver-CBID Creates (TE-only pad NPCs after restart hygiene).
-        foreach (var deliverCbid in CollectActiveDeliverCbids(character))
+        // 2) Deliver-CBID pad/turn-in NPCs (active alternate-form + active deliver only).
+        foreach (var deliverCbid in deliverCbids)
         {
-            if (MapHasLiveEntityWithCbid(deliverCbid))
-                continue;
-
-            foreach (var reaction in Reactions.Values.ToList())
-            {
-                if (reaction.Template.ReactionType != ReactionType.Create)
-                    continue;
-
-                if (!CreateTargetsSpawnType(reaction, deliverCbid))
-                    continue;
-
-                var coid = reaction.ObjectId.Coid;
-                if (!firedCreateCoids.Add(coid))
-                    continue;
-
-                Logger.WriteLog(LogType.Debug,
-                    "SectorMap {0}: replay Create {1} for missing deliver NPC cbid={2}",
-                    ContinentId,
-                    coid,
-                    deliverCbid);
-                TriggerReactions(activator, new List<long> { coid });
-                fired++;
-            }
+            fired += EnsureDeliverTurnInNpc(activator, deliverCbid, firedCreateCoids);
         }
+
+        // 3) Kill-target Creates (active kill seq only — not after advance to deliver).
+        foreach (var killType in killSpawnTypes)
+        {
+            if (MapHasPresentEntityWithCbid(character, killType)
+                || MapHasLiveTemplateVehicle(killType))
+            {
+                continue;
+            }
+
+            fired += FireMatchingCreates(activator, character, killType, firedCreateCoids, "kill target");
+            // Create places the spawn marker; Activate materializes combat children (shared server AI).
+            fired += FireMatchingActivates(activator, killType, firedCreateCoids);
+        }
+
+        // 4) Personal presence: suppress original givers when pad/deliver phase applies.
+        ApplyGiverSuppressionForWorldPhase(character);
 
         if (fired > 0)
         {
@@ -587,8 +597,8 @@ public class SectorMap
     }
 
     /// <summary>
-    /// Mission re-eval + deliver/condition Create replay. Call after login create packets /
-    /// PerPlayerLoad, and after solo hygiene when the character already holds quests.
+    /// Mission re-eval + deliver/kill/condition Create replay. Call after login create packets /
+    /// PerPlayerLoad, after solo hygiene when the character holds quests, and after kill→deliver.
     /// </summary>
     internal void ApplyMissionPhaseWorldState(ClonedObjectBase activator)
     {
@@ -597,6 +607,205 @@ public class SectorMap
 
         TriggerManager.Instance.OnMissionStateChanged(activator);
         ReplayMissionWorldSetup(activator);
+    }
+
+    private int FireMatchingCreates(
+        ClonedObjectBase activator,
+        Character character,
+        int spawnTypeOrCbid,
+        HashSet<long> firedCreateCoids,
+        string reason)
+    {
+        var fired = 0;
+
+        // Live reaction entities first.
+        foreach (var reaction in Reactions.Values.ToList())
+        {
+            if (reaction.Template.ReactionType != ReactionType.Create)
+                continue;
+
+            if (!CreateTargetsSpawnType(reaction, spawnTypeOrCbid))
+                continue;
+
+            var coid = reaction.ObjectId.Coid;
+            if (!firedCreateCoids.Add(coid))
+                continue;
+
+            Logger.WriteLog(LogType.Debug,
+                "SectorMap {0}: replay Create {1} for {2} type={3}",
+                ContinentId,
+                coid,
+                reason,
+                spawnTypeOrCbid);
+            TriggerReactions(activator, new List<long> { coid });
+            fired++;
+        }
+
+        // MapData templates: place missing reaction entities then fire (hygiene/reset gaps).
+        if (fired == 0)
+        {
+            foreach (var kvp in MapData.Templates)
+            {
+                if (kvp.Value is not ReactionTemplate rt
+                    || rt.ReactionType != ReactionType.Create)
+                {
+                    continue;
+                }
+
+                if (!CreateTargetsSpawnTypeFromTemplate(rt, spawnTypeOrCbid))
+                    continue;
+
+                var coid = kvp.Key;
+                if (!firedCreateCoids.Add(coid))
+                    continue;
+
+                if (GetObjectByCoid(coid) is not Reaction)
+                {
+                    try
+                    {
+                        var placed = rt.Create() as Reaction;
+                        if (placed == null)
+                            continue;
+                        if (placed.ObjectId.Coid <= 0)
+                            placed.SetCoid(rt.COID != 0 ? rt.COID : coid, false);
+                        placed.SetMap(this);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.WriteLog(LogType.Error,
+                            "SectorMap {0}: place Create reaction {1} failed: {2}",
+                            ContinentId,
+                            coid,
+                            ex.Message);
+                        continue;
+                    }
+                }
+
+                Logger.WriteLog(LogType.Debug,
+                    "SectorMap {0}: replay Create {1} (from MapData) for {2} type={3}",
+                    ContinentId,
+                    coid,
+                    reason,
+                    spawnTypeOrCbid);
+                TriggerReactions(activator, new List<long> { coid });
+                fired++;
+            }
+        }
+
+        return fired;
+    }
+
+    private bool CreateTargetsSpawnTypeFromTemplate(ReactionTemplate template, int spawnTypeOrCbid)
+    {
+        if (template?.Objects == null)
+            return false;
+
+        foreach (var objectCoid in template.Objects)
+        {
+            SpawnPointTemplate tpl = null;
+            if (GetObjectByCoid(objectCoid) is SpawnPoint liveSpawn)
+                tpl = liveSpawn.Template;
+            else if (MapData.Templates.TryGetValue(objectCoid, out var ot) && ot is SpawnPointTemplate mapTpl)
+                tpl = mapTpl;
+
+            if (tpl == null || tpl.OriginalIsActive)
+                continue;
+
+            foreach (var entry in tpl.Spawns)
+            {
+                if (entry.SpawnType == spawnTypeOrCbid && entry.SpawnType != -1)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Send CreateCreature (0x2013) for a live deliver NPC so the client object table has the TFID
+    /// before (or without waiting for) ghost scope. Without this, global MapNpcIdentity creatures
+    /// stay invisible when only ObjectInScope is used.
+    /// </summary>
+    private void NotifyDeliverNpcCreated(Character character, int deliverCbid)
+    {
+        if (character?.OwningConnection == null || deliverCbid <= 0)
+            return;
+
+        // One CreateCreature per character/CBID per continent visit (AutoPatrol is per-tick).
+        if (character.MapPresence.IsDeliverTurnInReady(deliverCbid))
+            return;
+
+        foreach (var obj in Objects.Values)
+        {
+            if (obj is not Creature creature || creature is Character)
+                continue;
+            if (creature.CBID != deliverCbid)
+                continue;
+            if (character.MapPresence.IsSuppressed(creature.ObjectId.Coid))
+                continue;
+
+            try
+            {
+                var packet = new CreateCreaturePacket();
+                creature.WriteToPacket(packet);
+                character.OwningConnection.SendGamePacket(packet);
+                if (creature.Ghost != null)
+                    character.OwningConnection.ObjectInScope(creature.Ghost);
+
+                character.MapPresence.MarkDeliverTurnInReady(deliverCbid);
+
+                Logger.WriteLog(LogType.Debug,
+                    "SectorMap {0}: CreateCreature deliver cbid={1} coid={2} → char={3}",
+                    ContinentId,
+                    deliverCbid,
+                    creature.ObjectId.Coid,
+                    character.ObjectId.Coid);
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLog(LogType.Error,
+                    "SectorMap {0}: CreateCreature deliver cbid={1} failed: {2}",
+                    ContinentId,
+                    deliverCbid,
+                    ex.Message);
+            }
+
+            return;
+        }
+    }
+
+    /// <summary>
+    /// Fire Activate reactions whose object list targets a fam-inactive spawn matching
+    /// <paramref name="spawnTypeOrCbid"/> (combat vehicle materialization after Create).
+    /// </summary>
+    private int FireMatchingActivates(
+        ClonedObjectBase activator,
+        int spawnTypeOrCbid,
+        HashSet<long> firedReactionCoids)
+    {
+        var fired = 0;
+        foreach (var reaction in Reactions.Values.ToList())
+        {
+            if (reaction.Template.ReactionType != ReactionType.Activate)
+                continue;
+
+            if (!CreateTargetsSpawnType(reaction, spawnTypeOrCbid))
+                continue;
+
+            var coid = reaction.ObjectId.Coid;
+            if (!firedReactionCoids.Add(coid))
+                continue;
+
+            Logger.WriteLog(LogType.Debug,
+                "SectorMap {0}: replay Activate {1} for kill spawn type={2}",
+                ContinentId,
+                coid,
+                spawnTypeOrCbid);
+            TriggerReactions(activator, new List<long> { coid });
+            fired++;
+        }
+
+        return fired;
     }
 
     private List<long> CollectCreateReactionCoids(List<long> reactionCoids)
@@ -611,9 +820,16 @@ public class SectorMap
         return result;
     }
 
-    private static IEnumerable<int> CollectActiveDeliverCbids(Character character)
+    /// <summary>
+    /// Deliver CBIDs that need world reconstruction:
+    /// active deliver objectives, and completed missions only when deliver was to a
+    /// <b>different</b> CBID than the giver (pad form). Same-NPC return missions (Kelly Sweet)
+    /// never need Create — the fam-active giver is the turn-in.
+    /// </summary>
+    private static IEnumerable<int> CollectDeliverCbidsForWorldPhase(Character character)
     {
         var seen = new HashSet<int>();
+
         foreach (var quest in character.CurrentQuests)
         {
             var mission = AssetManager.Instance.GetMission(quest.MissionId);
@@ -626,25 +842,480 @@ public class SectorMap
                 continue;
             }
 
-            foreach (var req in objective.Requirements.OfType<ObjectiveRequirementDeliver>())
+            foreach (var cbid in DeliverCbidsOnObjective(objective))
             {
-                if (!req.NPCTargetCompletes || req.NPCTargetCBID <= 0)
+                // Same-NPC return: no pad Create (and do not Error-log "no Create reaction").
+                if (mission.NPC > 0 && cbid == mission.NPC)
                     continue;
 
-                if (seen.Add(req.NPCTargetCBID))
-                    yield return req.NPCTargetCBID;
+                if (seen.Add(cbid))
+                    yield return cbid;
+            }
+        }
+
+        foreach (var missionId in character.CompletedMissionIds)
+        {
+            var mission = AssetManager.Instance.GetMission(missionId);
+            if (mission?.Objectives == null || mission.IsRepeatable != 0)
+                continue;
+
+            foreach (var objective in mission.Objectives.Values)
+            {
+                if (!HasAlternateFormDeliver(objective, mission.NPC))
+                    continue;
+
+                foreach (var cbid in DeliverCbidsOnObjective(objective))
+                {
+                    if (mission.NPC > 0 && cbid == mission.NPC)
+                        continue;
+                    if (seen.Add(cbid))
+                        yield return cbid;
+                }
             }
         }
     }
 
-    private bool MapHasLiveEntityWithCbid(int cbid)
+    /// <summary>
+    /// Create reaction (0x206C) + server children + CreateCreature for one deliver CBID.
+    /// Idempotent: once the live NPC exists and this character was notified, further calls
+    /// (e.g. AutoPatrol every tick in the pad volume) are no-ops.
+    /// </summary>
+    internal int EnsureDeliverTurnInNpc(
+        ClonedObjectBase activator,
+        int deliverCbid,
+        HashSet<long> firedCreateCoids = null)
+    {
+        if (activator?.Map == null || deliverCbid <= 0)
+            return 0;
+
+        var character = activator.GetAsCharacter() ?? activator.GetSuperCharacter(false);
+        if (character == null)
+            return 0;
+
+        character.MapPresence.EnsureContinent(ContinentId);
+
+        // Hot path: AutoPatrol / movement re-entry after pad is already set up.
+        if (MapHasPresentEntityWithCbid(character, deliverCbid)
+            && character.MapPresence.IsDeliverTurnInReady(deliverCbid))
+        {
+            return 0;
+        }
+
+        firedCreateCoids ??= new HashSet<long>();
+        var fired = 0;
+
+        // Only fire Create when the client has not been set up yet for this deliver CBID.
+        if (!character.MapPresence.IsDeliverTurnInReady(deliverCbid))
+        {
+            fired = FireMatchingCreates(
+                activator, character, deliverCbid, firedCreateCoids, "deliver NPC");
+
+            if (fired == 0 && !MapHasPresentEntityWithCbid(character, deliverCbid)
+                && HasFamInactiveSpawnForType(deliverCbid))
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "SectorMap {0}: no Create reaction for pad deliver cbid={1} — relying on EnsureDeliverNpcChildren",
+                    ContinentId,
+                    deliverCbid);
+            }
+        }
+
+        if (!MapHasPresentEntityWithCbid(character, deliverCbid))
+            EnsureDeliverNpcChildren(activator, deliverCbid);
+
+        if (!character.MapPresence.IsDeliverTurnInReady(deliverCbid))
+            NotifyDeliverNpcCreated(character, deliverCbid);
+
+        if (MapHasPresentEntityWithCbid(character, deliverCbid))
+            character.MapPresence.MarkDeliverTurnInReady(deliverCbid);
+
+        return fired;
+    }
+
+    private bool HasFamInactiveSpawnForType(int spawnType)
+    {
+        foreach (var kvp in MapData.Templates)
+        {
+            if (kvp.Value is not SpawnPointTemplate tpl || tpl.OriginalIsActive)
+                continue;
+            foreach (var entry in tpl.Spawns)
+            {
+                if (entry.SpawnType == spawnType && entry.SpawnType != -1)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<int> DeliverCbidsOnObjective(MissionObjective objective)
+    {
+        if (objective?.Requirements == null)
+            yield break;
+
+        foreach (var req in objective.Requirements.OfType<ObjectiveRequirementDeliver>())
+        {
+            if (req.NPCTargetCompletes && req.NPCTargetCBID > 0)
+                yield return req.NPCTargetCBID;
+        }
+    }
+
+    /// <summary>
+    /// True when the objective has a completing deliver to a CBID other than the mission giver.
+    /// That is the Final Exam pad-form case — not same-NPC return turn-ins.
+    /// </summary>
+    private static bool HasAlternateFormDeliver(MissionObjective objective, int giverNpcCbid)
+    {
+        if (objective?.Requirements == null || giverNpcCbid <= 0)
+            return false;
+
+        return objective.Requirements.OfType<ObjectiveRequirementDeliver>()
+            .Any(d => d.NPCTargetCompletes && d.NPCTargetCBID > 0 && d.NPCTargetCBID != giverNpcCbid);
+    }
+
+    /// <summary>
+    /// Spawn-list types for active kill requirements (clonebase CBID or template vehicle id).
+    /// </summary>
+    private static IEnumerable<int> CollectActiveKillSpawnTypes(Character character)
+    {
+        var seen = new HashSet<int>();
+        foreach (var quest in character.CurrentQuests)
+        {
+            var mission = AssetManager.Instance.GetMission(quest.MissionId);
+            if (mission == null
+                || !mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var objective)
+                || objective?.Requirements == null)
+            {
+                continue;
+            }
+
+            foreach (var req in objective.Requirements)
+            {
+                switch (req)
+                {
+                    case ObjectiveRequirementKill kill when !kill.NegativeKill && !kill.TargetIsPlayer
+                        && !kill.TargetIsFaction && kill.TargetCBID > 0:
+                        if (seen.Add(kill.TargetCBID))
+                            yield return kill.TargetCBID;
+                        break;
+
+                    case ObjectiveRequirementKillAggregate agg when !agg.NegativeKill:
+                        foreach (var t in agg.Targets)
+                        {
+                            if (t > 0 && seen.Add(t))
+                                yield return t;
+                        }
+
+                        break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Suppress fam-active mission-giver spawns only when the turn-in / post-mission face is a
+    /// <b>different</b> CBID (pad form). Same-NPC return missions (Red Tape / Kelly Sweet class)
+    /// must keep the giver interactable for deliver turn-in.
+    /// </summary>
+    private void ApplyGiverSuppressionForWorldPhase(Character character)
+    {
+        var giverCbids = new HashSet<int>();
+
+        foreach (var quest in character.CurrentQuests)
+        {
+            var mission = AssetManager.Instance.GetMission(quest.MissionId);
+            if (mission == null || mission.NPC <= 0)
+                continue;
+
+            if (!mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var objective))
+                continue;
+
+            // Suppress giver only when active deliver targets a different NPC (pad / alternate form).
+            if (HasAlternateFormDeliver(objective, mission.NPC))
+                giverCbids.Add(mission.NPC);
+        }
+
+        foreach (var missionId in character.CompletedMissionIds)
+        {
+            var mission = AssetManager.Instance.GetMission(missionId);
+            if (mission == null || mission.IsRepeatable != 0 || mission.NPC <= 0)
+                continue;
+
+            // Post-complete: keep pad form only when deliver was to a different CBID than the giver.
+            var hadAlternateDeliver = mission.Objectives.Values.Any(o =>
+                HasAlternateFormDeliver(o, mission.NPC));
+            if (hadAlternateDeliver)
+                giverCbids.Add(mission.NPC);
+        }
+
+        // Same-NPC return missions: clear any prior incorrect suppress so turn-in works again
+        // without requiring a full map leave / relog.
+        UnsuppressSameNpcDeliverGivers(character, giverCbids);
+
+        if (giverCbids.Count == 0)
+            return;
+
+        foreach (var kvp in MapData.Templates)
+        {
+            if (kvp.Value is not SpawnPointTemplate tpl || !tpl.OriginalIsActive)
+                continue;
+
+            var matchesGiver = false;
+            foreach (var entry in tpl.Spawns)
+            {
+                if (entry.SpawnType > 0 && giverCbids.Contains(entry.SpawnType))
+                {
+                    matchesGiver = true;
+                    break;
+                }
+            }
+
+            if (!matchesGiver)
+                continue;
+
+            var spawnCoid = kvp.Key;
+            character.MapPresence.Suppress(spawnCoid);
+
+            if (GetObjectByCoid(spawnCoid) is SpawnPoint spawn)
+            {
+                if (spawn.LastSpawnedCoid > 0)
+                    character.MapPresence.Suppress(spawn.LastSpawnedCoid);
+
+                foreach (var obj in Objects.Values)
+                {
+                    if (obj is Creature creature && creature.SpawnOwner == spawnCoid)
+                        character.MapPresence.Suppress(creature.ObjectId.Coid);
+                    else if (obj is Vehicle vehicle && vehicle.SpawnOwnerCoid == spawnCoid)
+                        character.MapPresence.Suppress(vehicle.ObjectId.Coid);
+                }
+            }
+
+            Logger.WriteLog(LogType.Debug,
+                "SectorMap {0}: phase suppress giver spawn coid={1} for char={2}",
+                ContinentId,
+                spawnCoid,
+                character.ObjectId.Coid);
+        }
+    }
+
+    /// <summary>
+    /// For active same-NPC deliver (and completed same-NPC missions), unsuppress fam-active
+    /// spawns matching the giver CBID so UseObject is not rejected.
+    /// </summary>
+    private void UnsuppressSameNpcDeliverGivers(Character character, HashSet<int> alternateFormGiverCbids)
+    {
+        var sameNpcGiverCbids = new HashSet<int>();
+
+        foreach (var quest in character.CurrentQuests)
+        {
+            var mission = AssetManager.Instance.GetMission(quest.MissionId);
+            if (mission == null || mission.NPC <= 0)
+                continue;
+            if (alternateFormGiverCbids.Contains(mission.NPC))
+                continue;
+
+            if (!mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var objective))
+                continue;
+
+            var hasSameNpcDeliver = objective.Requirements.OfType<ObjectiveRequirementDeliver>()
+                .Any(d => d.NPCTargetCompletes && d.NPCTargetCBID == mission.NPC);
+            if (hasSameNpcDeliver)
+                sameNpcGiverCbids.Add(mission.NPC);
+        }
+
+        if (sameNpcGiverCbids.Count == 0)
+            return;
+
+        foreach (var kvp in MapData.Templates)
+        {
+            if (kvp.Value is not SpawnPointTemplate tpl || !tpl.OriginalIsActive)
+                continue;
+
+            var matches = false;
+            foreach (var entry in tpl.Spawns)
+            {
+                if (entry.SpawnType > 0 && sameNpcGiverCbids.Contains(entry.SpawnType))
+                {
+                    matches = true;
+                    break;
+                }
+            }
+
+            if (!matches)
+                continue;
+
+            var spawnCoid = kvp.Key;
+            character.MapPresence.Unsuppress(spawnCoid);
+
+            if (GetObjectByCoid(spawnCoid) is SpawnPoint spawn)
+            {
+                if (spawn.LastSpawnedCoid > 0)
+                    character.MapPresence.Unsuppress(spawn.LastSpawnedCoid);
+
+                foreach (var obj in Objects.Values)
+                {
+                    if (obj is Creature creature && creature.SpawnOwner == spawnCoid)
+                        character.MapPresence.Unsuppress(creature.ObjectId.Coid);
+                    else if (obj is Vehicle vehicle && vehicle.SpawnOwnerCoid == spawnCoid)
+                        character.MapPresence.Unsuppress(vehicle.ObjectId.Coid);
+                    else if (obj is Creature c && c.CBID > 0 && sameNpcGiverCbids.Contains(c.CBID))
+                        character.MapPresence.Unsuppress(c.ObjectId.Coid);
+                }
+            }
+
+            // Also unsuppress live creatures with the giver CBID (map identity COIDs).
+            foreach (var obj in Objects.Values)
+            {
+                if (obj is Creature creature
+                    && creature.CBID > 0
+                    && sameNpcGiverCbids.Contains(creature.CBID))
+                {
+                    character.MapPresence.Unsuppress(creature.ObjectId.Coid);
+                }
+            }
+
+            Logger.WriteLog(LogType.Debug,
+                "SectorMap {0}: phase unsuppress same-NPC giver spawn coid={1} for char={2}",
+                ContinentId,
+                spawnCoid,
+                character.ObjectId.Coid);
+        }
+    }
+
+    /// <summary>
+    /// True when a live non-character entity with this CBID is present for <paramref name="character"/>
+    /// (not personally suppressed). Spawn-marker materialize alone does <b>not</b> count — deliver
+    /// turn-in requires a Creature/Vehicle the player can UseObject.
+    /// </summary>
+    private bool MapHasPresentEntityWithCbid(Character character, int cbid)
     {
         foreach (var obj in Objects.Values)
         {
             if (obj is Character)
                 continue;
 
-            if (obj.CBID == cbid)
+            if (obj.CBID != cbid)
+                continue;
+
+            if (character.MapPresence.IsSuppressed(obj.ObjectId.Coid))
+                continue;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Test seam for <see cref="MapHasPresentEntityWithCbid"/>.</summary>
+    internal bool MapHasPresentEntityWithCbidForTests(Character character, int cbid)
+        => MapHasPresentEntityWithCbid(character, cbid);
+
+    /// <summary>
+    /// After Create places a fam-inactive pad/dialog spawn marker, materialize children so
+    /// UseObject can resolve a Creature with the deliver CBID. Personal Create intentionally
+    /// skips combat children; deliver NPCs must still exist server-side for turn-in.
+    /// </summary>
+    internal void EnsureDeliverNpcChildren(ClonedObjectBase activator, int deliverCbid)
+    {
+        if (activator?.Map == null || deliverCbid <= 0)
+            return;
+
+        var character = activator.GetAsCharacter() ?? activator.GetSuperCharacter(false);
+        character?.MapPresence.EnsureContinent(ContinentId);
+
+        foreach (var kvp in MapData.Templates)
+        {
+            if (kvp.Value is not SpawnPointTemplate tpl || tpl.OriginalIsActive)
+                continue;
+
+            var matches = false;
+            foreach (var entry in tpl.Spawns)
+            {
+                if (entry.SpawnType == deliverCbid && entry.SpawnType != -1 && !entry.IsTemplate)
+                {
+                    matches = true;
+                    break;
+                }
+            }
+
+            if (!matches)
+                continue;
+
+            var spawnCoid = kvp.Key;
+            character?.MapPresence.Materialize(spawnCoid);
+
+            SpawnPoint spawn;
+            if (GetObjectByCoid(spawnCoid) is SpawnPoint live)
+            {
+                spawn = live;
+            }
+            else
+            {
+                try
+                {
+                    spawn = tpl.Create() as SpawnPoint;
+                }
+                catch (Exception ex)
+                {
+                    Logger.WriteLog(LogType.Error,
+                        "SectorMap {0}: EnsureDeliverNpcChildren Create failed coid={1}: {2}",
+                        ContinentId,
+                        spawnCoid,
+                        ex.Message);
+                    continue;
+                }
+
+                if (spawn == null)
+                    continue;
+
+                if (spawn.ObjectId.Coid <= 0)
+                    spawn.SetCoid(tpl.COID != 0 ? tpl.COID : spawnCoid, false);
+
+                spawn.SetMap(this);
+            }
+
+            if (spawn.HasLiveSpawn())
+            {
+                // Ensure live child is not suppressed for this character.
+                if (spawn.LastSpawnedCoid > 0)
+                    character?.MapPresence.Unsuppress(spawn.LastSpawnedCoid);
+                continue;
+            }
+
+            // Materialize dialog/turn-in NPC for interact (TE not required — Create already ran).
+            var spawned = spawn.Spawn(fireTriggerEvents: false, triggerActivator: activator);
+            Logger.WriteLog(LogType.Debug,
+                "SectorMap {0}: EnsureDeliverNpcChildren spawn coid={1} cbid={2} ok={3}",
+                ContinentId,
+                spawnCoid,
+                deliverCbid,
+                spawned ? 1 : 0);
+
+            if (spawned && spawn.LastSpawnedCoid > 0)
+            {
+                character?.MapPresence.Unsuppress(spawn.LastSpawnedCoid);
+                if (character != null)
+                    NotifyDeliverNpcCreated(character, deliverCbid);
+            }
+            else if (!spawned)
+            {
+                Logger.WriteLog(LogType.Error,
+                    "SectorMap {0}: EnsureDeliverNpcChildren Spawn failed coid={1} cbid={2} (missing clonebase?)",
+                    ContinentId,
+                    spawnCoid,
+                    deliverCbid);
+            }
+        }
+    }
+
+    private bool MapHasLiveTemplateVehicle(int templateId)
+    {
+        if (templateId <= 0)
+            return false;
+
+        foreach (var obj in Objects.Values)
+        {
+            if (obj is Vehicle vehicle && vehicle.TemplateId == templateId && vehicle.NpcAi != null)
                 return true;
         }
 
@@ -664,7 +1335,7 @@ public class SectorMap
             if (tpl == null)
                 continue;
 
-            // Fam-active dialog spawns are restored by hygiene; only replay reaction pad spawns.
+            // Fam-active dialog spawns are restored by hygiene; only replay reaction pad/combat spawns.
             if (tpl.OriginalIsActive)
                 continue;
 
@@ -816,6 +1487,13 @@ public class SectorMap
                 && entity.ObjectId.Global
                 && !IsLocalPlayerVehicle(vehicleEntity, self);
 
+            // Global map NPCs (MapNpcIdentity) need CreateCreature in the client object table
+            // before GhostCreature attaches — same constraint as foreign vehicles + CreateVehicle.
+            // Without this, deliver-phase pad NPCs spawn server-side but stay invisible.
+            var foreignGlobalCreature = entity is Creature creatureEntity
+                && entity is not Character
+                && entity.ObjectId.Global;
+
             // The local vehicle has already been constructed by CreateVehicleExtended. Sending
             // GhostVehicle's initial update afterwards clears the client's wheelset reference
             // and crashes the renderer at FUN_004F5560.
@@ -824,6 +1502,26 @@ public class SectorMap
 
             if (foreignGlobalVehicle && !ScopeGlobalVehicles)
                 continue;
+
+            if (foreignGlobalCreature
+                && gameConnection != null
+                && !ghost.IsGhostedTo(connection))
+            {
+                try
+                {
+                    var createCreature = new CreateCreaturePacket();
+                    ((Creature)entity).WriteToPacket(createCreature);
+                    gameConnection.SendGamePacket(createCreature);
+                }
+                catch (Exception ex)
+                {
+                    Logger.WriteLog(LogType.Error,
+                        "SectorMap {0}: CreateCreature scope coid={1} failed: {2}",
+                        ContinentId,
+                        entity.ObjectId.Coid,
+                        ex.Message);
+                }
+            }
 
             // Global game objects must exist in the client's object table before the TNL ghost
             // proxy attaches. Client FUN_008078b0: ghost object-create runs BEFORE game packets.

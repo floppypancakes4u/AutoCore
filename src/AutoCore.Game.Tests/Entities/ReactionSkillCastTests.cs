@@ -62,8 +62,9 @@ public class ReactionSkillCastTests
 
         Assert.IsTrue(reaction.TriggerIfPossible(vehicle));
 
-        Assert.AreEqual(225, vehicle.GetCurrentHP());
+        Assert.AreEqual(250, vehicle.GetCurrentHP());
         var effect = _sent.OfType<SkillStatusEffectPacket>().Single();
+        Assert.AreEqual((byte)1, effect.Flag, "reaction skills use the client item/reaction skill path");
         Assert.AreEqual(857, effect.SkillId);
         Assert.AreEqual((short)1, effect.SkillLevel);
         Assert.AreEqual(vehicle.ObjectId.Coid, effect.Targets.Single().Target.Coid);
@@ -139,7 +140,9 @@ public class ReactionSkillCastTests
         vehicle.SetMaximumHP(100, triggerGhostUpdate: false);
         vehicle.SetCurrentHP(0, triggerGhostUpdate: false);
         vehicle.OnDeath(DeathType.Silent);
-        vehicle.SetCurrentHP(1, triggerGhostUpdate: false);
+        // Bypass SetCurrentHP (which intentionally clears corpse when HP > 0) so we can
+        // arrange the live-HP + latched-corpse desync observed from mission/script paths.
+        vehicle.SetHPForTests(1);
         Assert.IsTrue(vehicle.IsCorpse, "Arrange the live-HP/stale-corpse state observed on SCAB");
 
         var reaction = new Reaction(new ReactionTemplate

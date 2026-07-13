@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <Include>
+            [AutoCore.Game]AutoCore.Game.Combat.VehicleCombatPool|[AutoCore.Game]AutoCore.Game.Managers.CharacterLevelManager|[AutoCore.Game]AutoCore.Game.Managers.CharacterManaState|[AutoCore.Game]AutoCore.Game.Skills.SkillService|[AutoCore.Game]AutoCore.Game.Skills.SkillResponse|[AutoCore.Game]AutoCore.Game.Skills.SkillElementTypes|[AutoCore.Game]AutoCore.Game.Skills.CharacterSkillService|[AutoCore.Game]AutoCore.Game.Entities.SimpleObject|[AutoCore.Game]AutoCore.Game.Entities.PowerPlant|[AutoCore.Game]AutoCore.Game.CloneBases.CloneBasePowerPlant|[AutoCore.Game]AutoCore.Game.CloneBases.Specifics.PowerPlantSpecific|[AutoCore.Game]AutoCore.Game.CloneBases.Prefixes.PrefixPowerPlant|[AutoCore.Game]AutoCore.Game.Packets.Sector.CharacterLevelPacket|[AutoCore.Game]AutoCore.Game.Packets.Sector.RequestCastSkillPacket|[AutoCore.Game]AutoCore.Game.Packets.Sector.SkillStatusEffectPacket|[AutoCore.Game]AutoCore.Game.Packets.Sector.CancelSkillPacket|[AutoCore.Game]AutoCore.Game.Packets.Sector.SkillIncrementPacket|[AutoCore.Game]AutoCore.Game.Packets.Sector.QuickBarUpdatePacket|[AutoCore.Game]AutoCore.Game.Packets.Sector.CreateSkillHeartbeat|[AutoCore.Game]AutoCore.Game.Packets.Sector.CreatePowerPlantPacket|[AutoCore.Game]AutoCore.Game.Structures.Skill|[AutoCore.Game]AutoCore.Game.Structures.SkillElement|[AutoCore.Game]AutoCore.Game.Structures.SkillSet
+          </Include>
+          <Exclude>
+            [AutoCore.Game]AutoCore.Game.Skills.CharacterSkillPersistence
+          </Exclude>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

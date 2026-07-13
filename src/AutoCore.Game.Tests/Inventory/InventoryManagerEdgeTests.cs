@@ -67,46 +67,47 @@ public class InventoryManagerEdgeTests
     public void CreateCargoSendAll_WithCustomCapacity_MapsItems()
     {
         var inventory = new InventoryManager();
-        inventory.SetCapacity(4, 2);
+        // height 26 = 2 UI pages of 13 rows; width 6.
+        inventory.SetCapacity(6, 26);
         inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "A", 100, 1, 1, 1));
 
         var packet = InventoryPacketFactory.CreateCargoSendAll(inventory);
 
-        Assert.AreEqual(2, packet.InventorySize);
-        Assert.AreEqual(100, packet.Items[5].ItemCoid);
-        Assert.AreEqual((byte)1, packet.Items[5].PositionX);
-        Assert.AreEqual((byte)1, packet.Items[5].PositionY);
+        Assert.AreEqual(2, packet.InventorySize, "UI page count = height/13");
+        Assert.AreEqual(100, packet.Items[7].ItemCoid); // y*6+x = 1*6+1
+        Assert.AreEqual((byte)1, packet.Items[7].PositionX);
+        Assert.AreEqual((byte)1, packet.Items[7].PositionY);
     }
 
     [TestMethod]
     public void CreateCargoSendAll_NullInventory_UsesDefaults()
     {
         var packet = InventoryPacketFactory.CreateCargoSendAll(null);
-        Assert.AreEqual(InventoryManager.DefaultCargoPageCount, packet.InventorySize);
+        Assert.AreEqual(1, packet.InventorySize, "default starter chassis is 1 cargo page");
     }
 
     [TestMethod]
     public void ConfigureVehicleCargo_WithInventory_FillsExtendedCoids()
     {
         var inventory = new InventoryManager();
-        inventory.SetCapacity(4, 1);
+        inventory.SetCapacity(6, 13);
         inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "A", 100, 2, 0, 1));
 
         var packet = new CreateVehicleExtendedPacket();
         InventoryPacketFactory.ConfigureVehicleCargo(packet, inventory);
 
-        Assert.AreEqual(inventory.SlotCount, packet.NumInventorySlots);
+        Assert.AreEqual(1, packet.NumInventorySlots, "wire short is UI page count");
         Assert.AreEqual(100, packet.InventoryCoids[2]);
     }
 
     [TestMethod]
-    public void ConfigureVehicleCargo_NullInventory_UsesDefaultSlotCount()
+    public void ConfigureVehicleCargo_NullInventory_UsesDefaultPageCount()
     {
         var packet = new CreateVehicleExtendedPacket();
         InventoryPacketFactory.ConfigureVehicleCargo(packet, null);
 
-        Assert.AreEqual(InventoryManager.DefaultCargoSlotCount, packet.InventorySlots);
-        Assert.AreEqual(InventoryManager.DefaultCargoSlotCount, packet.NumInventorySlots);
+        Assert.AreEqual(1, packet.InventorySlots);
+        Assert.AreEqual(1, packet.NumInventorySlots);
     }
 
     [TestMethod]

@@ -35,7 +35,8 @@ public class InventoryCommandServiceTests
         Assert.AreSame(item, result.AddedItem);
 
         var cargoSnapshot = (InventoryCargoSendAllPacket)result.Packets[2];
-        Assert.AreEqual(InventoryManager.CargoPageCount, cargoSnapshot.InventorySize);
+        // Wire InventorySize is UI page count (height/13), not grid height.
+        Assert.AreEqual(1, cargoSnapshot.InventorySize);
         Assert.AreEqual(1000, cargoSnapshot.Items[0].ItemCoid);
         Assert.AreEqual(0, cargoSnapshot.Items[0].PositionX);
         Assert.AreEqual(0, cargoSnapshot.Items[0].PositionY);
@@ -155,7 +156,9 @@ public class InventoryCommandServiceTests
             fullRuntime.Inventory.TryAdd(new CharacterInventoryItem(10000 + i, CloneBaseObjectType.Item, $"Item {i}", 20000 + i, x, y, 1));
         }
 
-        Assert.AreEqual("Cargo inventory is full (312/312 slots used, 312 item(s) loaded). Try /cargoinfo or /clearcargo.", service.AddItem(fullRuntime, new[] { "/addItem", "20" }).Message);
+        Assert.AreEqual(
+            $"Cargo inventory is full ({InventoryManager.CargoSlotCount}/{InventoryManager.CargoSlotCount} slots used, {InventoryManager.CargoSlotCount} item(s) loaded). Try /cargoinfo or /clearcargo.",
+            service.AddItem(fullRuntime, new[] { "/addItem", "20" }).Message);
     }
 
     [TestMethod]

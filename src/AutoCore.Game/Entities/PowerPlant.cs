@@ -42,7 +42,9 @@ public class PowerPlant : SimpleObject
             powerPlantPacket.PowerPlantSpecific = CloneBasePowerPlant.PowerPlantSpecific;
             powerPlantPacket.Mass = CloneBaseObject.SimpleObjectSpecific.Mass;
             powerPlantPacket.Name = "";
-            powerPlantPacket.SkillCooldown = 0.0f;
+            // Client multiplies skill cast-again duration by this field (FUN_0052a9b0 →
+            // CVOGHBOKToCastAgain). Identity is 1.0; 0.0 zeroes hotbar cooldowns for all skills.
+            powerPlantPacket.SkillCooldown = 1.0f;
         }
     }
 }

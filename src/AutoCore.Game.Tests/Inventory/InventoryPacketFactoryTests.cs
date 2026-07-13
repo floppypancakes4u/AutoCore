@@ -9,15 +9,16 @@ namespace AutoCore.Game.Tests.Inventory;
 public class InventoryPacketFactoryTests
 {
     [TestMethod]
-    public void ConfigureVehicleCargo_AdvertisesFullCommandCargoCapacity()
+    public void ConfigureVehicleCargo_AdvertisesPageCountOnWire()
     {
         var packet = new CreateVehicleExtendedPacket();
 
         InventoryPacketFactory.ConfigureVehicleCargo(packet);
 
-        Assert.AreEqual(InventoryManager.CargoSlotCount, packet.InventorySlots);
-        Assert.AreEqual(InventoryManager.CargoSlotCount, packet.NumInventorySlots);
-        Assert.AreEqual(InventoryManager.CargoSlotCount, packet.InventorySize);
+        // Default manager is 1 retail page (6×13); wire short is UI page count.
+        Assert.AreEqual(1, packet.InventorySlots);
+        Assert.AreEqual(1, packet.NumInventorySlots);
+        Assert.AreEqual(78, packet.InventorySize);
         Assert.IsTrue(packet.InventoryCoids.All(coid => coid == -1));
     }
 
@@ -42,7 +43,8 @@ public class InventoryPacketFactoryTests
 
         var packet = InventoryPacketFactory.CreateCargoSendAll(inventory);
 
-        Assert.AreEqual(InventoryManager.CargoPageCount, packet.InventorySize);
+        // InventorySize on CargoSendAll is UI page count (height/13), not grid height.
+        Assert.AreEqual(1, packet.InventorySize);
         Assert.AreEqual(-1, packet.Items[0].ItemCoid);
         Assert.AreEqual(1001, packet.Items[1].ItemCoid);
         Assert.AreEqual(1, packet.Items[1].PositionX);

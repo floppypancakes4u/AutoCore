@@ -223,7 +223,7 @@ public class TriggerManager : Singleton<TriggerManager>
     }
 
     /// <summary>
-    /// Call after grant/complete/set-active so mission-computed vars (types 9/11/12) can open
+    /// Call after grant/complete/set-active so mission-computed vars (types 9/10/11/12) can open
     /// gates, dialogues, etc. without requiring a new movement packet.
     /// Nested calls (GiveMission reaction during re-eval) coalesce to a single follow-up pass.
     /// </summary>

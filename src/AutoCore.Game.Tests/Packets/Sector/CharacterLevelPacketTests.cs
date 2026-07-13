@@ -58,7 +58,8 @@ public class CharacterLevelPacketTests
             Level = 42,
             Currency = 1_002_003_004L,
             Experience = 12345,
-            Unknown_0x2C = 0x55AA55AA55AA55AAL,
+            Health = 123,
+            HealthMaximum = 456,
             CurrentMana = 10,
             MaxMana = 20,
             AttributeTech = 1,
@@ -86,6 +87,8 @@ public class CharacterLevelPacketTests
         // Doc says Currency at 0x20 relative to message with opcode; our Write starts after opcode.
         // Relative to Write stream: Currency at offset 0x1C (28) = header 4 + TFID 16 + level 1 + pad 7.
         Assert.AreEqual(12345, BitConverter.ToInt32(bytes, 0x24));
+        Assert.AreEqual(123, BitConverter.ToInt32(bytes, 0x28));
+        Assert.AreEqual(456, BitConverter.ToInt32(bytes, 0x2C));
         Assert.AreEqual((short)10, BitConverter.ToInt16(bytes, 0x30));
         Assert.AreEqual((short)20, BitConverter.ToInt16(bytes, 0x32));
         // Pad after level must be zero (WriteZeros)

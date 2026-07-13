@@ -29,7 +29,11 @@ public sealed class CharacterProgressPersistence : ICharacterProgressPersistence
             character.Experience,
             character.SkillPoints,
             character.AttributePoints,
-            character.ResearchPoints);
+            character.ResearchPoints,
+            character.AttributeTech,
+            character.AttributeCombat,
+            character.AttributeTheory,
+            character.AttributePerception);
     }
 
     public void SaveProgress(long characterCoid, CharacterProgressSnapshot progress)
@@ -47,11 +51,16 @@ public sealed class CharacterProgressPersistence : ICharacterProgressPersistence
         character.SkillPoints = progress.SkillPoints;
         character.AttributePoints = progress.AttributePoints;
         character.ResearchPoints = progress.ResearchPoints;
+        character.AttributeTech = progress.AttributeTech;
+        character.AttributeCombat = progress.AttributeCombat;
+        character.AttributeTheory = progress.AttributeTheory;
+        character.AttributePerception = progress.AttributePerception;
         context.SaveChanges();
 
         Logger.WriteLog(
             LogType.Network,
             $"SaveProgress: character={characterCoid} level={progress.Level} xp={progress.Experience} " +
-            $"skill={progress.SkillPoints} attrib={progress.AttributePoints} research={progress.ResearchPoints}");
+            $"skill={progress.SkillPoints} attrib={progress.AttributePoints} research={progress.ResearchPoints} " +
+            $"tech={progress.AttributeTech} combat={progress.AttributeCombat} theory={progress.AttributeTheory} perception={progress.AttributePerception}");
     }
 }

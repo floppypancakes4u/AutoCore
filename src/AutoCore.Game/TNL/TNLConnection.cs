@@ -866,6 +866,22 @@ public partial class TNLConnection : GhostConnection
                     HandleFiringPacket(reader);
                     break;
 
+                case GameOpcode.SkillIncrement:
+                    HandleSkillIncrementPacket(reader);
+                    break;
+
+                case GameOpcode.AttributeIncrement:
+                    HandleAttributeIncrementPacket(reader);
+                    break;
+
+                case GameOpcode.QuickBarUpdate:
+                    HandleQuickBarUpdatePacket(reader);
+                    break;
+
+                case GameOpcode.RequestCastSkill:
+                    HandleRequestCastSkillPacket(reader);
+                    break;
+
                 case GameOpcode.Damage:
                     // C2S damage is not used; combat is server-authoritative via VehicleMoved/Firing.
                     break;

@@ -113,6 +113,20 @@ public class FirstTimeFlagsPacketTests
     }
 
     [TestMethod]
+    public void CreateCharacterExtended_WritesLearnedSkillRecords()
+    {
+        var packet = CreateMinimalExtendedPacket();
+        packet.NumSkills = 1;
+        packet.LearnedSkills.Add((857, 3));
+
+        var bytes = WritePacketWithOpcode(packet);
+        var skillOffset = CreateCharacterExtendedPacket.FixedPacketSizeIncludingOpcode;
+        Assert.AreEqual(857, BitConverter.ToInt32(bytes, skillOffset));
+        Assert.AreEqual((byte)3, bytes[skillOffset + 4]);
+        Assert.AreEqual(0, bytes[skillOffset + 5]);
+    }
+
+    [TestMethod]
     public void CreateCharacter_BasePacketSizeIs0x1A8()
     {
         var packet = new CreateCharacterPacket

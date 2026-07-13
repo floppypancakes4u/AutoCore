@@ -53,6 +53,18 @@ public class CharacterData
     /// <summary>Unspent research points granted on level-up.</summary>
     public short ResearchPoints { get; set; }
 
+    /// <summary>Spent Tech attribute (client char+0x13C). Persisted for login restore.</summary>
+    public short AttributeTech { get; set; }
+
+    /// <summary>Spent Combat attribute (client char+0x13E).</summary>
+    public short AttributeCombat { get; set; }
+
+    /// <summary>Spent Theory attribute (client char+0x140).</summary>
+    public short AttributeTheory { get; set; }
+
+    /// <summary>Spent Perception attribute (client char+0x142).</summary>
+    public short AttributePerception { get; set; }
+
     /// <summary>
     /// Server-authoritative money as a single int64 (Globes/Bars/Scrip/Clink groups of 1000).
     /// Client UI is restored after login via CharacterLevel (0x2017); do not write non-zero
@@ -66,12 +78,12 @@ public class CharacterData
     public bool Deleted { get; set; }
 
     /// <summary>
-    /// Cargo grid width (columns). Chassis systems can later overwrite this per character.
+    /// Cargo grid width (columns). Retail is 6; see VehicleCargoCapacity.
     /// </summary>
-    public int CargoWidth { get; set; } = 24;
+    public int CargoWidth { get; set; } = 6;
 
     /// <summary>
-    /// Cargo grid page/row count. Chassis systems can later overwrite this per character.
+    /// Cargo grid height (rows). Retail is pages×13; starter Callisto is 1 page → 13 rows.
     /// </summary>
     public int CargoPageCount { get; set; } = 13;
 

@@ -45,8 +45,11 @@ public class MapTransferGhostingTests
         Assert.IsNotNull(character.CurrentVehicle.Ghost);
         Assert.IsInstanceOfType(character.CurrentVehicle.Ghost, typeof(GhostVehicle));
         Assert.AreSame(character.Ghost, connection.GetScopeObject());
-        Assert.IsNull(character.CurrentVehicle.Ghost.GetFirstObjectRef(),
-            "The client constructs its own vehicle from CreateVehicleExtended; an initial GhostVehicle update overwrites its wheelset.");
+        // Local vehicle is scoped so Heat/Shield/HP/Power ghost masks reach the owner.
+        // GhostVehicle.PackUpdate uses OwnerCombatInitialMask (no equipment/pose) so the
+        // CreateVehicleExtended wheelset (+0x258) is not cleared by a full initial pack.
+        Assert.IsNotNull(character.CurrentVehicle.Ghost.GetFirstObjectRef(),
+            "Owner vehicle must be ghost-scoped for combat pool replication.");
     }
 
     [TestMethod]

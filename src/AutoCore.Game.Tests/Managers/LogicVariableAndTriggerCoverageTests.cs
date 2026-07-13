@@ -67,6 +67,166 @@ public class LogicVariableAndTriggerCoverageTests
         Assert.AreEqual(0f, store.Get(9999)); // missing id
     }
 
+    /// <summary>
+    /// Type 10 (HasCompletedObjective) — client FUN_0052c9d0. Ark Bay transit to Back Range
+    /// gates L1_coll_transit_tobackrange on var 214 (type 10, objective 5468) == const 1.
+    /// </summary>
+    [TestMethod]
+    public void LogicVariableStore_Type10_CompletedObjective_MissionCompleted()
+    {
+        const int completedObjId = 92110;
+        AssetManager.Instance.SetTestMission(
+            Mission.CreateForTests(
+                MissionId,
+                MissionObjective.CreateForTests(ObjectiveId, 0, MissionId, 1),
+                MissionObjective.CreateForTests(completedObjId, 1, MissionId, 1)));
+
+        var (character, _, map) = CreatePlayer();
+        map.MapData.Variables[214] = Variable.CreateForTests(
+            214, LogicVariableStore.TypeHasCompletedObjective, completedObjId, completedObjId, "gunnyhealed");
+        map.MapData.Variables[4] = Variable.CreateForTests(
+            4, LogicVariableStore.TypeConstant, 1f, 1f, "one");
+
+        var store = character.EnsureLogicVariables();
+        Assert.AreEqual(0f, store.Get(214), "Unknown progression must not report completed");
+
+        character.CompletedMissionIds.Add(MissionId);
+        Assert.AreEqual(1f, store.Get(214), "Completed parent mission means objective is completed");
+
+        Assert.IsTrue(new TriggerConditional
+        {
+            LeftId = 214,
+            RightId = 4,
+            Type = ConditionalType.EqualTo,
+        }.Check(character), "Back Range transit condition var[214]==1 must pass after mission complete");
+    }
+
+    [TestMethod]
+    public void LogicVariableStore_Type10_CompletedObjective_SequenceAdvanced()
+    {
+        const int firstObj = 92110;
+        const int secondObj = 92111;
+        AssetManager.Instance.SetTestMission(
+            Mission.CreateForTests(
+                MissionId,
+                MissionObjective.CreateForTests(firstObj, 0, MissionId, 1),
+                MissionObjective.CreateForTests(secondObj, 1, MissionId, 1)));
+
+        var (character, _, map) = CreatePlayer();
+        map.MapData.Variables[214] = Variable.CreateForTests(
+            214, LogicVariableStore.TypeHasCompletedObjective, firstObj, firstObj, "first");
+        map.MapData.Variables[4] = Variable.CreateForTests(
+            4, LogicVariableStore.TypeConstant, 1f, 1f, "one");
+
+        var store = character.EnsureLogicVariables();
+
+        // Still on sequence 0 (target objective): not completed.
+        var quest = new CharacterQuest(MissionId, activeObjectiveSequence: 0);
+        quest.PopulateFromAssets();
+        character.CurrentQuests.Add(quest);
+        Assert.AreEqual(0f, store.Get(214));
+        Assert.IsFalse(new TriggerConditional
+        {
+            LeftId = 214,
+            RightId = 4,
+            Type = ConditionalType.EqualTo,
+        }.Check(character));
+
+        // Advanced past sequence 0: completed.
+        quest.ActiveObjectiveSequence = 1;
+        Assert.AreEqual(1f, store.Get(214));
+        Assert.IsTrue(new TriggerConditional
+        {
+            LeftId = 214,
+            RightId = 4,
+            Type = ConditionalType.EqualTo,
+        }.Check(character));
+    }
+
+    [TestMethod]
+    public void LogicVariableStore_Type10_CompletedObjective_UnknownObjective_False()
+    {
+        AssetManager.Instance.SetTestMission(
+            Mission.CreateForTests(MissionId, MissionObjective.CreateForTests(ObjectiveId, 0, MissionId, 1)));
+
+        var (character, _, map) = CreatePlayer();
+        map.MapData.Variables[214] = Variable.CreateForTests(
+            214, LogicVariableStore.TypeHasCompletedObjective, 99999, 99999, "missing");
+
+        character.CompletedMissionIds.Add(MissionId);
+        var store = character.EnsureLogicVariables();
+        Assert.AreEqual(0f, store.Get(214));
+    }
+
+    [TestMethod]
+    public void BackRangeTransitGate_FiresOnlyWhenObjectiveCompleted()
+    {
+        // Mirrors L1_coll_transit_tobackrange: condition var[214]==var[4], reaction TransferMap.
+        const int healObjId = 92110;
+        AssetManager.Instance.SetTestMission(
+            Mission.CreateForTests(
+                MissionId,
+                MissionObjective.CreateForTests(ObjectiveId, 0, MissionId, 1),
+                MissionObjective.CreateForTests(healObjId, 1, MissionId, 1)));
+
+        var (character, vehicle, map) = CreatePlayer();
+        map.MapData.Variables[214] = Variable.CreateForTests(
+            214, LogicVariableStore.TypeHasCompletedObjective, healObjId, healObjId, "l0_gunnyhealed");
+        map.MapData.Variables[4] = Variable.CreateForTests(
+            4, LogicVariableStore.TypeConstant, 1f, 1f, "L0_const_1");
+
+        const long transferRxCoid = 99038;
+        var transferTpl = new ReactionTemplate
+        {
+            COID = (int)transferRxCoid,
+            Name = "l1_maptransfer_tobackrange",
+            ReactionType = ReactionType.TransferMap,
+            ActOnActivator = true,
+            MapTransfer = AutoCore.Game.Constants.MapTransferType.ContinentObject,
+            MapTransferData = 693,
+        };
+        var transferRx = new Reaction(transferTpl);
+        transferRx.SetCoid(transferRxCoid, false);
+        transferRx.SetMap(map);
+
+        const long triggerCoid = 99035;
+        var triggerTpl = new TriggerTemplate
+        {
+            COID = (int)triggerCoid,
+            Name = "L1_coll_transit_tobackrange",
+            TargetType = TriggerTargetType.Players,
+            Scale = 15f,
+            DoCollision = true,
+            DoConditionals = true,
+            AllConditionsNeeded = false,
+            ActivationCount = -1,
+        };
+        triggerTpl.Reactions.Add(transferRxCoid);
+        triggerTpl.Conditions.Add(new TriggerConditional
+        {
+            LeftId = 214,
+            RightId = 4,
+            Type = ConditionalType.EqualTo,
+        });
+        var trigger = new Trigger(triggerTpl);
+        trigger.SetCoid(triggerCoid, false);
+        trigger.Position = new Vector3(0, 0, 0);
+        trigger.Scale = 15f;
+        trigger.SetMap(map);
+
+        vehicle.Position = new Vector3(0, 0, 0);
+        character.EnsureLogicVariables();
+
+        // Gate closed: incomplete SCAB-style mission.
+        Assert.IsFalse(trigger.CanTrigger(vehicle), "Transit must not open before heal objective completes");
+        TriggerManager.Instance.CheckTriggersFor(vehicle);
+        Assert.AreEqual(0, trigger.FireCount);
+
+        // Gate open: parent mission completed (post-Gunny → Freelancer Roll Out).
+        character.CompletedMissionIds.Add(MissionId);
+        Assert.IsTrue(trigger.CanTrigger(vehicle), "Transit must open after heal objective's mission completes");
+    }
+
     [TestMethod]
     public void LogicVariableStore_Type7_PlayerHealthPercent_FullPartialZero()
     {
@@ -255,7 +415,9 @@ public class LogicVariableAndTriggerCoverageTests
         vehicle.Position = new Vector3(0, 0, 0);
 
         Assert.IsTrue(trigger.TriggerIfPossible(vehicle));
-        Assert.IsNull(map.GetObjectByCoid(objCoid));
+        // Delete is personal-suppress for multiplayer maps (shared object stays for others).
+        Assert.IsNotNull(map.GetObjectByCoid(objCoid));
+        Assert.IsTrue(character.MapPresence.IsSuppressed(objCoid));
         Assert.IsFalse(trigger.TriggerIfPossible(null));
     }
 
@@ -623,9 +785,11 @@ public class LogicVariableAndTriggerCoverageTests
         // Unrelated var change — should not fire
         TriggerManager.Instance.OnVariableChanged(vehicle, 999);
         Assert.IsNotNull(map.GetObjectByCoid(objCoid));
+        Assert.IsFalse(character.MapPresence.IsSuppressed(objCoid));
 
         TriggerManager.Instance.OnVariableChanged(vehicle, 30);
-        Assert.IsNull(map.GetObjectByCoid(objCoid));
+        Assert.IsNotNull(map.GetObjectByCoid(objCoid), "Shared map keeps object for other players");
+        Assert.IsTrue(character.MapPresence.IsSuppressed(objCoid), "Delete must personal-suppress for the activator");
     }
 
     [TestMethod]

@@ -16,6 +16,14 @@ using AutoCore.Utils.Memory;
 
 public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
 {
+    /// <summary>Chassis <c>InventorySlots</c> → retail cargo UI page count (min 1).</summary>
+    internal static int ResolveChassisCargoPages(int vehicleCbid)
+    {
+        var clone = AssetManager.Instance.GetCloneBase(vehicleCbid) as CloneBaseVehicle;
+        var slots = clone?.VehicleSpecific.InventorySlots ?? 1;
+        return VehicleCargoCapacity.ClampPageCount(slots);
+    }
+
     public static (bool, long) CreateNewCharacter(TNLConnection client, LoginNewCharacterPacket packet)
     {
         using var context = new CharContext();
@@ -238,8 +246,10 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
                 RotationY = 0.0f,
                 RotationZ = 0.0f,
                 RotationW = 1.0f,
-                CargoWidth = InventoryManager.DefaultCargoWidth,
-                CargoPageCount = InventoryManager.DefaultCargoPageCount
+                // Retail grid from chassis InventorySlots (pages); height = pages×13, width = 6.
+                CargoWidth = VehicleCargoCapacity.GridWidth,
+                CargoPageCount = VehicleCargoCapacity.HeightForPages(
+                    ResolveChassisCargoPages(configNewCharacter.Vehicle))
             };
             context.Characters.Add(character);
             AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Network, $"CreateNewCharacter: Character.Name before SaveChanges: '{character.Name}' (Length: {character.Name?.Length ?? 0})");

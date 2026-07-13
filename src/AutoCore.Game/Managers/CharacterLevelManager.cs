@@ -29,6 +29,7 @@ public class CharacterLevelManager : Singleton<CharacterLevelManager>
         if (character == null)
             throw new ArgumentNullException(nameof(character));
 
+        EnsurePowerPlantCapacity(character);
         var state = GetOrCreate(character.ObjectId.Coid);
         lock (state)
         {
@@ -37,10 +38,16 @@ public class CharacterLevelManager : Singleton<CharacterLevelManager>
                 CharacterId = character.ObjectId,
                 Level = character.Level,
                 Experience = character.Experience,
+                Health = character.CurrentVehicle?.GetCurrentHP() ?? character.GetCurrentHP(),
+                HealthMaximum = character.CurrentVehicle?.GetMaximumHP() ?? character.GetMaximumHP(),
                 Currency = character.Credits,
                 SkillPoints = character.SkillPoints,
                 AttributePoints = character.AttributePoints,
                 ResearchPoints = character.ResearchPoints,
+                AttributeTech = character.AttributeTech,
+                AttributeCombat = character.AttributeCombat,
+                AttributeTheory = character.AttributeTheory,
+                AttributePerception = character.AttributePerception,
                 CurrentMana = state.CurrentMana,
                 MaxMana = state.MaxMana
             };
@@ -49,7 +56,7 @@ public class CharacterLevelManager : Singleton<CharacterLevelManager>
 
     /// <summary>
     /// Sets current mana. When <paramref name="sendPacket"/> is true and the character has an
-    /// owning connection, sends CharacterLevel; always dirties vehicle PowerMask when possible.
+    /// owning connection, sends the absolute CharacterLevel power snapshot.
     /// </summary>
     public CharacterLevelPacket SetCurrentMana(Character character, short newCurrent, bool sendPacket = true)
     {
@@ -64,8 +71,6 @@ public class CharacterLevelManager : Singleton<CharacterLevelManager>
         }
 
         var packet = BuildPacket(character);
-        character.CurrentVehicle?.EnsureGhostMaskDelivery(GhostVehicle.PowerMask);
-
         if (sendPacket)
             character.OwningConnection?.SendGamePacket(packet);
 
@@ -87,11 +92,29 @@ public class CharacterLevelManager : Singleton<CharacterLevelManager>
         }
 
         var packet = BuildPacket(character);
-        character.CurrentVehicle?.EnsureGhostMaskDelivery(GhostVehicle.PowerMask);
-
         if (sendPacket)
             character.OwningConnection?.SendGamePacket(packet);
 
+        return packet;
+    }
+
+    /// <summary>Set the unified power pool; legacy packet fields remain CurrentMana/MaxMana.</summary>
+    public CharacterLevelPacket SetPower(Character character, short power, bool sendPacket = true)
+    {
+        if (character == null)
+            throw new ArgumentNullException(nameof(character));
+
+        var state = GetOrCreate(character.ObjectId.Coid);
+        lock (state)
+        {
+            var value = Math.Max(power, (short)0);
+            state.CurrentMana = value;
+            state.MaxMana = value;
+        }
+
+        var packet = BuildPacket(character);
+        if (sendPacket)
+            character.OwningConnection?.SendGamePacket(packet);
         return packet;
     }
 
@@ -104,6 +127,59 @@ public class CharacterLevelManager : Singleton<CharacterLevelManager>
 
     /// <summary>Test helper: drop all cached mana state between tests.</summary>
     internal void ClearAllForTests() => _cache.Clear();
+
+    /// <summary>Initialize the placeholder 10/10 pool from the equipped power plant.</summary>
+    public void EnsurePowerPlantCapacity(Character character)
+    {
+        var maximum = character?.CurrentVehicle?.PowerPlant?.CloneBasePowerPlant?.PowerPlantSpecific?.PowerMaximum ?? 0;
+        if (maximum <= 0)
+            return;
+        var state = GetOrCreate(character.ObjectId.Coid);
+        lock (state)
+        {
+            if (state.MaxMana == 10 && state.CurrentMana == 10)
+            {
+                var value = (short)Math.Clamp(maximum, 0, short.MaxValue);
+                state.MaxMana = value;
+                state.CurrentMana = value;
+            }
+        }
+    }
+
+    public (short Current, short Maximum) GetPower(long characterCoid)
+    {
+        var state = GetOrCreate(characterCoid);
+        lock (state)
+            return (state.CurrentMana, state.MaxMana);
+    }
+
+    /// <summary>
+    /// Dirties the vehicle ghost <see cref="GhostVehicle.PowerMask"/> so the client receives
+    /// absolute current power (same path as plant regen). Does not send <see cref="CharacterLevelPacket"/>.
+    /// Use after cast rejections so optimistic client spend can be restored to server truth.
+    /// Do not call on successful skill spend — client already deducted optimistically.
+    /// </summary>
+    public void SyncCurrentPowerGhost(Character character)
+    {
+        character?.CurrentVehicle?.EnsureGhostMaskDelivery(GhostVehicle.PowerMask);
+    }
+
+    /// <summary>
+    /// Absolute owner HUD snapshot via <see cref="CharacterLevelPacket"/> (0x2017).
+    /// Client <c>CVOGCharacter_ApplyCharacterLevelPacket</c> @ 0x00531E90 always applies mana and,
+    /// when in-world, vehicle Health/HealthMaximum through combat setters.
+    /// Same delivery path as <c>/power</c>; use for HP changes (heat/shield stay on ghost masks).
+    /// </summary>
+    public CharacterLevelPacket SyncOwnedCombatHud(Character character, bool sendPacket = true)
+    {
+        if (character == null)
+            throw new ArgumentNullException(nameof(character));
+
+        var packet = BuildPacket(character);
+        if (sendPacket)
+            character.OwningConnection?.SendGamePacket(packet);
+        return packet;
+    }
 }
 
 /// <summary>In-memory mana/power for one character.</summary>

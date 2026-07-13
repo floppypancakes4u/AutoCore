@@ -8,16 +8,17 @@ namespace AutoCore.Game.Tests.Inventory;
 public class InventoryManagerCapacityTests
 {
     [TestMethod]
-    public void DefaultCapacity_MatchesLegacyConstants()
+    public void DefaultCapacity_MatchesRetailStarterOnePage()
     {
         var inventory = new InventoryManager();
 
+        // Retail FUN_004F3A30: width 6, one page of 13 rows (Callisto X InventorySlots=1).
         Assert.AreEqual(InventoryManager.DefaultCargoWidth, inventory.Width);
         Assert.AreEqual(InventoryManager.DefaultCargoPageCount, inventory.PageCount);
         Assert.AreEqual(InventoryManager.DefaultCargoSlotCount, inventory.SlotCount);
-        Assert.AreEqual(24, inventory.Width);
+        Assert.AreEqual(6, inventory.Width);
         Assert.AreEqual(13, inventory.PageCount);
-        Assert.AreEqual(312, inventory.SlotCount);
+        Assert.AreEqual(78, inventory.SlotCount);
     }
 
     [TestMethod]
@@ -40,11 +41,11 @@ public class InventoryManagerCapacityTests
     public void SetCapacity_ClampsToMaxPacketSlots()
     {
         var inventory = new InventoryManager();
-        inventory.SetCapacity(24, 50);
+        inventory.SetCapacity(6, 200);
 
-        Assert.AreEqual(24, inventory.Width);
+        Assert.AreEqual(6, inventory.Width);
         Assert.IsTrue(inventory.SlotCount <= InventoryManager.MaxCargoSlotCount);
-        Assert.AreEqual(InventoryManager.MaxCargoSlotCount / 24, inventory.PageCount);
+        Assert.AreEqual(InventoryManager.MaxCargoSlotCount / 6, inventory.PageCount);
     }
 
     [TestMethod]

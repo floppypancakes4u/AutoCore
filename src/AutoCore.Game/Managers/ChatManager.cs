@@ -534,12 +534,7 @@ public class ChatManager : Singleton<ChatManager>
                         character.SetLevel(level);
                         Experience.CharacterProgressPersistence.Instance.SaveProgress(
                             character.ObjectId.Coid,
-                            new Experience.CharacterProgressSnapshot(
-                                level,
-                                character.Experience,
-                                character.SkillPoints,
-                                character.AttributePoints,
-                                character.ResearchPoints));
+                            character.ToProgressSnapshot());
                     }
 
                     connection.SendGamePacket(svc.BuildCharacterLevelPacket(character));
@@ -623,13 +618,11 @@ public class ChatManager : Singleton<ChatManager>
 
                 try
                 {
-                    connection.SendGamePacket(new CharacterLevelPacket
-                    {
-                        CharacterId = character.ObjectId,
-                        Level = character.Level,
-                        AttributeTech = tech
-                    });
-                    respPacket.Message = $"Set Tech to {tech}!";
+                    character.SetAttributeTech(tech);
+                    character.CurrentVehicle?.RecalculateMaximumHitPoints(refillCurrent: false, triggerGhostUpdate: true);
+                    character.CurrentVehicle?.RecalculateMaximumHeat(triggerGhostUpdate: true);
+                    connection.SendGamePacket(CharacterLevelManager.Instance.BuildPacket(character));
+                    respPacket.Message = $"Set Tech to {tech}! Vehicle HP {character.CurrentVehicle?.GetCurrentHP()}/{character.CurrentVehicle?.GetMaximumHP()} heat max {character.CurrentVehicle?.MaxHeat}";
                 }
                 catch (System.Exception ex)
                 {

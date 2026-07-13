@@ -37,7 +37,17 @@ public class CharacterProgressPersistenceTests
         return new CharContext(options);
     }
 
-    private void SeedCharacter(long coid, byte level = 1, int xp = 0, short skill = 0, short attrib = 0, short research = 0)
+    private void SeedCharacter(
+        long coid,
+        byte level = 1,
+        int xp = 0,
+        short skill = 0,
+        short attrib = 0,
+        short research = 0,
+        short tech = 0,
+        short combat = 0,
+        short theory = 0,
+        short perception = 0)
     {
         using var ctx = CreateContext();
         ctx.Characters.Add(new CharacterData
@@ -50,6 +60,10 @@ public class CharacterProgressPersistenceTests
             SkillPoints = skill,
             AttributePoints = attrib,
             ResearchPoints = research,
+            AttributeTech = tech,
+            AttributeCombat = combat,
+            AttributeTheory = theory,
+            AttributePerception = perception,
         });
         ctx.SaveChanges();
     }
@@ -65,20 +79,24 @@ public class CharacterProgressPersistenceTests
     [TestMethod]
     public void LoadProgress_ExistingCharacter_ReturnsStoredFields()
     {
-        SeedCharacter(100, level: 7, xp: 22000, skill: 2, attrib: 4, research: 1);
+        SeedCharacter(100, level: 7, xp: 22000, skill: 2, attrib: 4, research: 1, tech: 9, combat: 8, theory: 7, perception: 6);
         var snap = _persist.LoadProgress(100);
         Assert.AreEqual((byte)7, snap.Level);
         Assert.AreEqual(22000, snap.Experience);
         Assert.AreEqual((short)2, snap.SkillPoints);
         Assert.AreEqual((short)4, snap.AttributePoints);
         Assert.AreEqual((short)1, snap.ResearchPoints);
+        Assert.AreEqual((short)9, snap.AttributeTech);
+        Assert.AreEqual((short)8, snap.AttributeCombat);
+        Assert.AreEqual((short)7, snap.AttributeTheory);
+        Assert.AreEqual((short)6, snap.AttributePerception);
     }
 
     [TestMethod]
     public void SaveProgress_UpdatesAbsoluteFields()
     {
         SeedCharacter(200, level: 1, xp: 0);
-        _persist.SaveProgress(200, new CharacterProgressSnapshot(5, 9000, 3, 6, 2));
+        _persist.SaveProgress(200, new CharacterProgressSnapshot(5, 9000, 3, 6, 2, 15, 14, 13, 12));
 
         using var verify = CreateContext();
         var row = verify.Characters.Single(c => c.Coid == 200);
@@ -87,6 +105,10 @@ public class CharacterProgressPersistenceTests
         Assert.AreEqual((short)3, row.SkillPoints);
         Assert.AreEqual((short)6, row.AttributePoints);
         Assert.AreEqual((short)2, row.ResearchPoints);
+        Assert.AreEqual((short)15, row.AttributeTech);
+        Assert.AreEqual((short)14, row.AttributeCombat);
+        Assert.AreEqual((short)13, row.AttributeTheory);
+        Assert.AreEqual((short)12, row.AttributePerception);
     }
 
     [TestMethod]
@@ -102,7 +124,7 @@ public class CharacterProgressPersistenceTests
     public void SaveThenLoad_RoundTrip()
     {
         SeedCharacter(300);
-        var written = new CharacterProgressSnapshot(10, 39000, 5, 8, 3);
+        var written = new CharacterProgressSnapshot(10, 39000, 5, 8, 3, 20, 21, 22, 23);
         _persist.SaveProgress(300, written);
         var loaded = _persist.LoadProgress(300);
         Assert.AreEqual(written.Level, loaded.Level);
@@ -110,5 +132,9 @@ public class CharacterProgressPersistenceTests
         Assert.AreEqual(written.SkillPoints, loaded.SkillPoints);
         Assert.AreEqual(written.AttributePoints, loaded.AttributePoints);
         Assert.AreEqual(written.ResearchPoints, loaded.ResearchPoints);
+        Assert.AreEqual(written.AttributeTech, loaded.AttributeTech);
+        Assert.AreEqual(written.AttributeCombat, loaded.AttributeCombat);
+        Assert.AreEqual(written.AttributeTheory, loaded.AttributeTheory);
+        Assert.AreEqual(written.AttributePerception, loaded.AttributePerception);
     }
 }

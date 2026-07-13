@@ -252,7 +252,7 @@ public class ExperienceServiceTests
     [TestMethod]
     public void TryCreateLoginRestorePacket_LoadsFromPersistence()
     {
-        _persist.Store[2001] = new CharacterProgressSnapshot(5, 9000, 3, 4, 1);
+        _persist.Store[2001] = new CharacterProgressSnapshot(5, 9000, 3, 4, 1, 10, 11, 12, 13);
         var character = MakeCharacter(2001, xp: 0, level: 1);
         var packet = _svc.TryCreateLoginRestorePacket(character, _persist);
         Assert.IsNotNull(packet);
@@ -260,6 +260,14 @@ public class ExperienceServiceTests
         Assert.AreEqual(9000, character.Experience);
         Assert.AreEqual(9000, packet.Experience);
         Assert.AreEqual(5, packet.Level);
+        Assert.AreEqual((short)10, character.AttributeTech);
+        Assert.AreEqual((short)11, character.AttributeCombat);
+        Assert.AreEqual((short)12, character.AttributeTheory);
+        Assert.AreEqual((short)13, character.AttributePerception);
+        Assert.AreEqual((short)10, packet.AttributeTech);
+        Assert.AreEqual((short)11, packet.AttributeCombat);
+        Assert.AreEqual((short)12, packet.AttributeTheory);
+        Assert.AreEqual((short)13, packet.AttributePerception);
     }
 
     [TestMethod]

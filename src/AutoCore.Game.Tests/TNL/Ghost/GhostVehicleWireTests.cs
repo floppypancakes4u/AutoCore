@@ -11,6 +11,7 @@ using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
 using AutoCore.Game.Structures;
+using AutoCore.Game.TNL;
 using AutoCore.Game.TNL.Ghost;
 
 /// <summary>
@@ -504,6 +505,80 @@ public class GhostVehicleWireTests
         SkipToPathBlock(stream);
 
         Assert.IsFalse(stream.ReadFlag(), "EnablePathWire=false must force path flag false");
+    }
+
+    /// <summary>
+    /// Local player vehicles are constructed via CreateVehicleExtended. A full GhostVehicle
+    /// initial re-enters create-buffer materialize and can clear wheels (+0x258). Owner-control
+    /// initial packs only combat pool fields (HP/heat/shield/power).
+    /// </summary>
+    [TestMethod]
+    public void PackInitial_OwnerControlConnection_CombatOnly_OmitsEquipmentAndPacksPools()
+    {
+        var vehicle = CreateVehicleWithMap(9150);
+        vehicle.SetMaximumHP(800, triggerGhostUpdate: false);
+        vehicle.SetCurrentHP(250, triggerGhostUpdate: false);
+        vehicle.SetMaximumHeat(200, triggerGhostUpdate: false);
+        vehicle.SetCurrentHeat(40, triggerGhostUpdate: false);
+        vehicle.SetMaximumShield(300, triggerGhostUpdate: false);
+        vehicle.SetCurrentShield(90, triggerGhostUpdate: false);
+
+        var character = CreateTestCharacter(9151);
+        vehicle.SetOwner(character);
+        character.SetCurrentVehicleForTests(vehicle);
+
+        var connection = new TNLConnection();
+        connection.CurrentCharacter = character;
+        character.SetOwningConnection(connection);
+
+        var wheel = new WheelSet();
+        wheel.SetCoid(9152, false);
+        Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.WheelSet, wheel, out _));
+
+        var mask = ulong.MaxValue; // full dirty like first-scope
+        var stream = new BitStream(new byte[4096], 4096);
+        NetObject.PIsInitialUpdate = true;
+        vehicle.Ghost.PackUpdate(connection, mask, stream);
+        stream.SetBitPosition(0);
+
+        SkipToPathBlock(stream);
+
+        // Optional initial blocks omitted for owner combat profile.
+        Assert.IsFalse(stream.ReadFlag(), "path");
+        Assert.IsFalse(stream.ReadFlag(), "template");
+        Assert.IsFalse(stream.ReadFlag(), "spawn owner");
+        Assert.AreEqual(0u, stream.ReadInt(8)); // tricks
+        Assert.IsFalse(stream.ReadFlag()); // trailer
+        Assert.IsFalse(stream.ReadFlag(), "owner block");
+
+        // Initial has no Skills lead flag — seven equipment presence flags only.
+        for (var i = 0; i < 7; ++i)
+            Assert.IsFalse(stream.ReadFlag(), $"equip {i}");
+
+        Assert.IsFalse(stream.ReadFlag()); // GM
+        Assert.IsFalse(stream.ReadFlag()); // Clan
+        Assert.IsFalse(stream.ReadFlag()); // Pet
+        Assert.IsFalse(stream.ReadFlag()); // Murderer
+
+        Assert.IsTrue(stream.ReadFlag(), "Health");
+        Assert.AreEqual(250u, stream.ReadInt(18));
+        stream.ReadFlag(); // corpse
+        Assert.IsTrue(stream.ReadFlag(), "HealthMax");
+        Assert.AreEqual(800u, stream.ReadInt(18));
+        Assert.IsFalse(stream.ReadFlag()); // State
+        Assert.IsFalse(stream.ReadFlag(), "Position omitted on owner combat initial");
+        Assert.IsFalse(stream.ReadFlag()); // Target
+        Assert.IsFalse(stream.ReadFlag()); // Attribute
+        Assert.IsTrue(stream.ReadFlag(), "Heat");
+        stream.Read(out uint heat);
+        Assert.AreEqual(40u, heat);
+        Assert.IsTrue(stream.ReadFlag(), "ShieldMax");
+        stream.Read(out uint shieldMax);
+        Assert.AreEqual(300u, shieldMax);
+        Assert.IsTrue(stream.ReadFlag(), "Shield");
+        stream.Read(out uint shield);
+        Assert.AreEqual(90u, shield);
+        Assert.IsTrue(stream.ReadFlag(), "Power");
     }
 
     [TestMethod]

@@ -10,6 +10,7 @@ using AutoCore.Game.Map;
 ///   0  = plain flag/constant (mutable via VariableSet; seeded from InitialValue)
 ///   7  = player vehicle health percent (current/max, clamped 0..1) — e.g. SCAB pad full-heal gates
 ///   9  = has completed mission Id in <see cref="Variable.Value"/>
+///   10 = has completed objective Id in Value (FUN_0052c9d0: mission done or advanced past seq)
 ///   11 = has active mission Id in Value (char mission hash / CurrentQuests)
 ///   12 = has active objective Id in Value
 /// Conditions compare var[LeftId] OP var[RightId].
@@ -19,6 +20,7 @@ public class LogicVariableStore
     public const byte TypeConstant = 0;
     public const byte TypePlayerHealthPercent = 7;
     public const byte TypeHasCompletedMission = 9;
+    public const byte TypeHasCompletedObjective = 10;
     public const byte TypeHasActiveMission = 11;
     public const byte TypeHasActiveObjective = 12;
 
@@ -48,6 +50,10 @@ public class LogicVariableStore
         {
             case TypeHasCompletedMission:
                 return _character.CompletedMissionIds.Contains((int)def.Value) ? True : False;
+
+            case TypeHasCompletedObjective:
+                // Client FUN_0052c9d0 @ 0x0052c9d0 — not a mutable seed.
+                return HasCompletedObjective((int)def.Value) ? True : False;
 
             case TypeHasActiveMission:
                 return _character.CurrentQuests.Any(q => q.MissionId == (int)def.Value) ? True : False;
@@ -97,6 +103,38 @@ public class LogicVariableStore
             {
                 return true;
             }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Client <c>FUN_0052c9d0</c>: objective is "completed" if its parent mission is completed,
+    /// or the mission is active and the character's active objective sequence is strictly greater
+    /// than the target objective's sequence (player has advanced past it).
+    /// </summary>
+    private bool HasCompletedObjective(int objectiveId)
+    {
+        var mission = AssetManager.Instance.GetMissionByObjectiveId(objectiveId);
+        if (mission == null)
+            return false;
+
+        if (_character.CompletedMissionIds.Contains(mission.Id))
+            return true;
+
+        // Prefer GetObjectiveById so sequence comes from the same asset resolution as the mission.
+        var target = AssetManager.Instance.GetObjectiveById(objectiveId);
+        if (target == null)
+            return false;
+
+        foreach (var quest in _character.CurrentQuests)
+        {
+            if (quest.MissionId != mission.Id)
+                continue;
+
+            // Client: target.sequence < activeObjective.sequence → completed past this step.
+            if (target.Sequence < quest.ActiveObjectiveSequence)
+                return true;
         }
 
         return false;

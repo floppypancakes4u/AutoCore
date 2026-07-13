@@ -1,11 +1,14 @@
 namespace AutoCore.Game.Packets.Sector;
 
 using AutoCore.Game.Constants;
+using AutoCore.Game.Inventory;
 
 public class InventoryCargoSendAllPacket : BasePacket
 {
-    public const int ItemCount = 312;
-    public const byte DefaultCargoPageCount = 13;
+    /// <summary>Fixed wire array length (6×13×4 pages). See <see cref="VehicleCargoCapacity"/>.</summary>
+    public const int ItemCount = VehicleCargoCapacity.MaxWireSlotCount;
+    /// <summary>Default UI page count for a 1-page starter chassis (Callisto X).</summary>
+    public const byte DefaultCargoPageCount = 1;
 
     public override GameOpcode Opcode => GameOpcode.InventoryCargoSendAll;
 
