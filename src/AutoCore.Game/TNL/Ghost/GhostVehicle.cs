@@ -423,7 +423,8 @@ public class GhostVehicle : GhostObject
         var packWheelHardpoint = packEquipment
             || (isInitial && EnableInitialHardpointPack);
 
-        PackHardpoint(stream, packWheelHardpoint && (updateMask & WheelSetMask) != 0, parentVehicle.WheelSet);
+        // WheelSet uses a SINGLE presence flag on the wire; the weapon/ornament slots use two. See PackHardpoint.
+        PackHardpoint(stream, packWheelHardpoint && (updateMask & WheelSetMask) != 0, parentVehicle.WheelSet, singleFlag: true);
         PackHardpoint(stream, packEquipment && (updateMask & FrontWeaponMask) != 0, parentVehicle.WeaponFront);
         PackHardpoint(stream, packEquipment && (updateMask & TurretWeaponMask) != 0, parentVehicle.WeaponTurret);
         PackHardpoint(stream, packEquipment && (updateMask & RearWeaponMask) != 0, parentVehicle.WeaponRear);
@@ -697,8 +698,27 @@ public class GhostVehicle : GhostObject
     /// <summary>
     /// Wheel/weapon/ornament hardpoint: mask flag, then present flag + CBID20 + coid64 + global.
     /// </summary>
-    private static void PackHardpoint(BitStream stream, bool maskSet, ClonedObjectBase item)
+    private static void PackHardpoint(BitStream stream, bool maskSet, ClonedObjectBase item, bool singleFlag = false)
     {
+        // The WheelSet hardpoint is packed with a SINGLE combined presence flag, unlike the two-flag
+        // weapon/ornament slots. The retail client's GhostVehicle::unpackUpdate @0x005F7720 reads exactly
+        // ONE presence flag for the wheelset block (equip opcode 0x201b) and, if set, immediately reads
+        // CBID(20) + coid(64) + global; the weapon slots are a separate loop reading TWO flags per slot
+        // (opcode 0x201c). Writing a second flag for the wheelset is consumed by the client's readInt(0x14)
+        // CBID read, shifting every subsequent bit and corrupting the ~85-bit update stream on any
+        // WheelSetMask delta recovery pack.
+        if (singleFlag)
+        {
+            if (stream.WriteFlag(maskSet && item != null))
+            {
+                stream.WriteInt((uint)item.CBID, 20);
+                stream.Write(item.ObjectId.Coid);
+                stream.WriteFlag(item.ObjectId.Global);
+            }
+
+            return;
+        }
+
         if (stream.WriteFlag(maskSet) && stream.WriteFlag(item != null))
         {
             stream.WriteInt((uint)item.CBID, 20);
