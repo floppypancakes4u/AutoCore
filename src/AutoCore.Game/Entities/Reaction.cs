@@ -229,11 +229,7 @@ public class Reaction : ClonedObjectBase
                 return HandleCompleteObjective(activator);
 
             case ReactionType.FailMission:
-                LogMissionReactionStub(
-                    "Reaction.FailMission",
-                    "Fail not applied to CurrentQuests/CompletedMissionIds",
-                    "Remove or mark quest failed, send FailMission (0x20B2) if required, clear objective UI, OnMissionStateChanged; honor GenericVar1 mission id if set.");
-                return true;
+                return HandleFailMission(activator);
 
             case ReactionType.AddMissionString:
             case ReactionType.DelMissionString:
@@ -322,6 +318,30 @@ public class Reaction : ClonedObjectBase
             ObjectId.Coid,
             Template.ReactionType,
             Template.Name ?? string.Empty);
+    }
+
+    private bool HandleFailMission(ClonedObjectBase activator)
+    {
+        // Ghidra: CVOGReaction_ExecuteDispatcher @0x0057c500 case 0x48 calls
+        // CVOGCharacter::FailMission(char, this+0x25c) where this+0x25c == GenericVar1 (the failed
+        // mission id). The client self-applies the fail via the forwarded 0x206C, but leaving the quest
+        // active server-side desyncs: a relog or an OnMissionStateChanged re-eval resurrects the failed
+        // mission. Mirror the removal on the server so quest state stays consistent.
+        var missionId = Template.GenericVar1;
+        var character = GetCharacterFromActivator(activator);
+        if (character == null || missionId <= 0)
+            return true;
+
+        var quest = character.CurrentQuests.FirstOrDefault(q => q.MissionId == missionId);
+        if (quest != null)
+        {
+            character.CurrentQuests.Remove(quest);
+            Logger.WriteLog(LogType.Debug,
+                "FailMission reaction {0}: removed mission {1} for {2} (server mirror)",
+                Template.COID, missionId, character.Name);
+        }
+
+        return true;
     }
 
     private void LogMissionReactionStub(string handler, string gap, string todo)
