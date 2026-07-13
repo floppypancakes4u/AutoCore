@@ -832,14 +832,114 @@ public class LogicVariableAndTriggerCoverageTests
         Assert.AreEqual(10f / 3f, store.Get(20), 0.001f);
     }
 
-    private (Character Character, Vehicle Vehicle, SectorMap Map) CreatePlayer()
+    /// <summary>
+    /// Town maps (Upside etc.): player walks on foot. Collision triggers must use character
+    /// position — vehicle may sit at entry/garage far from the teleporter pad.
+    /// Mirrors L0_trans_tobackrange (TargetType=Players, DoCollision) on sec_f_h_town_j2_upside_01.
+    /// </summary>
+    [TestMethod]
+    public void CheckTriggersForPlayer_Town_UsesCharacterPosition_NotVehicle()
+    {
+        var (character, vehicle, map) = CreatePlayer(isTown: true, continentId: 558);
+
+        // Delete is a cheap no-op reaction; we only assert the volume fires for on-foot players.
+        const long reactionCoid = 4778;
+        var rxTpl = new ReactionTemplate
+        {
+            COID = (int)reactionCoid,
+            Name = "L0_trans_tobackrange",
+            ReactionType = ReactionType.Delete,
+        };
+        var rx = new Reaction(rxTpl);
+        rx.SetCoid(reactionCoid, false);
+        rx.SetMap(map);
+
+        const long triggerCoid = 4777;
+        var triggerTpl = new TriggerTemplate
+        {
+            COID = (int)triggerCoid,
+            Name = "L0_trans_tobackrange",
+            TargetType = TriggerTargetType.Players,
+            Scale = 15f,
+            DoCollision = true,
+            DoConditionals = false,
+            ActivationCount = -1,
+        };
+        triggerTpl.Reactions.Add(reactionCoid);
+        var trigger = new Trigger(triggerTpl);
+        trigger.SetCoid(triggerCoid, false);
+        trigger.Position = new Vector3(100, 0, 100);
+        trigger.Scale = 15f;
+        trigger.SetMap(map);
+
+        // On foot at the pad; vehicle left at town entry (far away).
+        character.Position = new Vector3(100, 0, 100);
+        vehicle.Position = new Vector3(0, 0, 0);
+
+        // Old path: only vehicle — never fires for town foot traffic.
+        TriggerManager.Instance.CheckTriggersFor(vehicle);
+        Assert.AreEqual(0, trigger.FireCount, "Vehicle-only check must not fire when vehicle is off-pad");
+
+        TriggerManager.Instance.CheckTriggersForPlayer(character);
+        Assert.AreEqual(1, trigger.FireCount,
+            "Town on-foot player at pad must fire Players collision triggers (Back Range teleporter).");
+    }
+
+    [TestMethod]
+    public void CheckTriggersForPlayer_NonTown_UsesVehiclePosition()
+    {
+        var (character, vehicle, map) = CreatePlayer(isTown: false, continentId: 693);
+
+        const long reactionCoid = 99001;
+        var rxTpl = new ReactionTemplate
+        {
+            COID = (int)reactionCoid,
+            ReactionType = ReactionType.Delete,
+        };
+        var rx = new Reaction(rxTpl);
+        rx.SetCoid(reactionCoid, false);
+        rx.SetMap(map);
+
+        const long triggerCoid = 99002;
+        var triggerTpl = new TriggerTemplate
+        {
+            COID = (int)triggerCoid,
+            TargetType = TriggerTargetType.Players,
+            Scale = 15f,
+            DoCollision = true,
+            ActivationCount = -1,
+        };
+        triggerTpl.Reactions.Add(reactionCoid);
+        var trigger = new Trigger(triggerTpl);
+        trigger.SetCoid(triggerCoid, false);
+        trigger.Position = new Vector3(50, 0, 50);
+        trigger.Scale = 15f;
+        trigger.SetMap(map);
+
+        // Character TFID may lag; vehicle is the field activator.
+        character.Position = new Vector3(0, 0, 0);
+        vehicle.Position = new Vector3(50, 0, 50);
+
+        TriggerManager.Instance.CheckTriggersForPlayer(character);
+        Assert.AreEqual(1, trigger.FireCount, "Highway/field maps must keep using vehicle as activator");
+    }
+
+    [TestMethod]
+    public void CheckTriggersForPlayer_NullCharacter_NoOp()
+    {
+        TriggerManager.Instance.CheckTriggersForPlayer(null);
+    }
+
+    private (Character Character, Vehicle Vehicle, SectorMap Map) CreatePlayer(
+        bool isTown = false,
+        int continentId = ContId)
     {
         var continent = new ContinentObject
         {
-            Id = ContId,
-            MapFileName = $"tm_mission_{ContId}",
+            Id = continentId,
+            MapFileName = $"tm_mission_{continentId}",
             DisplayName = "test",
-            IsTown = false,
+            IsTown = isTown,
             IsPersistent = true,
         };
         var map = SectorMap.CreateForTests(continent, new Vector4(0, 0, 0, 0));

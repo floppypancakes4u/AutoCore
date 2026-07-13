@@ -17,11 +17,12 @@ named NPC is special-cased anywhere. Behaviour is driven only by map spawn field
 |------:|-------|--------|-----------------|
 | A | `tVehicleTemplate` load + template/CBID spawn + driver + path/patrol on create & ghost | **Implemented** | `VehicleTemplate.cs`, `WadXmlWorldDataLoader.LoadVehicleTemplates`, `SpawnPoint.cs`, `Vehicle.cs`, `GhostVehicle.cs` |
 | B | `SetPath` (43) / `SetPatrolDistance` (44) reactions | **Implemented** | `Reaction.cs` |
-| C | Server path follower — vehicles **and** foot creatures (pose + point reactions + `WaitTime` dwell) | **Implemented** | `Npc/NpcPathFollower.cs`, `Npc/NpcTicker.cs` |
+| C | Server path follower — vehicles **and** foot creatures (pose + point reactions + `WaitTime` dwell) | **Implemented** | `Npc/NpcPathFollower.cs`, `Npc/NpcTicker.cs`, soft car kinematics in `SoftNpcPathMotion` |
 | C | Server combat AI (aggro scan / engage / pursue / fire / leash / flee / call-for-help) | **Implemented** | `Npc/NpcCombatAi.cs`, `Npc/NpcAiState.cs`, `Npc/FactionHostility.cs` |
 | D | Interest management (spatial hash + tiered scope + priority) | **Implemented** | `Map/SpatialHashGrid.cs`, `Map/InterestSelector.cs`, `TNL/Ghost/GhostObject.cs` |
 | D | Ghidra renames + RE closure notes for HBAI/path | **Complete** (§10, §12) |  |
 | — | `tCreatureAI` val1–val20 profile semantics | Documented §10.7 / §12.5 | `Structures/CreatureAiProfile.cs` |
+| — | Hostility matrix / Neutral vs Ambient / `FactionDirty` / Osterake case | **Documented** (§1.6, §12.2, **§15**); code gaps listed §15.5 | `FactionHostility.cs`, `SpawnPoint.cs` |
 | — | NPC vehicle Health on the wire (`EnableMinimalForeignHealthBlock` + resend window) | **Implemented** (§14) | `GhostVehicle.cs`, `WireIsolationLevers.cs` |
 | — | Target-frame Cur/Max via CreateCreature driver + CreateVehicle owner attach | **Implemented** (§14.4); live confirm Cur/Max after redeploy | `CreateCreaturePacket`, `SectorMap.TrySendForeignDriverCreate` |
 
@@ -138,19 +139,59 @@ DoLogic
 - Optional flanking / standoff using weapon range at target vehicle `+0x124` and orientation bits (`flags & 0x40`, high bit of facing).
 - Pure client steering math — not something the server should reimplement first.
 
-### 1.6 Targeting
+### 1.6 Targeting and hostility (RE 2026-07-13)
 
-**`FindTargetToAttack` (`00639210`):**
+**`FindTargetToAttack` (`00639210`) — proactive vision scan (idle → engage):**
 
-- Uses owner faction/team helpers and a world query (`FUN_004ea350`) around self position with vision-related radius from clonebase AI table (`+0x4cc`).
-- Filters corpses, invincible, wrong relation, level-adjusted range.
-- Sets current target via `FUN_005172d0`.
+1. Owner validate; random seed for level-radius jitter.
+2. **`Object_GetRootRaceId` (`00512440`)** on **self** → root object `+0x10` (faction/relation).
+   - Self root **`== -100` (Neutral)** → **return no target** (never proactive-aggro).
+   - Death/respawn bytes at owner `+0x278` (`2`/`3`) also abort.
+3. Spatial query `FUN_004ea350` with vision-related radius from clonebase AI table (`+0x4cc`).
+4. Per candidate:
+   - Skip if `FUN_005134e0` (bit 3 of `+0x184` — not targetable / friendly flag path).
+   - Skip if bit 10 of entity `+0x180` (team flag).
+   - **Require** `self.vtable+0x298(candidate)` truthy — **hostility** (see below).
+   - Skip if dead (`vtable+0x198`) or candidate root **`== -100`**.
+   - Level-delta clamps search radius; pick first/closest in adjusted radius.
+5. Sets current target via `FUN_005172d0`.
+
+**Creature hostility — `vtable+0x298` → thunk `004cc6c0` → `FUN_005c9450`:**
+
+```text
+// this = attacker creature; param_2 = candidate
+if candidate == null → false
+root = Object_GetRootRaceId(candidate)          // candidate root +0x10
+// ~RACE_HUMAN == -1 (tFactions "NPC") when RACE_HUMAN is 0
+if (root != -1) OR (candidate type == 3 /* item-ish */):
+    if self.GetFaction() != candidate.GetFaction()   // both vtable +0x28c → root race id
+        return true   // HOSTILE
+return false
+```
+
+Implications:
+
+| Self | Candidate | Proactive hostile? |
+|------|-----------|--------------------|
+| **−100 Neutral** | anyone | **No** (scan aborted for self) |
+| anyone | **−100 Neutral** | **No** (candidate filter) |
+| **21 Ambient** (e.g. Osterake) | player 0/1/2 | **Yes** (`21 ≠ 0`) — **not** “passive until attacked” |
+| **−1 NPC** | player 0 | **Yes** (different faction; only **candidate** −1 is special-cased) |
+| same faction | same | **No** |
+| human soldier **0** | mutant player **1** | **Yes** on client (`0 ≠ 1`) |
+
+There is **no** Ambient-only “retaliate only” gate in this path. Damage/aggro-list (`GetTargetFromAggro`) is a **second** acquisition path, not a substitute for the idle scan.
 
 **`GetTargetFromAggro` (`00638ec0`):**
 
 - Walks aggro container from `FUN_0058d9c0`.
 - Resolves each entry with `CVOGReaction_ResolveObjectTarget`.
 - Prefers target (or its vehicle at `+0x250`) within **hearing/aggro range** squared (`AI table +0x4c8`).
+- Still applies targetability (`FUN_005134e0`) and range; used after damage / list membership.
+
+**Nameplate “(Neutral)” (`FUN_00838ad0`)** is **UI-only** (party/same-faction filters + TFID heuristics). It is **not** equivalent to faction id **−100** and must not drive combat policy.
+
+**Idle roam (pathless):** `FUN_005cd220` (creature heartbeat) picks a random offset within a local radius and sets destination — **not** toward the player. Path NPCs use `ReturnToNormalLocation` / MapPath instead.
 
 ### 1.7 Fire weapons (`005d7100`)
 
@@ -423,7 +464,7 @@ Ordered by leverage vs effort. **All phases stay mission-agnostic** — driven o
 
 ### Phase D — RE closure (Ghidra) + interest management — **done**
 
-See **§10** for renamed symbols and AI-state notes, **§12** for the five RE closures (WaitTime, faction, 18-bit path id, creature pose-only, flee HP-band), and **§13** for interest management.
+See **§10** for renamed symbols and AI-state notes, **§12** for the five RE closures (WaitTime, faction, 18-bit path id, creature pose-only, flee HP-band), **§13** for interest management, and **§15** for the 2026-07-13 hostility / Neutral vs Ambient / `FactionDirty` pass.
 
 ---
 
@@ -495,7 +536,7 @@ See **§10** for renamed symbols and AI-state notes, **§12** for the five RE cl
 3. ~~Waypoint patrol layout~~ — **closed** (§10.4).
 4. ~~Foot-creature path follower~~ — **closed**: `NpcTicker` drives both `Vehicle` and `Creature`; the creature create/ghost path (`CVOGCreature_PostCreateFromPacket`) is **pose-only** (§12.4), so foot NPCs patrol via the server follower rather than a wire path block.
 5. ~~WaitTime units~~ — **closed** (§12.1): ms.
-6. ~~Faction "wrong relation" filter~~ — **closed** (§12.2): matches `FactionHostility`.
+6. ~~Faction / hostility filter~~ — **closed with refinement** (§12.2, **§15**): −100 sentinel + `vtable+0x298` different-faction; Ambient proactive; AutoCore heuristic is a close simplification.
 7. ~~18-bit path id widening~~ — **closed** (§12.3): zero-extended 18-bit, `-1` via absence flag.
 8. ~~Flee HP-band semantics~~ — **closed** (§12.5): deterministic `hpRatio <= band` gate.
 9. ~~Driver as CurrentOwner~~ — **closed** (§14.4): client links driver↔vehicle via
@@ -681,18 +722,17 @@ decompiled pseudocode / disassembly of the anchor functions in §7.
 - **Server:** `NpcPathFollower.Step` computes `WaitUntilMs = nowMs + point.WaitTime`, i.e. treats the
   raw value as ms. **Consistent with the client ms tick base — correct, no change.**
 
-### 12.2 Faction "wrong relation" filter — **matches `FactionHostility`**
+### 12.2 Faction / hostility filter — **refined 2026-07-13 (see also §15)**
 
-- `CVOGHBAIBase_FindTargetToAttack` (`00639210`) filters each candidate through `FUN_00512440`.
-- `FUN_00512440` walks the **owner chain** (`+0xac` → parent, repeatedly) up to the root object and
-  returns the root's relation/faction id at **`+0x10`**. The value **`-100`** is the never-aggro
-  sentinel: `if (relation == -100) skip`. The self object's class byte at `+0x278` also gates
-  (values `2` and `3` short-circuit).
-- This lines up with the server heuristic in `FactionHostility`: **`-1` (unset) / `-100` (neutral)
-  never aggro**; player races (0/1/2) never mutually aggro; NPC factions (>= 3) aggro any distinct
-  real faction. The binary's `-100` sentinel is the load-bearing match. **No change.**
-  *(Note: `FactionHostility.cs` still carries a "Pending RE refinement (NPC.md Risk 2)" caveat in its
-  XML doc — now resolved by this section; left untouched to keep this a docs-only stage.)*
+- `Object_GetRootRaceId` (`00512440`, formerly documented only as a relation walk) walks the **owner
+  chain** (`+0xac`) and returns root **`+0x10`** (faction id from clonebase / spawn override).
+- **`FindTargetToAttack`:** self **`−100` → no scan**; candidates with root **`−100` skipped**.
+- **Hostility** is **not** only the −100 sentinel: creature **`vtable+0x298` → `FUN_005c9450`** returns
+  true when **factions differ** (with a special skip when the **candidate** root is **−1** “NPC”
+  unless type==3). Full matrix and AutoCore deltas: **§15.2**.
+- AutoCore `FactionHostility` still matches the important **−100 / Ambient proactive** cases used on
+  live maps (e.g. Osterakes). It is a **simplification** of retail (blocks player-race mutual AI
+  aggro and treats −1 as non-aggressor). See **§15.5** for optional code alignment.
 
 ### 12.3 Ghost path id — **18-bit, zero-extended**
 
@@ -900,4 +940,144 @@ cur=150 max=150`, re-send delta `hp=1`) and the bar depleting on damage — but 
 
 ---
 
-*Last updated: 2026-07-11 — §14.4 CreateCreature driver materialize for Cur/Max; previously health lever + owner attach reapply.*
+## 15. Factions, Neutral vs Ambient, spawn overrides (RE 2026-07-13)
+
+### 15.1 `wad.xml` `tFactions` (authoritative name table)
+
+| ID | Short name | Combat-AI note |
+|---:|------------|----------------|
+| **−100** | **Neutral** | Never proactive-aggro; never selected as scan target |
+| **−1** | **NPC** | Label “NPC”; retail `vtable+0x298` **skips** candidates with this root (attacker −1 can still differ vs players — see §15.2) |
+| 0 / 1 / 2 | Humans / Mutants / Biomeks | Player races; many soldiers/civilians use these on clonebase |
+| 3+ | CB'ers, Wildlife, Scavs, … | Combat factions |
+| **21** | **Ambient** (“Ambient Life”) | **Wildlife / critters** — **not** Neutral; normal different-faction hostility |
+| 22 | Special | Scripted events |
+
+There is **no** faction-relation matrix table in wad/client SQL — hostility is **code** (`FindTarget` + `vtable+0x298`).
+
+**Clonebase sample (19295 objects, 3990 creatures):** Neutral −100 has only ~29 creature rows (16 with combat AI); Ambient 21 has ~15 combat creatures (Osterake family); faction −1 has hundreds of combat-capable rows.
+
+### 15.2 Retail vs AutoCore hostility
+
+| Rule | Retail client | AutoCore `FactionHostility` |
+|------|---------------|-------------------------------|
+| Self −100 | No `FindTarget` | `IsAggressor(−100, *)` false |
+| Candidate −100 | Skipped in scan | Never aggressed (`other >= 0` fails for −100; −100 never aggressor) |
+| Different factions | Hostile via `0x298` | Only if at least one side is **≥ 3** |
+| Same faction | Not hostile | Not hostile |
+| Player races 0 vs 1 vs 2 (mutual) | Hostile if both have AI and differ | **Not** mutual-hostile (by design simplification) |
+| Ambient 21 vs player 0 | **Hostile (proactive)** | **Hostile** (21 ≥ 3) |
+| Faction −1 as attacker vs player | Retail: **can** be hostile (`−1 ≠ 0`) | **Never** aggressor |
+
+**Conclusion for “neutral until attacked”:** only true for **faction −100** (and entities that never receive `NpcAi`, e.g. `IsNPC != 0` interactables). **Ambient is not passive-until-damaged.**
+
+Damage still latches targets (`NpcCombatAi.OnDamaged` / client aggro list) for everyone who can fight — including after a player shoots first.
+
+### 15.3 Spawn faction override — `FactionDirty`
+
+Client spawn (`CVOGSpawnPoint_CreateCreature` / `CreateTemplateVehicle`):
+
+```text
+if (spawnpoint +0x1a8 /* FactionDirty */) {
+    faction = Object_GetRootRaceId(spawnpoint);   // map template Faction
+    FUN_00512460(spawned, faction);              // write +0x10, walk owner chain
+    // template vehicles: same apply to driver when present
+}
+```
+
+Map fields (already loaded): `SpawnPointTemplate.FactionDirty`, `OriginalFaction`, object `Faction`.
+
+**AutoCore:** `SpawnPoint.ApplySpawnFactionOverride` (after `SetupCBFields` on creature, vehicle,
+and driver) copies spawnpoint `Faction` when `Template.FactionDirty` is true. When dirty is false,
+clonebase faction is kept (Osterake Ark Bay pattern).
+
+### 15.4 Case study — Osterakes, Hestia Ark Bay 313 (continent 707)
+
+| Field | Value |
+|-------|--------|
+| Map | `sec_f_h_map_tut_j2_arkbaytutorial` |
+| CBID | **626** `Osterake` (`mon_gen_n_cat_01_ostrich`) |
+| Faction | **21 Ambient** (not −100) |
+| `IsNPC` | **0** (combat creature) |
+| `AIBehavior` | **1** — “Normal creature AI”, `AICode=2` Creature |
+| Senses | Speed 9, vision **~156**, hearing ~14 |
+| Spawns on map | **20** active spawn points; `FactionDirty=false` → stay Ambient |
+| Paths | Mix of shared MapPaths (`17959`, `17990`) and pathless; **patrol 80** all |
+
+**Intended behaviour:** path/local roam in patrol area; **proactive aggro** on players in vision (retail + AutoCore). Large vision explains “everything seeks me” on the tutorial map. Quest items (beak/glands/esophagus) confirm killable wildlife, not scenery.
+
+Related CBIDs: Diseased/Ornery Osterake variants also faction 21.
+
+### 15.5 Server gaps / proposed code changes
+
+Ordered by impact for “NPCs behave like retail on Ark Bay”:
+
+| # | Change | Why | Effort |
+|---|--------|-----|--------|
+| **1** | **Apply `FactionDirty`** at spawn: if true, set creature (and vehicle + driver) `Faction` from spawnpoint `Faction` after `SetupCBFields`, matching `FUN_00512460` | Map-authored Neutral/overrides | **Done** (`SpawnPoint.ApplySpawnFactionOverride`, 2026-07-13) |
+| **2** | **Pathless idle roam** in `IdlePatrol` when no path: random point within `max(PatrolDistance, small default)` of `HomePosition` (client `FUN_005cd220`) | Pathless Ambient currently freeze until combat, then charge — feels like “only seek player” | Medium (deferred — radius field not fully RE’d) |
+| **3** | Docs/tests: assert Osterake-class Ambient **does** aggro players; assert −100 does not | Lock §15.2 | **Done** (`FactionHostilityTests`, `NpcCombatAiTests`) |
+| **4** *(optional)* | Align `FactionHostility` closer to `FUN_005c9450` (any unequal factions hostile; candidate −1 skip; keep −100 never) | Matches human-vs-mutant NPC AI and −1 attackers | Medium; re-check towns / same-race allies |
+| **5** *(optional)* | Cap or re-validate aggro radius (vision 156 is data-correct but harsh on tutorial) | Design polish, not RE bug | Product choice |
+
+**Do not change for Osterakes specifically:** no mission/CBID hardcode; no “Ambient passive” flag unless RE finds a separate gate (none in `FindTarget` / `0x298`).
+
+**Already correct for Osterakes:**
+
+- `FactionHostility.IsHostile(21, 0) == true`
+- `NpcCombatAi` idle scan → Engage → pursue
+- Path follower when `CoidCurrentPath` set
+- Interactive `IsNPC != 0` still gets no `NpcAi`
+
+### 15.6 Idle state machine (reminder)
+
+| State (`+0x26c`) | Movement owner (retail) | AutoCore |
+|------------------|-------------------------|----------|
+| 0 IdlePatrol | Path / `ReturnToNormalLocation` / pathless `FUN_005cd220` | Path follower; **no** pathless roam yet; combat scan yes |
+| 1 Engage | Close / flee wire | `NpcCombatAi.TickEngage` |
+| 2 Combat | Fire; pathless pursue; **path NPCs stay on MapPath** (no lunge) | `NpcCombatAi.TickCombat` |
+
+### 15.7 Terrain heightfield (map TGA) — server load + NPC Y snap (2026-07-13)
+
+**Source (same as level viewer / `CVOGTerrain::LoadMapImage` @ `0x4aba80`):**
+
+| Piece | Value |
+|-------|--------|
+| File | `{MapFileName}.tga` from maps GLM (next to `.fam`) |
+| Format | Uncompressed 32bpp BGRA |
+| Height | `height16 = (A << 8) \| B` (B = low byte) |
+| World Y | `height16 * HeightScale / 256` with **HeightScale = 4.0** |
+| Axes | `col = X / GridSize`, `row = Z / GridSize`, index `row * Width + col` (**no** vertical flip) |
+| Fam header | `m_lWidth` / `m_lHeight` / `m_fGridSize` → `MapData.TerrainWidth/Height/GridSize` (TGA dims must match) |
+
+**AutoCore:**
+
+| Component | Role |
+|-----------|------|
+| `MapTerrainHeightfield` | Parse TGA + bilinear `TrySample(x,z)` |
+| `MapDataLoader` | After each `.fam` read, extract `{map}.tga` from GLM and attach heightfield |
+| `MapData.Heightfield` | Per-map field (null if TGA missing/mismatch) |
+| `NpcTicker.SnapToTerrain` | Pure TGA Y on path moves, combat `SteerToward`, combat/vehicle spawn |
+| Foot offset | **Not** applied on server path/combat snap. Live: +~1.18 floats ghosted creatures. Client `FindTerrainHeight` foot is for **client AI**; ghost unpack is XYZ as-is. Static IsNPC still use spawn Y + foot (`ApplyStaticNpcSpawnHeight`). |
+
+**Path Y:** follower still **lerps** along the path segment so intermediate frames stay smooth; final
+pose Y is then **snapped** to the heightfield when present.
+
+**Soft path:** must **not** replace path XZ with move-along-facing car kinematics (orbits a
+waypoint at low speed — Skiddoo live). Soft keeps hard path progress, rate-limits yaw, ramps
+speed, wait-parks without stack, lane offset. Y from previous; `SnapToTerrain` owns ground.
+
+**Path combat (RE):** `CVOGHBAIDriver::DoLogic` combat only calls `DoVehiclePursue` when
+`ReturnToNormalLocation` is false. Active MapPath waypoint (`+0x52`) keeps pathing and returns
+true → **no chase**. `FireWeapons` always runs. Server: path NPCs fire/target but do not lunge
+off path (e.g. Surplus Scav Skiddoo template 595 on path **5092**, chassis 11840, driver 12508,
+turret 2205). Path latch uses **nearest** waypoint + small phase only — full-loop index stagger
+made vehicles cut cross-country (looked like pursuit).
+
+**Not height:** `{map}_den.pgm` is density/occupancy (sparse discrete values) — do not use for Y.
+
+**Stacking:** shared MapPaths + lane offset / wait park (soft); residual pile-ups possible.
+
+---
+
+*Last updated: 2026-07-13 — §15.7 soft Y + path-stay combat; §15 FactionDirty/Osterake. Previously 2026-07-11 §14.4 Cur/Max.*

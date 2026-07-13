@@ -236,13 +236,18 @@ public class MapManager : Singleton<MapManager>
 
             // Move server-side state onto the destination map before restarting ghosting,
             // so scope queries (PerformScopeQuery) see the new continent's entities.
+            // Spawn at the EnterPoint keyed by origin continent when present (Upside gate on
+            // Back Range, etc.); otherwise the map header EntryPoint.
+            var sourceContinentId = character.Map?.ContinentId ?? 0;
+            MapTransferSpawn.TryResolve(map, sourceContinentId, out var spawnPos, out var spawnRot);
+
             character.SetMap(map);
-            character.Position = map.MapData.EntryPoint.ToVector3();
-            character.Rotation = Quaternion.Default;
+            character.Position = spawnPos;
+            character.Rotation = spawnRot;
 
             character.CurrentVehicle.SetMap(map);
-            character.CurrentVehicle.Position = character.Position;
-            character.CurrentVehicle.Rotation = character.Rotation;
+            character.CurrentVehicle.Position = spawnPos;
+            character.CurrentVehicle.Rotation = spawnRot;
 
             // Keep LastTownId + pose DBData current so logout/relogin resumes on this map.
             character.CaptureWorldStateToDb();

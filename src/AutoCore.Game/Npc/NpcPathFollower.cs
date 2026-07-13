@@ -32,6 +32,21 @@ public struct PathStepResult
 
     /// <summary>True when the NPC is now walking the path backward (ping-pong); mirror to PathReversing.</summary>
     public bool NowReversing;
+
+    /// <summary>
+    /// Client throttle axis (vehicle+0x614). From <see cref="VehicleDriveInputs"/> when soft path
+    /// is on; otherwise filled in <see cref="Entities.Vehicle.ApplyServerMove"/>.
+    /// </summary>
+    public float Throttle;
+
+    /// <summary>Client steering axis (vehicle+0x618). Same as throttle.</summary>
+    public float Steering;
+
+    /// <summary>Client sharp-turn / drift-assist byte (vehicle+0x61c).</summary>
+    public byte SharpTurn;
+
+    /// <summary>True when <see cref="Throttle"/>/<see cref="Steering"/> were set by soft path.</summary>
+    public bool HasDriveInputs;
 }
 
 /// <summary>
@@ -108,11 +123,14 @@ public static class NpcPathFollower
         }
 
         // Steer in XZ at most one stepLen toward the waypoint (never more).
+        // Y advances with XZ progress along the segment — path points already store ground
+        // height. Snapping Y to target.Y every tick floats NPCs at the destination altitude.
         var inv = 1f / dist;
         var move = Math.Min(stepLen, dist);
+        var t = move * inv; // fraction of remaining segment covered this tick
         result.NewPosition = new Vector3(
             position.X + (dx * inv * move),
-            target.Y,
+            position.Y + ((target.Y - position.Y) * t),
             position.Z + (dz * inv * move));
         result.Velocity = new Vector3(dx * inv * speed, 0f, dz * inv * speed);
         result.Rotation = YawQuaternion(dx, dz);

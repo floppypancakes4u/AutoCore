@@ -19,6 +19,7 @@ public class ExplorationManager : Singleton<ExplorationManager>
 {
     private readonly ConcurrentDictionary<int, ContinentAreaMask> _masks = new();
     private readonly ConcurrentDictionary<int, byte> _missingMaskLogged = new();
+    private readonly ConcurrentDictionary<long, byte> _relockPending = new();
     private readonly ExplorationPersistenceQueue _persistQueue = new();
     private int _backgroundFlushScheduled;
 
@@ -35,6 +36,11 @@ public class ExplorationManager : Singleton<ExplorationManager>
     internal Action<long, int, uint> PersistRow { get; set; }
 
     /// <summary>
+    /// Delete one exploration row (relock). Defaults to EF; replace in tests.
+    /// </summary>
+    internal Action<long, int> DeleteRow { get; set; }
+
+    /// <summary>
     /// Optional mask resolver for unit tests (skips GLM/TGA I/O).
     /// </summary>
     internal Func<SectorMap, ContinentAreaMask> ResolveMaskForTests { get; set; }
@@ -44,6 +50,7 @@ public class ExplorationManager : Singleton<ExplorationManager>
     public ExplorationManager()
     {
         PersistRow = PersistRowToDatabase;
+        DeleteRow = DeleteRowFromDatabase;
     }
 
     /// <summary>
@@ -124,13 +131,58 @@ public class ExplorationManager : Singleton<ExplorationManager>
     }
 
     /// <summary>
+    /// Reaction UnlockContObj (type 32): ensure continent is in the character unlock hash,
+    /// persist, and notify via UnlockRegion (0x205B). Idempotent; preserves explored bits.
+    /// Client also applies via 0x206C GroupReactionCall → <c>CVOGReaction_UnlockContinentObject</c>.
+    /// </summary>
+    public bool UnlockContinent(Character character, int continentId)
+    {
+        if (character == null || continentId == 0)
+            return false;
+
+        var newlyUnlocked = character.TryUnlockContinent(continentId);
+        var bits = character.GetExploredBits(continentId);
+
+        // Always persist + notify so relog and map-transfer create packets stay authoritative
+        // even when the continent was already present from a prior unlock/reveal.
+        EnqueuePersist(character, continentId, bits);
+        SendUnlockRegion(character, continentId, bits);
+        return newlyUnlocked;
+    }
+
+    /// <summary>
+    /// Reaction RelockContObj (type 70): remove continent from unlock hash, delete persist row,
+    /// and send UnlockRegion with UnlockFlag=0.
+    /// </summary>
+    public bool RelockContinent(Character character, int continentId)
+    {
+        if (character == null || continentId == 0)
+            return false;
+
+        if (!character.TryRelockContinent(continentId))
+            return false;
+
+        EnqueuePersist(character, continentId, exploredBits: 0u, relock: true);
+        SendRelockRegion(character, continentId);
+        return true;
+    }
+
+    /// <summary>
     /// Drain pending exploration writes (background path / tests). Ordered by drain snapshot;
     /// latest-wins already applied at enqueue time per (coid, continentId).
     /// </summary>
     public int FlushPendingExplorations()
     {
         var persist = PersistRow ?? PersistRowToDatabase;
-        return _persistQueue.Flush(persist);
+        var delete = DeleteRow ?? DeleteRowFromDatabase;
+        return _persistQueue.Flush((coid, continentId, bits) =>
+        {
+            var key = PersistKey(coid, continentId);
+            if (_relockPending.TryRemove(key, out _))
+                delete(coid, continentId);
+            else
+                persist(coid, continentId, bits);
+        });
     }
 
     /// <summary>Reset queue and test hooks (unit tests).</summary>
@@ -138,8 +190,10 @@ public class ExplorationManager : Singleton<ExplorationManager>
     {
         AutoFlushOnEnqueue = false;
         PersistRow = PersistRowToDatabase;
+        DeleteRow = DeleteRowFromDatabase;
         ResolveMaskForTests = null;
         _persistQueue.Clear();
+        _relockPending.Clear();
         Interlocked.Exchange(ref _backgroundFlushScheduled, 0);
         ClearMaskCache();
     }
@@ -197,13 +251,21 @@ public class ExplorationManager : Singleton<ExplorationManager>
         }
     }
 
-    private void EnqueuePersist(Character character, int continentId, uint exploredBits)
+    private void EnqueuePersist(Character character, int continentId, uint exploredBits, bool relock = false)
     {
+        // Relock: persist bits=0 with a sentinel via the same queue; flush maps relock to delete.
+        // Using bits=0 alone is ambiguous (unlock-with-no-areas). Mark relock with a parallel set.
+        if (relock)
+            _relockPending.TryAdd(PersistKey(character.ObjectId.Coid, continentId), 1);
+
         _persistQueue.Enqueue(character.ObjectId.Coid, continentId, exploredBits);
 
         if (AutoFlushOnEnqueue)
             ScheduleBackgroundFlush();
     }
+
+    private static long PersistKey(long coid, int continentId)
+        => (coid << 32) ^ (uint)continentId;
 
     private void ScheduleBackgroundFlush()
     {
@@ -353,6 +415,46 @@ public class ExplorationManager : Singleton<ExplorationManager>
 
         conn.SendGamePacket(packet);
         conn.SendGamePacket(packet);
+    }
+
+    /// <summary>UnlockFlag=0 → client RelockContinentObject (drop continent entry).</summary>
+    private static void SendRelockRegion(Character character, int continentId)
+    {
+        var conn = character.OwningConnection;
+        if (conn == null)
+            return;
+
+        var packet = new UnlockRegionPacket
+        {
+            ContinentId = continentId,
+            UnlockFlag = 0,
+            ExploredBits = 0,
+        };
+
+        conn.SendGamePacket(packet);
+    }
+
+    /// <summary>EF delete for relock. Unit tests inject <see cref="DeleteRow"/>.</summary>
+    [ExcludeFromCodeCoverage(Justification = "EF CharContext I/O; unit tests inject DeleteRow.")]
+    private static void DeleteRowFromDatabase(long coid, int continentId)
+    {
+        try
+        {
+            using var context = new CharContext();
+            var row = context.CharacterExplorations
+                .FirstOrDefault(e => e.CharacterCoid == coid && e.ContinentId == continentId);
+            if (row == null)
+                return;
+
+            context.CharacterExplorations.Remove(row);
+            context.SaveChanges();
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "Exploration: failed to delete coid={0} continent={1}: {2}",
+                coid, continentId, ex.Message);
+        }
     }
 
     /// <summary>Clear cached masks (tests / reload).</summary>

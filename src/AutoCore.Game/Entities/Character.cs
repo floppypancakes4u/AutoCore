@@ -530,7 +530,9 @@ public partial class Character : Creature
 
     /// <summary>
     /// Copies live continent + pose into attached <see cref="CharacterData"/> / vehicle rows.
-    /// Prefer vehicle pose when a current vehicle exists (authoritative while driving).
+    /// Field/highway: vehicle pose is authoritative while driving.
+    /// Town: avatar is on foot — character pose is authoritative (vehicle may sit at entry/garage).
+    /// Matches create-packet <c>UsingVehicle = !IsTown</c> and town trigger scanning.
     /// Does not open a DB context — caller persists via <see cref="Managers.CharacterWorldStatePersistence"/>.
     /// </summary>
     /// <returns>Snapshot for persistence, or null when no DB row is attached.</returns>
@@ -545,18 +547,33 @@ public partial class Character : Creature
         Vector3 posePosition;
         Quaternion poseRotation;
         long vehicleCoid = -1;
+        var combat = VehicleCombatStateSnapshot.Unset;
 
-        if (CurrentVehicle != null)
+        // Prefer vehicle pose while driving on a non-town map. Town is on-foot: character is
+        // authoritative. When Map is null (post-teardown / orphan), keep character pose so a
+        // second disconnect cannot wipe a town walk with stale vehicle garage coords.
+        var useVehiclePose = CurrentVehicle != null
+            && Map?.MapData?.ContinentObject?.IsTown == false;
+
+        if (useVehiclePose)
         {
             posePosition = CurrentVehicle.Position;
             poseRotation = CurrentVehicle.Rotation;
             vehicleCoid = CurrentVehicle.ObjectId.Coid;
             CurrentVehicle.CaptureWorldStateToDb(posePosition, poseRotation);
+            combat = CurrentVehicle.CaptureCombatState(this);
         }
         else
         {
             posePosition = Position;
             poseRotation = Rotation;
+            if (CurrentVehicle != null)
+            {
+                vehicleCoid = CurrentVehicle.ObjectId.Coid;
+                // Shared snapshot still writes this pose to the vehicle row for resume.
+                CurrentVehicle.CaptureWorldStateToDb(posePosition, poseRotation);
+                combat = CurrentVehicle.CaptureCombatState(this);
+            }
         }
 
         DBData.PositionX = posePosition.X;
@@ -577,6 +594,10 @@ public partial class Character : Creature
             poseRotation.Y,
             poseRotation.Z,
             poseRotation.W,
-            vehicleCoid);
+            vehicleCoid,
+            combat.CurrentHP,
+            combat.CurrentShield,
+            combat.CurrentPower,
+            combat.CurrentHeat);
     }
 }

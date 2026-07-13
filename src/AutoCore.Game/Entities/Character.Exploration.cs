@@ -119,4 +119,40 @@ public partial class Character
         _exploredByContinent[continentId] = newBits;
         return true;
     }
+
+    /// <summary>
+    /// Client continent unlock hash (char+0x534): presence of a continent id means unlocked for
+    /// TransferMap (<c>FUN_004d2ac0</c>) and login create-packet slots.
+    /// </summary>
+    public bool IsContinentUnlocked(int continentId)
+        => continentId != 0 && _exploredByContinent.ContainsKey(continentId);
+
+    /// <summary>
+    /// Ensure continent is in the unlock set (explored bits preserved, or 0 if new).
+    /// Mirrors <c>CVOGReaction_UnlockContinentObject</c> @ 0x00531c80.
+    /// Returns true if this was a newly unlocked continent.
+    /// </summary>
+    public bool TryUnlockContinent(int continentId)
+    {
+        if (continentId == 0)
+            return false;
+
+        if (_exploredByContinent.ContainsKey(continentId))
+            return false;
+
+        _exploredByContinent[continentId] = 0u;
+        return true;
+    }
+
+    /// <summary>
+    /// Remove continent from the unlock set. Mirrors <c>CVOGReaction_RelockContinentObject</c>.
+    /// Returns true if the continent was previously unlocked.
+    /// </summary>
+    public bool TryRelockContinent(int continentId)
+    {
+        if (continentId == 0)
+            return false;
+
+        return _exploredByContinent.Remove(continentId);
+    }
 }

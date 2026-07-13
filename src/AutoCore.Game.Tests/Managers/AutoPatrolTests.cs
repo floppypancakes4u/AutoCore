@@ -173,6 +173,258 @@ public class AutoPatrolTests
         NpcInteractHandler.HandleAutoPatrol(conn, null);
     }
 
+    [TestMethod]
+    public void HandleAutoPatrol_Town_UsesCharacterFootPosition_Completes()
+    {
+        // Town: character on foot at waypoint; vehicle parked far (garage/entry).
+        SeedPatrolMission(MissionId, ObjectiveIdA, WaypointCoid, autoCompleteDist: 30f, nextObjectiveId: null);
+        var (conn, character, map) = CreatePlayer(isTown: true);
+        PlaceWaypoint(map, WaypointCoid, new Vector3(5, 0, 0));
+        character.Position = new Vector3(5, 0, 0);
+        character.CurrentVehicle.Position = new Vector3(500, 0, 0);
+        GiveQuest(character, MissionId);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(WaypointCoid, false),
+        });
+
+        Assert.AreEqual(0, character.CurrentQuests.Count,
+            "Town AutoPatrol must use character foot pose, not parked vehicle.");
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
+        Assert.IsTrue(_sent.OfType<CompleteDynamicObjectivePacket>().Any(p => p.ObjectiveId == ObjectiveIdA));
+    }
+
+    [TestMethod]
+    public void HandleAutoPatrol_Field_UsesVehiclePosition_Completes()
+    {
+        // Field: vehicle at waypoint; character body pose stale/far.
+        SeedPatrolMission(MissionId, ObjectiveIdA, WaypointCoid, autoCompleteDist: 30f, nextObjectiveId: null);
+        var (conn, character, map) = CreatePlayer(isTown: false);
+        PlaceWaypoint(map, WaypointCoid, new Vector3(5, 0, 0));
+        character.Position = new Vector3(500, 0, 0);
+        character.CurrentVehicle.Position = new Vector3(5, 0, 0);
+        GiveQuest(character, MissionId);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(WaypointCoid, false),
+        });
+
+        Assert.AreEqual(0, character.CurrentQuests.Count,
+            "Field AutoPatrol must use vehicle chassis pose, not character body.");
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
+    }
+
+    [TestMethod]
+    public void HandleAutoPatrol_Town_CharacterFar_VehicleNear_NoProgress()
+    {
+        // Town: vehicle sitting on waypoint must not complete while avatar is far.
+        SeedPatrolMission(MissionId, ObjectiveIdA, WaypointCoid, autoCompleteDist: 30f, nextObjectiveId: null);
+        var (conn, character, map) = CreatePlayer(isTown: true);
+        PlaceWaypoint(map, WaypointCoid, new Vector3(5, 0, 0));
+        character.Position = new Vector3(500, 0, 0);
+        character.CurrentVehicle.Position = new Vector3(5, 0, 0);
+        GiveQuest(character, MissionId);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(WaypointCoid, false),
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests.Count,
+            "Town AutoPatrol must not credit vehicle pose when character is far.");
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+    }
+
+    [TestMethod]
+    public void HandleAutoPatrol_NoMap_NoProgress()
+    {
+        SeedPatrolMission(MissionId, ObjectiveIdA, WaypointCoid, autoCompleteDist: 30f, nextObjectiveId: null);
+        var (conn, character, _) = CreatePlayer();
+        character.SetMap(null);
+        character.CurrentVehicle.SetMap(null);
+        GiveQuest(character, MissionId);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(WaypointCoid, false),
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests.Count);
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+    }
+
+    [TestMethod]
+    public void HandleAutoPatrol_InvalidTargetCoid_NoProgress()
+    {
+        SeedPatrolMission(MissionId, ObjectiveIdA, WaypointCoid, autoCompleteDist: 30f, nextObjectiveId: null);
+        var (conn, character, map) = CreatePlayer();
+        PlaceWaypoint(map, WaypointCoid, new Vector3(0, 0, 0));
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        GiveQuest(character, MissionId);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(0, false),
+        });
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(-1, false),
+        });
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = null,
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests.Count);
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+    }
+
+    [TestMethod]
+    public void HandleAutoPatrol_AlreadyCompletedMissionInList_Skips()
+    {
+        SeedPatrolMission(MissionId, ObjectiveIdA, WaypointCoid, autoCompleteDist: 30f, nextObjectiveId: null);
+        var (conn, character, map) = CreatePlayer();
+        PlaceWaypoint(map, WaypointCoid, new Vector3(0, 0, 0));
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        GiveQuest(character, MissionId);
+        character.CompletedMissionIds.Add(MissionId);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(WaypointCoid, false),
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests.Count, "Completed-id skip must not re-complete/remove quest");
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+    }
+
+    [TestMethod]
+    public void HandleAutoPatrol_UnknownMissionOrBadSequence_NoProgress()
+    {
+        var (conn, character, map) = CreatePlayer();
+        PlaceWaypoint(map, WaypointCoid, new Vector3(0, 0, 0));
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+
+        // No AssetManager mission for this id.
+        character.CurrentQuests.Add(new CharacterQuest(999001, 0));
+
+        // Mission exists but sequence is out of range.
+        SeedPatrolMission(MissionId, ObjectiveIdA, WaypointCoid, autoCompleteDist: 30f, nextObjectiveId: null);
+        var badSeq = new CharacterQuest(MissionId, 99);
+        character.CurrentQuests.Add(badSeq);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(WaypointCoid, false),
+        });
+
+        Assert.AreEqual(2, character.CurrentQuests.Count);
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+    }
+
+    [TestMethod]
+    public void HandleAutoPatrol_ListedTargetMissingFromWorld_NoProgress()
+    {
+        SeedPatrolMission(MissionId, ObjectiveIdA, WaypointCoid, autoCompleteDist: 50f, nextObjectiveId: null);
+        var (conn, character, map) = CreatePlayer();
+        // Do not PlaceWaypoint — TryGetWorldPosition must fail.
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        GiveQuest(character, MissionId);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(WaypointCoid, false),
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests.Count);
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+    }
+
+    [TestMethod]
+    public void HandleAutoPatrol_SiblingDeliver_SkipsInvalidDeliverEntries()
+    {
+        // One blocking deliver (valid) plus invalid sibling rows must not throw / complete.
+        var obj = MissionObjective.CreateForTests(ObjectiveIdA, 0, MissionId, 1);
+        var patrol = new ObjectiveRequirementPatrol(obj)
+        {
+            AutoComplete = true,
+            AutoCompleteDistance = 30f,
+            FirstStateSlot = 0,
+        };
+        patrol.GenericTargets[0] = WaypointCoid;
+        obj.Requirements.Add(patrol);
+        obj.Requirements.Add(new ObjectiveRequirementDeliver(obj)
+        {
+            NPCTargetCBID = 0, // invalid — continue branch
+            NPCTargetCompletes = true,
+        });
+        obj.Requirements.Add(new ObjectiveRequirementDeliver(obj)
+        {
+            NPCTargetCBID = 4242,
+            NPCTargetCompletes = false, // invalid — continue branch
+        });
+        obj.Requirements.Add(new ObjectiveRequirementDeliver(obj)
+        {
+            NPCTargetCBID = 4243,
+            NPCTargetCompletes = true, // blocking valid deliver
+        });
+        AssetManager.Instance.SetTestMission(Mission.CreateForTests(MissionId, obj));
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceWaypoint(map, WaypointCoid, new Vector3(0, 0, 0));
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        GiveQuest(character, MissionId);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(WaypointCoid, false),
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests.Count, "Sibling deliver must block mission complete");
+        Assert.IsFalse(character.CompletedMissionIds.Contains(MissionId));
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+    }
+
+    [TestMethod]
+    public void HandleAutoPatrol_Town_NoVehicle_UsesCharacterPosition()
+    {
+        SeedPatrolMission(MissionId, ObjectiveIdA, WaypointCoid, autoCompleteDist: 30f, nextObjectiveId: null);
+        var (conn, character, map) = CreatePlayer(isTown: true);
+        PlaceWaypoint(map, WaypointCoid, new Vector3(5, 0, 0));
+        character.Position = new Vector3(5, 0, 0);
+        character.SetCurrentVehicleForTests(null);
+        GiveQuest(character, MissionId);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(WaypointCoid, false),
+        });
+
+        Assert.AreEqual(0, character.CurrentQuests.Count,
+            "Town on-foot with no vehicle must still complete via character pose.");
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
+    }
+
+    [TestMethod]
+    public void HandleAutoPatrol_DefaultRadius_WhenAutoCompleteDistanceZero()
+    {
+        SeedPatrolMission(MissionId, ObjectiveIdA, WaypointCoid, autoCompleteDist: 0f, nextObjectiveId: null);
+        var (conn, character, map) = CreatePlayer();
+        // Default radius is 25f — place just inside.
+        PlaceWaypoint(map, WaypointCoid, new Vector3(20, 0, 0));
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        GiveQuest(character, MissionId);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(WaypointCoid, false),
+        });
+
+        Assert.AreEqual(0, character.CurrentQuests.Count, "Zero AutoCompleteDistance falls back to 25u");
+    }
+
     private static void SeedPatrolMission(
         int missionId,
         int objectiveId,
@@ -222,14 +474,14 @@ public class AutoPatrolTests
         obj.SetMap(map);
     }
 
-    private (TNLConnection Conn, Character Character, SectorMap Map) CreatePlayer()
+    private (TNLConnection Conn, Character Character, SectorMap Map) CreatePlayer(bool isTown = false)
     {
         var continent = new ContinentObject
         {
             Id = ContId,
             MapFileName = $"tm_mission_{ContId}",
             DisplayName = "test",
-            IsTown = false,
+            IsTown = isTown,
             IsPersistent = true,
         };
         var map = SectorMap.CreateForTests(continent, new Vector4(0, 0, 0, 0));

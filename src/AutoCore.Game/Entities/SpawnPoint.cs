@@ -464,8 +464,8 @@ public class SpawnPoint : ClonedObjectBase
 
     /// <summary>
     /// Elevates static interactive NPCs so the body origin sits above terrain.
-    /// Combat (<c>IsNPC == 0</c>) is left at the map spawn Y; the client AI re-snaps them.
-    /// See <c>Documentation/NPC_SPAWN_HEIGHT.md</c>.
+    /// Combat (<c>IsNPC == 0</c>) is left at the map spawn Y (caller may pure-snap via
+    /// <see cref="NpcTicker.SnapToTerrain"/>). See <c>Documentation/NPC_SPAWN_HEIGHT.md</c>.
     /// </summary>
     internal static Vector3 ApplyStaticNpcSpawnHeight(
         Vector3 spawnPosition,
@@ -504,8 +504,6 @@ public class SpawnPoint : ClonedObjectBase
 
     private Creature SpawnCreature(int cbid, SpawnPointTemplate.SpawnList spawnList)
     {
-        // TODO: faction of the creature should be the faction of the spawnpoint?
-
         var creature = new Creature();
         // Global=true + high COID range: see MapNpcIdentity (client crash 0x005D262A).
         var counter = Map.LocalCoidCounter;
@@ -513,6 +511,7 @@ public class SpawnPoint : ClonedObjectBase
         Map.LocalCoidCounter = counter;
         creature.LoadCloneBase(cbid);
         creature.SetupCBFields();
+        ApplySpawnFactionOverride(creature);
 
         // Flag mission-relevant NPCs once at spawn so interest management can grant them the
         // extended scope radius (data-driven from the mission set; no hardcoded ids).
@@ -524,15 +523,19 @@ public class SpawnPoint : ClonedObjectBase
             var baseLevel = cloneBaseCreature.CreatureSpecific.BaseLevel;
             creature.Level = CalculateSpawnLevel(baseLevel, spawnList.LevelOffset);
             creature.ScaleHealthForLevel((byte)baseLevel);
+            // IsNPC: map spawn Y + foot (see ApplyStaticNpcSpawnHeight). Combat: pure heightfield
+            // when present — no foot (server ghosts use XYZ as-is; +foot floats them).
             creature.Position = ApplyStaticNpcSpawnHeight(
                 Position,
                 cloneBaseCreature.CreatureSpecific,
                 cloneBaseCreature.SimpleObjectSpecific.PhysicsName);
+            if (cloneBaseCreature.CreatureSpecific.IsNPC == 0)
+                creature.Position = NpcTicker.SnapToTerrain(Map, creature.Position);
         }
         else
         {
             creature.Level = 1;
-            creature.Position = Position;
+            creature.Position = NpcTicker.SnapToTerrain(Map, Position);
             Logger.WriteLog(LogType.Error,
                 $"SpawnPoint.SpawnCreature: Creature CBID={cbid} is not a CloneBaseCreature, defaulting to level 1");
         }
@@ -562,8 +565,10 @@ public class SpawnPoint : ClonedObjectBase
         Map.LocalCoidCounter = counter;
         vehicle.LoadCloneBase(cbid);
         vehicle.SetupCBFields();
+        ApplySpawnFactionOverride(vehicle);
         vehicle.Layer = Layer;
-        vehicle.Position = Position;
+        // Pure terrain when heightfield present (CreateTemplateVehicle cast).
+        vehicle.Position = NpcTicker.SnapToTerrain(Map, Position);
         vehicle.Rotation = Rotation;
 
         // Raw-CBID spawn lists have no VehicleTemplate row, so the driver can only come from
@@ -600,10 +605,11 @@ public class SpawnPoint : ClonedObjectBase
         Map.LocalCoidCounter = counter;
         vehicle.LoadCloneBase(template.VehicleCbid);
         vehicle.SetupCBFields();
+        ApplySpawnFactionOverride(vehicle);
         vehicle.TemplateId = template.Id;
         vehicle.SpawnOwnerCoid = ObjectId.Coid;
         vehicle.Layer = Layer;
-        vehicle.Position = Position;
+        vehicle.Position = NpcTicker.SnapToTerrain(Map, Position);
         vehicle.Rotation = Rotation;
         vehicle.ApplyTemplateBaseHp(template.BaseHp);
         // Clonebase may flag chassis as invincible; template NPC vehicles are combat targets
@@ -653,6 +659,7 @@ public class SpawnPoint : ClonedObjectBase
         Map.LocalCoidCounter = counter;
         driver.LoadCloneBase(driverCbid);
         driver.SetupCBFields();
+        ApplySpawnFactionOverride(driver);
 
         var baseLevel = (driver.CloneBaseObject as CloneBaseCreature)?.CreatureSpecific.BaseLevel ?? 1;
         driver.Level = CalculateSpawnLevel(baseLevel, levelOffset);
@@ -661,6 +668,20 @@ public class SpawnPoint : ClonedObjectBase
         driver.Layer = Layer;
 
         return driver;
+    }
+
+    /// <summary>
+    /// When the map spawn has <see cref="SpawnPointTemplate.FactionDirty"/> set, copy this
+    /// spawnpoint's <see cref="ClonedObjectBase.Faction"/> onto the child (client
+    /// <c>FUN_00512460</c> after <c>Object_GetRootRaceId(spawnpoint)</c> — NPC.md §15.3).
+    /// No-op when dirty is false; clonebase faction from <see cref="SimpleObject.SetupCBFields"/> remains.
+    /// </summary>
+    private void ApplySpawnFactionOverride(ClonedObjectBase entity)
+    {
+        if (entity == null || Template == null || !Template.FactionDirty)
+            return;
+
+        entity.Faction = Faction;
     }
 
     /// <summary>Copies the driver's wad.xml AI behavior onto the vehicle it owns, if any.</summary>

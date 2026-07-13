@@ -112,7 +112,8 @@ public sealed class CharacterWorldStatePersistence : ICharacterWorldStatePersist
         store.SaveChanges();
         Logger.WriteLog(LogType.Debug,
             $"CharacterWorldStatePersistence.Save: character={snapshot.CharacterCoid} continent={snapshot.ContinentId} " +
-            $"pos=({snapshot.PositionX},{snapshot.PositionY},{snapshot.PositionZ})");
+            $"pos=({snapshot.PositionX},{snapshot.PositionY},{snapshot.PositionZ}) " +
+            $"hp={snapshot.CurrentHP} shield={snapshot.CurrentShield} power={snapshot.CurrentPower} heat={snapshot.CurrentHeat}");
     }
 
     internal static void ApplyToCharacter(CharacterData character, CharacterWorldStateSnapshot snapshot)
@@ -140,6 +141,12 @@ public sealed class CharacterWorldStatePersistence : ICharacterWorldStatePersist
         vehicle.RotationY = snapshot.RotationY;
         vehicle.RotationZ = snapshot.RotationZ;
         vehicle.RotationW = snapshot.RotationW;
+
+        // Combat pools: always write snapshot values (including -1 sentinel for "never saved").
+        vehicle.CurrentHP = snapshot.CurrentHP;
+        vehicle.CurrentShield = snapshot.CurrentShield;
+        vehicle.CurrentPower = snapshot.CurrentPower;
+        vehicle.CurrentHeat = snapshot.CurrentHeat;
     }
 
     /// <summary>Abstract store used by <see cref="SaveWithStore"/>.</summary>

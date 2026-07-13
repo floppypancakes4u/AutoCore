@@ -142,6 +142,75 @@ public class NpcInteractUseObjectTests
     [TestMethod]
     public void HandleUseObject_OutOfRange_DoesNotSendDialog()
     {
+        // Beyond MaxMissionInteractGrace — hard reject even for deliver partners.
+        SeedDeliverMission(MissionA, ObjectiveA, NpcCbid);
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(500f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveA,
+        });
+
+        Assert.AreEqual(0, _sent.OfType<NpcMissionDialogPacket>().Count());
+    }
+
+    [TestMethod]
+    public void HandleUseObject_YOnlyOffset_StillOpensDialog()
+    {
+        // Map-Y vs terrain-Y must not block interact when XZ is adjacent.
+        SeedDeliverMission(MissionA, ObjectiveA, NpcCbid);
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 40f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveA,
+        });
+
+        Assert.IsNotNull(_sent.OfType<NpcMissionDialogPacket>().SingleOrDefault());
+    }
+
+    [TestMethod]
+    public void HandleUseObject_SeatedNpc_UsesVehicleChassisPosition()
+    {
+        SeedDeliverMission(MissionA, ObjectiveA, NpcCbid);
+        var (conn, character, map) = CreatePlayer();
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+
+        // Driver body stuck at origin far from player; chassis is next to player.
+        var driver = new Creature { Position = new Vector3(0f, 0f, 0f) };
+        driver.SetCoid(NpcCoid, false);
+        driver.SetCbidForTests(NpcCbid);
+        driver.SetMap(map);
+
+        var chassis = new Vehicle { Position = new Vector3(5f, 0f, 0f) };
+        chassis.SetCoid(NpcCoid + 1, false);
+        chassis.SetOwner(driver);
+        chassis.SetMap(map);
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid + 1, false), // client clicks vehicle
+            ObjectiveId = ObjectiveA,
+        });
+
+        Assert.IsNotNull(
+            _sent.OfType<NpcMissionDialogPacket>().SingleOrDefault(),
+            "Range must use chassis pose when click resolves vehicle → driver.");
+    }
+
+    [TestMethod]
+    public void HandleUseObject_MissionPartnerWithinGrace_OpensDialog()
+    {
+        // Client already range-gated; server pose lag within grace still allows deliver dialog.
         SeedDeliverMission(MissionA, ObjectiveA, NpcCbid);
         var (conn, character, map) = CreatePlayer();
         PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(100f, 0f, 0f));
@@ -154,7 +223,70 @@ public class NpcInteractUseObjectTests
             ObjectiveId = ObjectiveA,
         });
 
+        Assert.IsNotNull(_sent.OfType<NpcMissionDialogPacket>().SingleOrDefault());
+    }
+
+    [TestMethod]
+    public void HandleUseObject_FarUnrelatedNpc_DoesNotSendDialog()
+    {
+        // Same distance as grace soft-allow, but wrong deliver CBID → no partner → reject.
+        SeedDeliverMission(MissionA, ObjectiveA, npcTargetCbid: OtherNpcCbid);
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(100f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveA,
+        });
+
         Assert.AreEqual(0, _sent.OfType<NpcMissionDialogPacket>().Count());
+    }
+
+    [TestMethod]
+    public void HandleUseObject_TownUsesCharacterFootPosition()
+    {
+        SeedDeliverMission(MissionA, ObjectiveA, NpcCbid);
+        var (conn, character, map) = CreatePlayer(isTown: true);
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        // On foot next to NPC; vehicle left at map entry far away.
+        character.Position = new Vector3(5f, 0f, 0f);
+        character.CurrentVehicle.Position = new Vector3(500f, 0f, 0f);
+        GiveQuest(character, MissionA);
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveA,
+        });
+
+        Assert.IsNotNull(
+            _sent.OfType<NpcMissionDialogPacket>().SingleOrDefault(),
+            "Town interact uses character (on-foot) pose, not parked vehicle.");
+    }
+
+    [TestMethod]
+    public void HandleUseObject_FieldUsesVehiclePosition()
+    {
+        SeedDeliverMission(MissionA, ObjectiveA, NpcCbid);
+        var (conn, character, map) = CreatePlayer(isTown: false);
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        // Vehicle next to NPC; character body pose stale/far (field always drives).
+        character.Position = new Vector3(500f, 0f, 0f);
+        character.CurrentVehicle.Position = new Vector3(5f, 0f, 0f);
+        GiveQuest(character, MissionA);
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveA,
+        });
+
+        Assert.IsNotNull(
+            _sent.OfType<NpcMissionDialogPacket>().SingleOrDefault(),
+            "Out-of-town interact uses vehicle pose, not character body.");
     }
 
     [TestMethod]
@@ -1055,22 +1187,22 @@ public class NpcInteractUseObjectTests
         AssetManager.Instance.SetTestMission(mission);
     }
 
-    private static SectorMap CreateMap(int continentId = ContinentId)
+    private static SectorMap CreateMap(int continentId = ContinentId, bool isTown = false)
     {
         var continent = new ContinentObject
         {
             Id = continentId,
             MapFileName = $"tm_mission_{continentId}",
             DisplayName = "test",
-            IsTown = false,
+            IsTown = isTown,
             IsPersistent = true
         };
         return SectorMap.CreateForTests(continent, new Vector4(0, 0, 0, 0));
     }
 
-    private (TNLConnection Conn, Character Character, SectorMap Map) CreatePlayer()
+    private (TNLConnection Conn, Character Character, SectorMap Map) CreatePlayer(bool isTown = false)
     {
-        var map = CreateMap();
+        var map = CreateMap(isTown: isTown);
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
         connection.SetGhostTo(false);

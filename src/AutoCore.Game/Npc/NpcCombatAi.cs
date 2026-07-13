@@ -176,24 +176,29 @@ public static class NpcCombatAi
     }
 
     /// <summary>
-    /// Combat movement. A pathless NPC closes on its target when out of range (spawn leash already
-    /// bounds it). A path NPC lunges toward the target only while still near its path and the target is
-    /// off-range-but-reachable; otherwise it leaves movement to <see cref="NpcTicker"/> so it rides /
-    /// returns to its route (client 005d6e80 pursue-vs-return-to-waypoint tether). Sets
-    /// <see cref="NpcAiState.PursuingThisTick"/> when it steers, so the path follower stands down.
+    /// Combat movement.
+    /// <list type="bullet">
+    ///   <item>Pathless: close when out of range (spawn leash bounds it).</item>
+    ///   <item>Path NPC: <b>do not leave the route</b> for pursuit. Client
+    ///   <c>CVOGHBAIDriver::DoLogic</c> only calls <c>DoVehiclePursue</c> when
+    ///   <c>ReturnToNormalLocation</c> returns false; with an active path waypoint
+    ///   (<c>+0x52 != 0</c>) that helper keeps steering to the waypoint and returns true, so
+    ///   pursue is skipped. <c>FireWeapons</c> still runs every tick. Server mirrors that:
+    ///   path movement stays on <see cref="NpcTicker"/>; combat only targets/fires.</item>
+    /// </list>
+    /// Sets <see cref="NpcAiState.PursuingThisTick"/> only for pathless closes (path follower
+    /// must not fight a combat lunge).
     /// </summary>
     private static void CombatMove(ClonedObjectBase entity, NpcAiState npcAi, Vector3 targetPos, bool atRange, float dt)
     {
-        if (!npcAi.HasPathAnchor)
-        {
-            if (!atRange)
-                SteerToward(entity, targetPos, NpcTicker.ResolveSpeed(entity), dt);
+        // Assigned MapPath (CoidCurrentPath > 0): never leave the route for a combat lunge —
+        // even if the path template failed to resolve this tick (HasPathAnchor false). Client
+        // DoLogic skips DoVehiclePursue while ReturnToNormalLocation is busy with the path.
+        // FireWeapons / target lock still run in TickCombat independently.
+        if (npcAi.HasPathAnchor || NpcTicker.GetPathCoid(entity) > 0)
             return;
-        }
 
-        var tether = System.Math.Max(GetPatrolDistance(entity), LeashRadius);
-        var strayed = entity.Position.Dist(npcAi.ReturnAnchor) > tether;
-        if (!atRange && !strayed)
+        if (!atRange)
         {
             SteerToward(entity, targetPos, NpcTicker.ResolveSpeed(entity), dt);
             npcAi.PursuingThisTick = true;
@@ -531,6 +536,7 @@ public static class NpcCombatAi
             entity.Position.X + (dx * inv * step),
             entity.Position.Y,
             entity.Position.Z + (dz * inv * step));
+        newPos = NpcTicker.SnapToTerrain(entity.Map, newPos);
         var velocity = new Vector3(dx * inv * speed, 0f, dz * inv * speed);
         var rotation = YawQuaternion(dx, dz);
 

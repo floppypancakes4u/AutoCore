@@ -40,6 +40,12 @@ public sealed class NpcAiState
     /// <summary>Index into the active path's waypoint list; -1 when not following a path.</summary>
     public int PathIndex { get; set; } = -1;
 
+    /// <summary>
+    /// Lateral offset (world units) applied by <see cref="SoftNpcPathMotion"/> so multiple NPCs
+    /// on the same MapPath do not share one centerline. Seeded from COID at spawn.
+    /// </summary>
+    public float PathLaneOffset { get; set; }
+
     /// <summary>+1 walking the path forward, -1 walking it backward (ping-pong patrols).</summary>
     public int PathDirection { get; set; } = 1;
 

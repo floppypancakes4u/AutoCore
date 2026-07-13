@@ -314,6 +314,119 @@ public class SpawnPointTemplateSpawnTests
         Assert.AreEqual(vehicles[0].ObjectId.Coid + 1, vehicles[1].ObjectId.Coid);
     }
 
+    /// <summary>
+    /// Client CVOGSpawnPoint_CreateCreature: when FactionDirty, FUN_00512460 writes the spawnpoint
+    /// root faction onto the child (NPC.md §15.3). Clonebase faction alone is not enough.
+    /// </summary>
+    [TestMethod]
+    public void Spawn_Creature_FactionDirty_OverridesClonebaseFaction()
+    {
+        const int creatureCbid = 650_001;
+        var map = CreateTestMap(9110);
+        // Clonebase is hostile Ambient; map author marks the spawn Neutral.
+        AssetManagerTestHelper.RegisterCreatureCloneBase(creatureCbid, faction: 21, aiBehaviorId: 0);
+
+        var template = new SpawnPointTemplate
+        {
+            COID = 14_600,
+            Faction = -100,
+            FactionDirty = true,
+        };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList
+        {
+            SpawnType = creatureCbid,
+            IsTemplate = false,
+        });
+
+        var spawnPoint = new SpawnPoint(template) { Faction = -100 };
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var creature = map.Objects.Values.OfType<Creature>().Single(c => c.CBID == creatureCbid);
+        Assert.AreEqual(-100, creature.Faction, "FactionDirty must copy spawnpoint faction onto the creature");
+        Assert.AreEqual(-100, creature.GetIDFaction(), "GetIDFaction must see the spawn override");
+    }
+
+    [TestMethod]
+    public void Spawn_Creature_FactionDirtyFalse_KeepsClonebaseFaction()
+    {
+        const int creatureCbid = 650_002;
+        var map = CreateTestMap(9111);
+        AssetManagerTestHelper.RegisterCreatureCloneBase(creatureCbid, faction: 21, aiBehaviorId: 0);
+
+        var template = new SpawnPointTemplate
+        {
+            COID = 14_601,
+            Faction = -100,
+            FactionDirty = false,
+        };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList
+        {
+            SpawnType = creatureCbid,
+            IsTemplate = false,
+        });
+
+        var spawnPoint = new SpawnPoint(template) { Faction = -100 };
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var creature = map.Objects.Values.OfType<Creature>().Single(c => c.CBID == creatureCbid);
+        Assert.AreEqual(21, creature.Faction, "without FactionDirty, clonebase faction must remain");
+    }
+
+    /// <summary>
+    /// Template vehicle: FactionDirty applies to chassis and driver so GetIDFaction (owner chain)
+    /// returns the spawn override — client writes both when +0x1a8 is set.
+    /// </summary>
+    [TestMethod]
+    public void Spawn_TemplateVehicle_FactionDirty_OverridesDriverAndVehicleFaction()
+    {
+        const int vehicleCbid = 650_010;
+        const int driverCbid = 650_011;
+        const int templateId = 650_012;
+        var map = CreateTestMap(9112);
+
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid, faction: 10);
+        AssetManagerTestHelper.RegisterCreatureCloneBase(driverCbid, faction: 10, aiBehaviorId: 0);
+        AssetManager.Instance.SetTestVehicleTemplates(new[]
+        {
+            new VehicleTemplate
+            {
+                Id = templateId,
+                VehicleCbid = vehicleCbid,
+                DriverCbid = driverCbid,
+            }
+        });
+
+        var template = new SpawnPointTemplate
+        {
+            COID = 14_602,
+            Faction = -100,
+            FactionDirty = true,
+        };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList
+        {
+            SpawnType = templateId,
+            IsTemplate = true,
+        });
+
+        var spawnPoint = new SpawnPoint(template) { Faction = -100 };
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var vehicle = map.Objects.Values.OfType<Vehicle>().Single();
+        Assert.AreEqual(-100, vehicle.Faction, "FactionDirty must override vehicle clonebase faction");
+        Assert.IsNotNull(vehicle.Owner, "template spawn must attach a driver");
+        Assert.AreEqual(-100, vehicle.Owner.Faction, "FactionDirty must override driver clonebase faction");
+        Assert.AreEqual(-100, vehicle.GetIDFaction(), "aggro chain must resolve to spawn Neutral override");
+    }
+
     private static SectorMap CreateTestMap(int continentId)
     {
         var continent = new ContinentObject

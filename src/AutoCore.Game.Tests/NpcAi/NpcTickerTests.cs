@@ -14,6 +14,7 @@ using AutoCore.Game.Npc;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL;
 using AutoCore.Game.TNL.Ghost;
+using AutoCore.Game.Tests.Map;
 
 /// <summary>
 /// Stage 8: <see cref="NpcTicker"/> drives idle-patrol NPCs over their path and fires arrival
@@ -180,6 +181,43 @@ public class NpcTickerTests
         Assert.AreEqual(10_000L + 1000L, patrol.NpcAi.WaitUntilMs, "arrival sets the wait deadline");
         Assert.AreEqual(GhostObject.PositionMask, ghostInfo.UpdateMask & GhostObject.PositionMask,
             "an arrival tick must still dirty PositionMask even though position was already on the waypoint");
+    }
+
+    [TestMethod]
+    public void SnapToTerrain_UsesMapHeightfieldWhenPresent()
+    {
+        var map = CreateMap();
+        // 2x2 cells, grid 10: cell (0,0) height16=256 → world Y = 4.
+        using var tga = MapTerrainHeightfieldTests.BuildHeightTga(2, 2, new ushort[] { 256, 0, 0, 0 });
+        Assert.IsTrue(MapTerrainHeightfield.TryLoad(tga, 2, 2, 10f, out var field, out var err), err);
+        map.MapData.SetHeightfield(field);
+
+        var snapped = NpcTicker.SnapToTerrain(map, new Vector3(0f, 99f, 0f));
+        Assert.AreEqual(4f, snapped.Y, 0.001f, "Y must come from the TGA heightfield, not the path pose Y");
+        Assert.AreEqual(0f, snapped.X, 0.001f);
+        Assert.AreEqual(0f, snapped.Z, 0.001f);
+    }
+
+    [TestMethod]
+    public void SnapToTerrain_WithoutHeightfield_PreservesY()
+    {
+        var map = CreateMap();
+        var snapped = NpcTicker.SnapToTerrain(map, new Vector3(1f, 7.5f, 2f));
+        Assert.AreEqual(7.5f, snapped.Y, 0.001f);
+    }
+
+    [TestMethod]
+    public void SnapToTerrain_IsPureTerrain_NoCreatureFoot()
+    {
+        // Live: server-ghosted creatures float when +foot (~1.18) is applied; pure TGA is correct.
+        var map = CreateMap();
+        using var tga = MapTerrainHeightfieldTests.BuildHeightTga(2, 2, new ushort[] { 256, 0, 0, 0 });
+        Assert.IsTrue(MapTerrainHeightfield.TryLoad(tga, 2, 2, 10f, out var field, out var err), err);
+        map.MapData.SetHeightfield(field);
+
+        var snapped = NpcTicker.SnapToTerrain(map, new Vector3(0f, 99f, 0f));
+        Assert.AreEqual(4f, snapped.Y, 0.001f);
+        Assert.AreNotEqual(4f + SpawnPoint.CreaturePhysicsFootOffset, snapped.Y, 0.001f);
     }
 
     private static SectorMap CreateMap()

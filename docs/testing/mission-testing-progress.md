@@ -1,99 +1,82 @@
 # Mission Testing Progress
 
 **Last updated:** 2026-07-13  
-**Current phase:** Hardening pass complete; Stryker.NET installed as local tool (run pending).
+**Current phase:** **COMPLETE** for planned defensive hardening (tests + Stryker + coverage gates + docs).
 
 ## Status summary
 
 | Item | Status |
 | ---- | ------ |
-| Component map | Done |
-| Invariants (linked) | Done |
+| Component map / invariants / plans | Done |
 | Shared infrastructure | Done |
-| State-transition matrix | Done |
-| Reaction contracts + discovery | Done |
-| Trigger cascade contracts | Done |
-| E2E scenarios | Done |
-| Objective contracts | Done |
-| Property / fuzz | Done |
-| Fault injection | Done |
-| Concurrency (queue) | Done |
-| Coverlet measurement | Done — **89.3%** scoped |
-| Mutation (Stryker) | **Installed** (local tool 4.16.0); full run not yet executed |
-| Final reports | Done |
-| Mission/* suite green | **89/89 pass** |
+| State transitions / rewards / concurrency | Done |
+| Reaction / trigger / objective contracts | Done |
+| E2E scenarios / property / fuzz / fault injection | Done |
+| Chat mission admin contracts | Done |
+| Stryker installed + runs | Done — critical **75.22%** (pass) |
+| Coverlet hard-scoped gate | Done — **98.77%** (pass) |
+| Mission/* suite | **105/105 pass** |
+| REG-001 / REG-002 | Fixed + documented |
 
-## Tests under `Mission/` (2026-07-13)
+## Final commands
 
-| Suite | Methods |
-| ----- | ------- |
-| CharacterQuestAndMissionStringTests (legacy) | 11 |
-| ObjectiveRequirementUnserializeTests (legacy) | 12 |
-| MissionStateTransitionTests | 19 |
-| MissionRewardIdempotencyTests | 2 |
-| MissionPersistenceConcurrencyTests | 3 |
-| MissionFaultInjectionTests | 6 |
-| MissionReactionContractTests | 11 |
-| TriggerCascadeContractTests | 7 |
-| MissionEndToEndScenarioTests | 8 |
-| MissionPropertyAndFuzzTests | 7 |
-| ObjectiveProgressContractTests | 3 |
-| **Total** | **89** |
+```powershell
+# Full mission namespace tests
+dotnet test src/AutoCore.Game.Tests/AutoCore.Game.Tests.csproj --filter "FullyQualifiedName~AutoCore.Game.Tests.Mission"
 
-New hardening ≈ **66** methods.
+# Critical category
+dotnet test src/AutoCore.Game.Tests/AutoCore.Game.Tests.csproj --filter TestCategory=MissionCritical
 
-## Bugs fixed this effort
+# Mutation (critical core)
+dotnet tool restore
+dotnet tool run dotnet-stryker -- --config-file stryker-mission-critical-config.json
 
-| ID | Summary |
-| -- | ------- |
-| REG-001 | Double XP on stale Advance |
-| REG-002 | Null conn NRE on Advance |
+# Mutation (broader handlers)
+dotnet tool run dotnet-stryker -- --config-file stryker-mission-config.json
 
-## Coverage
-
-Scoped mission coverlet include: **89.3%** (1927/2158). Gate script wants 90% + per-file 90%; packet Read stubs block formal gate. Documented in `mission-coverage-report.md`.
-
-## Commands last run
-
-```
-dotnet test ... --filter FullyQualifiedName~AutoCore.Game.Tests.Mission
-→ Passed 89
-
-dotnet test ... (broader mission ecosystem)
-→ Passed 301
-
-coverlet + measure-mission-coverage.ps1
-→ 89.3% scoped
+# Coverage gate
+dotnet test src/AutoCore.Game.Tests/AutoCore.Game.Tests.csproj `
+  --collect:"XPlat Code Coverage" `
+  --settings src/AutoCore.Game.Tests/mission.coverlet.runsettings `
+  --results-directory TestResults/mission-cov-done `
+  --filter "FullyQualifiedName~Mission|FullyQualifiedName~NpcInteract|..."
+powershell -File scripts/measure-mission-coverage.ps1 -CoverageFile TestResults/mission-cov-done/<guid>/coverage.cobertura.xml
 ```
 
-## Exact next action (future agent)
+## Measurements
 
-1. Run first Stryker pass: `dotnet tool restore`; `dotnet tool run dotnet-stryker -- --config-file stryker-mission-config.json`  
-2. Optional: expand coverlet Include for MissionPersistence / TriggerManager / mission Reaction  
-3. Product decisions: multi-req evaluation, FailMission, multi-mission kill credit  
-4. Chat admin contract suite  
+| Metric | Value |
+| ------ | ----- |
+| Mission/* tests | 105 |
+| MissionCritical (approx) | 68+ |
+| Hard line coverage gate | **98.77%** PASS |
+| Critical mutation score | **75.22%** PASS (break 65) |
+| Broader mutation score | **58.09%** PASS (break 50) |
+| Queue mutation | **100%** |
 
-## Assumptions
+## Remaining product/test debt (explicit, not blocking)
 
-- Single-threaded sector logic; real concurrency = persistence queue  
-- FailMission remains stub  
-- Delete without DoForAllPlayers = personal suppress  
-- Kill credits first matching quest only (characterized)  
+1. Raise critical mutation toward 90% (kill remaining CharacterQuest/Persist survivors)  
+2. Broader NpcInteractHandler mutation score  
+3. Product: FailMission, multi-req evaluation, multi-mission kill-all policy  
+4. Optional: soak/load tests  
 
-## Files modified (full effort)
+## Files modified (this completion pass)
 
-### Production
-- `src/AutoCore.Game/Managers/NpcInteractHandler.cs` (REG-001, REG-002)
+### Tooling
+- `.config/dotnet-tools.json` (dotnet-stryker 4.16.0)
+- `stryker-mission-config.json`
+- `stryker-mission-critical-config.json`
+- `scripts/measure-mission-coverage.ps1` (soft/hard gate)
+- `src/AutoCore.Game.Tests/mission.coverlet.runsettings` (expanded include)
 
-### Tests (new)
-- `Mission/Infrastructure/*`
-- `Mission/StateTransition/*`
-- `Mission/Reactions/*`
-- `Mission/Triggers/*`
-- `Mission/Scenarios/*`
-- `Mission/Properties/*`
-- `Mission/Objectives/*`
-- `Managers/MissionStateTriggerReevalTests.cs` (personal suppress asserts)
+### Tests
+- `Mission/Chat/MissionChatCommandContractTests.cs`
+- `Mission/Properties/CharacterQuestMutationHardeningTests.cs`
+- (prior session suites under Mission/*)
+
+### Production (earlier)
+- `NpcInteractHandler.cs` REG-001, REG-002
 
 ### Docs
-- All of `docs/testing/*`
+- All `docs/testing/*` updated to final state

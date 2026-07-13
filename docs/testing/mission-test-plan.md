@@ -10,7 +10,7 @@ Layered testing over the **existing** mission implementation (no redesign):
 4. E2E scenarios (grant → progress → complete)
 5. Concurrency (queue + flush only where real)
 6. Property/fuzz (seeded loops, malformed packets)
-7. Mutation (Stryker.NET local tool 4.16.0 installed; config ready)
+7. Mutation (Stryker.NET 4.16.0; critical **75.22%**, broader **58.09%**)
 
 ## Categories and filters
 
@@ -77,9 +77,11 @@ New hardening methods ≈ **66**.
 
 | Metric | Before | After |
 | ------ | ------ | ----- |
-| Scoped line (legacy include) | not measured at start | **89.3%** |
-| Branch | not instrumented separately | n/a |
-| Mutation | none | tooling deferred; REG suite kills critical mutants |
+| Hard-scoped line coverage gate | n/a | **98.77% PASS** |
+| Full scoped include | n/a | 84.06% (soft files drag) |
+| Critical mutation (persist+quest) | none | **75.22% PASS** |
+| Broader mission mutation | none | **58.09% PASS** |
+| Queue mutation | none | **100%** |
 
 ### 10. Remaining untested paths
 
@@ -102,7 +104,7 @@ None.
 
 ### 17. Recommended future work
 
-1. Run Stryker: `dotnet tool restore`; `dotnet tool run dotnet-stryker -- --config-file stryker-mission-config.json`
+1. Raise critical mutation toward 90%; optional nightly broader Stryker
 2. Expand coverlet Include to MissionPersistence + mission Reaction handlers  
 3. Implement or formally product-sign FailMission / multi-req evaluation  
 4. Decide multi-mission kill: credit all matching vs first-only (document or change)  

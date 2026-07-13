@@ -150,6 +150,12 @@ public partial class TNLConnection : GhostConnection
     /// </summary>
     internal static ICharacterWorldStatePersistence WorldStatePersistenceForTests { get; set; }
 
+    /// <summary>
+    /// When set (unit tests), replaces <see cref="MissionPersistence.FlushPending"/> during session end
+    /// so the disconnect catch path is exercisable (production queue swallows row-level failures).
+    /// </summary>
+    internal static Action MissionFlushForTests { get; set; }
+
     private static ICharacterWorldStatePersistence WorldStatePersistence =>
         WorldStatePersistenceForTests ?? CharacterWorldStatePersistence.Instance;
 
@@ -1147,8 +1153,13 @@ public partial class TNLConnection : GhostConnection
             return;
 
         var character = CurrentCharacter;
-        var ownsSession = character.OwningConnection == null
-            || ReferenceEquals(character.OwningConnection, this);
+        // Owner is this connection, or an orphan still on a map (no owner after a crash mid-handoff).
+        // Do NOT treat OwningConnection==null alone as ownership: after the sector owner tears down
+        // (persist + SetMap(null) + clear owner), the Global connection still holds CurrentCharacter
+        // and would re-persist with Map==null, overwriting the town on-foot pose with vehicle/garage
+        // coords and spawning the player under terrain on the next login.
+        var ownsSession = ReferenceEquals(character.OwningConnection, this)
+            || (character.OwningConnection == null && character.Map != null);
 
         if (!ownsSession)
         {
@@ -1170,7 +1181,10 @@ public partial class TNLConnection : GhostConnection
         // Drain any pending mission writes so a fast logout cannot outrun the background flush.
         try
         {
-            MissionPersistence.Instance.FlushPending();
+            if (MissionFlushForTests != null)
+                MissionFlushForTests();
+            else
+                MissionPersistence.Instance.FlushPending();
         }
         catch (Exception ex)
         {
@@ -1221,8 +1235,10 @@ public partial class TNLConnection : GhostConnection
     {
         base.PrepareWritePacket();
 
-        if (Ghosting && CurrentCharacter != null && CurrentCharacter.CurrentVehicle != null && CurrentCharacter.CurrentVehicle.Map != null)
-            TriggerManager.Instance.CheckTriggersFor(CurrentCharacter?.CurrentVehicle);
+        // Town maps: scan character (on foot). Field/highway: scan vehicle.
+        // Checking only the vehicle left Upside teleporters (and other town pads) inert.
+        if (Ghosting && CurrentCharacter != null)
+            TriggerManager.Instance.CheckTriggersForPlayer(CurrentCharacter);
     }
 
     public NetObject GetGhost() => GetScopeObject();

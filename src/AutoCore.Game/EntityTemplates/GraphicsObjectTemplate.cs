@@ -38,7 +38,10 @@ public class GraphicsObjectTemplate : ObjectTemplate
     {
         var obj = new GraphicsObject(ObjectType);
         obj.SetCoid(COID, false);
-        obj.LoadCloneBase(CBID);
+        // EnterPoints and other map-logic props often have CBID 0. LoadCloneBase(0) throws;
+        // SectorMap.InitializeLocalObjects also skips materialization when CBID <= 0.
+        if (CBID > 0)
+            obj.LoadCloneBase(CBID);
         obj.Faction = Faction;
         obj.Scale = Scale;
         obj.Layer = Layer;

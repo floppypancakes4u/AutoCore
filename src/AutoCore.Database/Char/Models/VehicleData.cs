@@ -30,6 +30,18 @@ public class VehicleData
     public uint SecondaryColor { get; set; }
     public byte Trim { get; set; }
 
+    /// <summary>Current HP. -1 = never saved (login fills full).</summary>
+    public int CurrentHP { get; set; } = -1;
+
+    /// <summary>Current shield. -1 = never saved.</summary>
+    public int CurrentShield { get; set; } = -1;
+
+    /// <summary>Current power (mana). -1 = never saved.</summary>
+    public int CurrentPower { get; set; } = -1;
+
+    /// <summary>Current heat. -1 = never saved.</summary>
+    public int CurrentHeat { get; set; } = -1;
+
     [ForeignKey("Coid")]
     public SimpleObjectData SimpleObjectBase { get; set; }
 

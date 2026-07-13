@@ -13,8 +13,12 @@ public class SoftNpcPathMotionTests
     public void TearDown()
     {
         SoftNpcPathMotion.Enabled = false;
-        SoftNpcPathMotion.MaxYawRateRadiansPerSecond = MathF.PI;
+        SoftNpcPathMotion.MaxYawRateRadiansPerSecond = MathF.PI * 1.25f;
         SoftNpcPathMotion.YBlendPerSecond = 3f;
+        SoftNpcPathMotion.MaxAcceleration = 40f;
+        SoftNpcPathMotion.MaxBrake = 50f;
+        SoftNpcPathMotion.LookAheadDistance = 22f;
+        SoftNpcPathMotion.MaxLaneOffset = 3.5f;
     }
 
     [TestMethod]
@@ -40,72 +44,94 @@ public class SoftNpcPathMotionTests
 
         Assert.AreEqual(hard.NewPosition, soft.NewPosition);
         Assert.AreEqual(hard.Velocity, soft.Velocity);
+        Assert.IsFalse(soft.HasDriveInputs);
     }
 
     [TestMethod]
-    public void Apply_BlendsYTowardTarget()
+    public void Apply_PreservesPreviousY()
     {
         SoftNpcPathMotion.Enabled = true;
-        SoftNpcPathMotion.YBlendPerSecond = 1f; // alpha = 0.1 for dt 0.1
         var hard = new PathStepResult
         {
-            NewPosition = new Vector3(0f, 10f, 0f),
-            Velocity = new Vector3(0f, 0f, 5f),
-            Rotation = Quaternion.Default,
-            NewIndex = 0,
-        };
-
-        var soft = SoftNpcPathMotion.Apply(
-            hard,
-            previousPosition: new Vector3(0f, 0f, 0f),
-            previousRotation: Quaternion.Default,
-            speed: 5f,
-            dt: 0.1f,
-            path: MakePath(),
-            nowMs: 1000);
-
-        Assert.IsTrue(soft.NewPosition.Y > 0f && soft.NewPosition.Y < 10f,
-            $"Y should blend between 0 and 10, got {soft.NewPosition.Y}");
-    }
-
-    [TestMethod]
-    public void Apply_LimitsYawRate()
-    {
-        SoftNpcPathMotion.Enabled = true;
-        SoftNpcPathMotion.MaxYawRateRadiansPerSecond = 0.5f; // slow turn
-        // Hard step wants ~90° yaw (face +X).
-        var hard = new PathStepResult
-        {
-            NewPosition = new Vector3(1f, 0f, 0f),
-            Velocity = new Vector3(5f, 0f, 0f),
+            NewPosition = new Vector3(10f, 99f, 0f),
+            Velocity = new Vector3(12f, 0f, 0f),
             Rotation = new Quaternion(0f, 0.7071068f, 0f, 0.7071068f),
-            NewIndex = 0,
+            NewIndex = 1,
+        };
+
+        var soft = SoftNpcPathMotion.Apply(
+            hard,
+            previousPosition: new Vector3(0f, 42f, 0f),
+            previousRotation: new Quaternion(0f, 0.7071068f, 0f, 0.7071068f),
+            speed: 12f,
+            dt: 0.1f,
+            path: MakePath(),
+            nowMs: 1000,
+            previousVelocity: new Vector3(12f, 0f, 0f));
+
+        Assert.AreEqual(42f, soft.NewPosition.Y, 0.001f);
+    }
+
+    [TestMethod]
+    public void Apply_SetsDriveInputs_ForClientWheels()
+    {
+        SoftNpcPathMotion.Enabled = true;
+        var hard = new PathStepResult
+        {
+            NewPosition = new Vector3(10f, 0f, 0f),
+            Velocity = new Vector3(12f, 0f, 0f),
+            Rotation = new Quaternion(0f, 0.7071068f, 0f, 0.7071068f),
+            NewIndex = 1,
         };
 
         var soft = SoftNpcPathMotion.Apply(
             hard,
             previousPosition: new Vector3(0f, 0f, 0f),
-            previousRotation: Quaternion.Default, // face +Z
-            speed: 5f,
+            previousRotation: new Quaternion(0f, 0.7071068f, 0f, 0.7071068f),
+            speed: 12f,
             dt: 0.1f,
             path: MakePath(),
-            nowMs: 1000);
+            nowMs: 1000,
+            previousVelocity: new Vector3(12f, 0f, 0f));
 
-        var hardYaw = SoftNpcPathMotion.YawFromQuaternion(hard.Rotation);
-        var softYaw = SoftNpcPathMotion.YawFromQuaternion(soft.Rotation);
-        var prevYaw = SoftNpcPathMotion.YawFromQuaternion(Quaternion.Default);
-        var maxStep = SoftNpcPathMotion.MaxYawRateRadiansPerSecond * 0.1f;
-        Assert.IsTrue(MathF.Abs(SoftNpcPathMotion.NormalizeRadians(softYaw - prevYaw)) <= maxStep + 1e-3f,
-            $"soft yaw step {softYaw - prevYaw} must not exceed max {maxStep}");
-        Assert.AreNotEqual(hardYaw, softYaw, 1e-3f);
+        Assert.IsTrue(soft.HasDriveInputs);
+        Assert.IsTrue(soft.Throttle > 0.5f, $"path move must pack thr for wheels, got {soft.Throttle}");
     }
 
     [TestMethod]
-    public void Apply_ArrivalWithNoWait_CarriesVelocityTowardNextIndex()
+    public void Apply_WaitArrival_DoesNotHardSnapToWaypoint()
     {
         SoftNpcPathMotion.Enabled = true;
         var path = MakePath();
-        // Hard arrival zeros velocity (classic steppy look).
+        path.Points[0].WaitTime = 2000;
+        var hard = new PathStepResult
+        {
+            NewPosition = path.Points[0].Position,
+            Velocity = default,
+            Rotation = Quaternion.Default,
+            NewIndex = 1,
+            Arrived = true,
+            WaitUntilMs = 3000,
+        };
+
+        var approach = new Vector3(2f, 0f, 1f);
+        var soft = SoftNpcPathMotion.Apply(
+            hard,
+            previousPosition: approach,
+            previousRotation: Quaternion.Default,
+            speed: 12f,
+            dt: 0.1f,
+            path: path,
+            nowMs: 1000);
+
+        Assert.AreNotEqual(hard.NewPosition.X, soft.NewPosition.X, 0.01f);
+    }
+
+    [TestMethod]
+    public void Apply_ArrivalWithNoWait_CarriesVelocity()
+    {
+        SoftNpcPathMotion.Enabled = true;
+        var path = MakePath();
         var hard = new PathStepResult
         {
             NewPosition = path.Points[0].Position,
@@ -113,7 +139,7 @@ public class SoftNpcPathMotionTests
             Rotation = Quaternion.Default,
             NewIndex = 1,
             Arrived = true,
-            WaitUntilMs = 1000, // no remaining wait
+            WaitUntilMs = 1000,
         };
 
         var soft = SoftNpcPathMotion.Apply(
@@ -125,8 +151,102 @@ public class SoftNpcPathMotionTests
             path: path,
             nowMs: 1000);
 
-        Assert.AreNotEqual(0f, soft.Velocity.X + soft.Velocity.Z,
-            "zero-wait arrival should keep non-zero XZ velocity toward the next waypoint");
+        var spd = MathF.Sqrt((soft.Velocity.X * soft.Velocity.X) + (soft.Velocity.Z * soft.Velocity.Z));
+        Assert.IsTrue(spd > 5f, $"zero-wait carry, got {spd}");
+    }
+
+    [TestMethod]
+    public void ResolveStaggeredPathIndex_IsAlwaysGeometricNearest()
+    {
+        // Phase offsets left some Skiddoos aiming at a far index → arrives=0, circling one node.
+        var path = new MapPathTemplate();
+        for (var i = 0; i < 80; i++)
+            path.Points.Add(new MapPathTemplate.MapPathPoint
+            {
+                Position = new Vector3(i * 10f, 0f, 0f),
+                AcceptDistance = 2f,
+            });
+
+        for (long seed = 0; seed < 40; seed++)
+        {
+            var idx = SoftNpcPathMotion.ResolveStaggeredPathIndex(
+                new Vector3(0f, 0f, 0f), path, seed);
+            Assert.AreEqual(0, idx, $"seed {seed} must latch nearest (0), got {idx}");
+        }
+
+        Assert.AreEqual(5, SoftNpcPathMotion.ResolveStaggeredPathIndex(
+            new Vector3(50f, 0f, 0f), path, seed: 999));
+    }
+
+    [TestMethod]
+    public void Apply_FollowsHardPathXz_ForAcceptDistance()
+    {
+        SoftNpcPathMotion.Enabled = true;
+        var hard = new PathStepResult
+        {
+            NewPosition = new Vector3(10f, 0f, 0f),
+            Velocity = new Vector3(12f, 0f, 0f),
+            Rotation = new Quaternion(0f, 0.7071068f, 0f, 0.7071068f),
+            NewIndex = 1,
+        };
+
+        var soft = SoftNpcPathMotion.Apply(
+            hard,
+            previousPosition: new Vector3(0f, 0f, 0f),
+            previousRotation: new Quaternion(0f, 0.7071068f, 0f, 0.7071068f),
+            speed: 12f,
+            dt: 0.1f,
+            path: MakePath(),
+            nowMs: 1000,
+            previousVelocity: new Vector3(12f, 0f, 0f));
+
+        Assert.AreEqual(hard.NewPosition.X, soft.NewPosition.X, 0.01f);
+        Assert.AreEqual(hard.NewPosition.Z, soft.NewPosition.Z, 0.01f);
+        Assert.IsTrue(soft.HasDriveInputs && soft.Throttle > 0.5f);
+    }
+
+    [TestMethod]
+    public void SoftFollow_DenseAcceptPath_AdvancesManyNodes()
+    {
+        // Regression: pure-pursuit / phase latch left some vehicles with arrives=0 (circling one node).
+        SoftNpcPathMotion.Enabled = true;
+        var path = new MapPathTemplate();
+        for (var i = 0; i < 40; i++)
+        {
+            path.Points.Add(new MapPathTemplate.MapPathPoint
+            {
+                Position = new Vector3(i * 25f, 0f, 0f),
+                AcceptDistance = 15f,
+                WaitTime = 0,
+            });
+        }
+
+        // Start slightly off node 5 (like a spawn near the path).
+        var pos = new Vector3(5 * 25f + 8f, 0f, 3f);
+        var idx = SoftNpcPathMotion.ResolveStaggeredPathIndex(pos, path, seed: 12345);
+        Assert.AreEqual(5, idx);
+
+        var rot = Quaternion.Default;
+        var vel = default(Vector3);
+        long wait = 0, now = 0;
+        var arrives = 0;
+        for (var t = 0; t < 200; t++)
+        {
+            now += 50;
+            var hard = NpcPathFollower.Step(pos, path, idx, 1, wait, now, 27f, 0.05f);
+            var soft = SoftNpcPathMotion.Apply(
+                hard, pos, rot, 27f, 0.05f, path, now, vel, laneOffset: 2f);
+            pos = soft.NewPosition;
+            rot = soft.Rotation;
+            vel = soft.Velocity;
+            idx = soft.NewIndex;
+            wait = soft.WaitUntilMs;
+            if (hard.Arrived)
+                arrives++;
+        }
+
+        Assert.IsTrue(arrives >= 8, $"expected multi-node progress, arrives={arrives} endIdx={idx}");
+        Assert.IsTrue(idx > 5, $"index must advance past start, endIdx={idx}");
     }
 
     private static MapPathTemplate MakePath()

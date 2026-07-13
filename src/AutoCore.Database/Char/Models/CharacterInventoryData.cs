@@ -18,6 +18,12 @@ public class CharacterInventoryData
     public byte SlotY { get; set; }
     public int Quantity { get; set; } = 1;
 
+    /// <summary>
+    /// True when this stack was granted as mission gear (deliver GiveItemOnStart, etc.).
+    /// Restored to CreateSimpleObject.PossibleMissionItem on relog.
+    /// </summary>
+    public bool IsMissionItem { get; set; }
+
     [ForeignKey(nameof(CharacterCoid))]
     public CharacterData Character { get; set; }
 }

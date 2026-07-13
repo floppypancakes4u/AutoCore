@@ -490,6 +490,21 @@ public class Vehicle : SimpleObject
     /// the previous pose so client interpolation is less steppy (movement smoothness M2).
     /// </summary>
     public void ApplyServerMove(Vector3 position, Quaternion rotation, Vector3 velocity, float dt = 0f)
+        => ApplyServerMove(position, rotation, velocity, dt, driveThrottle: null, driveSteering: null, sharpTurn: null);
+
+    /// <summary>
+    /// Server pose update with optional explicit drive axes (client <c>MoveToTarget3DPoint</c> /
+    /// ghost +0x614/+0x618/+0x61c). When drive inputs are provided, they override dYaw-derived
+    /// steering so wheels turn even when pose already faces the path.
+    /// </summary>
+    public void ApplyServerMove(
+        Vector3 position,
+        Quaternion rotation,
+        Vector3 velocity,
+        float dt,
+        float? driveThrottle,
+        float? driveSteering,
+        byte? sharpTurn)
     {
         if (dt > 0f && dt < 1f)
         {
@@ -497,28 +512,61 @@ public class Vehicle : SimpleObject
             var nextYaw = YawFromQuaternion(rotation);
             var dYaw = NormalizeRadians(nextYaw - prevYaw);
             AngularVelocity = new Vector3(0f, dYaw / dt, 0f);
-            // Map yaw rate into [-1,1] steering for the ghost pose block (client +0x618).
-            Steering = Math.Clamp(dYaw / (MathF.PI * 0.25f * Math.Max(dt, 1e-3f)) * dt, -1f, 1f);
 
-            // Ghost "Acceleration" is the client throttle axis (+0x614), packed with
-            // WriteSignedFloat(6) ∈ ~[-1,1]. Constant-speed path follow must send cruise throttle
-            // so Havok keeps driving between pose packs (client capture: thr=1 + action present).
+            if (driveSteering.HasValue)
+                Steering = Math.Clamp(driveSteering.Value, -1f, 1f);
+            else
+                Steering = Math.Clamp(dYaw / (MathF.PI * 0.5f * Math.Max(dt, 1e-3f)), -1f, 1f);
+
+            var prevSpeed = MathF.Sqrt((Velocity.X * Velocity.X) + (Velocity.Y * Velocity.Y) + (Velocity.Z * Velocity.Z));
             var nextSpeed = MathF.Sqrt((velocity.X * velocity.X) + (velocity.Y * velocity.Y) + (velocity.Z * velocity.Z));
-            Acceleration = nextSpeed > 0.05f ? 1f : 0f;
+            if (driveThrottle.HasValue)
+                Acceleration = Math.Clamp(driveThrottle.Value, -1f, 1f);
+            else
+                Acceleration = ResolvePathThrottle(prevSpeed, nextSpeed, MathF.Abs(dYaw) / Math.Max(dt, 1e-3f));
+
+            // sharpTurn maps to client vehicle+0x61c via VehicleFlags/handbrake packing history —
+            // do not set Handbrake (VehicleFlags bit0); thr/steer alone drive wheel visuals when
+            // VehicleAction exists. Reserved for a dedicated wire field later.
+            _ = sharpTurn;
         }
         else
         {
             AngularVelocity = default;
-            // Leave Steering/Acceleration as-is when dt unknown (e.g. unit tests without time).
         }
+
+        if (driveThrottle.HasValue)
+            Acceleration = Math.Clamp(driveThrottle.Value, -1f, 1f);
+        if (driveSteering.HasValue)
+            Steering = Math.Clamp(driveSteering.Value, -1f, 1f);
 
         Position = position;
         Rotation = rotation;
         Velocity = velocity;
 
-        // Idle path patrol: optional client-side path visual (no continuous pose snaps).
         if (!ShouldSuppressPatrolPoseGhost())
             Ghost?.SetMaskBits(GhostObject.PositionMask);
+    }
+
+    /// <summary>
+    /// Throttle for network pose: accelerate hard, cruise mid, ease off when braking/turning.
+    /// Client Havok needs non-zero throttle while moving (see docs/nullWheels.md M2).
+    /// </summary>
+    internal static float ResolvePathThrottle(float prevSpeed, float nextSpeed, float absYawRate)
+    {
+        const float movingEps = 0.05f;
+        if (nextSpeed <= movingEps)
+            return 0f;
+
+        var delta = nextSpeed - prevSpeed;
+        // Hard turn: lift off slightly so the client does not fight the pose with full thr.
+        var turnEase = absYawRate > 1.2f ? 0.55f : 1f;
+
+        if (delta > 0.35f)
+            return Math.Clamp(1f * turnEase, 0f, 1f);
+        if (delta < -0.35f)
+            return Math.Clamp(0.25f * turnEase, 0f, 1f); // coast/brake — avoid reverse thr
+        return Math.Clamp(0.85f * turnEase, 0f, 1f); // cruise
     }
 
     /// <summary>
@@ -1226,6 +1274,72 @@ public class Vehicle : SimpleObject
         DBData.RotationW = rotation.W;
     }
 
+    /// <summary>
+    /// Captures live HP/shield/power/heat into a snapshot and attached <see cref="VehicleData"/>.
+    /// No DB I/O — caller persists via world-state save.
+    /// </summary>
+    public VehicleCombatStateSnapshot CaptureCombatState(Character owner)
+    {
+        var power = owner != null
+            ? (int)CharacterLevelManager.Instance.GetCurrentMana(owner.ObjectId.Coid)
+            : -1;
+
+        var snap = new VehicleCombatStateSnapshot(
+            GetCurrentHP(),
+            CurrentShield,
+            power,
+            CurrentHeat);
+
+        if (DBData != null)
+        {
+            DBData.CurrentHP = snap.CurrentHP;
+            DBData.CurrentShield = snap.CurrentShield;
+            DBData.CurrentPower = snap.CurrentPower;
+            DBData.CurrentHeat = snap.CurrentHeat;
+        }
+
+        return snap;
+    }
+
+    /// <summary>
+    /// Applies combat-pool currents after maxes have been recalculated (login).
+    /// Values of <c>-1</c> leave the current (typically full) pools unchanged.
+    /// </summary>
+    public void ApplyCombatState(VehicleCombatStateSnapshot state, Character owner)
+    {
+        if (state.CurrentHP >= 0)
+            SetCurrentHP(state.CurrentHP, triggerGhostUpdate: false, notifyOwnerHud: false);
+
+        if (state.CurrentShield >= 0)
+            SetCurrentShield(state.CurrentShield, triggerGhostUpdate: false);
+
+        if (state.CurrentHeat >= 0)
+            SetCurrentHeat(state.CurrentHeat, triggerGhostUpdate: false);
+
+        if (state.CurrentPower >= 0 && owner != null)
+        {
+            var power = (short)Math.Clamp(state.CurrentPower, 0, short.MaxValue);
+            CharacterLevelManager.Instance.SetCurrentMana(owner, power, sendPacket: false);
+        }
+    }
+
+    /// <summary>
+    /// Restores combat pools from attached <see cref="VehicleData"/> after max recalculation.
+    /// </summary>
+    public void RestoreCombatStateFromDb(Character owner)
+    {
+        if (DBData == null)
+            return;
+
+        ApplyCombatState(
+            new VehicleCombatStateSnapshot(
+                DBData.CurrentHP,
+                DBData.CurrentShield,
+                DBData.CurrentPower,
+                DBData.CurrentHeat),
+            owner);
+    }
+
     internal void AttachTestDataForTests(string name = "TestVehicle")
     {
         DBData = new VehicleData
@@ -1235,10 +1349,25 @@ public class Vehicle : SimpleObject
         };
     }
 
+    internal void SetDbCombatStateForTests(int currentHP, int currentShield, int currentPower, int currentHeat)
+    {
+        if (DBData == null)
+            AttachTestDataForTests();
+
+        DBData.CurrentHP = currentHP;
+        DBData.CurrentShield = currentShield;
+        DBData.CurrentPower = currentPower;
+        DBData.CurrentHeat = currentHeat;
+    }
+
     internal float GetDbPositionXForTests() => DBData?.PositionX ?? float.NaN;
     internal float GetDbPositionZForTests() => DBData?.PositionZ ?? float.NaN;
     internal float GetDbRotationYForTests() => DBData?.RotationY ?? float.NaN;
     internal float GetDbRotationWForTests() => DBData?.RotationW ?? float.NaN;
+    internal int GetDbCurrentHPForTests() => DBData?.CurrentHP ?? -1;
+    internal int GetDbCurrentShieldForTests() => DBData?.CurrentShield ?? -1;
+    internal int GetDbCurrentPowerForTests() => DBData?.CurrentPower ?? -1;
+    internal int GetDbCurrentHeatForTests() => DBData?.CurrentHeat ?? -1;
 
     /// <summary>Test hook: stamps angular velocity without going through ApplyServerMove.</summary>
     internal void SetAngularVelocityForTests(Vector3 angularVelocity) => AngularVelocity = angularVelocity;

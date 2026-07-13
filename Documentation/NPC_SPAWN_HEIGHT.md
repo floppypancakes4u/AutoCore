@@ -50,6 +50,16 @@ Tags: `npc-spawn`, `height`, `IsNPC`, `GhostCreature`. Bookmarks category `AutoC
 | Ghost position | `GhostCreature.PackUpdate` (`PositionMask`) |
 | Tests | `SpawnPointMapNpcTests` height cases |
 
+## Server path / combat snap (2026-07-13)
+
+When the map TGA heightfield is loaded, `NpcTicker.SnapToTerrain` uses **pure terrain Y** for
+vehicles and combat creatures. Do **not** add the AI foot half-extent on server snaps: ghost
+unpack applies XYZ as-is, and live testing showed +foot floats creatures higher.
+
+Static IsNPC still use `ApplyStaticNpcSpawnHeight` (map spawn Y + flying + foot) — they never
+move, so they never get client `FindTerrainHeight` re-snaps.
+
 ## Live check
 
-Static quest/interact NPCs stand on terrain; combat mobs still correct (not floating).
+Static quest/interact NPCs stand on terrain; combat pathing uses pure TGA. Residual subset ~1 m
+float on some maps is still open (not fixed by server foot offset).

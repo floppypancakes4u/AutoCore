@@ -6,9 +6,9 @@ using AutoCore.Game.Npc;
 
 /// <summary>
 /// Stage 10: <see cref="FactionHostility.IsHostile"/> is the single choke point for aggro
-/// decisions. wad.xml tFactions: 0 Humans / 1 Mutants / 2 Biomeks are player races (never mutual
-/// aggro); >= 3 are NPC factions (aggressive toward any real faction != themselves); -1 unset and
-/// -100 neutral never aggro either way.
+/// decisions. Server heuristic (NPC.md §15.2): player races 0/1/2 never mutual-aggro; &gt;= 3
+/// (including Ambient 21) aggressive toward any other real faction; -1 / -100 never aggress.
+/// Retail client is slightly broader (any unequal faction via vtable+0x298); Ambient is proactive.
 /// </summary>
 [TestClass]
 public class FactionHostilityTests
@@ -39,5 +39,21 @@ public class FactionHostilityTests
         Assert.IsFalse(FactionHostility.IsHostile(3, -100), "NPC vs neutral (-100) must not aggro");
         Assert.IsFalse(FactionHostility.IsHostile(-100, 3), "neutral (-100) vs NPC must not aggro");
         Assert.IsFalse(FactionHostility.IsHostile(-1, -1), "unset vs unset must not aggro");
+    }
+
+    /// <summary>
+    /// Ambient (21) is wildlife, not Neutral (−100). Osterakes and other Ambient creatures
+    /// proactively aggro players (NPC.md §15.2 / §15.4).
+    /// </summary>
+    [TestMethod]
+    public void IsHostile_AmbientVsPlayer_IsHostile()
+    {
+        Assert.IsTrue(FactionHostility.IsHostile(21, 0), "Ambient vs human must be hostile");
+        Assert.IsTrue(FactionHostility.IsHostile(0, 21), "hostility is symmetric");
+        Assert.IsTrue(FactionHostility.IsHostile(21, 1), "Ambient vs mutant must be hostile");
+        Assert.IsTrue(FactionHostility.IsHostile(21, 2), "Ambient vs biomek must be hostile");
+        Assert.IsFalse(FactionHostility.IsHostile(21, 21), "same Ambient faction must not self-aggro");
+        Assert.IsFalse(FactionHostility.IsHostile(21, -100), "Ambient must not aggro Neutral");
+        Assert.IsFalse(FactionHostility.IsHostile(-100, 0), "Neutral must never aggro a player");
     }
 }

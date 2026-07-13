@@ -72,6 +72,42 @@ public class NpcPathFollowerTests
         Assert.AreEqual(0, result.NewIndex);
     }
 
+    /// <summary>
+    /// Path points encode ground height; Y must advance along the segment with XZ progress.
+    /// Snapping Y to the destination waypoint every tick makes NPCs "fly" at the target height.
+    /// </summary>
+    [TestMethod]
+    public void Step_BetweenUnevenHeights_LerpsYWithXzProgress()
+    {
+        var path = Path(false, new Vector3(100f, 10f, 0f));
+
+        // Halfway toward the point in one step (speed*dt = 50, dist = 100).
+        var result = NpcPathFollower.Step(
+            new Vector3(0f, 0f, 0f), path, index: 0, direction: 1,
+            waitUntilMs: 0, nowMs: 1000, speed: 100f, dt: 0.5f);
+
+        Assert.IsFalse(result.Arrived);
+        Assert.AreEqual(50f, result.NewPosition.X, Tolerance);
+        Assert.AreEqual(5f, result.NewPosition.Y, 0.01f,
+            "Y must be halfway from 0 to 10 when XZ is halfway — not snapped to target.Y=10");
+        Assert.AreEqual(0f, result.NewPosition.Z, Tolerance);
+    }
+
+    [TestMethod]
+    public void Step_BetweenUnevenHeights_DoesNotJumpToTargetYOnFirstTick()
+    {
+        var path = Path(false, new Vector3(100f, 20f, 0f));
+
+        var result = NpcPathFollower.Step(
+            new Vector3(0f, 2f, 0f), path, index: 0, direction: 1,
+            waitUntilMs: 0, nowMs: 1000, speed: 10f, dt: 0.1f); // move 1u of 100u
+
+        Assert.IsFalse(result.Arrived);
+        Assert.IsTrue(result.NewPosition.Y < 4f,
+            $"first step must stay near start Y (2), not jump toward 20; got {result.NewPosition.Y}");
+        Assert.IsTrue(result.NewPosition.Y >= 2f - Tolerance);
+    }
+
     [TestMethod]
     public void Step_Arrival_SnapsAndReportsReactionAndWait()
     {

@@ -106,9 +106,9 @@ Mission `h_1-1_tas_arkbay_finalexam` kills template vehicle **580** (Gunny Sioux
 | --- | --- |
 | M1 | Vehicle ghost priority weight **0.40** (was 0.15 props) |
 | M1b | **Moving** vehicle weight **0.50** (match Character) + skip boost **0.05** |
-| M2 | `ApplyServerMove(dt)` fills angVel/steering; **cruise throttle** while moving |
+| M2 | `ApplyServerMove(dt)` fills angVel/steering; throttle from speed change (accel/cruise/coast) |
 | M3 | Tick NPCs **before** Pulse; keep `PositionMask` dirty while moving |
-| Soft path | `EnableSoftNpcPathMotion` — yaw rate, Y blend, velocity carry (server path quality only) |
+| Soft path | `EnableSoftNpcPathMotion` — pure-pursuit + **`VehicleDriveInputs`** thr/steer (client `MoveToTarget3DPoint` 0x004fc650) so ghost packs spin wheels; see `docs/NPC_VEHICLE_DRIVE_RE.md` |
 | Client-path visual | **Rejected** — freezes (client AI not latched) |
 
 **Live tick tuning:** `/sectorTick` / `sector.tick` (1–5000 ms). Alone does not fix skip if TNL still starves the ghost.

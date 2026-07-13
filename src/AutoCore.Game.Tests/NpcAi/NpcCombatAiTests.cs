@@ -83,6 +83,36 @@ public class NpcCombatAiTests
         Assert.IsNull(neutral.Target, "neutral NPC must not aggro the patrolling NPC either");
     }
 
+    /// <summary>
+    /// Ambient (21) wildlife (e.g. Ark Bay Osterake) proactively scans and engages players —
+    /// not "neutral until attacked" (NPC.md §15.4).
+    /// </summary>
+    [TestMethod]
+    public void IdlePatrol_AmbientDriver_AggroesPlayerInVision()
+    {
+        var map = CreateFieldMap();
+        var ambient = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: 21, visionRange: 60f);
+        var (player, _) = PlacePlayerVehicle(map, new Vector3(30f, 0f, 0f), faction: 0);
+
+        NpcCombatAi.Tick(map, ambient, nowMs: 100_000, dt: 0.1f);
+
+        Assert.AreSame(player, ambient.Target, "Ambient NPC must acquire the player in vision");
+        Assert.AreEqual(HBAICombatState.Engage, ambient.NpcAi.CombatState);
+    }
+
+    [TestMethod]
+    public void IdlePatrol_NeutralDriver_DoesNotAggroPlayerInVision()
+    {
+        var map = CreateFieldMap();
+        var neutral = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: -100, visionRange: 60f);
+        PlacePlayerVehicle(map, new Vector3(10f, 0f, 0f), faction: 0);
+
+        NpcCombatAi.Tick(map, neutral, nowMs: 100_000, dt: 0.1f);
+
+        Assert.IsNull(neutral.Target, "Neutral (−100) must never proactive-aggro");
+        Assert.AreEqual(HBAICombatState.IdlePatrol, neutral.NpcAi.CombatState);
+    }
+
     [TestMethod]
     public void Engage_TimerElapsed_TransitionsToCombat()
     {

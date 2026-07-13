@@ -53,6 +53,16 @@ public static class NpcTicker
             // NpcPathFollower.Step's hold-in-place branch (nowMs still short of the wait deadline).
             var wasHolding = nowMs < npcAi.WaitUntilMs;
 
+            // First latch onto a path: stagger start index so shared MapPaths do not all begin
+            // at the same nearest waypoint (stacking on spawn).
+            if (npcAi.PathIndex < 0)
+            {
+                npcAi.PathIndex = SoftNpcPathMotion.ResolveStaggeredPathIndex(
+                    entity.Position, path, entity.ObjectId.Coid);
+                if (MathF.Abs(npcAi.PathLaneOffset) < 1e-6f)
+                    npcAi.PathLaneOffset = SoftNpcPathMotion.ResolveLaneOffset(entity.ObjectId.Coid);
+            }
+
             var result = NpcPathFollower.Step(
                 entity.Position, path, npcAi.PathIndex, npcAi.PathDirection,
                 npcAi.WaitUntilMs, nowMs, ResolveSpeed(entity), dt);
@@ -75,16 +85,22 @@ public static class NpcTicker
                     ResolveSpeed(entity),
                     dt,
                     path,
-                    nowMs);
+                    nowMs,
+                    GetVelocity(entity),
+                    npcAi.PathLaneOffset);
             }
 
             if (!wasHolding || !PositionsEqual(result.NewPosition, entity.Position))
                 ApplyMove(entity, result, dt);
             else if (entity is Vehicle holdVehicle && holdVehicle.CoidCurrentPath > 0)
             {
-                // Holding on a waypoint: still re-dirty pose so TNL does not drop the ghost from
-                // the non-zero update list (live: 3 pose packs then silence until the next move).
-                holdVehicle.Ghost?.SetMaskBits(GhostObject.PositionMask);
+                // Holding on a waypoint: re-snap Y (soft wait parks at previous XYZ) and keep
+                // pose dirty so TNL does not drop the ghost from the non-zero update list.
+                var grounded = SnapToTerrain(map, holdVehicle.Position);
+                if (MathF.Abs(grounded.Y - holdVehicle.Position.Y) > 1e-3f)
+                    holdVehicle.ApplyServerMove(grounded, holdVehicle.Rotation, holdVehicle.Velocity, 0f);
+                else
+                    holdVehicle.Ghost?.SetMaskBits(GhostObject.PositionMask);
             }
 
             if (result.FireReactionCoid > 0)
@@ -113,6 +129,13 @@ public static class NpcTicker
         _ => Quaternion.Default,
     };
 
+    private static Vector3 GetVelocity(ClonedObjectBase entity) => entity switch
+    {
+        Vehicle vehicle => vehicle.Velocity,
+        Creature creature => creature.Velocity,
+        _ => default,
+    };
+
     /// <summary>True when both positions are exactly equal on all three axes.</summary>
     private static bool PositionsEqual(Vector3 a, Vector3 b) => a.X == b.X && a.Y == b.Y && a.Z == b.Z;
 
@@ -137,16 +160,47 @@ public static class NpcTicker
 
     private static void ApplyMove(ClonedObjectBase entity, PathStepResult result, float dt)
     {
+        var pos = SnapToTerrain(entity.Map, result.NewPosition);
+        // Keep target position grounded for foot creatures (client pose target).
+        var targetPos = pos;
+
         switch (entity)
         {
             case Vehicle vehicle:
-                vehicle.ApplyServerMove(result.NewPosition, result.Rotation, result.Velocity, dt);
+                // Pack MoveToTarget3DPoint-style thr/steer when soft path computed them so the
+                // client VehicleAction spins wheels and steers (ghost +0x614/+0x618).
+                if (result.HasDriveInputs)
+                {
+                    vehicle.ApplyServerMove(
+                        pos, result.Rotation, result.Velocity, dt,
+                        result.Throttle, result.Steering, result.SharpTurn);
+                }
+                else
+                {
+                    vehicle.ApplyServerMove(pos, result.Rotation, result.Velocity, dt);
+                }
+
                 vehicle.PathReversing = result.NowReversing;
                 break;
             case Creature creature:
-                creature.ApplyServerMove(result.NewPosition, result.Rotation, result.Velocity, result.NewPosition);
+                creature.ApplyServerMove(pos, result.Rotation, result.Velocity, targetPos);
                 creature.PathReversing = result.NowReversing;
                 break;
         }
+    }
+
+    /// <summary>
+    /// Sample the map TGA heightfield when present; otherwise leave Y unchanged.
+    /// Pure terrain only — do not add the retail AI foot offset here. Ghost unpack applies
+    /// server XYZ as-is; live check showed +foot (~1.18) floats server-driven creatures.
+    /// Static IsNPC still use <see cref="SpawnPoint.ApplyStaticNpcSpawnHeight"/> (spawn map Y + foot).
+    /// </summary>
+    internal static Vector3 SnapToTerrain(SectorMap map, Vector3 position)
+    {
+        var field = map?.MapData?.Heightfield;
+        if (field == null || !field.TrySample(position.X, position.Z, out var y))
+            return position;
+
+        return new Vector3(position.X, y, position.Z);
     }
 }

@@ -9,4 +9,5 @@ public sealed record CharacterInventoryItem(
     long Coid,
     byte InventoryPositionX,
     byte InventoryPositionY,
-    int Quantity);
+    int Quantity,
+    bool IsMissionItem = false);

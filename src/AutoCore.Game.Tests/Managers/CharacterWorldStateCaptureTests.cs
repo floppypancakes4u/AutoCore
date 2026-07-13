@@ -14,9 +14,9 @@ using AutoCore.Game.Structures;
 public class CharacterWorldStateCaptureTests
 {
     [TestMethod]
-    public void CaptureWorldStateToDb_WithVehicle_UsesVehiclePoseAndMapContinent()
+    public void CaptureWorldStateToDb_WithVehicle_OnField_UsesVehiclePose()
     {
-        var map = CreateMap(continentId: 693);
+        var map = CreateMap(continentId: 693, isTown: false);
         var character = new Character();
         character.SetCoid(1001, true);
         character.AttachTestDataForTests();
@@ -58,10 +58,61 @@ public class CharacterWorldStateCaptureTests
         Assert.AreEqual(0.9f, vehicle.GetDbRotationWForTests());
     }
 
+    /// <summary>
+    /// Town maps: avatar is on foot; vehicle sits at entry/garage. Logout must persist
+    /// character pose so relogin does not spawn under terrain at the vehicle position.
+    /// </summary>
+    [TestMethod]
+    public void CaptureWorldStateToDb_WithVehicle_OnTown_UsesCharacterPose()
+    {
+        var map = CreateMap(continentId: 558, isTown: true);
+        var character = new Character();
+        character.SetCoid(1010, true);
+        character.AttachTestDataForTests();
+        // Walked on-foot pose (away from entry).
+        character.Position = new Vector3(100.5f, 12.0f, 200.75f);
+        character.Rotation = new Quaternion(0f, 0.707f, 0f, 0.707f);
+
+        var vehicle = new Vehicle();
+        vehicle.SetCoid(2010, true);
+        vehicle.AttachTestDataForTests();
+        // Stale entry/garage pose (wrong for resume while on foot).
+        vehicle.Position = new Vector3(1f, -50f, 2f);
+        vehicle.Rotation = new Quaternion(0.1f, 0.2f, 0.3f, 0.9f);
+        character.SetCurrentVehicleForTests(vehicle);
+        character.SetMap(map);
+
+        var snapshot = character.CaptureWorldStateToDb();
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(1010L, snapshot.Value.CharacterCoid);
+        Assert.AreEqual(558, snapshot.Value.ContinentId);
+        Assert.AreEqual(100.5f, snapshot.Value.PositionX);
+        Assert.AreEqual(12.0f, snapshot.Value.PositionY);
+        Assert.AreEqual(200.75f, snapshot.Value.PositionZ);
+        Assert.AreEqual(0f, snapshot.Value.RotationX);
+        Assert.AreEqual(0.707f, snapshot.Value.RotationY);
+        Assert.AreEqual(0f, snapshot.Value.RotationZ);
+        Assert.AreEqual(0.707f, snapshot.Value.RotationW);
+        Assert.AreEqual(2010L, snapshot.Value.VehicleCoid);
+
+        Assert.AreEqual(558, character.LastTownId);
+        Assert.AreEqual(100.5f, character.GetDbPositionXForTests());
+        Assert.AreEqual(12.0f, character.GetDbPositionYForTests());
+        Assert.AreEqual(200.75f, character.GetDbPositionZForTests());
+        Assert.AreEqual(0.707f, character.GetDbRotationWForTests());
+
+        // Shared snapshot pose is also written to the vehicle row for resume consistency.
+        Assert.AreEqual(100.5f, vehicle.GetDbPositionXForTests());
+        Assert.AreEqual(200.75f, vehicle.GetDbPositionZForTests());
+        Assert.AreEqual(0.707f, vehicle.GetDbRotationYForTests());
+        Assert.AreEqual(0.707f, vehicle.GetDbRotationWForTests());
+    }
+
     [TestMethod]
     public void CaptureWorldStateToDb_WithoutVehicle_UsesCharacterPose()
     {
-        var map = CreateMap(continentId: 42);
+        var map = CreateMap(continentId: 42, isTown: false);
         var character = new Character();
         character.SetCoid(1002, true);
         character.AttachTestDataForTests();
@@ -99,6 +150,38 @@ public class CharacterWorldStateCaptureTests
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(55, snapshot.Value.ContinentId);
         Assert.AreEqual(55, character.LastTownId);
+    }
+
+    /// <summary>
+    /// After sector teardown Map is null. A second disconnect (Global) must not prefer
+    /// vehicle garage coords over the walked character pose.
+    /// </summary>
+    [TestMethod]
+    public void CaptureWorldStateToDb_NoMap_WithVehicle_UsesCharacterPose()
+    {
+        var character = new Character();
+        character.SetCoid(1011, true);
+        character.AttachTestDataForTests();
+        character.SetLastTownIdForTests(558);
+        character.Position = new Vector3(100.5f, 12f, 200.75f);
+        character.Rotation = Quaternion.Default;
+
+        var vehicle = new Vehicle();
+        vehicle.SetCoid(2011, true);
+        vehicle.AttachTestDataForTests();
+        vehicle.Position = new Vector3(1f, -50f, 2f);
+        character.SetCurrentVehicleForTests(vehicle);
+        // Map intentionally null (post-teardown).
+
+        var snapshot = character.CaptureWorldStateToDb();
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(100.5f, snapshot.Value.PositionX);
+        Assert.AreEqual(12f, snapshot.Value.PositionY);
+        Assert.AreEqual(200.75f, snapshot.Value.PositionZ);
+        Assert.AreEqual(2011L, snapshot.Value.VehicleCoid);
+        Assert.AreEqual(100.5f, character.GetDbPositionXForTests());
+        Assert.AreEqual(100.5f, vehicle.GetDbPositionXForTests());
     }
 
     [TestMethod]
@@ -151,14 +234,14 @@ public class CharacterWorldStateCaptureTests
         Assert.AreEqual(-1, character.LastTownId);
     }
 
-    private static SectorMap CreateMap(int continentId)
+    private static SectorMap CreateMap(int continentId, bool isTown = false)
     {
         var continent = new ContinentObject
         {
             Id = continentId,
             MapFileName = "test_map",
             DisplayName = "Test",
-            IsTown = false,
+            IsTown = isTown,
             IsPersistent = true
         };
         return SectorMap.CreateForTests(continent, new Vector4(0f, 0f, 0f, 0f));

@@ -19,7 +19,29 @@ public class MapData
 
     public int MapVersion { get; private set; }
     public int IterationVersion { get; private set; }
+
+    /// <summary>
+    /// Terrain grid width in cells (fam header <c>m_lWidth</c>). World X extent is
+    /// <c>TerrainWidth * GridSize</c>. Must match the map TGA width for heightfield load.
+    /// </summary>
+    public int TerrainWidth { get; private set; }
+
+    /// <summary>
+    /// Terrain grid height in cells (fam header <c>m_lHeight</c>). World Z extent is
+    /// <c>TerrainHeight * GridSize</c>. Must match the map TGA height for heightfield load.
+    /// </summary>
+    public int TerrainHeight { get; private set; }
+
     public float GridSize { get; private set; }
+
+    /// <summary>
+    /// Continuous terrain heightfield from <c>{MapFileName}.tga</c> (loaded at map init from GLM).
+    /// Null when the TGA is missing or dimensions mismatch. See <see cref="MapTerrainHeightfield"/>.
+    /// </summary>
+    public MapTerrainHeightfield Heightfield { get; private set; }
+
+    /// <summary>Loader / test seam: attach a heightfield after <see cref="Read"/>.</summary>
+    internal void SetHeightfield(MapTerrainHeightfield heightfield) => Heightfield = heightfield;
     public byte TileSet { get; private set; }
     public bool UseRoad { get; private set; }
     public short[] Music { get; private set; }
@@ -74,8 +96,9 @@ public class MapData
         if (MapVersion >= 27)
             IterationVersion = reader.ReadInt32();
 
-        reader.BaseStream.Position += 8;
-
+        // Client CVOGTerrain_StreamMapHeader: m_lWidth, m_lHeight, m_fGridSize (was skipped 8 bytes).
+        TerrainWidth = reader.ReadInt32();
+        TerrainHeight = reader.ReadInt32();
         GridSize = reader.ReadSingle();
         TileSet = reader.ReadByte();
         UseRoad = reader.ReadBoolean();

@@ -806,72 +806,68 @@ public class Reaction : ClonedObjectBase
         return activator.GetAsCharacter() ?? activator.GetSuperCharacter(false);
     }
 
+    /// <summary>
+    /// UnlockContObj (type 32). GenericVar1 = continent object id.
+    /// Client: <c>CVOGReaction_Dispatch</c> case 0x20 → <c>CVOGReaction_UnlockContinentObject</c>.
+    /// Server tracks the same unlock hash so TransferMap gates and login restore stay authoritative.
+    /// Returns true so GroupReactionCall (0x206C) still notifies the client.
+    /// </summary>
     private bool HandleUnlockContObj(ClonedObjectBase activator)
     {
-        // UnlockContObj unlocks mission objectives/containers for the player
-        // GenericVar1 may contain the objective ID to unlock
-        // The client handles the visual unlocking via LogicStateChangePacket
         var character = GetCharacterFromActivator(activator);
-        var objectiveId = Template.GenericVar1;
+        var continentId = Template.GenericVar1;
 
-        // Look up which mission this objective belongs to
-        var mission = Managers.AssetManager.Instance.GetMissionByObjectiveId(objectiveId);
-        if (mission != null)
+        var charLabel = character != null ? $"coid={character.ObjectId.Coid}" : "(null)";
+        Logger.WriteLog(LogType.Debug,
+            "UnlockContObj reaction {0}: continentId={1} g3={2} actOn={3} char={4}",
+            Template.COID,
+            continentId,
+            Template.GenericVar3,
+            Template.ActOnActivator,
+            charLabel);
+
+        if (character != null && continentId != 0)
         {
-            Logger.WriteLog(LogType.Debug, $"UnlockContObj reaction {Template.COID}: ObjectiveID={objectiveId} belongs to Mission {mission.Id} '{mission.Name}' (Title: {mission.Title})");
+            var newly = Managers.ExplorationManager.Instance.UnlockContinent(character, continentId);
+            Logger.WriteLog(LogType.Debug,
+                "UnlockContObj reaction {0}: {1} continent {2} for {3}",
+                Template.COID,
+                newly ? "unlocked" : "already-unlocked",
+                continentId,
+                charLabel);
         }
 
-        Logger.WriteLog(LogType.Debug, $"UnlockContObj reaction {Template.COID}: GenericVar1={objectiveId}, GenericVar3={Template.GenericVar3}, Objects={Template.Objects.Count}, ActOnActivator={Template.ActOnActivator}");
-
-        IncompleteHandlerLog.Warn(
-            "Reaction.UnlockContObj",
-            $"coid={Template.COID} objectiveIdOrG1={objectiveId} g3={Template.GenericVar3} objs=[{string.Join(',', Template.Objects)}] char={character?.Name ?? "(null)"}",
-            "No per-character unlock set — only logs; map/mission gates using unlock state will not open server-side",
-            "Track unlocked objective/container ids on character; gate triggers/conditions; sync client if needed beyond 0x206C.");
-
-        if (character != null)
-        {
-            Logger.WriteLog(LogType.Debug, $"UnlockContObj reaction {Template.COID}: Unlocking for character {character.Name}");
-        }
-
-        if (Template.Objects.Count > 0)
-        {
-            var map = activator.Map;
-            foreach (var objectCoid in Template.Objects)
-            {
-                var obj = map?.GetObjectByCoid(objectCoid);
-                if (obj != null)
-                {
-                    Logger.WriteLog(LogType.Debug, $"UnlockContObj reaction {Template.COID}: Unlocking object {objectCoid}");
-                }
-                else
-                {
-                    Logger.WriteLog(LogType.Debug, $"UnlockContObj reaction {Template.COID}: Object {objectCoid} is client-side only");
-                }
-            }
-        }
         return true;
     }
 
+    /// <summary>
+    /// RelockContObj (type 70). GenericVar1 = continent object id.
+    /// Client: case 0x46 → <c>CVOGReaction_RelockContinentObject</c>.
+    /// </summary>
     private bool HandleRelockContObj(ClonedObjectBase activator)
     {
-        // RelockContObj re-locks previously unlocked objectives/containers
         var character = GetCharacterFromActivator(activator);
+        var continentId = Template.GenericVar1;
 
-        Logger.WriteLog(LogType.Debug, $"RelockContObj reaction {Template.COID}: GenericVar1={Template.GenericVar1}, GenericVar3={Template.GenericVar3}");
+        var charLabel = character != null ? $"coid={character.ObjectId.Coid}" : "(null)";
+        Logger.WriteLog(LogType.Debug,
+            "RelockContObj reaction {0}: continentId={1} g3={2} char={3}",
+            Template.COID,
+            continentId,
+            Template.GenericVar3,
+            charLabel);
 
-        if (character != null)
+        if (character != null && continentId != 0)
         {
-            Logger.WriteLog(LogType.Debug, $"RelockContObj reaction {Template.COID}: Relocking for character {character.Name}");
+            var removed = Managers.ExplorationManager.Instance.RelockContinent(character, continentId);
+            Logger.WriteLog(LogType.Debug,
+                "RelockContObj reaction {0}: {1} continent {2} for {3}",
+                Template.COID,
+                removed ? "relocked" : "was-not-unlocked",
+                continentId,
+                charLabel);
         }
 
-        if (Template.Objects.Count > 0)
-        {
-            foreach (var objectCoid in Template.Objects)
-            {
-                Logger.WriteLog(LogType.Debug, $"RelockContObj reaction {Template.COID}: Relocking object {objectCoid}");
-            }
-        }
         return true;
     }
 
@@ -1023,6 +1019,9 @@ public class Reaction : ClonedObjectBase
         var conn = character.OwningConnection;
         if (conn != null)
             NpcInteractHandler.ResyncActiveMissionToClient(conn, character, quest);
+
+        // Deliver GiveItemOnStart → mission cargo (same path as dialog GrantMission).
+        Mission.MissionCargoService.EnsureAndSend(character, quest);
 
         TriggerManager.Instance.OnMissionStateChanged(character.CurrentVehicle ?? (ClonedObjectBase)character);
         return true;
@@ -1341,7 +1340,12 @@ public class Reaction : ClonedObjectBase
         var mapTransferType = Template.MapTransfer;
         var mapTransferData = Template.MapTransferData;
 
-        Logger.WriteLog(LogType.Debug, $"TransferMap reaction {Template.COID}: Type={mapTransferType}, Data={mapTransferData} for character {character.Name}");
+        Logger.WriteLog(LogType.Debug,
+            "TransferMap reaction {0}: Type={1}, Data={2} for character coid={3}",
+            Template.COID,
+            mapTransferType,
+            mapTransferData,
+            character.ObjectId.Coid);
 
         switch (mapTransferType)
         {

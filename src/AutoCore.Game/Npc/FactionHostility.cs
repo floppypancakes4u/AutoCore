@@ -1,17 +1,20 @@
 namespace AutoCore.Game.Npc;
 
 /// <summary>
-/// Single choke point for NPC aggro decisions (client CVOGHBAI faction check). Faction ids come
-/// from wad.xml <c>tFactions</c> via <see cref="Entities.ClonedObjectBase.GetIDFaction"/>:
+/// Single choke point for NPC aggro decisions. Faction ids come from wad.xml <c>tFactions</c>
+/// via <see cref="Entities.ClonedObjectBase.GetIDFaction"/> (root owner chain).
 /// <list type="bullet">
-///   <item>0 Humans / 1 Mutants / 2 Biomeks are the player races — they never mutually aggro.</item>
-///   <item>&gt;= 3 are NPC factions — aggressive toward any real faction that is not themselves.</item>
-///   <item>-1 (unset) and -100 (neutral) never aggro, in either direction.</item>
+///   <item><b>-100 Neutral</b> — never aggro either way (client <c>FindTargetToAttack</c> aborts
+///   for self −100 and skips −100 candidates).</item>
+///   <item><b>-1 NPC</b> — never aggressor in this server heuristic (retail <c>vtable+0x298</c>
+///   is slightly different; see NPC.md §15.2).</item>
+///   <item><b>0 / 1 / 2</b> player races — never mutually aggro on the server (retail different-faction
+///   AI can; intentional simplification).</item>
+///   <item><b>&gt;= 3</b> (Wildlife, Ambient, Scavs, …) — proactive hostile toward any other real
+///   faction (&gt;= 0). Ambient (21) is wildlife, not Neutral — Osterakes aggro players.</item>
 /// </list>
-/// RE-confirmed (NPC.md §12.2, Stage 12 closure of Risk 2): decompiling the retail
-/// <c>CVOGHBAIBase_FindTargetToAttack</c> (<c>00639210</c>) faction filter — which walks the owner
-/// chain via <c>FUN_00512440</c> to the root object's relation id and treats <c>-100</c> as a
-/// never-aggro sentinel — confirms the heuristic below matches retail behavior exactly.
+/// Retail detail: creature hostility is <c>FUN_005c9450</c> (different faction ⇒ hostile) plus the
+/// −100 scan gates. Full matrix and gaps: NPC.md §1.6 / §12.2 / §15.
 /// </summary>
 public static class FactionHostility
 {

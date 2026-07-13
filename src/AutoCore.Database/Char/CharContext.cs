@@ -78,6 +78,31 @@ public class CharContext : DbContext
         context.EnsureCharacterProgressSchema();
         context.EnsureMissionSchema();
         context.EnsureSkillSchema();
+        context.EnsureVehicleCombatStateSchema();
+    }
+
+    /// <summary>
+    /// Adds vehicle combat-pool columns for logout/login restore (HP/shield/power/heat).
+    /// -1 means never saved → login keeps full-fill behavior. Safe to call repeatedly.
+    /// </summary>
+    public void EnsureVehicleCombatStateSchema()
+    {
+        TryExecute("""
+            ALTER TABLE `vehicle`
+            ADD COLUMN `CurrentHP` INT NOT NULL DEFAULT -1
+            """);
+        TryExecute("""
+            ALTER TABLE `vehicle`
+            ADD COLUMN `CurrentShield` INT NOT NULL DEFAULT -1
+            """);
+        TryExecute("""
+            ALTER TABLE `vehicle`
+            ADD COLUMN `CurrentPower` INT NOT NULL DEFAULT -1
+            """);
+        TryExecute("""
+            ALTER TABLE `vehicle`
+            ADD COLUMN `CurrentHeat` INT NOT NULL DEFAULT -1
+            """);
     }
 
     /// <summary>
@@ -104,10 +129,15 @@ public class CharContext : DbContext
                 `SlotX` TINYINT UNSIGNED NOT NULL,
                 `SlotY` TINYINT UNSIGNED NOT NULL,
                 `Quantity` INT NOT NULL DEFAULT 1,
+                `IsMissionItem` TINYINT(1) NOT NULL DEFAULT 0,
                 PRIMARY KEY (`Id`),
                 UNIQUE KEY `IX_character_inventory_ItemCoid` (`ItemCoid`),
                 KEY `IX_character_inventory_CharacterCoid` (`CharacterCoid`)
             )
+            """);
+        TryExecute("""
+            ALTER TABLE `character_inventory`
+            ADD COLUMN `IsMissionItem` TINYINT(1) NOT NULL DEFAULT 0
             """);
     }
 

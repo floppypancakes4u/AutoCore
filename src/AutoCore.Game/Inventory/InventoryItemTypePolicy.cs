@@ -20,6 +20,9 @@ public static class InventoryItemTypePolicy
             CloneBaseObjectType.Accessory => true,
             CloneBaseObjectType.RaceItem => true,
             CloneBaseObjectType.Ornament => true,
+            // Mission Inventory gear (deliver GiveItemOnStart / use-item objectives).
+            CloneBaseObjectType.QuestObject => true,
+            CloneBaseObjectType.MissionObject => true,
             _ => false
         };
     }

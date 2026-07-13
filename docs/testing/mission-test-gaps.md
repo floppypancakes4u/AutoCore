@@ -35,15 +35,24 @@ Explicit inventory of untested, partially tested, or N/A paths. Prefer documenti
 | E2E reload mid-progress | Scenario_PartialKill_FlushReload_Finish |
 | Property/fuzz pack + malformed | MissionPropertyAndFuzzTests |
 
+## Closed this completion pass
+
+| Item | Resolution |
+| ---- | ---------- |
+| Stryker install + critical run | 75.22% pass (`stryker-mission-critical-config.json`) |
+| Stryker broader run | 58.09% pass (`stryker-mission-config.json`) |
+| Coverlet expand + hard gate | 98.77% hard-scoped pass |
+| Chat admin mission contracts | `MissionChatCommandContractTests` |
+| Packet Read paths | UseObject/AutoPatrol 100% under mission filter |
+
 ## Remaining priority gaps
 
 | Priority | Gap | Notes |
 | -------- | --- | ----- |
-| P1 | Stryker full run + score gate | Tool installed; first run pending |
-| P1 | Coverlet expand to Persistence/Reaction/TriggerManager | Legacy include list |
-| P2 | Chat admin full contract | Partial via ForceComplete |
-| P2 | Packet Read paths | Low value (UseObject/AutoPatrol) |
-| P2 | Multi-mission kill-all policy | Product decision |
+| P2 | Critical mutation → 90% | 8 CharacterQuest + 6 MissionPersistence survivors |
+| P2 | Broader handler mutation | NpcInteractHandler ~63% killed/survived |
+| P2 | Multi-mission kill-all policy | Product decision (first-only characterized) |
+| P3 | Soak/load | Not in unit suite |
 
 ## Flaky tests
 

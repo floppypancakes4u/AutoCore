@@ -223,18 +223,20 @@ public class Creature : SimpleObject
 
     public void HandleMovement(CreatureMovedPacket packet)
     {
-        if (Ghost == null)
-            return;
-
         if (packet.ObjectId != ObjectId)
             throw new Exception("WTF? Someone else moves me?");
 
-        // Update position
+        // Always update pose (even if ghost is not ready) so town on-foot logout resume and
+        // trigger volumes see the walked position. Matches Vehicle.HandleMovement — ghost is
+        // only required for rebroadcast, not for authoritative server pose.
         Position = packet.Location;
         Rotation = packet.Rotation;
         Velocity = packet.Velocity;
         AngularVelocity = packet.AngularVelocity;
         TargetPosition = packet.TargetPosition;
+
+        if (Ghost == null)
+            return;
 
         Ghost.SetMaskBits(GhostObject.PositionMask);
 

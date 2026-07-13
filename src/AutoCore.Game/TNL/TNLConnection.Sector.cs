@@ -317,10 +317,12 @@ public partial class TNLConnection
 
         // Re-seed heat/power from equipped PP now that Owner is the Character (LoadFromDB
         // may have run before ownership was attached). Uses loaded Tech for heat max.
+        // Fill full first so maxes are correct, then overwrite currents from DB if saved.
         character.CurrentVehicle.ApplyPowerPlantCapacities(startPowerAtFull: true, clearHeat: true);
         character.CurrentVehicle.ApplyRaceItemShieldFromEquipped(startAtFull: true);
         // Clonebase MaxHitPoint is stub 1 — recompute retail max before create + CharacterLevel.
         character.CurrentVehicle.RecalculateMaximumHitPoints(refillCurrent: true, triggerGhostUpdate: false);
+        character.CurrentVehicle.RestoreCombatStateFromDb(character);
         // Ensure cargo matches chassis InventorySlots (retail 6×13×pages) before create packets.
         character.ApplyCargoCapacityFromCurrentVehicle(persist: false);
 

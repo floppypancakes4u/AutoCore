@@ -28,7 +28,8 @@ public sealed class InventoryPersistence : IInventoryPersistence
                 i.ItemCoid,
                 i.SlotX,
                 i.SlotY,
-                i.Quantity))
+                i.Quantity,
+                i.IsMissionItem))
             .ToList();
     }
 
@@ -49,7 +50,8 @@ public sealed class InventoryPersistence : IInventoryPersistence
                 Type = (byte)item.Type,
                 SlotX = item.InventoryPositionX,
                 SlotY = item.InventoryPositionY,
-                Quantity = Math.Max(1, item.Quantity)
+                Quantity = Math.Max(1, item.Quantity),
+                IsMissionItem = item.IsMissionItem
             });
         }
         else
@@ -60,6 +62,7 @@ public sealed class InventoryPersistence : IInventoryPersistence
             row.SlotX = item.InventoryPositionX;
             row.SlotY = item.InventoryPositionY;
             row.Quantity = Math.Max(1, item.Quantity);
+            row.IsMissionItem = item.IsMissionItem;
         }
 
         EnsureSimpleObjectInternal(context, item.Coid, (byte)item.Type, item.Cbid);

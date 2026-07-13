@@ -93,16 +93,19 @@ public class NpcPathLeashTests
     }
 
     [TestMethod]
-    public void PathNpc_TargetOffPathButNear_LungesTowardTarget()
+    public void PathNpc_TargetOffPathButNear_DoesNotLunge_StaysOnPath()
     {
+        // Client DoLogic: DoVehiclePursue only when ReturnToNormalLocation returns false.
+        // Active path waypoint (+0x52) keeps steering to the path and returns true → no pursue.
+        // Surplus Scav Skiddoo-style: lap path, fire when in range, no chase off the route.
         var map = CreateFieldMap();
         SeedPath(map, PathCoid, new Vector3(500f, 0f, 0f));
 
-        // NPC near its path (10u), target out of weapon range (30) but within vision (60): lunge.
         var npc = PlaceNpcVehicle(map, new Vector3(500f, 0f, 10f), driverFaction: 3, speed: 10f);
         EquipFrontWeapon(npc, rangeMax: 30f);
         npc.NpcAi.HomePosition = new Vector3(0f, 0f, 0f);
         npc.CoidCurrentPath = PathCoid;
+        var start = npc.Position;
         var (player, _) = PlacePlayerVehicle(map, new Vector3(555f, 0f, 10f), faction: 0);
 
         npc.SetTargetObject(player);
@@ -110,9 +113,34 @@ public class NpcPathLeashTests
 
         NpcCombatAi.Tick(map, npc, nowMs: 100_000, dt: 0.1f);
 
-        Assert.IsTrue(npc.NpcAi.PursuingThisTick, "a reachable off-range target near the path is pursued");
-        Assert.IsTrue(npc.Position.X > 500f, "lunges toward the target at X=555");
-        Assert.AreSame(player, npc.Target, "keeps its target while lunging");
+        Assert.IsFalse(npc.NpcAi.PursuingThisTick, "path NPCs do not combat-lunge off the MapPath");
+        Assert.AreEqual(start.X, npc.Position.X, 0.001f, "combat tick does not move X toward the player");
+        Assert.AreEqual(start.Z, npc.Position.Z, 0.001f, "combat tick does not leave the path anchor");
+        Assert.AreSame(player, npc.Target, "still tracks the target for fire when in range");
+    }
+
+    [TestMethod]
+    public void PathNpc_CoidSetEvenIfHasPathAnchorFalse_StillDoesNotLunge()
+    {
+        // Defense in depth: assigned path COID must block combat lunge even when the map path
+        // table fails to resolve this tick (HasPathAnchor false).
+        var map = CreateFieldMap();
+        // Deliberately do NOT seed PathCoid in map templates.
+        var npc = PlaceNpcVehicle(map, new Vector3(100f, 0f, 0f), driverFaction: 3, speed: 10f);
+        EquipFrontWeapon(npc, rangeMax: 30f);
+        npc.CoidCurrentPath = 99_999; // assigned but unresolvable
+        npc.NpcAi.HomePosition = new Vector3(0f, 0f, 0f);
+        var start = npc.Position;
+        var (player, _) = PlacePlayerVehicle(map, new Vector3(140f, 0f, 0f), faction: 0);
+
+        npc.SetTargetObject(player);
+        npc.NpcAi.CombatState = HBAICombatState.Combat;
+
+        NpcCombatAi.Tick(map, npc, nowMs: 100_000, dt: 0.1f);
+
+        Assert.IsFalse(npc.NpcAi.HasPathAnchor, "path template missing → no path anchor");
+        Assert.IsFalse(npc.NpcAi.PursuingThisTick, "CoidCurrentPath still forbids combat lunge");
+        Assert.AreEqual(start.X, npc.Position.X, 0.001f);
     }
 
     [TestMethod]

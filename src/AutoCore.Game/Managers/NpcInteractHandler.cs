@@ -18,8 +18,14 @@ using AutoCore.Utils;
 /// </summary>
 public static class NpcInteractHandler
 {
-    // Client click range ~25f (DAT_00aaa6fc); allow small latency slack.
+    // Client click range DAT_00aaa6fc = 25f (Client_InteractClickPickTarget @ 0x009247b0);
+    // small latency slack for C2S lag.
     private const float MaxInteractDistance = 30f;
+
+    // When XZ exceeds MaxInteractDistance but the NPC is a data-driven mission dialog partner
+    // (deliver / giver / offerable), still allow within this grace. Client already range-gated
+    // at 25f against its body; server pose can lag (motion authority, map-Y vs terrain-Y).
+    private const float MaxMissionInteractGrace = 150f;
 
     /// <summary>
     /// Delay before journal + OnMissionStateChanged after dialog deliver turn-in.
@@ -235,7 +241,7 @@ public static class NpcInteractHandler
             return;
         }
 
-        var playerPos = character.CurrentVehicle?.Position ?? character.Position;
+        var playerPos = GetPlayerInteractPosition(character);
 
         // World-object interact (use-item / use-object objectives) before NPC dialog.
         if (TryCompleteUseItemObjective(conn, character, targetCoid, packet.ObjectiveId))
@@ -265,26 +271,41 @@ public static class NpcInteractHandler
             return;
         }
 
-        var targetPos = npc.Position;
-        if (playerPos.DistSq(targetPos) > MaxInteractDistance * MaxInteractDistance)
-        {
-            Logger.WriteLog(LogType.Debug,
-                "UseObject: rejected out of range charCoid={0} npc={1}",
-                character.ObjectId.Coid,
-                npc.ObjectId.Coid);
-            return;
-        }
-
         var npcCbid = npc.CBID;
         if (npcCbid <= 0)
             return;
 
-        // Client often advances objectives (0x206C / local UI) before the server — e.g. patrol
-        // done client-side while ActiveObjectiveSequence is still 0. Reconcile from objectiveId
-        // so deliver turn-in and PrepareClientTurnInDialog see the correct active sequence.
-        TryReconcileClientObjectiveHint(conn, character, packet.ObjectiveId, npcCbid);
+        var targetPos = GetNpcInteractPosition(npc, character.Map);
+        var distXZSq = DistXZSq(playerPos, targetPos);
+        var maxSq = MaxInteractDistance * MaxInteractDistance;
 
+        // Prefer building dialog list once: needed both for soft-allow and for send.
         var dialogMissions = BuildDialogMissions(character, npcCbid, packet.ObjectiveId);
+
+        if (distXZSq > maxSq)
+        {
+            var graceSq = MaxMissionInteractGrace * MaxMissionInteractGrace;
+            if (dialogMissions.Count == 0 || distXZSq > graceSq)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "UseObject: rejected out of range charCoid={0} npc={1} distXZ={2:F1} player={3} target={4} partners={5}",
+                    character.ObjectId.Coid,
+                    npc.ObjectId.Coid,
+                    MathF.Sqrt(distXZSq),
+                    playerPos,
+                    targetPos,
+                    dialogMissions.Count);
+                return;
+            }
+
+            Logger.WriteLog(LogType.Debug,
+                "UseObject: mission partner soft-allow charCoid={0} npc={1} cbid={2} distXZ={3:F1}",
+                character.ObjectId.Coid,
+                npc.ObjectId.Coid,
+                npcCbid,
+                MathF.Sqrt(distXZSq));
+        }
+
         if (dialogMissions.Count == 0)
         {
             Logger.WriteLog(LogType.Debug,
@@ -295,8 +316,56 @@ public static class NpcInteractHandler
             return;
         }
 
+        // Client often advances objectives (0x206C / local UI) before the server — e.g. patrol
+        // done client-side while ActiveObjectiveSequence is still 0. Reconcile from objectiveId
+        // so deliver turn-in and PrepareClientTurnInDialog see the correct active sequence.
+        TryReconcileClientObjectiveHint(conn, character, packet.ObjectiveId, npcCbid);
+
+        // Re-build after reconcile so deliver-active sequence is reflected if hint advanced it.
+        dialogMissions = BuildDialogMissions(character, npcCbid, packet.ObjectiveId);
+        if (dialogMissions.Count == 0)
+            return;
+
         PrepareClientTurnInDialog(conn, character, npcCbid, dialogMissions);
         SendNpcMissionDialog(conn, npc.ObjectId, dialogMissions);
+    }
+
+    /// <summary>
+    /// Town continents: character on foot. Field/highway: vehicle chassis.
+    /// Matches <see cref="TriggerManager.ResolvePlayerTriggerActivator"/> / create-packet UsingVehicle.
+    /// </summary>
+    internal static Vector3 GetPlayerInteractPosition(Character character)
+    {
+        var body = TriggerManager.ResolvePlayerTriggerActivator(character);
+        return body?.Position ?? character?.Position ?? default;
+    }
+
+    /// <summary>
+    /// Seated mission NPCs: client range-checks the chassis (object +0x80). Driver.Position is
+    /// stamped at spawn and does not track the vehicle — use the owned chassis when present.
+    /// </summary>
+    internal static Vector3 GetNpcInteractPosition(Creature npc, SectorMap map)
+    {
+        if (npc == null)
+            return default;
+
+        if (map != null)
+        {
+            foreach (var obj in map.Objects.Values)
+            {
+                if (obj is Vehicle vehicle && ReferenceEquals(vehicle.Owner, npc))
+                    return vehicle.Position;
+            }
+        }
+
+        return npc.Position;
+    }
+
+    internal static float DistXZSq(Vector3 a, Vector3 b)
+    {
+        var dx = a.X - b.X;
+        var dz = a.Z - b.Z;
+        return dx * dx + dz * dz;
     }
 
     /// <summary>
@@ -312,6 +381,8 @@ public static class NpcInteractHandler
         if (character?.Map == null)
             return null;
 
+        // Nearby fallback uses hard interact cap only (not mission grace) so we do not bind
+        // a distant same-CBID NPC when the click COID is simply missing.
         var rangeSq = MaxInteractDistance * MaxInteractDistance;
         Creature best = null;
         var bestDist = float.MaxValue;
@@ -353,7 +424,7 @@ public static class NpcInteractHandler
                     if (IsSuppressedFor(character, creature.ObjectId.Coid))
                         continue;
 
-                    var dist = playerPos.DistSq(creature.Position);
+                    var dist = DistXZSq(playerPos, GetNpcInteractPosition(creature, character.Map));
                     if (dist > rangeSq || dist >= bestDist)
                         continue;
 
@@ -945,6 +1016,8 @@ public static class NpcInteractHandler
             // Duplicate grant path: still resync UI (journal may be empty after bad restore).
             var existing = character.CurrentQuests.First(q => q.MissionId == missionId);
             ResyncActiveMissionToClient(conn, character, existing);
+            // Idempotent: top up missing GiveItemOnStart cargo without duplicating.
+            MissionCargoService.EnsureAndSend(character, existing);
             TriggerManager.Instance.OnMissionStateChanged(
                 character.CurrentVehicle ?? (ClonedObjectBase)character);
             return;
@@ -957,6 +1030,9 @@ public static class NpcInteractHandler
 
         // Seed client objective state so journal can show the new objective.
         ResyncActiveMissionToClient(conn, character, quest);
+
+        // Deliver GiveItemOnStart → mission cargo (server-authoritative; idempotent).
+        MissionCargoService.EnsureAndSend(character, quest);
 
         Logger.WriteLog(LogType.Debug,
             "MissionDialogResponse: granted mission {0} to charCoid={1}",
@@ -1133,6 +1209,9 @@ public static class NpcInteractHandler
                 "Route deliver completion through MissionManager/AdvanceOrCompleteObjective for one generic complete pipeline.");
         }
 
+        // TakeItemAtEnd before completing so cargo state matches turn-in.
+        MissionCargoService.TakeAndSend(character, quest, objective);
+
         character.CurrentQuests.Remove(quest);
         character.CompletedMissionIds.Add(missionId);
         MissionPersistence.Instance.OnMissionCompleted(character.ObjectId.Coid, missionId);
@@ -1200,9 +1279,12 @@ public static class NpcInteractHandler
             return;
 
         var character = conn.CurrentCharacter;
-        var vehicle = character?.CurrentVehicle;
-        if (character?.Map == null || vehicle == null)
+        if (character?.Map == null)
             return;
+
+        // Town: character on foot; field/highway: vehicle chassis (same as UseObject / triggers).
+        var playerPos = GetPlayerInteractPosition(character);
+        var activator = TriggerManager.ResolvePlayerTriggerActivator(character) ?? (ClonedObjectBase)character;
 
         var targetCoid = packet.Target?.Coid ?? -1;
         if (targetCoid <= 0)
@@ -1231,7 +1313,7 @@ public static class NpcInteractHandler
                 continue;
 
             var radius = patrol.AutoCompleteDistance > 0f ? patrol.AutoCompleteDistance : 25f;
-            if (vehicle.Position.DistSq(targetPos) > radius * radius)
+            if (playerPos.DistSq(targetPos) > radius * radius)
                 continue;
 
             // Patrol + deliver on same objective (Final Exam class): reaching the pad waypoint
@@ -1260,7 +1342,7 @@ public static class NpcInteractHandler
                         quest.ActiveObjectiveSequence,
                         deliver.NPCTargetCBID);
 
-                    character.Map?.EnsureDeliverTurnInNpc(vehicle, deliver.NPCTargetCBID);
+                    character.Map?.EnsureDeliverTurnInNpc(activator, deliver.NPCTargetCBID);
                 }
 
                 return;
@@ -1446,6 +1528,9 @@ public static class NpcInteractHandler
             ObjectiveId = objective.ObjectiveId,
         });
 
+        // Take mission cargo for the finishing objective before advance/complete.
+        MissionCargoService.TakeAndSend(character, quest, objective);
+
         if (hasNext)
         {
             var nextSeq = mission.Objectives.Values
@@ -1479,6 +1564,9 @@ public static class NpcInteractHandler
                     ObjectiveId = nextObjective.ObjectiveId,
                 });
             }
+
+            // New active objective may GiveItemOnStart (deliver cargo).
+            MissionCargoService.EnsureAndSend(character, quest);
 
             if (objective.XP != 0 || objective.Credits != 0 || objective.SkillPoints != 0 || objective.AttribPoints != 0)
             {

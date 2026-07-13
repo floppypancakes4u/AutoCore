@@ -10,6 +10,7 @@ using AutoCore.Game.Map;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL;
 using global::TNL.Entities;
+// CharacterQuest lives under Structures (mission active row).
 
 /// <summary>
 /// Recording-persistence + session-end ownership tests for world-state logout save.
@@ -24,8 +25,10 @@ public class CharacterWorldStatePersistenceTests
     public void Cleanup()
     {
         TNLConnection.WorldStatePersistenceForTests = null;
+        TNLConnection.MissionFlushForTests = null;
         ObjectManager.Instance.Remove(CharCoid);
         ObjectManager.Instance.Remove(VehicleCoid);
+        MissionPersistence.Instance.ResetPersistenceForTests();
     }
 
     [TestMethod]
@@ -286,6 +289,11 @@ public class CharacterWorldStatePersistenceTests
         Assert.AreEqual(0.3f, vehicle.RotationY);
         Assert.AreEqual(0.4f, vehicle.RotationZ);
         Assert.AreEqual(0.8f, vehicle.RotationW);
+        // Combat fields default to -1 when omitted from the snapshot constructor.
+        Assert.AreEqual(-1, vehicle.CurrentHP);
+        Assert.AreEqual(-1, vehicle.CurrentShield);
+        Assert.AreEqual(-1, vehicle.CurrentPower);
+        Assert.AreEqual(-1, vehicle.CurrentHeat);
     }
 
     [TestMethod]
@@ -334,7 +342,7 @@ public class CharacterWorldStatePersistenceTests
     }
 
     [TestMethod]
-    public void EndCharacterSession_OwningConnectionNull_TreatsAsOwnerAndPersists()
+    public void EndCharacterSession_OwningConnectionNull_StillOnMap_TreatsAsOwnerAndPersists()
     {
         var map = CreateMap(706);
         var character = CreateCharacterWithVehicle(map);
@@ -351,6 +359,161 @@ public class CharacterWorldStatePersistenceTests
 
         Assert.AreEqual(1, recording.Saves.Count);
         Assert.IsNull(connection.CurrentCharacter);
+        Assert.IsNull(ObjectManager.Instance.GetCharacter(CharCoid));
+    }
+
+    /// <summary>
+    /// Sector owner disconnect persists + clears Map/owner. Global connection still holds
+    /// CurrentCharacter and must not re-persist (would wipe town on-foot pose with vehicle).
+    /// </summary>
+    [TestMethod]
+    public void EndCharacterSession_AfterOwnerTeardown_SecondConnectionDoesNotRepersist()
+    {
+        var map = CreateMap(709);
+        var character = CreateCharacterWithVehicle(map);
+        character.Position = new Vector3(100f, 12f, 200f);
+        character.CurrentVehicle.Position = new Vector3(1f, -50f, 2f);
+        ObjectManager.Instance.Add(character);
+        ObjectManager.Instance.Add(character.CurrentVehicle);
+
+        var recording = new RecordingWorldStatePersistence();
+        TNLConnection.WorldStatePersistenceForTests = recording;
+
+        var sector = character.OwningConnection;
+        sector.CurrentCharacter = character;
+
+        // Simulate Global connection that also references the same character.
+        var global = new TNLConnection();
+        global.CurrentCharacter = character;
+
+        sector.EndCharacterSession();
+        Assert.AreEqual(1, recording.Saves.Count);
+        Assert.IsNull(character.Map);
+        Assert.IsNull(character.OwningConnection);
+
+        // Global disconnects second — must not write another snapshot.
+        global.EndCharacterSession();
+        Assert.AreEqual(1, recording.Saves.Count, "Second disconnect must not re-persist world state.");
+        Assert.IsNull(global.CurrentCharacter);
+    }
+
+    /// <summary>
+    /// Town logout: sector must persist the walked character pose, not the garage vehicle pose.
+    /// </summary>
+    [TestMethod]
+    public void EndCharacterSession_OnTown_PersistsCharacterPoseNotVehicle()
+    {
+        var map = CreateMap(710, isTown: true);
+        var character = CreateCharacterWithVehicle(map);
+        character.Position = new Vector3(100.5f, 12f, 200.75f);
+        character.Rotation = new Quaternion(0f, 0.707f, 0f, 0.707f);
+        character.CurrentVehicle.Position = new Vector3(1f, -50f, 2f);
+        character.CurrentVehicle.Rotation = new Quaternion(0.1f, 0.2f, 0.3f, 0.9f);
+        ObjectManager.Instance.Add(character);
+        ObjectManager.Instance.Add(character.CurrentVehicle);
+
+        var recording = new RecordingWorldStatePersistence();
+        TNLConnection.WorldStatePersistenceForTests = recording;
+
+        var connection = character.OwningConnection;
+        connection.CurrentCharacter = character;
+        connection.EndCharacterSession();
+
+        Assert.AreEqual(1, recording.Saves.Count);
+        var snap = recording.Saves[0];
+        Assert.AreEqual(710, snap.ContinentId);
+        Assert.AreEqual(100.5f, snap.PositionX);
+        Assert.AreEqual(12f, snap.PositionY);
+        Assert.AreEqual(200.75f, snap.PositionZ);
+        Assert.AreEqual(0.707f, snap.RotationY);
+        Assert.AreEqual(0.707f, snap.RotationW);
+        Assert.AreNotEqual(1f, snap.PositionX);
+        Assert.AreNotEqual(-50f, snap.PositionY);
+    }
+
+    [TestMethod]
+    public void EndCharacterSession_OnField_PersistsVehiclePose()
+    {
+        var map = CreateMap(711, isTown: false);
+        var character = CreateCharacterWithVehicle(map);
+        character.Position = new Vector3(1f, 1f, 1f);
+        character.CurrentVehicle.Position = new Vector3(88f, 9f, 77f);
+        ObjectManager.Instance.Add(character);
+        ObjectManager.Instance.Add(character.CurrentVehicle);
+
+        var recording = new RecordingWorldStatePersistence();
+        TNLConnection.WorldStatePersistenceForTests = recording;
+
+        character.OwningConnection.CurrentCharacter = character;
+        character.OwningConnection.EndCharacterSession();
+
+        Assert.AreEqual(1, recording.Saves.Count);
+        Assert.AreEqual(88f, recording.Saves[0].PositionX);
+        Assert.AreEqual(9f, recording.Saves[0].PositionY);
+        Assert.AreEqual(77f, recording.Saves[0].PositionZ);
+    }
+
+    [TestMethod]
+    public void EndCharacterSession_OrphanNoMap_DoesNotPersist()
+    {
+        // Already torn down: no owner, no map — Global-style leftover reference only.
+        var character = CreateCharacterWithVehicle(CreateMap(712));
+        character.SetMap(null);
+        character.CurrentVehicle?.SetMap(null);
+        character.SetOwningConnection(null);
+
+        var recording = new RecordingWorldStatePersistence();
+        TNLConnection.WorldStatePersistenceForTests = recording;
+
+        var connection = new TNLConnection();
+        connection.CurrentCharacter = character;
+        connection.EndCharacterSession();
+
+        Assert.AreEqual(0, recording.Saves.Count);
+        Assert.IsNull(connection.CurrentCharacter);
+    }
+
+    [TestMethod]
+    public void EndCharacterSession_MissionFlushThrows_StillTearsDown()
+    {
+        var map = CreateMap(713);
+        var character = CreateCharacterWithVehicle(map);
+        ObjectManager.Instance.Add(character);
+        ObjectManager.Instance.Add(character.CurrentVehicle);
+
+        TNLConnection.WorldStatePersistenceForTests = new RecordingWorldStatePersistence();
+        // Production MissionPersistenceQueue swallows row failures; inject a throwing flush so
+        // the EndCharacterSession catch + continue teardown path is covered.
+        TNLConnection.MissionFlushForTests = () =>
+            throw new InvalidOperationException("simulated mission flush failure");
+
+        var connection = character.OwningConnection;
+        connection.CurrentCharacter = character;
+        connection.EndCharacterSession();
+
+        Assert.IsNull(connection.CurrentCharacter);
+        Assert.IsNull(character.OwningConnection);
+        Assert.IsNull(ObjectManager.Instance.GetCharacter(CharCoid));
+    }
+
+    [TestMethod]
+    public void EndCharacterSession_TeardownStepThrows_StillCompletesSession()
+    {
+        var map = CreateMap(714);
+        var character = CreateCharacterWithVehicle(map);
+        // Ghost whose SetParent throws exercises SafeTeardownStep catch during ClearGhost.
+        character.SetGhost(new ThrowingOnParentClearGhost());
+        ObjectManager.Instance.Add(character);
+        ObjectManager.Instance.Add(character.CurrentVehicle);
+
+        TNLConnection.WorldStatePersistenceForTests = new RecordingWorldStatePersistence();
+
+        var connection = character.OwningConnection;
+        connection.CurrentCharacter = character;
+        connection.EndCharacterSession();
+
+        Assert.IsNull(connection.CurrentCharacter);
+        Assert.IsNull(character.OwningConnection);
         Assert.IsNull(ObjectManager.Instance.GetCharacter(CharCoid));
     }
 
@@ -465,17 +628,27 @@ public class CharacterWorldStatePersistenceTests
         return character;
     }
 
-    private static SectorMap CreateMap(int continentId)
+    private static SectorMap CreateMap(int continentId, bool isTown = false)
     {
         var continent = new ContinentObject
         {
             Id = continentId,
             MapFileName = "test_map",
             DisplayName = "Test",
-            IsTown = false,
+            IsTown = isTown,
             IsPersistent = true
         };
         return SectorMap.CreateForTests(continent, new Vector4(0f, 0f, 0f, 0f));
+    }
+
+    private sealed class ThrowingOnParentClearGhost : AutoCore.Game.TNL.Ghost.GhostObject
+    {
+        public override void SetParent(ClonedObjectBase parent)
+        {
+            if (parent == null)
+                throw new InvalidOperationException("simulated ClearGhost parent clear failure");
+            base.SetParent(parent);
+        }
     }
 
     private sealed class RecordingWorldStatePersistence : ICharacterWorldStatePersistence

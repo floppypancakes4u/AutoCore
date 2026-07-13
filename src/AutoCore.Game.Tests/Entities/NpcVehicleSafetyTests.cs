@@ -135,6 +135,17 @@ public class NpcVehicleSafetyTests
     }
 
     [TestMethod]
+    public void ResolvePathThrottle_AccelCruiseCoast_AndStop()
+    {
+        Assert.AreEqual(0f, Vehicle.ResolvePathThrottle(5f, 0f, 0f), 1e-3f);
+        Assert.IsTrue(Vehicle.ResolvePathThrottle(2f, 8f, 0f) > 0.9f, "accelerating → full thr");
+        Assert.IsTrue(Vehicle.ResolvePathThrottle(12f, 12f, 0f) > 0.5f, "cruise → mid/high thr");
+        Assert.IsTrue(Vehicle.ResolvePathThrottle(12f, 6f, 0f) < 0.5f, "braking → ease thr");
+        Assert.IsTrue(Vehicle.ResolvePathThrottle(12f, 12f, 2f) < Vehicle.ResolvePathThrottle(12f, 12f, 0f),
+            "hard turn eases throttle");
+    }
+
+    [TestMethod]
     public void Vehicle_ApplyServerMove_ClientSidePathVisual_SkipsPositionMaskWhileIdlePatrol()
     {
         GhostVehicle.EnableClientSidePathVisual = true;

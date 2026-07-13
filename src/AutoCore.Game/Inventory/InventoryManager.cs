@@ -260,20 +260,206 @@ public sealed class InventoryManager
         return new InventoryCommandResult($"Added {createResult.DisplayName} ({entry.Cbid}){quantitySuffix} to cargo slot {x},{y}.", packets, item);
     }
 
+    /// <summary>
+    /// Total quantity of cargo stacks matching <paramref name="cbid"/>.
+    /// </summary>
+    public int CountByCbid(int cbid)
+    {
+        if (cbid <= 0)
+            return 0;
+
+        var total = 0;
+        foreach (var item in _items)
+        {
+            if (item.Cbid == cbid)
+                total += Math.Max(0, item.Quantity);
+        }
+
+        return total;
+    }
+
+    /// <summary>
+    /// Server-authoritative mission-gear grant into cargo: place first, then Create + 0x2047.
+    /// Marks the stack as mission inventory gear for relog PossibleMissionItem restore.
+    /// </summary>
+    public InventoryCommandResult GrantMissionCargoItem(
+        int cbid,
+        CloneBaseObjectType type,
+        string displayName,
+        long coid,
+        long characterCoid,
+        int quantity = 1,
+        IInventoryItemCreator itemCreator = null)
+    {
+        if (cbid <= 0)
+            return new InventoryCommandResult($"Cannot grant mission cargo: invalid CBID {cbid}.");
+        if (quantity < 1)
+            return new InventoryCommandResult("Cannot grant mission cargo: quantity must be at least 1.");
+        if (!TryGetFirstFreeCargoSlot(out var x, out var y))
+            return new InventoryCommandResult(BuildCargoFullMessage());
+
+        if (!InventoryItemTypePolicy.IsInventoryCapable(type))
+            type = CloneBaseObjectType.Item;
+
+        var name = string.IsNullOrWhiteSpace(displayName) ? $"CBID {cbid}" : displayName;
+        var entry = new InventoryCatalogEntry(cbid, type, name);
+        CreateSimpleObjectPacket createPacket;
+
+        if (itemCreator != null)
+        {
+            var createResult = itemCreator.Create(entry, coid, x, y);
+            if (!createResult.WasSuccessful)
+                return new InventoryCommandResult($"Cannot grant mission cargo CBID {cbid}: {createResult.Error}");
+
+            createPacket = createResult.Packet;
+            if (!string.IsNullOrWhiteSpace(createResult.DisplayName))
+                name = createResult.DisplayName;
+        }
+        else
+        {
+            createPacket = InventoryItemCreator.CreatePacketFor(type);
+            createPacket.CBID = cbid;
+            createPacket.ObjectId = new TFID { Coid = coid, Global = true };
+            createPacket.InventoryPositionX = x;
+            createPacket.InventoryPositionY = y;
+            createPacket.IsInInventory = true;
+            createPacket.IsIdentified = true;
+            createPacket.IsBound = false;
+        }
+
+        createPacket.Quantity = quantity;
+        createPacket.IsInInventory = true;
+        createPacket.IsIdentified = true;
+        createPacket.PossibleMissionItem = true;
+
+        var item = new CharacterInventoryItem(cbid, type, name, coid, x, y, quantity, IsMissionItem: true);
+        if (!TryAdd(item))
+            return new InventoryCommandResult(BuildCargoAddRejectedMessage(coid, x, y));
+
+        if (characterCoid != 0)
+            PersistCargoUpsert(characterCoid, item);
+
+        IReadOnlyList<BasePacket> packets = new BasePacket[]
+        {
+            createPacket,
+            new InventoryAddItemResponsePacket
+            {
+                ItemCoid = coid,
+                InventoryPositionX = x,
+                InventoryPositionY = y,
+                AddToExistingItem = false,
+                Quantity = quantity,
+                WasSuccessful = true
+            },
+            InventoryPacketFactory.CreateCargoSendAll(this)
+        };
+
+        var quantitySuffix = quantity > 1 ? $" x{quantity}" : string.Empty;
+        return new InventoryCommandResult(
+            $"Granted mission cargo {name} ({cbid}){quantitySuffix} at {x},{y}.",
+            packets,
+            item);
+    }
+
+    /// <summary>
+    /// Removes up to <paramref name="quantity"/> of cargo stacks matching <paramref name="cbid"/>.
+    /// Prefers mission-item stacks, then any remaining matching CBID.
+    /// </summary>
+    public InventoryCommandResult RemoveCargoByCbid(long characterCoid, int cbid, int quantity)
+    {
+        if (cbid <= 0 || quantity < 1)
+        {
+            return new InventoryCommandResult(
+                "No cargo removed.",
+                new BasePacket[] { InventoryPacketFactory.CreateCargoSendAll(this) });
+        }
+
+        var remaining = quantity;
+        var removedCoids = new List<long>();
+
+        // Prefer mission gear stacks first (deliver TakeItemAtEnd).
+        remaining = RemoveMatchingStacks(characterCoid, cbid, remaining, missionOnly: true, removedCoids);
+        if (remaining > 0)
+            remaining = RemoveMatchingStacks(characterCoid, cbid, remaining, missionOnly: false, removedCoids);
+
+        var removedQty = quantity - remaining;
+        IReadOnlyList<BasePacket> packets = new BasePacket[]
+        {
+            InventoryPacketFactory.CreateCargoSendAll(this)
+        };
+
+        return new InventoryCommandResult(
+            $"Removed {removedQty} of CBID {cbid} from cargo ({removedCoids.Count} stack(s)).",
+            packets);
+    }
+
+    private int RemoveMatchingStacks(
+        long characterCoid,
+        int cbid,
+        int remaining,
+        bool missionOnly,
+        List<long> removedCoids)
+    {
+        if (remaining < 1)
+            return remaining;
+
+        for (var i = _items.Count - 1; i >= 0 && remaining > 0; i--)
+        {
+            var item = _items[i];
+            if (item.Cbid != cbid)
+                continue;
+            if (missionOnly && !item.IsMissionItem)
+                continue;
+            if (!missionOnly && item.IsMissionItem)
+                continue;
+
+            if (item.Quantity > remaining)
+            {
+                var reduced = item with { Quantity = item.Quantity - remaining };
+                _items[i] = reduced;
+                if (characterCoid != 0)
+                    PersistCargoUpsert(characterCoid, reduced);
+                remaining = 0;
+                break;
+            }
+
+            remaining -= Math.Max(1, item.Quantity);
+            removedCoids.Add(item.Coid);
+            _items.RemoveAt(i);
+            if (characterCoid != 0)
+                PersistCargoDelete(characterCoid, item.Coid);
+        }
+
+        return remaining;
+    }
+
     public IReadOnlyList<BasePacket> CreateItemObjectPackets(InventoryCatalog catalog, IInventoryItemCreator itemCreator)
     {
         var packets = new List<BasePacket>();
         foreach (var item in Items.OrderBy(i => i.InventoryPositionY).ThenBy(i => i.InventoryPositionX))
         {
             var entry = catalog.FindAny(item.Cbid);
-            if (entry == null || !InventoryItemTypePolicy.IsInventoryCapable(entry.Type))
+            var type = entry?.Type ?? item.Type;
+            if (entry == null)
+            {
+                if (!InventoryItemTypePolicy.IsInventoryCapable(item.Type) && !item.IsMissionItem)
+                    continue;
+
+                entry = new InventoryCatalogEntry(item.Cbid, type, item.DisplayName);
+            }
+            else if (!InventoryItemTypePolicy.IsInventoryCapable(entry.Type) && !item.IsMissionItem)
+            {
                 continue;
+            }
 
             var createResult = itemCreator.Create(entry, item.Coid, item.InventoryPositionX, item.InventoryPositionY);
             if (!createResult.WasSuccessful)
                 continue;
 
             createResult.Packet.Quantity = item.Quantity;
+            createResult.Packet.IsInInventory = true;
+            if (item.IsMissionItem)
+                createResult.Packet.PossibleMissionItem = true;
             packets.Add(createResult.Packet);
         }
 

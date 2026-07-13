@@ -94,6 +94,47 @@ public class TriggerManager : Singleton<TriggerManager>
         => CheckTriggersFor(clonedObject, nowMs, pulseSkills: true);
 
     /// <summary>
+    /// Collision trigger scan for a logged-in player.
+    /// Town continents put the avatar on foot (<c>UsingVehicle = false</c>); field/highway maps
+    /// keep the vehicle as the moving body. Always checking only the vehicle left town pads
+    /// (e.g. Upside → Back Range) dead because the vehicle sits at entry while the human walks.
+    /// </summary>
+    public void CheckTriggersForPlayer(Character character)
+        => CheckTriggersForPlayer(character, Environment.TickCount64);
+
+    internal void CheckTriggersForPlayer(Character character, long nowMs)
+    {
+        if (character is null)
+            return;
+
+        var activator = ResolvePlayerTriggerActivator(character);
+        if (activator?.Map is null)
+            return;
+
+        CheckTriggersFor(activator, nowMs, pulseSkills: true);
+    }
+
+    /// <summary>
+    /// Town → character body; non-town with vehicle on a map → vehicle; else character.
+    /// Matches <see cref="Character"/> create-packet <c>UsingVehicle = !IsTown</c>.
+    /// </summary>
+    internal static ClonedObjectBase ResolvePlayerTriggerActivator(Character character)
+    {
+        if (character is null)
+            return null;
+
+        var isTown = character.Map?.MapData?.ContinentObject?.IsTown == true;
+        if (isTown)
+            return character;
+
+        var vehicle = character.CurrentVehicle;
+        if (vehicle?.Map != null)
+            return vehicle;
+
+        return character;
+    }
+
+    /// <summary>
     /// After player HP changes (heal pad, skills, admin set HP), re-evaluate collision
     /// volume conditions without advancing skill pulse cadence. Type-7 health% gates
     /// (e.g. full-HP complete objectives) open while standing still; pad heal timing
@@ -261,9 +302,8 @@ public class TriggerManager : Singleton<TriggerManager>
         if (character != null)
             character.EnsureLogicVariables();
 
-        var vehicle = character?.CurrentVehicle;
-        if (vehicle?.Map != null)
-            CheckTriggersFor(vehicle);
+        if (character != null)
+            CheckTriggersForPlayer(character);
         else
             CheckTriggersFor(activator);
 
