@@ -502,6 +502,7 @@ public class LootManager : Singleton<LootManager>
 
     /// <summary>
     /// Spawns a world ground item: map registration + CreateSimpleObject broadcast.
+    /// Used by <c>/loot</c>, creature/vehicle death drops, and reaction loot — one contract for all.
     /// Does <b>not</b> create a GhostObject (plain ghost + local TFID AV at client 0x005B0EFF).
     /// Always uses CreateSimpleObject so the client treats the object as ground-pickable.
     /// </summary>

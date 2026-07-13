@@ -92,6 +92,45 @@ public class LootWorldSpawnTests
         Assert.IsFalse(LootManager.Instance.TryPickRandomGroundLootCbid(out _));
     }
 
+    [TestMethod]
+    public void SpawnLootItem_DeathPath_DoesNotCreateGhost()
+    {
+        // Creature/Vehicle OnDeath call SpawnLootItem — same contract as /loot (no plain GhostObject).
+        AssetManagerTestHelper.RegisterCloneBase(5030, CloneBaseObjectType.Item);
+        var map = CreateMap(localCoid: 3000);
+
+        LootManager.Instance.SpawnLootItem(
+            5030,
+            new Vector3(1, 0, 2),
+            Quaternion.Default,
+            map);
+
+        var spawned = map.Objects.Values.OfType<SimpleObject>().LastOrDefault(o => o.CBID == 5030);
+        Assert.IsNotNull(spawned, "Death loot must register the item on the map.");
+        Assert.IsNull(spawned.Ghost, "Death loot must not CreateGhost (AV 0x005B0EFF).");
+        Assert.IsFalse(spawned.ObjectId.Global);
+    }
+
+    [TestMethod]
+    public void SpawnLootItem_ArmorEquipment_StillNoGhost()
+    {
+        // Equipment may ground-spawn when auto-loot has no killer; must still avoid plain GhostObject.
+        AssetManagerTestHelper.RegisterArmorCloneBase(5040);
+        var map = CreateMap(localCoid: 3100);
+
+        Assert.IsTrue(LootManager.Instance.TrySpawnLootItem(
+            5040,
+            new Vector3(3, 0, 4),
+            Quaternion.Default,
+            map,
+            out var coid));
+
+        var item = map.GetObjectByCoid(coid);
+        Assert.IsNotNull(item);
+        Assert.IsNull(item.Ghost);
+        Assert.IsFalse(item.ObjectId.Global);
+    }
+
     private static SectorMap CreateMap(long localCoid)
     {
         var continent = new ContinentObject

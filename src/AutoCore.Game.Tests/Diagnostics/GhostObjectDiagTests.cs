@@ -132,4 +132,67 @@ public class GhostObjectDiagTests
         Assert.AreEqual(3L, snap[0].Seq);
         Assert.AreEqual(5L, snap[2].Seq);
     }
+
+    [TestMethod]
+    public void RateLimitedScopeEvents_LogFirstPerCoidAndPlayerOnly()
+    {
+        GhostObjectDiag.Enabled = true;
+
+        // InterestSelect / ObjectInScope / ScopeAlways / PackDelta are high-frequency.
+        for (var i = 0; i < 5; i++)
+        {
+            GhostObjectDiag.Record("InterestSelect", "GraphicsObject", 1, coid: 100, global: false, playerCoid: 50);
+            GhostObjectDiag.Record("ObjectInScope", "GraphicsObject", 1, coid: 100, global: false, playerCoid: 50);
+            GhostObjectDiag.Record("PackDelta", "GraphicsObject", 1, coid: 100, global: false, playerCoid: 50);
+            GhostObjectDiag.Record("ScopeAlways", "GraphicsObject", 1, coid: 100, global: false, playerCoid: 50);
+        }
+
+        var snap = GhostObjectDiag.Snapshot();
+        Assert.AreEqual(4, snap.Count, "Each rate-limited event name should log once per coid+player.");
+        CollectionAssert.AreEquivalent(
+            new[] { "InterestSelect", "ObjectInScope", "PackDelta", "ScopeAlways" },
+            snap.Select(e => e.Name).ToArray());
+    }
+
+    [TestMethod]
+    public void RateLimitedEvents_DifferentPlayerOrCoid_StillLogged()
+    {
+        GhostObjectDiag.Enabled = true;
+
+        GhostObjectDiag.Record("ObjectInScope", "GraphicsObject", 1, coid: 100, global: false, playerCoid: 50);
+        GhostObjectDiag.Record("ObjectInScope", "GraphicsObject", 1, coid: 100, global: false, playerCoid: 51);
+        GhostObjectDiag.Record("ObjectInScope", "GraphicsObject", 1, coid: 101, global: false, playerCoid: 50);
+
+        Assert.AreEqual(3, GhostObjectDiag.Snapshot().Count);
+    }
+
+    [TestMethod]
+    public void LifecycleEvents_NotRateLimited()
+    {
+        GhostObjectDiag.Enabled = true;
+
+        for (var i = 0; i < 3; i++)
+        {
+            GhostObjectDiag.Record("CreateGhost", "GraphicsObject", 1, coid: 100, global: false, playerCoid: 0);
+            GhostObjectDiag.Record("PackInitial", "GraphicsObject", 1, coid: 100, global: false, playerCoid: 50);
+            GhostObjectDiag.Record("BecameDamagable", "GraphicsObject", 1, coid: 100, global: false, playerCoid: 0);
+            GhostObjectDiag.Record("SendCreate", "CreateSimpleObject", 1, coid: 100, global: false, playerCoid: 50);
+        }
+
+        Assert.AreEqual(12, GhostObjectDiag.Snapshot().Count, "Lifecycle / first-signal events must not be rate-limited.");
+    }
+
+    [TestMethod]
+    public void EnsureCombatGhost_RateLimitedAfterFirst()
+    {
+        GhostObjectDiag.Enabled = true;
+
+        GhostObjectDiag.Record("EnsureCombatGhost", "GraphicsObject", 1, coid: 100, global: false, playerCoid: 0, detail: "created=1");
+        GhostObjectDiag.Record("EnsureCombatGhost", "GraphicsObject", 1, coid: 100, global: false, playerCoid: 0, detail: "created=0");
+        GhostObjectDiag.Record("EnsureCombatGhost", "GraphicsObject", 1, coid: 100, global: false, playerCoid: 0, detail: "created=0");
+
+        var snap = GhostObjectDiag.Snapshot();
+        Assert.AreEqual(1, snap.Count);
+        StringAssert.Contains(snap[0].Detail, "created=1");
+    }
 }

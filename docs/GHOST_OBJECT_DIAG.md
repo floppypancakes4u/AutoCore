@@ -3,9 +3,20 @@
 Correlates **server plain-`GhostObject` lifecycle** with **client waiting-bind apply**
 (`FUN_005b0ed0` / crash IP `0x005B0EFF` after `"Assigned a ghost to waiting"`).
 
-Loot is not the current hypothesis; map-prop combat ghosts (`MakeNotInvincible` /
-`TakeDamage` → `EnsureCombatGhost` → `ObjectLocalScopeAlways`) and any other
-`new GhostObject()` path are the primary targets.
+**World loot** no longer creates plain `GhostObject`s (`LootManager.TrySpawnLootItem` —
+shared by `/loot` and creature/vehicle death). Remaining risk is **map-prop combat
+ghosts** (`MakeNotInvincible` / `TakeDamage` → `EnsureCombatGhost` →
+`ObjectLocalScopeAlways`) and any other `new GhostObject()` path with a local TFID.
+
+### Rate limiting
+
+High-frequency events log **once per (name, coid, player)** only:
+
+- `InterestSelect`, `ObjectInScope`, `ScopeAlways`, `PackDelta`, `EnsureCombatGhost`
+
+Always logged (lifecycle / first signal):
+
+- `CreateGhost`, `PackInitial`, `BecameDamagable`, `SendCreate`
 
 ## Server
 

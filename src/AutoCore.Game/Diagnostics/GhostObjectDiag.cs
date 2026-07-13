@@ -17,15 +17,33 @@ public static class GhostObjectDiag
 {
     public const string EnvironmentVariableName = "AUTOCORE_GHOST_OBJECT_DIAG";
 
+    /// <summary>
+    /// High-frequency scope/pack events: log the first occurrence per (name, coid, player) only.
+    /// Lifecycle signals (CreateGhost, PackInitial, BecameDamagable, SendCreate, EnsureCombatGhost) always log.
+    /// </summary>
+    private static readonly HashSet<string> RateLimitedEventNames = new(StringComparer.Ordinal)
+    {
+        "InterestSelect",
+        "ObjectInScope",
+        "ScopeAlways",
+        "PackDelta",
+        // EnsureCombatGhost is called on every TakeDamage after the first create.
+        "EnsureCombatGhost",
+    };
+
     private static long _seq;
     private static readonly object Gate = new();
     private static readonly List<GhostObjectDiagEntry> Entries = new();
+    private static readonly HashSet<string> RateLimitKeys = new(StringComparer.Ordinal);
 
     /// <summary>When false, record methods are no-ops.</summary>
     public static bool Enabled { get; set; }
 
     /// <summary>Cap retained snapshot entries.</summary>
     public static int MaxRetainedEntries { get; set; } = 4000;
+
+    /// <summary>Cap first-seen rate-limit keys (evicts all when exceeded).</summary>
+    public static int MaxRateLimitKeys { get; set; } = 8192;
 
     public static long CurrentSeq
     {
@@ -51,10 +69,19 @@ public static class GhostObjectDiag
         {
             _seq = 0;
             Entries.Clear();
+            RateLimitKeys.Clear();
             Enabled = false;
             MaxRetainedEntries = 4000;
+            MaxRateLimitKeys = 8192;
         }
     }
+
+    /// <summary>
+    /// True when <paramref name="name"/> is a high-frequency event that is rate-limited
+    /// to the first log per (name, coid, playerCoid).
+    /// </summary>
+    public static bool IsRateLimitedEvent(string name) =>
+        !string.IsNullOrEmpty(name) && RateLimitedEventNames.Contains(name);
 
     public static IReadOnlyList<GhostObjectDiagEntry> Snapshot()
     {
@@ -136,9 +163,13 @@ public static class GhostObjectDiag
         if (!Enabled)
             return;
 
+        var eventName = name ?? "?";
+        if (IsRateLimitedEvent(eventName) && !TryClaimRateLimitSlot(eventName, coid, playerCoid))
+            return;
+
         Append(new GhostObjectDiagEntry
         {
-            Name = name ?? "?",
+            Name = eventName,
             ParentType = parentType ?? "?",
             Cbid = cbid,
             Coid = coid,
@@ -146,6 +177,23 @@ public static class GhostObjectDiag
             PlayerCoid = playerCoid,
             Detail = detail,
         });
+    }
+
+    /// <summary>
+    /// Claims the first-log slot for a rate-limited (name, coid, player) key.
+    /// Returns false when this combination was already logged.
+    /// </summary>
+    private static bool TryClaimRateLimitSlot(string name, long coid, long playerCoid)
+    {
+        var key = string.Format(CultureInfo.InvariantCulture, "{0}\0{1}\0{2}", name, coid, playerCoid);
+
+        lock (Gate)
+        {
+            if (RateLimitKeys.Count >= MaxRateLimitKeys)
+                RateLimitKeys.Clear();
+
+            return RateLimitKeys.Add(key);
+        }
     }
 
     public static string FormatLine(GhostObjectDiagEntry entry)
