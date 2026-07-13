@@ -53,6 +53,7 @@ public class WireIsolationLeversTests
         Assert.IsFalse(GhostVehicle.EnableMinimalForeignHealthBlock,
             "NPC health under minimal foreign is opt-in via production levers JSON");
         Assert.IsFalse(WireDiag.Enabled);
+        Assert.IsFalse(GhostObjectDiag.Enabled);
     }
 
     [TestMethod]

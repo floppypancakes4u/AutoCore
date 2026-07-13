@@ -7,6 +7,7 @@
 #include "minhook.h"
 
 // Path A (CreateVehicle equip → SetWheelset → optional Havok activate) non-freezing capture.
+// Also GhostObject waiting-bind apply (FUN_005b0ed0 @ 0x005B0ED0) for AV 0x005B0EFF.
 // Injected MinHook detours: log only, never break/suspend the process.
 // Client build: autoassault 0.0.14.117.2007.2.1.11 image base 0x400000.
 
@@ -17,6 +18,9 @@ namespace
     constexpr uintptr_t CreateVehicleActionRva = 0x000FB660; // 0x004FB660
     constexpr uintptr_t ActivateEnterWorldRva = 0x00103F30;  // 0x00503F30
     constexpr uintptr_t RecvCreateVehicleRva = 0x0040A4B0;   // 0x0080A4B0
+    // GhostObject apply after "Assigned a ghost to waiting" (crash 0x005B0EFF).
+    constexpr uintptr_t GhostApplyRva = 0x001B0ED0;         // 0x005B0ED0 FUN_005b0ed0
+    constexpr uintptr_t GhostOnAddRva = 0x001B0D70;         // 0x005B0D70 GhostObject_OnGhostAdd
 
     // First 8 bytes at each VA (Ghidra / client PE).
     constexpr unsigned char EquipPrologue[] = { 0x51, 0x53, 0x8b, 0x5c, 0x24, 0x0c, 0x55, 0x8b };
@@ -24,6 +28,22 @@ namespace
     constexpr unsigned char CreateActionPrologue[] = { 0x64, 0xa1, 0x00, 0x00, 0x00, 0x00, 0x6a, 0xff };
     constexpr unsigned char ActivatePrologue[] = { 0x64, 0xa1, 0x00, 0x00, 0x00, 0x00, 0x6a, 0xff };
     constexpr unsigned char RecvPrologue[] = { 0x56, 0x57, 0x8b, 0xf8, 0x8b, 0x43, 0x04, 0x6a };
+    constexpr unsigned char GhostApplyPrologue[] = { 0x55, 0x8b, 0xec, 0x83, 0xe4, 0xf0, 0x83, 0xec };
+    constexpr unsigned char GhostOnAddPrologue[] = { 0x8b, 0xc1, 0x83, 0x78, 0x50, 0x00, 0x74, 0x11 };
+
+    // GhostObject layout (client RE)
+    constexpr size_t GhostBoundObjectOffset = 0x50;   // game object pointer
+    constexpr size_t GhostCreateBufOffset = 0x5C;    // pending create/state blob
+    constexpr size_t GhostTfidCoidOffset = 0x40;     // int64 coid (low/high dwords at +0x40/+0x44)
+    constexpr size_t GhostGlobalFlagOffset = 0x48;   // bool at ghost+0x48 (param_1[0x12] as int*)
+    // Create blob (FUN_005b0e30): opcode @0, cbid @+8
+    constexpr size_t BufOpcodeOffset = 0x00;
+    constexpr size_t BufCbidOffset = 0x08;
+    // Game object: COID pair often at +0x160/+0x164 (logged after assign)
+    constexpr size_t ObjectCoidLoOffset = 0x160;
+    constexpr size_t ObjectCoidHiOffset = 0x164;
+    // vtable slot used by FUN_005b0ed0 before crash
+    constexpr size_t ObjectVfuncIfaceOffset = 0x1C8;
 
     constexpr size_t VehicleWheelsetOffset = 0x258;
     // CreateVehicle fixed message layout (FUN_005F5AD0 / EquipFromCreate param_2)
@@ -295,6 +315,133 @@ namespace
         }
     }
 
+    // --- GhostObject apply (thiscall): this=ghost — AV 0x005B0EFF when iface null ---
+    using GhostApplyFn = void(__fastcall*)(void* ghost, void* edx);
+    GhostApplyFn pOrigGhostApply = nullptr;
+    LPVOID pTargetGhostApply = nullptr;
+
+    void* CallObjectIface(void* object)
+    {
+        if (!object || !IsReadable(object, sizeof(void*)))
+            return reinterpret_cast<void*>(static_cast<uintptr_t>(-2));
+        void* vtable = *reinterpret_cast<void**>(object);
+        if (!vtable || !IsReadable(vtable, ObjectVfuncIfaceOffset + sizeof(void*)))
+            return reinterpret_cast<void*>(static_cast<uintptr_t>(-3));
+        auto* slot = reinterpret_cast<void**>(reinterpret_cast<unsigned char*>(vtable) + ObjectVfuncIfaceOffset);
+        auto fn = reinterpret_cast<void*(__fastcall*)(void*, void*)>(*slot);
+        if (!fn)
+            return reinterpret_cast<void*>(static_cast<uintptr_t>(-4));
+        // Call carefully: if object is corrupt this may still AV, but only after we logged enter.
+        return fn(object, nullptr);
+    }
+
+    void __fastcall HookedGhostApply(void* ghost, void* edx)
+    {
+        void* bound = ghost ? ReadPtr(ghost, GhostBoundObjectOffset) : nullptr;
+        void* buf = ghost ? ReadPtr(ghost, GhostCreateBufOffset) : nullptr;
+        const long long tfidLo = ghost ? ReadLong(ghost, GhostTfidCoidOffset) : 0;
+        const int globalFlag = ghost ? static_cast<int>(ReadByte(ghost, GhostGlobalFlagOffset)) : -1;
+        const int bufOpcode = buf && buf != reinterpret_cast<void*>(static_cast<uintptr_t>(-1))
+            ? ReadInt(buf, BufOpcodeOffset) : 0x7FFFFFFF;
+        const int bufCbid = buf && buf != reinterpret_cast<void*>(static_cast<uintptr_t>(-1))
+            ? ReadInt(buf, BufCbidOffset) : 0x7FFFFFFF;
+        const int objCoidLo = bound && bound != reinterpret_cast<void*>(static_cast<uintptr_t>(-1))
+            ? ReadInt(bound, ObjectCoidLoOffset) : 0x7FFFFFFF;
+        const int objCoidHi = bound && bound != reinterpret_cast<void*>(static_cast<uintptr_t>(-1))
+            ? ReadInt(bound, ObjectCoidHiOffset) : 0x7FFFFFFF;
+
+        char line[768];
+        // Log raw fields first (before any speculative vcall) so a bad object still leaves a trail.
+        sprintf_s(line,
+            "{\"t\":%lu,\"ev\":\"GhostApply_enter\",\"ghost\":\"%p\",\"bound\":\"%p\",\"buf\":\"%p\","
+            "\"tfid\":%lld,\"global\":%d,\"buf_opcode\":%d,\"buf_cbid\":%d,"
+            "\"obj_coid_lo\":%d,\"obj_coid_hi\":%d,\"hit\":%ld}",
+            static_cast<unsigned long>(GetTickCount()),
+            ghost,
+            bound,
+            buf,
+            static_cast<long long>(tfidLo),
+            globalFlag,
+            bufOpcode,
+            bufCbid,
+            objCoidLo,
+            objCoidHi,
+            static_cast<long>(g_hitCount + 1));
+        AppendJsonLine(line);
+
+        // FUN_005b0ed0 only touches iface when both bound+buf non-null.
+        const bool willProbe = bound
+            && bound != reinterpret_cast<void*>(static_cast<uintptr_t>(-1))
+            && buf
+            && buf != reinterpret_cast<void*>(static_cast<uintptr_t>(-1));
+
+        if (willProbe)
+        {
+            void* iface = CallObjectIface(bound);
+            const int ifaceOk = (iface != nullptr
+                && iface != reinterpret_cast<void*>(static_cast<uintptr_t>(-2))
+                && iface != reinterpret_cast<void*>(static_cast<uintptr_t>(-3))
+                && iface != reinterpret_cast<void*>(static_cast<uintptr_t>(-4))) ? 1 : 0;
+
+            sprintf_s(line,
+                "{\"t\":%lu,\"ev\":\"%s\",\"ghost\":\"%p\",\"iface\":\"%p\",\"iface_ok\":%d,"
+                "\"tfid\":%lld,\"buf_opcode\":%d,\"buf_cbid\":%d,\"obj_coid_lo\":%d,\"hit\":%ld}",
+                static_cast<unsigned long>(GetTickCount()),
+                ifaceOk ? "GhostApply_iface" : "GhostApply_CRASH_IMMINENT",
+                ghost,
+                iface,
+                ifaceOk,
+                static_cast<long long>(tfidLo),
+                bufOpcode,
+                bufCbid,
+                objCoidLo,
+                static_cast<long>(g_hitCount + 1));
+            AppendJsonLine(line);
+
+            // Skip original when we know it will AV — keeps the client alive for more repros.
+            if (ifaceOk == 0)
+            {
+                sprintf_s(line,
+                    "{\"t\":%lu,\"ev\":\"GhostApply_SKIPPED_NULL_IFACE\",\"ghost\":\"%p\",\"hit\":%ld}",
+                    static_cast<unsigned long>(GetTickCount()),
+                    ghost,
+                    static_cast<long>(g_hitCount + 1));
+                AppendJsonLine(line);
+                return;
+            }
+        }
+
+        pOrigGhostApply(ghost, edx);
+
+        sprintf_s(line,
+            "{\"t\":%lu,\"ev\":\"GhostApply_exit\",\"ghost\":\"%p\",\"hit\":%ld}",
+            static_cast<unsigned long>(GetTickCount()),
+            ghost,
+            static_cast<long>(g_hitCount + 1));
+        AppendJsonLine(line);
+    }
+
+    // --- GhostObject_OnGhostAdd (thiscall): this=ghost ---
+    using GhostOnAddFn = int(__fastcall*)(void* ghost, void* edx);
+    GhostOnAddFn pOrigGhostOnAdd = nullptr;
+    LPVOID pTargetGhostOnAdd = nullptr;
+
+    int __fastcall HookedGhostOnAdd(void* ghost, void* edx)
+    {
+        void* bound = ghost ? ReadPtr(ghost, GhostBoundObjectOffset) : nullptr;
+        const long long tfidLo = ghost ? ReadLong(ghost, GhostTfidCoidOffset) : 0;
+        char line[320];
+        sprintf_s(line,
+            "{\"t\":%lu,\"ev\":\"GhostOnAdd\",\"ghost\":\"%p\",\"bound\":\"%p\",\"tfid\":%lld,\"hit\":%ld}",
+            static_cast<unsigned long>(GetTickCount()),
+            ghost,
+            bound,
+            static_cast<long long>(tfidLo),
+            static_cast<long>(g_hitCount + 1));
+        AppendJsonLine(line);
+        return pOrigGhostOnAdd(ghost, edx);
+    }
+
     void RemoveAllHooks()
     {
         if (pTargetSetWheelset) { MH_DisableHook(pTargetSetWheelset); MH_RemoveHook(pTargetSetWheelset); pTargetSetWheelset = nullptr; }
@@ -302,11 +449,15 @@ namespace
         if (pTargetCreateAction) { MH_DisableHook(pTargetCreateAction); MH_RemoveHook(pTargetCreateAction); pTargetCreateAction = nullptr; }
         if (pTargetActivate) { MH_DisableHook(pTargetActivate); MH_RemoveHook(pTargetActivate); pTargetActivate = nullptr; }
         if (pTargetRecv) { MH_DisableHook(pTargetRecv); MH_RemoveHook(pTargetRecv); pTargetRecv = nullptr; }
+        if (pTargetGhostApply) { MH_DisableHook(pTargetGhostApply); MH_RemoveHook(pTargetGhostApply); pTargetGhostApply = nullptr; }
+        if (pTargetGhostOnAdd) { MH_DisableHook(pTargetGhostOnAdd); MH_RemoveHook(pTargetGhostOnAdd); pTargetGhostOnAdd = nullptr; }
         pOrigSetWheelset = nullptr;
         pOrigEquip = nullptr;
         pOrigCreateAction = nullptr;
         pOrigActivate = nullptr;
         pOrigRecv = nullptr;
+        pOrigGhostApply = nullptr;
+        pOrigGhostOnAdd = nullptr;
     }
 }
 
@@ -353,6 +504,10 @@ extern "C" __declspec(dllexport) DWORD WINAPI SetupPathAHook(LPVOID /*unused*/)
         &HookedCreateAction, &pTargetCreateAction, reinterpret_cast<LPVOID*>(&pOrigCreateAction)) && ok;
     ok = VerifyAndHook(imageBase, ActivateEnterWorldRva, ActivatePrologue, sizeof(ActivatePrologue),
         &HookedActivate, &pTargetActivate, reinterpret_cast<LPVOID*>(&pOrigActivate)) && ok;
+    ok = VerifyAndHook(imageBase, GhostApplyRva, GhostApplyPrologue, sizeof(GhostApplyPrologue),
+        &HookedGhostApply, &pTargetGhostApply, reinterpret_cast<LPVOID*>(&pOrigGhostApply)) && ok;
+    ok = VerifyAndHook(imageBase, GhostOnAddRva, GhostOnAddPrologue, sizeof(GhostOnAddPrologue),
+        &HookedGhostOnAdd, &pTargetGhostOnAdd, reinterpret_cast<LPVOID*>(&pOrigGhostOnAdd)) && ok;
 
     // Recv is optional: custom register convention; still try.
     const bool recvOk = VerifyAndHook(imageBase, RecvCreateVehicleRva, RecvPrologue, sizeof(RecvPrologue),
@@ -360,9 +515,12 @@ extern "C" __declspec(dllexport) DWORD WINAPI SetupPathAHook(LPVOID /*unused*/)
 
     if (!ok)
     {
-        char fail[160];
-        sprintf_s(fail, "{\"t\":%lu,\"ev\":\"SetupPathAHook_FAILED\",\"recv\":%d}",
-            static_cast<unsigned long>(GetTickCount()), recvOk ? 1 : 0);
+        char fail[200];
+        sprintf_s(fail, "{\"t\":%lu,\"ev\":\"SetupPathAHook_FAILED\",\"recv\":%d,\"ghost_apply\":%d,\"ghost_onadd\":%d}",
+            static_cast<unsigned long>(GetTickCount()),
+            recvOk ? 1 : 0,
+            pOrigGhostApply ? 1 : 0,
+            pOrigGhostOnAdd ? 1 : 0);
         AppendJsonLine(fail);
         RemoveAllHooks();
         if (st == MH_OK)
@@ -371,8 +529,9 @@ extern "C" __declspec(dllexport) DWORD WINAPI SetupPathAHook(LPVOID /*unused*/)
         return 0;
     }
 
-    char done[200];
-    sprintf_s(done, "{\"t\":%lu,\"ev\":\"SetupPathAHook_OK\",\"recv\":%d,\"base\":\"0x%p\"}",
+    char done[280];
+    sprintf_s(done,
+        "{\"t\":%lu,\"ev\":\"SetupPathAHook_OK\",\"recv\":%d,\"ghost_apply\":1,\"ghost_onadd\":1,\"base\":\"0x%p\"}",
         static_cast<unsigned long>(GetTickCount()), recvOk ? 1 : 0, reinterpret_cast<void*>(imageBase));
     AppendJsonLine(done);
 

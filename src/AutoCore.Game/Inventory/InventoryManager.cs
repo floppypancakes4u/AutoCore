@@ -261,6 +261,38 @@ public sealed class InventoryManager
     }
 
     /// <summary>
+    /// Claims world ground loot into cargo with the same client wire sequence as /addItem:
+    /// Create (IsInInventory + global TFID) → InventoryAddItemResponse → CargoSendAll.
+    /// Caller must allocate a fresh inventory coid and destroy the world entity separately —
+    /// reusing the local world TFID with only 0x2047 does not place the item in client cargo.
+    /// </summary>
+    public InventoryCommandResult PickupWorldItem(
+        int cbid,
+        CloneBaseObjectType type,
+        string displayName,
+        long inventoryCoid,
+        IInventoryItemCreator itemCreator,
+        long characterCoid = 0,
+        int quantity = 1)
+    {
+        if (cbid <= 0)
+            return new InventoryCommandResult("Invalid loot CBID.");
+
+        if (itemCreator == null)
+            return new InventoryCommandResult("Item creator is required.");
+
+        if (quantity < 1)
+            return new InventoryCommandResult("Quantity must be at least 1.");
+
+        if (!InventoryItemTypePolicy.IsInventoryCapable(type))
+            return new InventoryCommandResult($"CBID {cbid} ({type}) is not an inventory item.");
+
+        var name = string.IsNullOrWhiteSpace(displayName) ? $"CBID {cbid}" : displayName;
+        var entry = new InventoryCatalogEntry(cbid, type, name);
+        return AddItem(entry, itemCreator, inventoryCoid, characterCoid, quantity);
+    }
+
+    /// <summary>
     /// Total quantity of cargo stacks matching <paramref name="cbid"/>.
     /// </summary>
     public int CountByCbid(int cbid)

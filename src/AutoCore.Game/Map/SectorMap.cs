@@ -1483,6 +1483,17 @@ public class SectorMap
             if (ghost == null)
                 continue;
 
+            // Plain GhostObject only — vehicle/creature/character use different client apply paths.
+            if (Diagnostics.GhostObjectDiag.Enabled
+                && Diagnostics.GhostObjectDiag.IsPlainGhostObject(ghost))
+            {
+                Diagnostics.GhostObjectDiag.RecordEntity(
+                    "InterestSelect",
+                    entity,
+                    playerCoid: self.ObjectId?.Coid ?? 0,
+                    extra: "via=PerformScopeQuery");
+            }
+
             var foreignGlobalVehicle = entity is Vehicle vehicleEntity
                 && entity.ObjectId.Global
                 && !IsLocalPlayerVehicle(vehicleEntity, self);
@@ -1606,7 +1617,19 @@ public class SectorMap
                 _scopePinnedSeenThisQuery.Add(coid);
             }
             else
+            {
+                if (Diagnostics.GhostObjectDiag.Enabled
+                    && Diagnostics.GhostObjectDiag.IsPlainGhostObject(ghost))
+                {
+                    Diagnostics.GhostObjectDiag.RecordEntity(
+                        "ObjectInScope",
+                        entity,
+                        playerCoid: self.ObjectId?.Coid ?? 0,
+                        extra: "via=PerformScopeQuery");
+                }
+
                 connection.ObjectInScope(ghost);
+            }
             if (foreignGlobalVehicle && gameConnection != null)
             {
                 var nowGhosted = ghost.IsGhostedTo(connection);

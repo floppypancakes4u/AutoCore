@@ -4,7 +4,11 @@ Set-Location $PSScriptRoot
 
 Write-Host "=== PathAHook Build ===" -ForegroundColor Cyan
 
-$minhookRoot = Join-Path $PSScriptRoot "..\..\AutoLogin\AuthHook\minhook"
+# Prefer sibling SpeedHook vendored MinHook (repo layout); fall back to legacy AutoLogin path.
+$minhookRoot = Join-Path $PSScriptRoot "..\..\AutoCore.DevTool\SpeedHook\minhook"
+if (-not (Test-Path $minhookRoot)) {
+    $minhookRoot = Join-Path $PSScriptRoot "..\..\AutoLogin\AuthHook\minhook"
+}
 $minhookInclude = Join-Path $minhookRoot "include"
 $minhookLib = Join-Path $minhookRoot "build\Release\minhook.x32.lib"
 

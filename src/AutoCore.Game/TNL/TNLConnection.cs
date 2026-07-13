@@ -588,6 +588,32 @@ public partial class TNLConnection : GhostConnection
                 playerCoid: CurrentCharacter?.ObjectId.Coid ?? GetPlayerCOID(),
                 hexPreview: hex,
                 detail: detail);
+
+            // Correlate Create* game packets with plain GhostObject scope (client ghost list runs first).
+            if (GhostObjectDiag.Enabled
+                && packet.Opcode is GameOpcode.CreateSimpleObject
+                    or GameOpcode.CreateArmor
+                    or GameOpcode.CreateWeapon
+                    or GameOpcode.CreatePowerPlant
+                    or GameOpcode.CreateWheelSet)
+            {
+                GhostObjectDiag.Record(
+                    "SendCreate",
+                    parentType: packet.Opcode.ToString(),
+                    cbid: packet is AutoCore.Game.Packets.Sector.CreateSimpleObjectPacket createSo
+                        ? createSo.CBID
+                        : 0,
+                    coid: objectCoid,
+                    global: packet is AutoCore.Game.Packets.Sector.CreateSimpleObjectPacket createSo2
+                        && createSo2.ObjectId != null
+                        && createSo2.ObjectId.Global,
+                    playerCoid: CurrentCharacter?.ObjectId.Coid ?? GetPlayerCOID(),
+                    detail: string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "bytes={0} opcode={1}",
+                        arr.Length,
+                        packet.Opcode));
+            }
         }
 
         if (packet.Opcode == GameOpcode.InventoryGrabResponse)

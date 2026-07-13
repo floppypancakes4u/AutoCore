@@ -26,8 +26,12 @@ The older `cv-debug` / cdb path freezes the client (attach break + DirectInput).
 | SetWheelset | `0x004FEA90` | vehicle, wheelset object, `+0x258` before/after |
 | CreateVehicleAction | `0x004FB660` | vehicle, `+0x258` enter/exit |
 | ActivateEnterWorld | `0x00503F30` | vehicle, `+0x258` enter/exit |
+| GhostOnAdd | `0x005B0D70` | ghost, bound object, tfid |
+| GhostApply | `0x005B0ED0` | FUN_005b0ed0: bound/buf/tfid/buf_opcode/cbid; probes `vtbl+0x1C8`; logs `GhostApply_CRASH_IMMINENT` and **skips** original when iface is null (AV `0x005B0EFF`) |
 
-All detours call the original function; they never `int3` or suspend.
+All detours call the original function (except GhostApply null-iface skip); they never `int3` or suspend.
+
+See also [GHOST_OBJECT_DIAG.md](GHOST_OBJECT_DIAG.md) for server correlation.
 
 ## Workflow
 

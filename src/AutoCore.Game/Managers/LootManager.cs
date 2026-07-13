@@ -471,8 +471,39 @@ public class LootManager : Singleton<LootManager>
     }
 
     /// <summary>
-    /// Spawns a world item and broadcasts CreateSimpleObject to all players in the map.
-    /// Returns the assigned local COID when successful.
+    /// Picks a random ground-pickable generatable item CBID (<see cref="CloneBaseObjectType.Item"/>).
+    /// Equipment types require auto-loot and are excluded (client will not ground-pickup them).
+    /// </summary>
+    public bool TryPickRandomGroundLootCbid(out int cbid)
+    {
+        cbid = 0;
+        if (!_initialized || _itemIndex == null || _itemIndex.Count == 0)
+            return false;
+
+        var ground = new List<int>();
+        foreach (var kvp in _itemIndex)
+        {
+            if (kvp.Key.type != CloneBaseObjectType.Item)
+                continue;
+
+            foreach (var entry in kvp.Value)
+            {
+                if (entry.CBID > 0 && !RequiresAutoLoot(entry.CBID))
+                    ground.Add(entry.CBID);
+            }
+        }
+
+        if (ground.Count == 0)
+            return false;
+
+        cbid = ground[_random.Next(ground.Count)];
+        return true;
+    }
+
+    /// <summary>
+    /// Spawns a world ground item: map registration + CreateSimpleObject broadcast.
+    /// Does <b>not</b> create a GhostObject (plain ghost + local TFID AV at client 0x005B0EFF).
+    /// Always uses CreateSimpleObject so the client treats the object as ground-pickable.
     /// </summary>
     public bool TrySpawnLootItem(
         int cbid,
@@ -514,7 +545,8 @@ public class LootManager : Singleton<LootManager>
         item.Rotation = rotation;
         item.Faction = -1;
         item.SetMap(map);
-        item.CreateGhost();
+        // No CreateGhost: world loot is static ground pickup resolved by COID.
+        // GhostObject + PackInitial for local items caused client AV 0x005B0EFF.
 
         if (map.GetObjectByCoid(spawnedCoid) == null)
         {
@@ -532,7 +564,7 @@ public class LootManager : Singleton<LootManager>
             return false;
         }
 
-        var createPacket = CreateWorldSpawnPacket(cloneType, simpleObject);
+        var createPacket = BuildGroundLootCreatePacket(simpleObject);
 
         // #region agent log
         TossDebugLogger.Log(
@@ -558,9 +590,12 @@ public class LootManager : Singleton<LootManager>
         return true;
     }
 
-    private static CreateSimpleObjectPacket CreateWorldSpawnPacket(CloneBaseObjectType cloneType, SimpleObject simpleObject)
+    /// <summary>
+    /// Ground-loot wire shape: always <see cref="CreateSimpleObjectPacket"/> (not typed CreateArmor/Weapon).
+    /// </summary>
+    internal static CreateSimpleObjectPacket BuildGroundLootCreatePacket(SimpleObject simpleObject)
     {
-        var createPacket = InventoryItemCreator.CreatePacketFor(cloneType);
+        var createPacket = new CreateSimpleObjectPacket();
         simpleObject.WriteToPacket(createPacket);
         createPacket.IsBound = false;
         createPacket.IsInInventory = false;

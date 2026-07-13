@@ -1,5 +1,6 @@
 {
   "WireDiag": true,
+  "GhostObjectDiag": true,
   "ScopeGlobalVehicles": true,
   "ScopeGlobalVehicleCreate": true,
   "ScopeGlobalVehicleGhost": true,

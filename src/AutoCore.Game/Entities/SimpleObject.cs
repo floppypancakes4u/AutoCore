@@ -3,6 +3,7 @@
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.Constants;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL.Ghost;
@@ -204,6 +205,7 @@ public class SimpleObject : GraphicsObject
 
         Ghost = new GhostObject();
         Ghost.SetParent(this);
+        GhostObjectDiag.RecordEntity("CreateGhost", this, extra: "source=SimpleObject");
     }
 
     public override void WriteToPacket(CreateSimpleObjectPacket packet)

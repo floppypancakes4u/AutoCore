@@ -108,12 +108,15 @@ internal static class Program
     {
         var processName = DefaultProcessName;
         var dllPath = DefaultDllPath();
+        var skipVerify = false;
         for (var i = 1; i < args.Length; i++)
         {
             if (args[i] == "--process" && i + 1 < args.Length)
                 processName = args[++i];
             else if (args[i] == "--dll" && i + 1 < args.Length)
                 dllPath = args[++i];
+            else if (args[i] is "--force" or "--skip-verify")
+                skipVerify = true;
         }
 
         if (!File.Exists(dllPath))
@@ -134,20 +137,30 @@ internal static class Program
         var pid = clients[0].Id;
 
         var exePath = TryGetMainModulePath(pid);
-        var verifier = new ClientBuildVerifier();
-        if (!string.IsNullOrEmpty(exePath))
+        if (skipVerify)
         {
-            var v = verifier.Verify(exePath);
-            if (!v.Success)
-            {
-                Console.Error.WriteLine("Client build check failed: " + v.Message);
-                return 1;
-            }
-            Console.WriteLine("Client build verified: " + exePath);
+            Console.WriteLine("WARNING: --force/--skip-verify: skipping client build allowlist check.");
+            if (!string.IsNullOrEmpty(exePath))
+                Console.WriteLine("Client path: " + exePath);
         }
         else
         {
-            Console.WriteLine("WARNING: could not resolve client path; skipping hash check.");
+            var verifier = new ClientBuildVerifier();
+            if (!string.IsNullOrEmpty(exePath))
+            {
+                var v = verifier.Verify(exePath);
+                if (!v.Success)
+                {
+                    Console.Error.WriteLine("Client build check failed: " + v.Message);
+                    Console.Error.WriteLine("Re-run with --force to inject anyway (VA prologues still verified).");
+                    return 1;
+                }
+                Console.WriteLine("Client build verified: " + exePath);
+            }
+            else
+            {
+                Console.WriteLine("WARNING: could not resolve client path; skipping hash check.");
+            }
         }
 
         var platform = new WindowsInjectionPlatform();

@@ -123,47 +123,56 @@ public class ChatManager : Singleton<ChatManager>
         switch (parts[0].ToLowerInvariant())
         {
             case "/loot":
-                if (parts.Length < 2)
+            {
+                // World ground spawn for pickup testing (not cargo AutoLoot).
+                // /loot <cbid> | /loot rand
+                if (character?.Map == null || character.CurrentVehicle == null)
                 {
-                    respPacket.Message = $"Invalid loot command! Specify a cbid!";
+                    respPacket.Message = "You need a vehicle on a map to spawn world loot.";
                     break;
                 }
 
-                if (int.TryParse(parts[1], out var cbid))
+                if (parts.Length < 2)
                 {
-                    var item = ClonedObjectBase.AllocateNewObjectFromCBID(cbid);
-                    if (item == null)
+                    respPacket.Message = "Usage: /loot <cbid> | /loot rand";
+                    break;
+                }
+
+                int lootCbid;
+                if (parts[1].Equals("rand", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!LootManager.Instance.TryPickRandomGroundLootCbid(out lootCbid))
                     {
-                        respPacket.Message = $"Unable to create item {cbid}!";
+                        respPacket.Message = "No ground-pickable items in the loot index (need generatable Item-type CBIDs).";
                         break;
                     }
-
-                    item.SetCoid(character.Map.LocalCoidCounter++, false);
-                    item.LoadCloneBase(cbid);
-                    item.Faction = character.Faction;
-                    item.Position = character.CurrentVehicle.Position;
-                    item.Rotation = character.CurrentVehicle.Rotation;
-
-                    CreateSimpleObjectPacket createPacket;
-                    switch (item)
-                    {
-                        case WheelSet:
-                            createPacket = new CreateWheelSetPacket();
-                            break;
-
-                        default:
-                            createPacket = null;
-                            break;
-                    }
-
-                    if (createPacket is not null)
-                    {
-                        item.WriteToPacket(createPacket);
-
-                        connection.SendGamePacket(createPacket);
-                    }
                 }
+                else if (!int.TryParse(parts[1], out lootCbid) || lootCbid <= 0)
+                {
+                    respPacket.Message = "Usage: /loot <cbid> | /loot rand";
+                    break;
+                }
+
+                var vehPos = character.CurrentVehicle.Position;
+                var spawnPos = new Vector3(vehPos.X + 2f, vehPos.Y, vehPos.Z);
+                if (!LootManager.Instance.TrySpawnLootItem(
+                        lootCbid,
+                        spawnPos,
+                        character.CurrentVehicle.Rotation,
+                        character.Map,
+                        out var lootCoid))
+                {
+                    respPacket.Message = $"Failed to spawn world loot CBID {lootCbid}.";
+                    break;
+                }
+
+                var pickHint = LootManager.Instance.RequiresAutoLoot(lootCbid)
+                    ? " (equipment: may not ground-pickup on client; prefer /loot rand for Item types)"
+                    : " — drive near and pick up";
+                respPacket.Message =
+                    $"Spawned world loot CBID {lootCbid} COID {lootCoid} at ({spawnPos.X:F1},{spawnPos.Y:F1},{spawnPos.Z:F1}){pickHint}";
                 break;
+            }
 
             case "/getcbid":
                 if (character?.CurrentVehicle == null)

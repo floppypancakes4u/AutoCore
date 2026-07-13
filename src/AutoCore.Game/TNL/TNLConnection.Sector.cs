@@ -609,27 +609,55 @@ public partial class TNLConnection
 
         Logger.WriteLog(LogType.Debug, $"HandleItemPickupPacket: Player {CurrentCharacter.Name} picking up item {packet.ItemId.Coid} (CBID: {simpleObject.CBID})");
 
-        // TODO: Add item to player's inventory
-        // For now, we'll just remove it from the world
-        // The actual inventory system integration will need to be implemented separately
-
-        // Save item info before removing from map
-        var itemObjectId = item.ObjectId;
-        var map = CurrentCharacter.Map;
-
-        // Remove item from map (SetMap(null) handles calling LeaveMap internally)
-        item.SetMap(null);
-
-        // Broadcast destroy packet to all players in the map so they remove the item client-side
-        var destroyPacket = new DestroyObjectPacket(itemObjectId);
-        foreach (var character in map.Objects.Values.OfType<Character>().Where(c => c.OwningConnection != null))
+        var inventory = CurrentCharacter.Inventory;
+        if (inventory == null)
         {
-            character.OwningConnection.SendGamePacket(destroyPacket);
+            Logger.WriteLog(LogType.Error, "HandleItemPickupPacket: Character inventory is null");
+            return;
         }
 
-        Logger.WriteLog(LogType.Debug, $"HandleItemPickupPacket: Item {packet.ItemId.Coid} removed from world");
+        // Same path as /addItem: allocate inventory coid, Create(IsInInventory) + 0x2047 + CargoSendAll.
+        // Do not reuse the world local TFID or only send 0x2047 — client cargo will not bind.
+        var runtime = new InventoryRuntime(CurrentCharacter);
+        if (!runtime.CanAllocateItem)
+        {
+            Logger.WriteLog(LogType.Error, "HandleItemPickupPacket: cannot allocate inventory coid (no map)");
+            return;
+        }
 
-        // TODO: Send InventoryAddItem packet to add the item to the player's inventory
+        var worldObjectId = item.ObjectId;
+        var cbid = simpleObject.CBID;
+        var type = simpleObject.Type;
+        var displayName = simpleObject.CloneBaseObject?.CloneBaseSpecific.UniqueName ?? $"CBID {cbid}";
+        var inventoryCoid = runtime.AllocateItemCoid();
+
+        var claim = inventory.PickupWorldItem(
+            cbid,
+            type,
+            displayName,
+            inventoryCoid,
+            new InventoryItemCreator(),
+            CurrentCharacter.ObjectId.Coid);
+
+        if (claim.AddedItem == null)
+        {
+            Logger.WriteLog(LogType.Debug,
+                $"HandleItemPickupPacket: claim failed for world coid={worldObjectId.Coid}: {claim.Message}");
+            return;
+        }
+
+        foreach (var outbound in claim.Packets)
+            SendGamePacket(outbound);
+
+        var map = CurrentCharacter.Map;
+        item.SetMap(null);
+
+        var destroyPacket = new DestroyObjectPacket(worldObjectId);
+        foreach (var character in map.Objects.Values.OfType<Character>().Where(c => c.OwningConnection != null))
+            character.OwningConnection.SendGamePacket(destroyPacket);
+
+        Logger.WriteLog(LogType.Debug,
+            $"HandleItemPickupPacket: world coid={worldObjectId.Coid} cbid={cbid} → cargo coid={inventoryCoid} slot ({claim.AddedItem.InventoryPositionX},{claim.AddedItem.InventoryPositionY})");
     }
 
     private void HandleItemDropPacket(BinaryReader reader)

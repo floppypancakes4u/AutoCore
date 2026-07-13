@@ -10,6 +10,10 @@
     <PlatformTarget>x86</PlatformTarget>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\AutoLogin\AutoLoginInjector\AutoLoginInjector.csproj" />
+    <!-- Prebuilt x86 injector (source not in this repo; see AutoCore.DevTool/lib/README.md). -->
+    <Reference Include="AutoLoginInjector">
+      <HintPath>..\..\AutoCore.DevTool\lib\AutoLoginInjector.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 </Project>

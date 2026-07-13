@@ -21,6 +21,8 @@ public static class WireIsolationLevers
     {
         new("WireDiag", "Log S2C game packets + GhostVehicle packs",
             () => WireDiag.Enabled, v => WireDiag.Enabled = v, envSuffix: "DIAG"),
+        new("GhostObjectDiag", "Log plain GhostObject create/scope/pack (map-prop combat / 0x005B0EFF)",
+            () => GhostObjectDiag.Enabled, v => GhostObjectDiag.Enabled = v, envSuffix: "GHOST_OBJECT_DIAG"),
         new("ScopeGlobalVehicles", "Foreign global vehicle CreateVehicle + ObjectInScope",
             () => SectorMap.ScopeGlobalVehicles, v => SectorMap.ScopeGlobalVehicles = v, envSuffix: "SCOPE_GLOBAL_VEHICLES"),
         new("ScopeGlobalVehicleCreate", "Foreign global CreateVehicle only",
@@ -84,6 +86,9 @@ public static class WireIsolationLevers
         }
 
         ApplyFromEnvironmentVariables();
+        // Standalone env aliases (same tokens as lever DIGs when set).
+        WireDiag.TryEnableFromEnvironment();
+        GhostObjectDiag.TryEnableFromEnvironment();
         Logger.WriteLog(LogType.Network, "WireIsolationLevers active:\n" + FormatStatus());
 
         foreach (var warning in GetNpcCombatLeverWarnings())
@@ -126,6 +131,7 @@ public static class WireIsolationLevers
     public static void ResetToDefaults()
     {
         WireDiag.Enabled = false;
+        GhostObjectDiag.Enabled = false;
         SectorMap.ScopeGlobalVehicles = true;
         SectorMap.ScopeGlobalVehicleCreate = true;
         SectorMap.ScopeGlobalVehicleGhost = false;

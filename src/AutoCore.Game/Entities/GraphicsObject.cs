@@ -1,5 +1,6 @@
 ﻿using System.Linq;
 using AutoCore.Game.Constants;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
@@ -183,6 +184,7 @@ public class GraphicsObject : ClonedObjectBase
 
         Ghost = new GhostObject();
         Ghost.SetParent(this);
+        GhostObjectDiag.RecordEntity("CreateGhost", this, extra: "source=GraphicsObject");
     }
 
     /// <summary>
@@ -203,6 +205,10 @@ public class GraphicsObject : ClonedObjectBase
     protected override void OnBecameDamagable()
     {
         EnsureHealthInitialized();
+        // Vehicles/creatures inherit SetInvincible → here, but they do not use plain GhostObject
+        // combat ghosts (GhostWhenDamagable=false). Only log the path that can feed 0x005B0EFF.
+        if (GhostWhenDamagable)
+            GhostObjectDiag.RecordEntity("BecameDamagable", this, extra: "masks=Health|Position");
         EnsureCombatGhost();
         Ghost?.SetMaskBits(GhostObject.HealthMask | GhostObject.PositionMask);
         ScopeGhostToMapPlayers();
@@ -242,7 +248,12 @@ public class GraphicsObject : ClonedObjectBase
         var created = Ghost == null;
         CreateGhost();
         if (created && Ghost != null)
+        {
+            GhostObjectDiag.RecordEntity("EnsureCombatGhost", this, extra: "created=1");
             ScopeGhostToMapPlayers();
+        }
+        else if (Ghost != null)
+            GhostObjectDiag.RecordEntity("EnsureCombatGhost", this, extra: "created=0");
     }
 
     private void ScopeGhostToMapPlayers()
@@ -263,6 +274,11 @@ public class GraphicsObject : ClonedObjectBase
 
                 // Always-scope so HP updates are not lost if the prop was created/made
                 // damagable after the player's initial scope query.
+                GhostObjectDiag.RecordEntity(
+                    "ScopeAlways",
+                    this,
+                    playerCoid: character.ObjectId?.Coid ?? 0,
+                    extra: "via=ScopeGhostToMapPlayers");
                 conn.ObjectLocalScopeAlways(Ghost);
             }
             catch (Exception ex)

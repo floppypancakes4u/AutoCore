@@ -5,9 +5,11 @@ using TNL.Utils;
 
 namespace AutoCore.Game.TNL.Ghost;
 
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.TNL;
 
 public enum GhostType
 {
@@ -221,6 +223,24 @@ public class GhostObject : NetObject
     {
         if (Parent == null)
             throw new Exception("PackUpdate for GhostObject without parent!");
+
+        // Only plain GhostObject (not Vehicle/Creature/Character subclasses) run client FUN_005b0ed0.
+        if (GhostObjectDiag.Enabled && GhostObjectDiag.IsPlainGhostObject(this))
+        {
+            var playerCoid = 0L;
+            if (connection is TNLConnection tnl && tnl.CurrentCharacter?.ObjectId != null)
+                playerCoid = tnl.CurrentCharacter.ObjectId.Coid;
+
+            GhostObjectDiag.RecordEntity(
+                PIsInitialUpdate ? "PackInitial" : "PackDelta",
+                Parent,
+                playerCoid: playerCoid,
+                extra: string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    "mask=0x{0:X} globalFlag={1}",
+                    updateMask,
+                    Parent.ObjectId.Global ? 1 : 0));
+        }
 
         if (PIsInitialUpdate)
         {
