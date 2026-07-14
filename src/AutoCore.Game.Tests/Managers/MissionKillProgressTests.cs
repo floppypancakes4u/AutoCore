@@ -3,6 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace AutoCore.Game.Tests.Managers;
 
 using AutoCore.Database.World.Models;
+using AutoCore.Game.Combat;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Managers;
@@ -37,6 +38,7 @@ public class MissionKillProgressTests
         TNLConnection.TestPacketSink = (_, p) => _sent.Add(p);
         AssetManager.Instance.ClearTestMissions();
         TriggerManager.Instance.ClearAllForTests();
+        MapPropCorpseDespawn.ResetForTests();
     }
 
     [TestCleanup]
@@ -45,6 +47,7 @@ public class MissionKillProgressTests
         TNLConnection.TestPacketSink = null;
         AssetManager.Instance.ClearTestMissions();
         TriggerManager.Instance.ClearAllForTests();
+        MapPropCorpseDespawn.ResetForTests();
         _sent.Clear();
     }
 
@@ -63,6 +66,10 @@ public class MissionKillProgressTests
         Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
         Assert.IsTrue(_sent.OfType<CompleteDynamicObjectivePacket>().Any(p => p.ObjectiveId == ObjectiveId));
         Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
+        // Map props leave a corpse for a delay before despawn — still present until flush.
+        Assert.IsNotNull(map.GetObjectByCoid(PropCoid));
+        Assert.IsTrue(MapPropCorpseDespawn.PendingCountForTests >= 1);
+        MapPropCorpseDespawn.FlushAllForTests();
         Assert.IsNull(map.GetObjectByCoid(PropCoid));
     }
 

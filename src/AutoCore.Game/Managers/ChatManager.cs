@@ -167,7 +167,7 @@ public class ChatManager : Singleton<ChatManager>
                 }
 
                 var pickHint = LootManager.Instance.RequiresAutoLoot(lootCbid)
-                    ? " (equipment: may not ground-pickup on client; prefer /loot rand for Item types)"
+                    ? " (type not ground-pickable on retail client; may need cargo claim)"
                     : " — drive near and pick up";
                 respPacket.Message =
                     $"Spawned world loot CBID {lootCbid} COID {lootCoid} at ({spawnPos.X:F1},{spawnPos.Y:F1},{spawnPos.Z:F1}){pickHint}";
@@ -419,7 +419,7 @@ public class ChatManager : Singleton<ChatManager>
                 {
                     // Set the murderer for loot attribution
                     target.SetMurderer(character.CurrentVehicle ?? (ClonedObjectBase)character);
-                    target.OnDeath(DeathType.Silent);
+                    target.OnDeath(DeathType.Violent);
                     respPacket.Message = $"Killed {target.GetType().Name}#{target.ObjectId.Coid} with {actualDamage} damage!";
                 }
                 else

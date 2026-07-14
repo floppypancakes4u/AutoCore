@@ -263,9 +263,9 @@ public static class SkillService
             Vehicle.TrySendDamagePacket(character, target, caster.ObjectId, damageToReport);
 
         // Let the client resolve the successful effect while the target still exists.
-        // DestroyObject must follow SkillStatusEffect for lethal casts.
+        // DestroyObject must follow SkillStatusEffect for lethal casts; Violent plays death VFX.
         if (targetKilled)
-            target.OnDeath(DeathType.Silent);
+            target.OnDeath(DeathType.Violent);
 
         response = SkillResponse.Ok;
 
@@ -366,7 +366,7 @@ public static class SkillService
         if (activator.GetCurrentHP() <= 0 && !activator.IsCorpse)
         {
             activator.SetMurderer(activator);
-            activator.OnDeath(DeathType.Silent);
+            activator.OnDeath(DeathType.Violent);
         }
 
         Logger.WriteLog(LogType.Debug,

@@ -7,6 +7,7 @@ using AutoCore.Game.Entities;
 using AutoCore.Game.Extensions;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Mission;
 using AutoCore.Game.Skills;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Global;
@@ -335,6 +336,11 @@ public partial class TNLConnection
         SendGamePacket(charPacket);
         SendGamePacket(InventoryPacketFactory.CreateCargoSendAll(character.Inventory));
 
+        // Top up GiveItemOnStart mission gear if cargo rows were missing (failed persist / old
+        // session). Idempotent by CBID quantity. Packets go out before PerPlayerLoad GiveMission
+        // so client has objects before journal/dialog flows.
+        RestoreMissionCargoAfterLogin(character);
+
         // CreateCharacterExtended hash-inserts continents without per-bit UI notify.
         // UnlockRegion (sent twice) forces client apply + map fog refresh.
         ExplorationManager.Instance.SyncExplorationAfterLogin(character);
@@ -361,6 +367,32 @@ public partial class TNLConnection
         var itemCreator = new InventoryItemCreator();
         foreach (var itemPacket in character.Inventory.CreateItemObjectPackets(catalog, itemCreator))
             SendGamePacket(itemPacket);
+    }
+
+    /// <summary>
+    /// After cargo load + create packets: re-ensure deliver GiveItemOnStart items for active quests.
+    /// Covers failed mid-session persists and older DBs without mission cargo rows.
+    /// </summary>
+    private void RestoreMissionCargoAfterLogin(Character character)
+    {
+        if (character?.CurrentQuests == null || character.CurrentQuests.Count == 0)
+            return;
+
+        foreach (var quest in character.CurrentQuests.ToList())
+        {
+            try
+            {
+                MissionCargoService.EnsureAndSend(character, quest);
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLog(LogType.Error,
+                    "RestoreMissionCargoAfterLogin: mission={0} char={1}: {2}",
+                    quest.MissionId,
+                    character.ObjectId.Coid,
+                    ex.Message);
+            }
+        }
     }
 
     private void HandleCreatureMovedPacket(BinaryReader reader)
@@ -410,6 +442,24 @@ public partial class TNLConnection
         }
 
         NpcInteractHandler.HandleAutoPatrol(this, packet);
+    }
+
+    private void HandleFailMissionPacket(BinaryReader reader)
+    {
+        // C2S journal abandon confirm (0x20B2). Client does not apply fail locally —
+        // server must echo S2C FailMission after removing active quest state.
+        var packet = new FailMissionPacket();
+        try
+        {
+            packet.Read(reader);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error, "HandleFailMissionPacket: parse failed: {0}", ex.Message);
+            return;
+        }
+
+        NpcInteractHandler.HandleFailMission(this, packet);
     }
 
     private void HandleMissionDialogResponse(BinaryReader reader)

@@ -217,6 +217,407 @@ public class MissionPhaseHeavyRegressionTests
             || character.MapPresence.IsSuppressed(DialogCreature));
     }
 
+    /// <summary>
+    /// Room-and-Motherboard class: NPC was a completed alternate-form giver (suppressed),
+    /// then becomes an active completing deliver target on a later mission — must unsuppress
+    /// so UseObject turn-in is not rejected.
+    /// </summary>
+    [TestMethod]
+    public void CompletedAltFormGiver_BecomesActiveDeliverTarget_IsUnsuppressed()
+    {
+        const int completedMissionId = MissionId + 10;
+        const int activeMissionId = MissionId + 11;
+        const int completedObjId = DeliverObjId + 10;
+        const int activeObjId = DeliverObjId + 11;
+        const int hutchinsLike = 22100; // past giver, current deliver target
+        const int otherDeliver = 22101;
+        const int otherGiver = 22102;
+        const long hutchinsSpawn = DialogSpawn;
+        const long hutchinsCreature = DialogCreature;
+
+        // Mission A completed: Hutchins-like gave quest, turn-in elsewhere (alt-form).
+        var completedObj = MissionObjective.CreateForTests(completedObjId, 0, completedMissionId, 1);
+        completedObj.Requirements.Add(new ObjectiveRequirementDeliver(completedObj)
+        {
+            NPCTargetCBID = otherDeliver,
+            NPCTargetCompletes = true,
+        });
+        var completedMission = Mission.CreateForTests(completedMissionId, completedObj);
+        completedMission.NPC = hutchinsLike;
+        completedMission.IsRepeatable = 0;
+        AssetManager.Instance.SetTestMission(completedMission);
+
+        // Mission B active: deliver to Hutchins-like (Room and Motherboard class).
+        var activeObj = MissionObjective.CreateForTests(activeObjId, 0, activeMissionId, 1);
+        activeObj.Requirements.Add(new ObjectiveRequirementDeliver(activeObj)
+        {
+            NPCTargetCBID = hutchinsLike,
+            NPCTargetCompletes = true,
+        });
+        var activeMission = Mission.CreateForTests(activeMissionId, activeObj);
+        activeMission.NPC = otherGiver;
+        AssetManager.Instance.SetTestMission(activeMission);
+        NpcInteractHandler.InvalidateMissionIndex();
+
+        AssetManagerTestHelper.RegisterCreatureCloneBase(hutchinsLike, maxHitPoint: 80);
+        if (AssetManager.Instance.GetCloneBase(hutchinsLike) is AutoCore.Game.CloneBases.CloneBaseCreature hcb)
+            hcb.CreatureSpecific.IsNPC = 1;
+
+        var (character, vehicle, map) = CreatePlayer();
+        map.MapData.Templates[hutchinsSpawn] = MakeSpawn(hutchinsSpawn, true, hutchinsLike);
+        PlaceDialog(map, hutchinsLike);
+
+        character.CompletedMissionIds.Add(completedMissionId);
+        var quest = new CharacterQuest(activeMissionId, 0);
+        quest.PopulateFromAssets();
+        character.CurrentQuests.Add(quest);
+        character.SetMap(map);
+        vehicle.SetMap(map);
+
+        // Simulate prior phase suppress of the completed giver (common after class intros).
+        character.MapPresence.EnsureContinent(ContId);
+        character.MapPresence.Suppress(hutchinsSpawn);
+        character.MapPresence.Suppress(hutchinsCreature);
+        Assert.IsTrue(character.MapPresence.IsSuppressed(hutchinsCreature));
+
+        map.ApplyMissionPhaseWorldState(vehicle);
+
+        Assert.IsFalse(character.MapPresence.IsSuppressed(hutchinsSpawn),
+            "Fam-active spawn for active deliver CBID must be unsuppressed");
+        Assert.IsFalse(character.MapPresence.IsSuppressed(hutchinsCreature),
+            "Live deliver NPC must be unsuppressed so UseObject is not rejected");
+    }
+
+    /// <summary>
+    /// Track This / class-report class: completed deliver to a different standing NPC (no pad
+    /// form) must not permanently suppress the original giver — they still offer follow-ups.
+    /// </summary>
+    [TestMethod]
+    public void CompletedAltFormGiver_NonPadDeliver_NotPermanentlySuppressed()
+    {
+        const int completedMissionId = MissionId + 20;
+        const int completedObjId = DeliverObjId + 20;
+        const int hutchinsLike = 22200;
+        const int otherStandingNpc = 22201;
+
+        var completedObj = MissionObjective.CreateForTests(completedObjId, 0, completedMissionId, 1);
+        completedObj.Requirements.Add(new ObjectiveRequirementDeliver(completedObj)
+        {
+            NPCTargetCBID = otherStandingNpc,
+            NPCTargetCompletes = true,
+        });
+        var completedMission = Mission.CreateForTests(completedMissionId, completedObj);
+        completedMission.NPC = hutchinsLike;
+        completedMission.IsRepeatable = 0;
+        AssetManager.Instance.SetTestMission(completedMission);
+        NpcInteractHandler.InvalidateMissionIndex();
+
+        var (character, vehicle, map) = CreatePlayer();
+        map.MapData.Templates[DialogSpawn] = MakeSpawn(DialogSpawn, true, hutchinsLike);
+        PlaceDialog(map, hutchinsLike);
+
+        character.CompletedMissionIds.Add(completedMissionId);
+        character.MapPresence.EnsureContinent(ContId);
+        character.MapPresence.Suppress(DialogSpawn);
+        character.MapPresence.Suppress(DialogCreature);
+        character.SetMap(map);
+        vehicle.SetMap(map);
+
+        map.ApplyMissionPhaseWorldState(vehicle);
+
+        Assert.IsFalse(character.MapPresence.IsSuppressed(DialogSpawn),
+            "Non-pad alt-form completed giver must not stay suppressed (follow-up offers)");
+        Assert.IsFalse(character.MapPresence.IsSuppressed(DialogCreature),
+            "Live giver must remain interactable after non-pad alt-form completion");
+    }
+
+    /// <summary>
+    /// Final Exam class: completed pad-form deliver still suppresses the original fam-active giver.
+    /// </summary>
+    [TestMethod]
+    public void CompletedAltFormGiver_PadFormDeliver_StillSuppressesGiver()
+    {
+        SeedFinalExamShape();
+        var (character, vehicle, map) = CreatePlayer();
+        SeedPadGraph(map);
+        PlaceDialog(map, GiverCbid);
+        character.CompletedMissionIds.Add(MissionId);
+        character.SetMap(map);
+        vehicle.SetMap(map);
+
+        map.ApplyMissionPhaseWorldState(vehicle);
+
+        Assert.IsTrue(
+            character.MapPresence.IsSuppressed(DialogSpawn)
+            || character.MapPresence.IsSuppressed(DialogCreature),
+            "Pad-class completed alt-form must keep original giver suppressed");
+    }
+
+    [TestMethod]
+    public void ActiveAltFormDeliver_SuppressesGiver_NotDeliverTarget()
+    {
+        // Active pad/alt deliver: original giver suppressed; deliver CBID stays interactable.
+        SeedFinalExamShape();
+        var (character, vehicle, map) = CreatePlayer();
+        SeedPadGraph(map);
+        PlaceDialog(map, GiverCbid);
+        character.CurrentQuests.Add(MakeQuest(1)); // deliver seq
+        character.SetMap(map);
+        vehicle.SetMap(map);
+
+        map.ApplyMissionPhaseWorldState(vehicle);
+
+        Assert.IsTrue(
+            character.MapPresence.IsSuppressed(DialogSpawn)
+            || character.MapPresence.IsSuppressed(DialogCreature),
+            "Active alt-form must suppress original giver");
+        Assert.IsFalse(character.MapPresence.IsSuppressed(PadSpawn),
+            "Pad deliver marker must not be suppressed as giver");
+    }
+
+    [TestMethod]
+    public void PhaseApply_UnknownActiveQuestMission_DoesNotThrow()
+    {
+        var (character, vehicle, map) = CreatePlayer();
+        character.CurrentQuests.Add(new CharacterQuest(999_001, 0));
+        character.CompletedMissionIds.Add(999_002);
+        character.SetMap(map);
+        vehicle.SetMap(map);
+        map.ApplyMissionPhaseWorldState(vehicle);
+        Assert.AreEqual(1, character.CurrentQuests.Count);
+    }
+
+    [TestMethod]
+    public void PhaseApply_CompletedMissionNullObjectives_DoesNotThrow()
+    {
+        const int mid = MissionId + 80;
+        const int keepAlive = MissionId + 81;
+        // No objectives dictionary — pad-class check must early-out.
+        var mission = Mission.CreateForTests(mid);
+        mission.NPC = GiverCbid;
+        mission.IsRepeatable = 0;
+        mission.Objectives = null;
+        AssetManager.Instance.SetTestMission(mission);
+
+        // Keep ReplayMissionWorldSetup from early-returning (needs active quest or deliver CBIDs).
+        var aliveObj = MissionObjective.CreateForTests(DeliverObjId + 81, 0, keepAlive, 1);
+        aliveObj.Requirements.Add(new ObjectiveRequirementDeliver(aliveObj)
+        {
+            NPCTargetCBID = DeliverCbid,
+            NPCTargetCompletes = true,
+        });
+        var alive = Mission.CreateForTests(keepAlive, aliveObj);
+        alive.NPC = DeliverCbid;
+        AssetManager.Instance.SetTestMission(alive);
+
+        var (character, vehicle, map) = CreatePlayer();
+        map.MapData.Templates[DialogSpawn] = MakeSpawn(DialogSpawn, true, GiverCbid);
+        PlaceDialog(map, GiverCbid);
+        character.CompletedMissionIds.Add(mid);
+        character.CurrentQuests.Add(new CharacterQuest(keepAlive, 0));
+        character.SetMap(map);
+        vehicle.SetMap(map);
+        map.ApplyMissionPhaseWorldState(vehicle);
+        Assert.IsFalse(character.MapPresence.IsSuppressed(DialogSpawn));
+    }
+
+    [TestMethod]
+    public void PhaseApply_CompletedRepeatableAltGiver_NotSuppressed()
+    {
+        const int mid = MissionId + 30;
+        const int oid = DeliverObjId + 30;
+        const int giver = 22300;
+        var obj = MissionObjective.CreateForTests(oid, 0, mid, 1);
+        obj.Requirements.Add(new ObjectiveRequirementDeliver(obj)
+        {
+            NPCTargetCBID = 22301,
+            NPCTargetCompletes = true,
+        });
+        var mission = Mission.CreateForTests(mid, obj);
+        mission.NPC = giver;
+        mission.IsRepeatable = 1;
+        AssetManager.Instance.SetTestMission(mission);
+
+        var (character, vehicle, map) = CreatePlayer();
+        map.MapData.Templates[DialogSpawn] = MakeSpawn(DialogSpawn, true, giver);
+        PlaceDialog(map, giver);
+        character.CompletedMissionIds.Add(mid);
+        character.SetMap(map);
+        vehicle.SetMap(map);
+        map.ApplyMissionPhaseWorldState(vehicle);
+
+        Assert.IsFalse(character.MapPresence.IsSuppressed(DialogSpawn));
+        Assert.IsFalse(character.MapPresence.IsSuppressed(DialogCreature));
+    }
+
+    [TestMethod]
+    public void PhaseUnsuppress_VehicleOwnedBySpawn_Cleared()
+    {
+        const int mid = MissionId + 40;
+        const int oid = DeliverObjId + 40;
+        const int hutchinsLike = 22400;
+        const int other = 22401;
+        const long vehicleCoid = 99003;
+
+        var completedObj = MissionObjective.CreateForTests(oid, 0, mid, 1);
+        completedObj.Requirements.Add(new ObjectiveRequirementDeliver(completedObj)
+        {
+            NPCTargetCBID = other,
+            NPCTargetCompletes = true,
+        });
+        var completedMission = Mission.CreateForTests(mid, completedObj);
+        completedMission.NPC = hutchinsLike;
+        completedMission.IsRepeatable = 0;
+        AssetManager.Instance.SetTestMission(completedMission);
+
+        var (character, vehicle, map) = CreatePlayer();
+        map.MapData.Templates[DialogSpawn] = MakeSpawn(DialogSpawn, true, hutchinsLike);
+        if (map.GetObjectByCoid(DialogSpawn) is not SpawnPoint)
+        {
+            var sp = new SpawnPoint((SpawnPointTemplate)map.MapData.Templates[DialogSpawn]);
+            sp.SetCoid(DialogSpawn, false);
+            sp.SetMap(map);
+            sp.SetLastSpawnedCoidForTests(vehicleCoid);
+        }
+
+        var npcVehicle = new Vehicle { Position = new Vector3(0, 0, 0) };
+        npcVehicle.SetCoid(vehicleCoid, true);
+        npcVehicle.SetCbidForTests(hutchinsLike);
+        npcVehicle.SpawnOwnerCoid = DialogSpawn;
+        npcVehicle.SetMap(map);
+
+        character.CompletedMissionIds.Add(mid);
+        character.MapPresence.EnsureContinent(ContId);
+        character.MapPresence.Suppress(DialogSpawn);
+        character.MapPresence.Suppress(vehicleCoid);
+        character.SetMap(map);
+        vehicle.SetMap(map);
+
+        map.ApplyMissionPhaseWorldState(vehicle);
+
+        Assert.IsFalse(character.MapPresence.IsSuppressed(DialogSpawn));
+        Assert.IsFalse(character.MapPresence.IsSuppressed(vehicleCoid),
+            "Spawn-owned vehicle COID must unsuppress with non-pad completed giver");
+    }
+
+    [TestMethod]
+    public void PhaseApply_ActiveQuestMissingObjectiveSeq_SkipsWithoutThrow()
+    {
+        var obj = MissionObjective.CreateForTests(DeliverObjId + 60, 0, MissionId + 60, 1);
+        obj.Requirements.Add(new ObjectiveRequirementDeliver(obj)
+        {
+            NPCTargetCBID = DeliverCbid,
+            NPCTargetCompletes = true,
+        });
+        var mission = Mission.CreateForTests(MissionId + 60, obj);
+        mission.NPC = GiverCbid;
+        AssetManager.Instance.SetTestMission(mission);
+
+        var (character, vehicle, map) = CreatePlayer();
+        // Sequence 9 does not exist on the mission.
+        character.CurrentQuests.Add(new CharacterQuest(MissionId + 60, 9));
+        character.SetMap(map);
+        vehicle.SetMap(map);
+        map.ApplyMissionPhaseWorldState(vehicle);
+        Assert.AreEqual(1, character.CurrentQuests.Count);
+    }
+
+    [TestMethod]
+    public void PhaseSuppress_VehicleChildOfGiverSpawn_Suppressed()
+    {
+        SeedFinalExamShape();
+        const long vehicleCoid = 99004;
+        var (character, vehicle, map) = CreatePlayer();
+        SeedPadGraph(map);
+
+        map.MapData.Templates[DialogSpawn] = MakeSpawn(DialogSpawn, true, GiverCbid);
+        var sp = new SpawnPoint((SpawnPointTemplate)map.MapData.Templates[DialogSpawn]);
+        sp.SetCoid(DialogSpawn, false);
+        sp.SetMap(map);
+        sp.SetLastSpawnedCoidForTests(vehicleCoid);
+
+        var npcVehicle = new Vehicle { Position = new Vector3(0, 0, 0) };
+        npcVehicle.SetCoid(vehicleCoid, true);
+        npcVehicle.SetCbidForTests(GiverCbid);
+        npcVehicle.SpawnOwnerCoid = DialogSpawn;
+        npcVehicle.SetMap(map);
+
+        character.CompletedMissionIds.Add(MissionId);
+        character.SetMap(map);
+        vehicle.SetMap(map);
+        map.ApplyMissionPhaseWorldState(vehicle);
+
+        Assert.IsTrue(character.MapPresence.IsSuppressed(DialogSpawn)
+            || character.MapPresence.IsSuppressed(vehicleCoid),
+            "Pad-class completed giver vehicle child must be suppressable");
+        Assert.IsTrue(character.MapPresence.IsSuppressed(vehicleCoid),
+            "Vehicle SpawnOwnerCoid child must be suppressed with giver");
+    }
+
+    [TestMethod]
+    public void SameNpcDeliver_InvalidActiveSeq_DoesNotThrow()
+    {
+        const int same = 2469;
+        var obj = MissionObjective.CreateForTests(DeliverObjId + 70, 0, MissionId + 70, 1);
+        obj.Requirements.Add(new ObjectiveRequirementDeliver(obj)
+        {
+            NPCTargetCBID = same,
+            NPCTargetCompletes = true,
+        });
+        var mission = Mission.CreateForTests(MissionId + 70, obj);
+        mission.NPC = same;
+        AssetManager.Instance.SetTestMission(mission);
+
+        var (character, vehicle, map) = CreatePlayer();
+        map.MapData.Templates[DialogSpawn] = MakeSpawn(DialogSpawn, true, same);
+        PlaceDialog(map, same);
+        character.CurrentQuests.Add(new CharacterQuest(MissionId + 70, 3)); // missing seq
+        character.SetMap(map);
+        vehicle.SetMap(map);
+        map.ApplyMissionPhaseWorldState(vehicle);
+        Assert.IsFalse(character.MapPresence.IsSuppressed(DialogSpawn));
+    }
+
+    [TestMethod]
+    public void ActiveDeliver_UnsuppressesEvenWhenAlsoCompletedPadGiver()
+    {
+        // Completed pad-class Final Exam shape + active deliver to same giver CBID elsewhere.
+        SeedFinalExamShape();
+        const int activeMid = MissionId + 50;
+        const int activeOid = DeliverObjId + 50;
+        var activeObj = MissionObjective.CreateForTests(activeOid, 0, activeMid, 1);
+        activeObj.Requirements.Add(new ObjectiveRequirementDeliver(activeObj)
+        {
+            NPCTargetCBID = GiverCbid,
+            NPCTargetCompletes = true,
+        });
+        var active = Mission.CreateForTests(activeMid, activeObj);
+        active.NPC = 9999;
+        AssetManager.Instance.SetTestMission(active);
+
+        var (character, vehicle, map) = CreatePlayer();
+        SeedPadGraph(map);
+        PlaceDialog(map, GiverCbid);
+        character.CompletedMissionIds.Add(MissionId);
+        var q = new CharacterQuest(activeMid, 0);
+        q.PopulateFromAssets();
+        character.CurrentQuests.Add(q);
+        character.SetMap(map);
+        vehicle.SetMap(map);
+
+        // Sticky suppress as if prior pad-complete phase had hidden the giver.
+        character.MapPresence.EnsureContinent(ContId);
+        character.MapPresence.Suppress(DialogSpawn);
+        character.MapPresence.Suppress(DialogCreature);
+
+        map.ApplyMissionPhaseWorldState(vehicle);
+
+        Assert.IsFalse(character.MapPresence.IsSuppressed(DialogSpawn),
+            "Active deliver must unsuppress giver spawn over completed pad-giver suppress");
+        Assert.IsFalse(character.MapPresence.IsSuppressed(DialogCreature),
+            "Active deliver must unsuppress live giver creature");
+    }
+
     [TestMethod]
     public void EnsureDeliverTurnIn_InvalidArgs_NoThrow()
     {

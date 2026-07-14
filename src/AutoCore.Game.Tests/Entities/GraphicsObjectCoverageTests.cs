@@ -5,6 +5,7 @@ namespace AutoCore.Game.Tests.Entities;
 using AutoCore.Database.World.Models;
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.CloneBases.Specifics;
+using AutoCore.Game.Combat;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
@@ -27,10 +28,16 @@ public class GraphicsObjectCoverageTests
     {
         _sent.Clear();
         TNLConnection.TestPacketSink = (_, p) => _sent.Add(p);
+        MapPropCorpseDespawn.ResetForTests();
     }
 
     [TestCleanup]
-    public void TearDown() => TNLConnection.TestPacketSink = null;
+    public void TearDown()
+    {
+        TNLConnection.TestPacketSink = null;
+        MapPropCorpseDespawn.ResetForTests();
+        GraphicsObject.ForceNetworkHelperFailureForTests = false;
+    }
 
     [TestMethod]
     public void TakeDamage_ZeroOrNegative_ReturnsZero()
@@ -90,7 +97,7 @@ public class GraphicsObjectCoverageTests
     }
 
     [TestMethod]
-    public void OnDeath_WithPlayerOnMap_BroadcastsDestroy()
+    public void OnDeath_WithPlayerOnMap_SchedulesDelayedDestroy()
     {
         var (character, map) = CreatePlayer();
         var prop = new GraphicsObject(GraphicsObjectType.GraphicsPhysics);
@@ -100,6 +107,9 @@ public class GraphicsObjectCoverageTests
         prop.SetMurderer(character.CurrentVehicle);
         prop.OnDeath(DeathType.Silent);
 
+        Assert.IsNotNull(map.GetObjectByCoid(77), "corpse stays until delayed despawn");
+        Assert.IsFalse(_sent.OfType<DestroyObjectPacket>().Any(), "no DestroyObject at kill time");
+        MapPropCorpseDespawn.FlushAllForTests();
         Assert.IsNull(map.GetObjectByCoid(77));
         Assert.IsTrue(_sent.OfType<DestroyObjectPacket>().Any(p => p.ObjectId.Coid == 77));
     }
@@ -149,7 +159,7 @@ public class GraphicsObjectCoverageTests
     }
 
     [TestMethod]
-    public void ScopeGhost_WithPlayerConnection_OnBecameDamagable()
+    public void OnBecameDamagable_DoesNotCreatePlainGhostObject()
     {
         var (character, map) = CreatePlayer();
         var prop = new GraphicsObject(GraphicsObjectType.Graphics);
@@ -158,11 +168,15 @@ public class GraphicsObjectCoverageTests
         prop.SetMap(map);
         prop.SetInvincible(true);
         prop.SetInvincible(false);
+        // Explicit CreateGhost still works for tests; automatic combat ghosting is disabled
+        // (plain GhostObject local TFID → client AV 0x005B0EFF).
+        Assert.IsNull(prop.Ghost);
+        prop.CreateGhost();
         Assert.IsNotNull(prop.Ghost);
     }
 
     [TestMethod]
-    public void ScopeGhost_CharacterWithoutConnection_Skipped()
+    public void OnBecameDamagable_CharacterWithoutConnection_StillNoAutoGhost()
     {
         var map = CreateMapOnly();
         var character = new Character();
@@ -175,7 +189,7 @@ public class GraphicsObjectCoverageTests
         prop.SetCoid(91, false);
         prop.SetMap(map);
         prop.SetInvincible(false);
-        Assert.IsNotNull(prop.Ghost);
+        Assert.IsNull(prop.Ghost);
     }
 
     [TestMethod]
@@ -218,7 +232,7 @@ public class GraphicsObjectCoverageTests
     }
 
     [TestMethod]
-    public void OnDeath_AlreadyGhosted_SetsHealthMaskBeforeDestroy()
+    public void OnDeath_AlreadyGhosted_SchedulesDestroyAndStaysCorpse()
     {
         var (character, map) = CreatePlayer();
         var prop = new GraphicsObject(GraphicsObjectType.Graphics);
@@ -228,11 +242,13 @@ public class GraphicsObjectCoverageTests
         prop.CreateGhost();
         prop.OnDeath(DeathType.Violent);
         Assert.IsTrue(prop.IsCorpse);
+        Assert.IsFalse(_sent.OfType<DestroyObjectPacket>().Any());
+        MapPropCorpseDespawn.FlushAllForTests();
         Assert.IsTrue(_sent.OfType<DestroyObjectPacket>().Any());
     }
 
     [TestMethod]
-    public void ScopeGhost_ForcedFailure_LogsAndContinues()
+    public void ScopeGhost_ForcedFailure_OnlyWhenGhostExists()
     {
         var (character, map) = CreatePlayer();
         var prop = new GraphicsObject(GraphicsObjectType.Graphics);
@@ -242,6 +258,10 @@ public class GraphicsObjectCoverageTests
         try
         {
             GraphicsObject.ForceNetworkHelperFailureForTests = true;
+            prop.SetInvincible(false);
+            Assert.IsNull(prop.Ghost, "auto combat ghost disabled (client AV 0x005B0EFF)");
+            // Explicit ghost + scope still exercises error path.
+            prop.CreateGhost();
             prop.SetInvincible(false);
             Assert.IsNotNull(prop.Ghost);
         }

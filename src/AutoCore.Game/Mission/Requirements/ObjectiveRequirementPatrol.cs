@@ -49,7 +49,12 @@ public class ObjectiveRequirementPatrol : ObjectiveRequirement
             Laps = (int)laps;
 
         foreach (var el in elem.Elements("GenericTargetCOID"))
-            if (TargetCount < 10)
-                GenericTargets[TargetCount++] = (long)el;
+        {
+            // Array holds 20 slots; older cap of 10 dropped Track This-class routes (15 pads).
+            if (TargetCount >= GenericTargets.Length)
+                break;
+            GenericTargets[TargetCount++] = (long)el;
+        }
     }
 }
+

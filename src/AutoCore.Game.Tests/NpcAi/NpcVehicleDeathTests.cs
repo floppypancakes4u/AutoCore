@@ -76,13 +76,16 @@ public class NpcVehicleDeathTests
         vehicle.InitializeHealthForTests(50);
         vehicle.SetMap(map);
 
-        vehicle.OnDeath(DeathType.Silent);
+        vehicle.OnDeath(DeathType.Violent);
 
         Assert.IsTrue(vehicle.IsCorpse, "death must mark the vehicle a corpse");
         Assert.IsNull(map.GetObjectByCoid(VehicleCoid), "dead NPC vehicle must leave the sector map");
+        var destroy = _sent.OfType<DestroyObjectPacket>().FirstOrDefault(p => p.ObjectId.Coid == VehicleCoid);
+        Assert.IsNotNull(destroy, "clients need a DestroyObject broadcast so the wreck disappears");
+        Assert.AreEqual(DeathType.Violent, destroy.DeathType);
         Assert.IsTrue(
-            _sent.OfType<DestroyObjectPacket>().Any(p => p.ObjectId.Coid == VehicleCoid),
-            "clients need a DestroyObject broadcast so the wreck disappears");
+            _sent.OfType<InitCreateObjectPacket>().Any(p => p.ObjectCoid == VehicleCoid && p.DoDeath),
+            "combat vehicle death must send InitCreateObject DoDeath");
         Assert.IsTrue(
             _sent.OfType<CreateSimpleObjectPacket>().Any(p => p.CBID == LootItemCbid),
             "template loot must be rolled and spawned; sent=" + string.Join(',', _sent.Select(p => p.Opcode)));

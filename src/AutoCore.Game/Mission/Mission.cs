@@ -159,6 +159,11 @@ public class Mission
     }
 
     /// <summary>Unit-test factory.</summary>
+    /// <remarks>
+    /// <see cref="ReqRace"/> / <see cref="ReqClass"/> default to -1 (0xFFFF) = unrestricted,
+    /// matching client <c>CVOGCharacter_CheckMissionRequirements</c>. Retail WAD always sets
+    /// explicit values; 0 is a valid race/class id (Human / Commando), not "any".
+    /// </remarks>
     internal static Mission CreateForTests(int id, params MissionObjective[] objectives)
     {
         var mission = new Mission
@@ -167,6 +172,8 @@ public class Mission
             Name = $"mission_{id}",
             Objectives = new Dictionary<byte, MissionObjective>(),
             NumberOfObjectives = (byte)(objectives?.Length ?? 0),
+            ReqRace = -1,
+            ReqClass = -1,
         };
 
         if (objectives != null)

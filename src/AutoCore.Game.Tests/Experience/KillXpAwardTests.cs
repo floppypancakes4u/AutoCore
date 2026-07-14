@@ -133,11 +133,10 @@ public class KillXpAwardTests
     }
 
     [TestMethod]
-    public void TryAward_NonCreatureVictim_UsesLevel1Table()
+    public void TryAward_NpcVehicleVictim_UsesLevel1Table()
     {
-        // Non-Creature path: victimLevel = 1 (GraphicsObject / non-Creature ClonedObjectBase)
+        // NPC vehicles are combatants; victimLevel falls back to 1 without a driver creature.
         var killer = RegisterKiller(5400, level: 1, xp: 0);
-        // Use a Vehicle as a non-Creature murder victim (Creature is Creature/Character only).
         var vehicle = new Vehicle();
         vehicle.SetCoid(5401, true);
         vehicle.SetMurderer(new TFID(killer.ObjectId.Coid, true));
@@ -145,5 +144,35 @@ public class KillXpAwardTests
         KillXpAward.TryAward(vehicle);
 
         Assert.AreEqual(39, killer.Experience);
+    }
+
+    [TestMethod]
+    public void TryAward_MapPropGraphicsObject_NoXp()
+    {
+        // Pure map scenery (exact GraphicsObject) must not grant kill XP on ram / destroy.
+        // docs/XP.md: kill XP uses creature/vehicle level — map props are not combatants.
+        var killer = RegisterKiller(5410, level: 1, xp: 0);
+        var prop = new GraphicsObject(GraphicsObjectType.GraphicsPhysics);
+        prop.InitializeHealthForTests(25);
+        prop.SetCoid(5411, false);
+        prop.SetMurderer(new TFID(killer.ObjectId.Coid, true));
+
+        KillXpAward.TryAward(prop);
+
+        Assert.AreEqual(0, killer.Experience);
+        Assert.AreEqual(0, _persist.Saves.Count);
+    }
+
+    [TestMethod]
+    public void TryAward_SimpleObjectVictim_NoXp()
+    {
+        var killer = RegisterKiller(5420, level: 1, xp: 0);
+        var item = new SimpleObject(GraphicsObjectType.Graphics);
+        item.SetCoid(5421, false);
+        item.SetMurderer(new TFID(killer.ObjectId.Coid, true));
+
+        KillXpAward.TryAward(item);
+
+        Assert.AreEqual(0, killer.Experience);
     }
 }

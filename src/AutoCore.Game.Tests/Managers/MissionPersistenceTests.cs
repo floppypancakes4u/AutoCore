@@ -257,6 +257,33 @@ public class MissionPersistenceTests
     }
 
     [TestMethod]
+    public void Manager_OnMissionFailed_EnqueuesRemove()
+    {
+        var manager = MissionPersistence.Instance;
+        QuestPersistKind? seen = null;
+        manager.PersistQuestRow = (_, _, op) => seen = op.Kind;
+
+        manager.OnMissionFailed(4003, 888);
+        Assert.AreEqual(1, manager.PendingPersistCount);
+        manager.FlushPending();
+        Assert.AreEqual(QuestPersistKind.Remove, seen);
+    }
+
+    [TestMethod]
+    public void Queue_Remove_LatestWinsOverUpsert()
+    {
+        var queue = new MissionPersistenceQueue();
+        queue.Enqueue(10, 100, QuestPersistOp.Upsert(0, 0, Array.Empty<byte>()));
+        queue.Enqueue(10, 100, QuestPersistOp.Remove());
+
+        var ops = new List<QuestPersistKind>();
+        queue.Flush((_, _, op) => ops.Add(op.Kind));
+
+        Assert.AreEqual(1, ops.Count);
+        Assert.AreEqual(QuestPersistKind.Remove, ops[0]);
+    }
+
+    [TestMethod]
     public void Manager_OnQuestChanged_NullArgs_NoEnqueue()
     {
         var manager = MissionPersistence.Instance;

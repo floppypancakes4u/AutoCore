@@ -13,6 +13,12 @@ public sealed class CharacterMapPresence
     readonly HashSet<long> _ownedCombat = new();
     /// <summary>Deliver CBIDs that already received Create+CreateCreature this continent visit.</summary>
     readonly HashSet<int> _deliverTurnInReady = new();
+    /// <summary>
+    /// Mission ids for which we already sent a one-shot client resync after AutoPatrol on a
+    /// finished (prior-sequence) patrol pad — stops per-tick spam while the client still shows
+    /// old waypoints after server advanced (Track This seq2 deliver while client patrols).
+    /// </summary>
+    readonly HashSet<int> _stalePatrolResyncedMissions = new();
 
     public int ContinentId { get; private set; } = -1;
 
@@ -38,6 +44,7 @@ public sealed class CharacterMapPresence
         _materialized.Clear();
         _ownedCombat.Clear();
         _deliverTurnInReady.Clear();
+        _stalePatrolResyncedMissions.Clear();
     }
 
     public void Clear()
@@ -47,6 +54,7 @@ public sealed class CharacterMapPresence
         _materialized.Clear();
         _ownedCombat.Clear();
         _deliverTurnInReady.Clear();
+        _stalePatrolResyncedMissions.Clear();
     }
 
     /// <summary>
@@ -60,6 +68,16 @@ public sealed class CharacterMapPresence
     {
         if (deliverCbid > 0)
             _deliverTurnInReady.Add(deliverCbid);
+    }
+
+    /// <summary>True if we already re-synced client after stale AutoPatrol for this mission this map.</summary>
+    public bool HasStalePatrolResync(int missionId)
+        => missionId > 0 && _stalePatrolResyncedMissions.Contains(missionId);
+
+    public void MarkStalePatrolResync(int missionId)
+    {
+        if (missionId > 0)
+            _stalePatrolResyncedMissions.Add(missionId);
     }
 
     public bool IsSuppressed(long coid) => coid > 0 && _suppressed.Contains(coid);

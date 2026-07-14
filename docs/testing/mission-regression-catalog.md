@@ -6,6 +6,7 @@ Permanent record of defects found during mission testing hardening.
 | -- | ---- | ------- | ---------- | --------------- | ------ |
 | REG-001 | 2026-07-12 | Replaying `AdvanceOrCompleteObjective` after final complete double-granted mission XP | Complete path did not check whether `quest` was still in `CurrentQuests` before remove/reward | `MissionRewardIdempotencyTests.Complete_ThenReplayStaleAdvance_DoesNotGrantXpTwice` | Yes |
 | REG-002 | 2026-07-13 | Null `TNLConnection` in `AdvanceOrCompleteObjective` threw NRE before server state update | Packet/journal sends unguarded | `MissionFaultInjectionTests.Complete_WithNullConnection_StillMutatesServerState` | Yes |
+| REG-003 | 2026-07-13 | Mid-sequence deliver turn-in (e.g. mission 3979 GPS unit) removed whole quest; NPC done, journal/next objectives wrong | `TryCompleteDeliverFromDialog` always complete-removed regardless of later sequences | `NpcInteractCoverageGapTests.DeliverTurnIn_WithLaterObjectives_AdvancesSequence_KeepsQuest` | Yes |
 
 ## Entry template
 
@@ -34,3 +35,11 @@ Permanent record of defects found during mission testing hardening.
 - Failing test (before fix): `MissionFaultInjectionTests.Complete_WithNullConnection_StillMutatesServerState`
 - Fix: `conn?.SendGamePacket(...)` and guard `PushJournalMissionList` with `if (conn != null)`.
 - Permanent test: same method — server still completes/persists without connection.
+
+### REG-003 — Deliver dialog force-completed multi-sequence missions
+- Discovered: 2026-07-13
+- Symptom: Turning in a deliver item on sequence 0 of a multi-objective mission (live: mission 3979 / objective 7656, “G.P.S Control Unit”) made the NPC behave as finished while the journal still showed the mission; cargo could be taken without correct credit for later sequences. Server log: `INCOMPLETE[DeliverTurnIn] … later objective sequences exist`.
+- Root cause: `TryCompleteDeliverFromDialog` always removed the quest, added `CompletedMissionIds`, and applied full rewards even when a higher objective sequence existed. Kill/patrol/useitem already used `AdvanceOrCompleteObjective`.
+- Failing test (before fix): `NpcInteractCoverageGapTests.DeliverTurnIn_WithLaterObjectives_AdvancesSequence_KeepsQuest` (plus cargo / second-dialog cases).
+- Fix: Route dialog deliver through parameterized `AdvanceOrCompleteObjective` (`sendCompleteDynamicObjective: false`, `notifyClientRewards: false`, `syncClientImmediately: false`); advance when not final; soft-pedal + delayed force-complete only on final multi-req.
+- Permanent tests: mid-seq advance, cargo take/grant next, second dialog does not complete, existing final deliver + patrol+deliver delayed 0x2070.

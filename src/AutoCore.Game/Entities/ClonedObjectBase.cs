@@ -376,6 +376,9 @@ public abstract class ClonedObjectBase
             case CloneBaseObjectType.Ornament:
             case CloneBaseObjectType.RaceItem:
             case CloneBaseObjectType.Money:
+            // Mission Inventory gear (deliver GiveItemOnStart / use-item objectives).
+            case CloneBaseObjectType.QuestObject:
+            case CloneBaseObjectType.MissionObject:
                 return new SimpleObject(GraphicsObjectType.Graphics);
 
             default:

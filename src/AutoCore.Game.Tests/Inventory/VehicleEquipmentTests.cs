@@ -1,3 +1,6 @@
+using System.Runtime.CompilerServices;
+using AutoCore.Game.CloneBases;
+using AutoCore.Game.CloneBases.Specifics;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Inventory;
@@ -79,6 +82,84 @@ public class VehicleEquipmentTests
         Assert.IsFalse(vehicle.TryEquipItem(VehicleEquipmentSlot.Armor, simple, out var previous));
         Assert.IsNull(previous);
         Assert.IsNull(vehicle.GetEquippedItem(VehicleEquipmentSlot.Armor));
+    }
+
+    [TestMethod]
+    public void TryEquipItem_WeaponEntityWithNonWeaponCloneBase_Rejected()
+    {
+        var vehicle = new Vehicle();
+        var weapon = new Weapon();
+        weapon.SetCoid(302, true);
+        var itemClone = (CloneBaseObject)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseObject));
+        itemClone.CloneBaseSpecific = new CloneBaseSpecific
+        {
+            Type = (int)CloneBaseObjectType.Item,
+            CloneBaseId = 10479,
+        };
+        weapon.AssignCloneBaseForTests(itemClone);
+
+        Assert.IsFalse(vehicle.TryEquipItem(VehicleEquipmentSlot.WeaponFront, weapon, out var previous));
+        Assert.IsNull(previous);
+        Assert.IsNull(vehicle.WeaponFront);
+    }
+
+    [TestMethod]
+    public void TryEquipItem_WheelSetEntityWithNonWheelCloneBase_Rejected()
+    {
+        var vehicle = new Vehicle();
+        var wheels = new WheelSet();
+        wheels.SetCoid(303, true);
+        var itemClone = (CloneBaseObject)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseObject));
+        itemClone.CloneBaseSpecific = new CloneBaseSpecific
+        {
+            Type = (int)CloneBaseObjectType.Item,
+            CloneBaseId = 1,
+        };
+        wheels.AssignCloneBaseForTests(itemClone);
+
+        Assert.IsFalse(vehicle.TryEquipItem(VehicleEquipmentSlot.WheelSet, wheels, out _));
+        Assert.IsNull(vehicle.WheelSet);
+    }
+
+    [TestMethod]
+    public void TryEquipItem_FrontOnlyWeapon_RejectedOnTurretSlot()
+    {
+        var vehicle = new Vehicle();
+        var weapon = new Weapon();
+        weapon.SetCoid(304, true);
+        var clone = (CloneBaseWeapon)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseWeapon));
+        clone.CloneBaseSpecific = new CloneBaseSpecific
+        {
+            Type = (int)CloneBaseObjectType.Weapon,
+            CloneBaseId = 9001,
+        };
+        clone.WeaponSpecific = new WeaponSpecific { Flags = VehicleEquipmentSlotResolver.WeaponFlagFront };
+        weapon.AssignCloneBaseForTests(clone);
+
+        Assert.IsFalse(vehicle.TryEquipItem(VehicleEquipmentSlot.WeaponTurret, weapon, out _));
+        Assert.IsNull(vehicle.WeaponTurret);
+        Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.WeaponFront, weapon, out _));
+        Assert.AreSame(weapon, vehicle.WeaponFront);
+    }
+
+    [TestMethod]
+    public void TryEquipItem_UnspecifiedWeapon_AllowedOnMelee_TemplateStyle()
+    {
+        // Retail template 884 equips CBID 14070 on WeaponMelee with SubType=0 Flags=0.
+        var vehicle = new Vehicle();
+        var weapon = new Weapon();
+        weapon.SetCoid(305, true);
+        var clone = (CloneBaseWeapon)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseWeapon));
+        clone.CloneBaseSpecific = new CloneBaseSpecific
+        {
+            Type = (int)CloneBaseObjectType.Weapon,
+            CloneBaseId = 14070,
+        };
+        clone.WeaponSpecific = new WeaponSpecific { SubType = 0, Flags = 0 };
+        weapon.AssignCloneBaseForTests(clone);
+
+        Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.WeaponMelee, weapon, out _));
+        Assert.AreSame(weapon, vehicle.WeaponMelee);
     }
 
     [TestMethod]

@@ -124,7 +124,7 @@ public static class ForeignNpcDriverWire
                 ghost.SetMaskBits(GhostVehicle.WheelSetMask);
         }
 
-        if (WireDiag.Enabled)
+        if (LogFilters.ForeignOwnerAttach)
         {
             Logger.WriteLog(LogType.Network,
                 "ForeignOwnerAttachReapply coid={0} driverCoid={1} destroy veh+driver recreate vehicle→creature",

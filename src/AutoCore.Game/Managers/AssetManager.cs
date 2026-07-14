@@ -26,6 +26,8 @@ public class AssetManager : Singleton<AssetManager>
     private Dictionary<int, VehicleTemplate> _testVehicleTemplates;
     private Dictionary<int, CreatureAiProfile> _testCreatureAiProfiles;
     private Dictionary<int, LootTable> _testLootTables;
+    private Dictionary<int, IReadOnlyList<LootWeight>> _testLootWeights;
+    private List<ConsumableLootEntry> _testConsumables;
 
     public string GamePath { get; private set; }
     public ServerType ServerType { get; private set; }
@@ -692,11 +694,36 @@ public class AssetManager : Singleton<AssetManager>
             _testLootTables[table.Id] = table;
     }
 
+    internal void SetTestLootWeights(IEnumerable<LootWeight> weights)
+    {
+        if (weights is null)
+            return;
+
+        _testLootWeights ??= new Dictionary<int, IReadOnlyList<LootWeight>>();
+        foreach (var group in weights.GroupBy(w => w.DestroyedCbid))
+        {
+            var list = group.ToList();
+            if (_testLootWeights.TryGetValue(group.Key, out var existing))
+                list = existing.Concat(list).ToList();
+            _testLootWeights[group.Key] = list;
+        }
+    }
+
+    internal void SetTestConsumables(IEnumerable<ConsumableLootEntry> consumables)
+    {
+        if (consumables is null)
+            return;
+        _testConsumables ??= new List<ConsumableLootEntry>();
+        _testConsumables.AddRange(consumables);
+    }
+
     internal void ClearTestNpcData()
     {
         _testVehicleTemplates = null;
         _testCreatureAiProfiles = null;
         _testLootTables = null;
+        _testLootWeights = null;
+        _testConsumables = null;
     }
 
     public IEnumerable<LootTable> GetAllLootTables()
@@ -705,6 +732,28 @@ public class AssetManager : Singleton<AssetManager>
             return Enumerable.Empty<LootTable>();
 
         return WorldDBLoader.LootTables.Values;
+    }
+
+    /// <summary>Fixed junk rows for a destroyed clonebase CBID (<c>tLootWeights</c>).</summary>
+    public IReadOnlyList<LootWeight> GetLootWeightsForDestroyed(int destroyedCbid)
+    {
+        if (_testLootWeights != null && _testLootWeights.TryGetValue(destroyedCbid, out var testList))
+            return testList;
+
+        if (WorldDBLoader.LootWeights != null &&
+            WorldDBLoader.LootWeights.TryGetValue(destroyedCbid, out var list))
+            return list;
+
+        return Array.Empty<LootWeight>();
+    }
+
+    /// <summary>All consumable loot entries (<c>tConsumables</c>).</summary>
+    public IReadOnlyList<ConsumableLootEntry> GetConsumables()
+    {
+        if (_testConsumables != null)
+            return _testConsumables;
+
+        return WorldDBLoader.Consumables ?? Array.Empty<ConsumableLootEntry>();
     }
     #endregion
 }

@@ -368,8 +368,34 @@ public sealed class InventoryManager
         if (!TryAdd(item))
             return new InventoryCommandResult(BuildCargoAddRejectedMessage(coid, x, y));
 
+        // Persist before client packets so a DB failure is logged with the grant attempt.
+        // Still deliver live packets if persist fails — login ensure will re-grant.
+        var persistOk = true;
         if (characterCoid != 0)
-            PersistCargoUpsert(characterCoid, item);
+        {
+            try
+            {
+                PersistCargoUpsert(characterCoid, item);
+            }
+            catch (Exception ex)
+            {
+                persistOk = false;
+                Logger.WriteLog(LogType.Error,
+                    "GrantMissionCargoItem: persist failed char={0} coid={1} cbid={2}: {3}",
+                    characterCoid,
+                    coid,
+                    cbid,
+                    ex.Message);
+            }
+        }
+        else
+        {
+            persistOk = false;
+            Logger.WriteLog(LogType.Error,
+                "GrantMissionCargoItem: characterCoid=0 — cargo not persisted (cbid={0} itemCoid={1})",
+                cbid,
+                coid);
+        }
 
         IReadOnlyList<BasePacket> packets = new BasePacket[]
         {
@@ -387,8 +413,9 @@ public sealed class InventoryManager
         };
 
         var quantitySuffix = quantity > 1 ? $" x{quantity}" : string.Empty;
+        var persistNote = persistOk ? string.Empty : " (NOT PERSISTED)";
         return new InventoryCommandResult(
-            $"Granted mission cargo {name} ({cbid}){quantitySuffix} at {x},{y}.",
+            $"Granted mission cargo {name} ({cbid}){quantitySuffix} at {x},{y}.{persistNote}",
             packets,
             item);
     }
@@ -470,7 +497,7 @@ public sealed class InventoryManager
         var packets = new List<BasePacket>();
         foreach (var item in Items.OrderBy(i => i.InventoryPositionY).ThenBy(i => i.InventoryPositionX))
         {
-            var entry = catalog.FindAny(item.Cbid);
+            var entry = catalog?.FindAny(item.Cbid);
             var type = entry?.Type ?? item.Type;
             if (entry == null)
             {
@@ -484,18 +511,47 @@ public sealed class InventoryManager
                 continue;
             }
 
-            var createResult = itemCreator.Create(entry, item.Coid, item.InventoryPositionX, item.InventoryPositionY);
-            if (!createResult.WasSuccessful)
-                continue;
+            CreateSimpleObjectPacket createPacket = null;
+            if (itemCreator != null)
+            {
+                var createResult = itemCreator.Create(entry, item.Coid, item.InventoryPositionX, item.InventoryPositionY);
+                if (createResult.WasSuccessful)
+                    createPacket = createResult.Packet;
+            }
 
-            createResult.Packet.Quantity = item.Quantity;
-            createResult.Packet.IsInInventory = true;
+            // Login restore must not drop cargo when the typed factory lacks a clonebase path
+            // (historical QuestObject gap). Mission gear and plain items get a minimal create.
+            createPacket ??= BuildFallbackInventoryCreatePacket(item, type);
+
+            createPacket.Quantity = item.Quantity;
+            createPacket.IsInInventory = true;
+            createPacket.IsIdentified = true;
             if (item.IsMissionItem)
-                createResult.Packet.PossibleMissionItem = true;
-            packets.Add(createResult.Packet);
+                createPacket.PossibleMissionItem = true;
+            packets.Add(createPacket);
         }
 
         return packets;
+    }
+
+    /// <summary>
+    /// Minimal CreateSimpleObject for cargo login restore when AllocateNewObjectFromCBID fails.
+    /// </summary>
+    private static CreateSimpleObjectPacket BuildFallbackInventoryCreatePacket(
+        CharacterInventoryItem item,
+        CloneBaseObjectType type)
+    {
+        var packet = InventoryItemCreator.CreatePacketFor(type);
+        packet.CBID = item.Cbid;
+        packet.ObjectId = new TFID { Coid = item.Coid, Global = true };
+        packet.InventoryPositionX = item.InventoryPositionX;
+        packet.InventoryPositionY = item.InventoryPositionY;
+        packet.Quantity = item.Quantity;
+        packet.IsInInventory = true;
+        packet.IsIdentified = true;
+        packet.IsBound = false;
+        packet.PossibleMissionItem = item.IsMissionItem;
+        return packet;
     }
 
     public InventoryOperationResult Grab(InventoryGrabPacket packet, Character character)

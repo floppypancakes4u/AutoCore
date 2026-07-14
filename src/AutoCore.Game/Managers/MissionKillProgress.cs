@@ -80,17 +80,12 @@ public static class MissionKillProgress
 
             if (quest.ObjectiveProgress[seq] < needed)
             {
-                IncompleteHandlerLog.Warn(
-                    "KillProgress",
-                    $"mission={quest.MissionId} seq={seq} objective={objective.ObjectiveId} progress={quest.ObjectiveProgress[seq]}/{needed}",
-                    "Partial kill progress — ObjectiveState bitmask/slots not fully populated",
-                    "Send ObjectiveState with FirstStateSlot floats / bitmask reflecting kill count.");
-
-                conn.SendGamePacket(new ObjectiveStatePacket
-                {
-                    ObjectiveBitmask = 0u,
-                    ObjectiveId = objective.ObjectiveId,
-                });
+                var partialState = ObjectiveStateBuilder.Build(
+                    objective,
+                    quest.ObjectiveProgress[seq],
+                    needed);
+                if (partialState != null)
+                    conn.SendGamePacket(partialState);
                 MissionPersistence.Instance.OnQuestChanged(killer, quest);
                 NpcInteractHandler.PushJournalMissionList(conn, killer);
                 TriggerManager.Instance.OnMissionStateChanged(

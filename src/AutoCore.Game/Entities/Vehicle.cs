@@ -657,6 +657,7 @@ public class Vehicle : SimpleObject
     /// <summary>
     /// Equips <paramref name="item"/> into <paramref name="slot"/>, replacing any occupant.
     /// Returns the previous occupant (if any) so callers can move it to cargo.
+    /// Rejects C# type mismatches and wrong clonebase / weapon hardpoint (logs loudly).
     /// </summary>
     public bool TryEquipItem(VehicleEquipmentSlot slot, SimpleObject item, out SimpleObject previousItem)
     {
@@ -664,14 +665,165 @@ public class Vehicle : SimpleObject
         if (item == null)
             return false;
 
+        if (!IsCompatibleWithEquipmentSlot(slot, item, out var rejectReason))
+        {
+            Logger.WriteLog(LogType.Error,
+                "TryEquipItem BLOCKED: slot={0} itemCoid={1} itemCbid={2} itemType={3} cloneType={4} reason={5}",
+                slot,
+                item.ObjectId.Coid,
+                item.CBID,
+                item.GetType().Name,
+                item.CloneBaseObject?.GetType().Name ?? "null",
+                rejectReason);
+            return false;
+        }
+
         previousItem = GetEquippedItem(slot);
         if (!AssignEquipmentSlot(slot, item))
         {
             previousItem = null;
+            Logger.WriteLog(LogType.Error,
+                "TryEquipItem BLOCKED: AssignEquipmentSlot failed slot={0} itemCoid={1} itemCbid={2} itemType={3}",
+                slot, item.ObjectId.Coid, item.CBID, item.GetType().Name);
             return false;
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// True when <paramref name="item"/> may occupy <paramref name="slot"/> (runtime type + clonebase).
+    /// Clonebase null is allowed (unit tests / pre-load); wrong clonebase type is not.
+    /// </summary>
+    public static bool IsCompatibleWithEquipmentSlot(
+        VehicleEquipmentSlot slot,
+        SimpleObject item,
+        out string rejectReason)
+    {
+        rejectReason = null;
+        if (item == null)
+        {
+            rejectReason = "item is null";
+            return false;
+        }
+
+        // global:: types: this class has properties named Armor/PowerPlant/WheelSet/Weapon*.
+        // Clonebase match uses Type enum (not only as-cast) so typed WAD rows and test fakes both work;
+        // wrong Type (e.g. Item on a Weapon entity) is blocked.
+        switch (slot)
+        {
+            case VehicleEquipmentSlot.Armor:
+                if (item is not global::AutoCore.Game.Entities.Armor)
+                {
+                    rejectReason = "runtime type is not Armor";
+                    return false;
+                }
+                return CloneBaseTypeMatchesSlot(item, CloneBaseObjectType.Armor, out rejectReason);
+
+            case VehicleEquipmentSlot.PowerPlant:
+                if (item is not global::AutoCore.Game.Entities.PowerPlant)
+                {
+                    rejectReason = "runtime type is not PowerPlant";
+                    return false;
+                }
+                return CloneBaseTypeMatchesSlot(item, CloneBaseObjectType.PowerPlant, out rejectReason);
+
+            case VehicleEquipmentSlot.WheelSet:
+                if (item is not global::AutoCore.Game.Entities.WheelSet)
+                {
+                    rejectReason = "runtime type is not WheelSet";
+                    return false;
+                }
+                return CloneBaseTypeMatchesSlot(item, CloneBaseObjectType.WheelSet, out rejectReason);
+
+            case VehicleEquipmentSlot.WeaponMelee:
+            case VehicleEquipmentSlot.WeaponFront:
+            case VehicleEquipmentSlot.WeaponTurret:
+            case VehicleEquipmentSlot.WeaponRear:
+                if (item is not global::AutoCore.Game.Entities.Weapon weapon)
+                {
+                    rejectReason = "runtime type is not Weapon";
+                    return false;
+                }
+                if (!CloneBaseTypeMatchesSlot(weapon, CloneBaseObjectType.Weapon, out rejectReason))
+                    return false;
+                if (weapon.CloneBaseWeapon != null
+                    && !WeaponCloneMatchesHardpoint(slot, weapon.CloneBaseWeapon, out rejectReason))
+                {
+                    return false;
+                }
+                return true;
+
+            case VehicleEquipmentSlot.Ornament:
+            case VehicleEquipmentSlot.RaceItem:
+                // SimpleObject / Item subtype hardpoints — any non-null graphics object is accepted.
+                return true;
+
+            default:
+                rejectReason = "unknown equipment slot";
+                return false;
+        }
+    }
+
+    private static bool CloneBaseTypeMatchesSlot(
+        SimpleObject item,
+        CloneBaseObjectType expected,
+        out string rejectReason)
+    {
+        rejectReason = null;
+        if (item.CloneBaseObject == null)
+            return true; // unit tests / pre-load
+
+        if (item.CloneBaseObject.Type == expected)
+            return true;
+
+        rejectReason =
+            $"clonebase Type={item.CloneBaseObject.Type} (cbid={item.CBID}) does not match slot expected {expected}";
+        return false;
+    }
+
+    /// <summary>
+    /// Hardpoint flags from client equip helpers (0x02 front, 0x10 turret, 0x04 rear).
+    /// SubType 9 is a cargo <em>auto-resolve</em> hint for melee (VehicleEquipmentSlotResolver),
+    /// not a requirement for explicit template/player equip into the melee slot — retail templates
+    /// often put ordinary weapons (SubType 0, Flags 0) on WeaponMelee (e.g. CBID 14070 / Template 884).
+    /// Flags==0 means unspecified — allow the requested ranged hardpoint.
+    /// </summary>
+    private static bool WeaponCloneMatchesHardpoint(
+        VehicleEquipmentSlot slot,
+        CloneBaseWeapon weapon,
+        out string rejectReason)
+    {
+        rejectReason = null;
+        var subType = weapon.WeaponSpecific.SubType;
+        var flags = weapon.WeaponSpecific.Flags;
+
+        // Explicit equip to melee: any weapon clonebase is valid.
+        if (slot == VehicleEquipmentSlot.WeaponMelee)
+            return true;
+
+        // Melee-only subtype should not sit on front/turret/rear when flags are absent.
+        if (subType == 9 && flags == 0)
+        {
+            rejectReason = "melee SubType 9 cannot equip on ranged hardpoint";
+            return false;
+        }
+
+        if (flags == 0)
+            return true;
+
+        var ok = slot switch
+        {
+            VehicleEquipmentSlot.WeaponFront => (flags & VehicleEquipmentSlotResolver.WeaponFlagFront) != 0,
+            VehicleEquipmentSlot.WeaponTurret => (flags & VehicleEquipmentSlotResolver.WeaponFlagTurret) != 0,
+            VehicleEquipmentSlot.WeaponRear => (flags & VehicleEquipmentSlotResolver.WeaponFlagRear) != 0,
+            _ => false,
+        };
+        if (ok)
+            return true;
+
+        rejectReason = $"weapon Flags=0x{flags:X2} SubType={subType} does not match slot {slot}";
+        return false;
     }
 
     public SimpleObject GetEquippedItem(VehicleEquipmentSlot slot)
@@ -1204,25 +1356,26 @@ public class Vehicle : SimpleObject
                 Armor.WriteToPacket(vehiclePacket.CreateArmor);
             }
 
-            if (WeaponMelee != null)
+            // Skip non-weapon clonebases (WriteToPacket logs + ignores); empty nest = CBID -1 on wire.
+            if (WeaponMelee?.CloneBaseWeapon != null)
             {
                 vehiclePacket.CreateWeaponMelee = new CreateWeaponPacket();
                 WeaponMelee.WriteToPacket(vehiclePacket.CreateWeaponMelee);
             }
 
-            if (WeaponFront != null)
+            if (WeaponFront?.CloneBaseWeapon != null)
             {
                 vehiclePacket.CreateWeapons[0] = new CreateWeaponPacket();
                 WeaponFront.WriteToPacket(vehiclePacket.CreateWeapons[0]);
             }
 
-            if (WeaponTurret != null)
+            if (WeaponTurret?.CloneBaseWeapon != null)
             {
                 vehiclePacket.CreateWeapons[1] = new CreateWeaponPacket();
                 WeaponTurret.WriteToPacket(vehiclePacket.CreateWeapons[1]);
             }
 
-            if (WeaponRear != null)
+            if (WeaponRear?.CloneBaseWeapon != null)
             {
                 vehiclePacket.CreateWeapons[2] = new CreateWeaponPacket();
                 WeaponRear.WriteToPacket(vehiclePacket.CreateWeapons[2]);
@@ -1381,6 +1534,9 @@ public class Vehicle : SimpleObject
         if (packet.ObjectId != ObjectId)
             throw new Exception("WTF? Someone else moves me?");
 
+        // Snapshot before apply — ram uses position delta when packet velocity is near-zero.
+        var previousPosition = Position;
+
         // Update position (even if ghost is not ready — exploration must still track travel).
         Position = packet.Location;
         Rotation = packet.Rotation;
@@ -1394,6 +1550,10 @@ public class Vehicle : SimpleObject
         Firing = packet.Firing;
 
         ExplorationManager.Instance.OnVehicleMoved(this);
+
+        // Server-side ram: client DoVehicleCollision is LOCAL ONLY (no C2S collision packet).
+        // Must run even when Ghost is null so props die + loot while ghosting is not ready.
+        Combat.VehicleMapPropRam.Process(this, previousPosition);
 
         if (Ghost == null)
             return;
@@ -1672,10 +1832,9 @@ public class Vehicle : SimpleObject
 
         GenerateAndSpawnTemplateLoot(killerCharacter);
 
-        // Leave the map first so the destroy-broadcast iteration stays consistent.
+        // Death packets while still on-map/ghosted, then leave.
+        BroadcastDeath(map, vehicleObjectId, deathType, Murderer, Ghost);
         SetMap(null);
-
-        BroadcastDestroy(map, vehicleObjectId);
     }
 
     void NotifySpawnOwnerTriggerEventsOnDeath(SectorMap map, Character killerCharacter)

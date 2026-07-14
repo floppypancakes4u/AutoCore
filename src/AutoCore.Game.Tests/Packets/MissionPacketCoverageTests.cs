@@ -32,6 +32,52 @@ public class MissionPacketCoverageTests
     }
 
     [TestMethod]
+    public void FailMissionPacket_Read_Layout()
+    {
+        // After opcode is consumed by TNLConnection: pad4 + coid i64 + mission i32 + pad4.
+        using var ms = new MemoryStream();
+        var writer = new BinaryWriter(ms);
+        writer.Write(0); // pad
+        writer.Write(18374L);
+        writer.Write(554);
+        writer.Write(0); // pad
+        writer.Flush();
+
+        ms.Position = 0;
+        using var reader = new BinaryReader(ms);
+        var packet = new FailMissionPacket();
+        packet.Read(reader);
+
+        Assert.AreEqual(GameOpcode.FailMission, packet.Opcode);
+        Assert.AreEqual(18374L, packet.CharacterCoid);
+        Assert.AreEqual(554, packet.MissionId);
+        Assert.AreEqual(ms.Length, ms.Position);
+    }
+
+    [TestMethod]
+    public void FailMissionPacket_WriteThenRead_RoundTrips()
+    {
+        var original = new FailMissionPacket
+        {
+            CharacterCoid = 90001,
+            MissionId = 3052,
+        };
+
+        using var ms = new MemoryStream();
+        var writer = new BinaryWriter(ms);
+        original.Write(writer);
+        writer.Flush();
+
+        ms.Position = 0;
+        using var reader = new BinaryReader(ms);
+        var restored = new FailMissionPacket();
+        restored.Read(reader);
+
+        Assert.AreEqual(original.CharacterCoid, restored.CharacterCoid);
+        Assert.AreEqual(original.MissionId, restored.MissionId);
+    }
+
+    [TestMethod]
     public void ConvoyMissionsRequest_Read_IsNoOp()
     {
         var packet = new ConvoyMissionsRequestPacket();

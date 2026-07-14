@@ -7,6 +7,8 @@ public enum QuestPersistKind
 {
     Upsert,
     Complete,
+    /// <summary>Delete active quest row only (fail/abandon). Does not insert completed.</summary>
+    Remove,
 }
 
 /// <summary>
@@ -34,6 +36,9 @@ public readonly struct QuestPersistOp
 
     public static QuestPersistOp Complete()
         => new(QuestPersistKind.Complete, 0, 0, null);
+
+    public static QuestPersistOp Remove()
+        => new(QuestPersistKind.Remove, 0, 0, null);
 }
 
 /// <summary>

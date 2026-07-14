@@ -1,6 +1,7 @@
 namespace AutoCore.Game.Experience;
 
 using AutoCore.Database.Char;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Utils;
 using Microsoft.EntityFrameworkCore;
 
@@ -57,10 +58,13 @@ public sealed class CharacterProgressPersistence : ICharacterProgressPersistence
         character.AttributePerception = progress.AttributePerception;
         context.SaveChanges();
 
-        Logger.WriteLog(
-            LogType.Network,
-            $"SaveProgress: character={characterCoid} level={progress.Level} xp={progress.Experience} " +
-            $"skill={progress.SkillPoints} attrib={progress.AttributePoints} research={progress.ResearchPoints} " +
-            $"tech={progress.AttributeTech} combat={progress.AttributeCombat} theory={progress.AttributeTheory} perception={progress.AttributePerception}");
+        if (LogFilters.SaveProgress)
+        {
+            Logger.WriteLog(
+                LogType.Network,
+                $"SaveProgress: character={characterCoid} level={progress.Level} xp={progress.Experience} " +
+                $"skill={progress.SkillPoints} attrib={progress.AttributePoints} research={progress.ResearchPoints} " +
+                $"tech={progress.AttributeTech} combat={progress.AttributeCombat} theory={progress.AttributeTheory} perception={progress.AttributePerception}");
+        }
     }
 }

@@ -229,11 +229,7 @@ public class Reaction : ClonedObjectBase
                 return HandleCompleteObjective(activator);
 
             case ReactionType.FailMission:
-                LogMissionReactionStub(
-                    "Reaction.FailMission",
-                    "Fail not applied to CurrentQuests/CompletedMissionIds",
-                    "Remove or mark quest failed, send FailMission (0x20B2) if required, clear objective UI, OnMissionStateChanged; honor GenericVar1 mission id if set.");
-                return true;
+                return HandleFailMission(activator);
 
             case ReactionType.AddMissionString:
             case ReactionType.DelMissionString:
@@ -959,6 +955,44 @@ public class Reaction : ClonedObjectBase
             source: "Reaction.CompleteObjective");
 
         // false: skip 0x206C for this reaction — 0x2070 already force-completes client-side.
+        return false;
+    }
+
+    /// <summary>
+    /// FailMission (type 72). GenericVar1 = mission id.
+    /// Server removes active quest + persists; S2C 0x20B2 drives client fail UI.
+    /// Returns false so SectorMap skips 0x206C for this reaction (same pattern as CompleteObjective).
+    /// </summary>
+    private bool HandleFailMission(ClonedObjectBase activator)
+    {
+        var missionId = Template.GenericVar1;
+        Logger.WriteLog(LogType.Debug,
+            "Mission reaction FailMission triggered for reaction {0} mission={1}",
+            Template.COID,
+            missionId);
+
+        if (missionId <= 0)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "FailMission: reaction {0} has GenericVar1={1}; nothing to fail",
+                Template.COID,
+                missionId);
+            return false;
+        }
+
+        var character = GetCharacterFromActivator(activator);
+        if (character == null)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "FailMission: reaction {0} mission={1} — no character from activator",
+                Template.COID,
+                missionId);
+            return false;
+        }
+
+        NpcInteractHandler.FailMission(character.OwningConnection, character, missionId);
+
+        // false: skip 0x206C — FailMissionPacket (0x20B2) already force-fails client-side.
         return false;
     }
 

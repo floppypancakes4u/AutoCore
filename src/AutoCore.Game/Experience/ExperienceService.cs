@@ -1,6 +1,7 @@
 namespace AutoCore.Game.Experience;
 
 using AutoCore.Database.World.Models;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Mission;
@@ -248,7 +249,8 @@ public sealed class ExperienceService : Singleton<ExperienceService>
                 character.OwningConnection.SendGamePacket(levelPacket);
         }
 
-        Logger.WriteLog(
+        LogFilters.WriteIf(
+            LogFilters.GiveXp,
             LogType.Debug,
             "GiveXp: coid={0} source={1} applied={2} total={3} level={4}->{5} notify={6} leveled={7}",
             coid,

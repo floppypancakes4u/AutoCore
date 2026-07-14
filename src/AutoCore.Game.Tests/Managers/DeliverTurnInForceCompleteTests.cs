@@ -121,6 +121,27 @@ public class DeliverTurnInForceCompleteTests
         Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
     }
 
+    [TestMethod]
+    public void DeliverTurnIn_AcceptedFalse_StillCompletesDeliver()
+    {
+        // Retail turn-in OK packets often carry Accepted=false; deliver must still complete.
+        SeedPatrolPlusDeliver();
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map);
+        GiveQuest(character);
+
+        NpcInteractHandler.HandleMissionDialogResponse(conn, new MissionDialogResponsePacket
+        {
+            MissionId = MissionId,
+            Accepted = false,
+            MissionGiver = new TFID(NpcCoid, false),
+        });
+
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId),
+            "Deliver turn-in must complete even when Accepted=false (retail wire)");
+        Assert.IsFalse(character.CurrentQuests.Any(q => q.MissionId == MissionId));
+    }
+
     private void SeedPatrolPlusDeliver()
     {
         var obj = MissionObjective.CreateForTests(ObjectiveId, 0, MissionId, 1);

@@ -321,6 +321,78 @@ public static class WadXmlWorldDataLoader
         return dict;
     }
 
+    /// <summary>
+    /// Loads <c>tLootWeights</c> keyed by destroyed CBID (vehicle/object clonebase).
+    /// </summary>
+    public static IDictionary<int, IReadOnlyList<LootWeight>> LoadLootWeights(string wadXmlPath)
+    {
+        var doc = XDocument.Load(wadXmlPath);
+        var section = doc.Descendants("tLootWeights").FirstOrDefault();
+        if (section == null)
+            return new Dictionary<int, IReadOnlyList<LootWeight>>();
+
+        var buckets = new Dictionary<int, List<LootWeight>>();
+
+        foreach (var row in section.Elements("row"))
+        {
+            var destroyed = GetInt(row, "CBIDDestroyed", defaultValue: -1);
+            var loot = GetInt(row, "CBIDLoot", defaultValue: -1);
+            if (destroyed <= 0 || loot <= 0)
+                continue;
+
+            var weight = (short)Math.Clamp(GetInt(row, "sinWeight", defaultValue: 0), 0, short.MaxValue);
+            if (weight <= 0)
+                continue;
+
+            if (!buckets.TryGetValue(destroyed, out var list))
+            {
+                list = new List<LootWeight>();
+                buckets[destroyed] = list;
+            }
+
+            list.Add(new LootWeight
+            {
+                DestroyedCbid = destroyed,
+                LootCbid = loot,
+                Weight = weight,
+            });
+        }
+
+        return buckets.ToDictionary(
+            kvp => kvp.Key,
+            kvp => (IReadOnlyList<LootWeight>)kvp.Value);
+    }
+
+    /// <summary>
+    /// Loads <c>tConsumables</c> rows used for independent death-loot consumable rolls.
+    /// </summary>
+    public static IReadOnlyList<ConsumableLootEntry> LoadConsumables(string wadXmlPath)
+    {
+        var doc = XDocument.Load(wadXmlPath);
+        var section = doc.Descendants("tConsumables").FirstOrDefault();
+        if (section == null)
+            return Array.Empty<ConsumableLootEntry>();
+
+        var list = new List<ConsumableLootEntry>();
+
+        foreach (var row in section.Elements("row"))
+        {
+            var cbid = GetInt(row, "CBIDItem", defaultValue: -1);
+            if (cbid <= 0)
+                continue;
+
+            list.Add(new ConsumableLootEntry
+            {
+                Cbid = cbid,
+                LevelMin = (short)GetInt(row, "sinLevelMin", defaultValue: 1),
+                LevelMax = (short)GetInt(row, "sinLevelMax", defaultValue: 100),
+                Offset = Math.Max(0, GetInt(row, "intOffset", defaultValue: 1)),
+            });
+        }
+
+        return list;
+    }
+
     public static IDictionary<int, VehicleTemplate> LoadVehicleTemplates(string wadXmlPath)
     {
         var doc = XDocument.Load(wadXmlPath);

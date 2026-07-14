@@ -387,8 +387,7 @@ public class GhostVehicleWireRegressionTests
 
         var stream = PackUpdateNonInitial(vehicle, GhostVehicle.WheelSetMask | GhostVehicle.OrnamentMask);
         Assert.IsFalse(stream.ReadFlag()); // Skills
-        Assert.IsTrue(stream.ReadFlag()); // Wheel mask
-        Assert.IsTrue(stream.ReadFlag()); // present
+        Assert.IsTrue(stream.ReadFlag(), "WheelSet single presence flag");
         stream.ReadInt(20);
         stream.Read(out long wheelCoid);
         Assert.AreEqual(20_111L, wheelCoid);
@@ -398,7 +397,7 @@ public class GhostVehicleWireRegressionTests
         Assert.IsFalse(stream.ReadFlag()); // Rear
         Assert.IsFalse(stream.ReadFlag()); // Melee
         Assert.IsTrue(stream.ReadFlag()); // Ornament mask
-        Assert.IsTrue(stream.ReadFlag()); // present
+        Assert.IsTrue(stream.ReadFlag()); // present (two-flag weapon/ornament form)
         stream.ReadInt(20);
         stream.Read(out long ornamentCoid);
         Assert.AreEqual(20_110L, ornamentCoid);
@@ -461,8 +460,10 @@ public class GhostVehicleWireRegressionTests
         var stream = PackUpdateNonInitial(vehicle, mask);
 
         Assert.IsFalse(stream.ReadFlag()); // Skills
-        // Each equipment mask set, item null → mask true, present false
-        for (var i = 0; i < 6; ++i)
+        // WheelSet single-flag: maskSet && item!=null → false when null (one flag only).
+        Assert.IsFalse(stream.ReadFlag(), "WheelSet single presence false when null");
+        // Weapons/ornament: two-flag form — mask true, present false
+        for (var i = 0; i < 5; ++i)
         {
             Assert.IsTrue(stream.ReadFlag(), $"hardpoint mask {i}");
             Assert.IsFalse(stream.ReadFlag(), $"hardpoint present {i}");
@@ -767,8 +768,7 @@ public class GhostVehicleWireRegressionTests
         var stream = PackUpdateNonInitial(vehicle, GhostVehicle.WheelSetMask | GhostVehicle.FrontWeaponMask);
 
         Assert.IsFalse(stream.ReadFlag()); // Skills
-        Assert.IsTrue(stream.ReadFlag(), "WheelSetMask must pack under minimal foreign delta");
-        Assert.IsTrue(stream.ReadFlag(), "wheel present");
+        Assert.IsTrue(stream.ReadFlag(), "WheelSet single presence flag must pack under minimal foreign delta");
         stream.ReadInt(20); // CBID (may be 0 without clonebase — hardpoint presence is the contract)
         stream.Read(out long wheelCoid);
         Assert.AreEqual(MapNpcIdentity.CoidBase + 20_174, wheelCoid);
@@ -839,9 +839,8 @@ public class GhostVehicleWireRegressionTests
         packed.ReadInt(8); // tricks
         Assert.IsFalse(packed.ReadFlag()); // trailer
         Assert.IsFalse(packed.ReadFlag()); // owner
-        // Initial packs skip Skills (delta-only); first mask flag is WheelSet.
-        Assert.IsTrue(packed.ReadFlag(), "WheelSet mask admitted on minimal initial when lever on");
-        Assert.IsTrue(packed.ReadFlag(), "wheel present");
+        // Initial packs skip Skills (delta-only); first mask flag is WheelSet (single presence).
+        Assert.IsTrue(packed.ReadFlag(), "WheelSet single presence flag on minimal initial when lever on");
         packed.ReadInt(20);
         packed.Read(out long wheelCoid);
         Assert.AreEqual(MapNpcIdentity.CoidBase + 20_177, wheelCoid);
@@ -876,11 +875,11 @@ public class GhostVehicleWireRegressionTests
         stream.ReadInt(8); // trick count
         Assert.IsFalse(stream.ReadFlag()); // trailer
         Assert.IsFalse(stream.ReadFlag()); // owner
-        Assert.IsTrue(stream.ReadFlag(), "WheelSet admitted on minimal initial (hardpoint lever)");
-        Assert.IsTrue(stream.ReadFlag()); // wheel present
+        Assert.IsTrue(stream.ReadFlag(), "WheelSet single presence on minimal initial (hardpoint lever)");
         stream.ReadInt(20); // CBID
         stream.Read(out long _); // wheel coid
         stream.ReadFlag(); // global
+        // Front/Turret/Rear/Melee (one flag each when mask off) + Ornament (1) + Armor (1) = 6
         for (var i = 0; i < 6; ++i)
             Assert.IsFalse(stream.ReadFlag(), $"equipment lead flag {i + 1} must stay false");
         Assert.IsFalse(stream.ReadFlag()); // GM

@@ -54,6 +54,13 @@ public class MissionPersistence : Singleton<MissionPersistence>
         MaybeFlush();
     }
 
+    /// <summary>Enqueue fail/abandon: delete the active-quest row only (no completed-mission insert).</summary>
+    public void OnMissionFailed(long coid, int missionId)
+    {
+        _persistQueue.Enqueue(coid, missionId, QuestPersistOp.Remove());
+        MaybeFlush();
+    }
+
     /// <summary>Drain pending mission writes (background path / disconnect / tests).</summary>
     public int FlushPending()
     {
@@ -213,6 +220,17 @@ public class MissionPersistence : Singleton<MissionPersistence>
                             MissionId = missionId,
                         });
                     }
+
+                    break;
+                }
+
+                case QuestPersistKind.Remove:
+                {
+                    // Fail/abandon: drop active row only — free retry, not a completed grant.
+                    var row = context.CharacterQuests
+                        .FirstOrDefault(q => q.CharacterCoid == coid && q.MissionId == missionId);
+                    if (row != null)
+                        context.CharacterQuests.Remove(row);
 
                     break;
                 }

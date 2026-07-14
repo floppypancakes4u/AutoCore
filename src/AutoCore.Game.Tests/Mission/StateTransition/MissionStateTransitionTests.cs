@@ -354,19 +354,19 @@ public class MissionStateTransitionTests
 
     [TestMethod]
     [TestCategory("MissionCritical")]
-    public void FailMissionReaction_IsStub_DoesNotClearActiveQuest()
+    public void FailMissionReaction_ClearsActiveQuest_DoesNotComplete()
     {
-        // Characterization of current IncompleteHandlerLog stub — not a fix request.
         var o0 = _fx.CreateSimpleObjective(ObjectiveA, 0, MissionId);
         _fx.SeedMission(MissionId, 0, o0);
         var player = _fx.CreatePlayer();
         _fx.GiveQuest(player.Character, MissionId);
 
         var reaction = _fx.PlaceReaction(player.Map, _fx.NextCoid(), ReactionType.FailMission, MissionId);
-        Assert.IsTrue(reaction.TriggerIfPossible(player.Character));
+        Assert.IsFalse(reaction.TriggerIfPossible(player.Character));
 
-        MissionInvariantAssertions.AssertActiveMission(player.Character, MissionId, 0);
+        MissionInvariantAssertions.AssertNotActive(player.Character, MissionId);
         Assert.IsFalse(player.Character.CompletedMissionIds.Contains(MissionId));
+        Assert.IsTrue(_fx.CountPackets<FailMissionPacket>() >= 1);
     }
 
     [TestMethod]

@@ -31,6 +31,9 @@ public sealed class InventoryItemCreator : IInventoryItemCreator
         packet.Quantity = 1;
         packet.IsBound = false;
         packet.IsIdentified = true;
+        // Quest/mission clonebase types open Mission Inventory UI on the client.
+        if (entry.Type is CloneBaseObjectType.QuestObject or CloneBaseObjectType.MissionObject)
+            packet.PossibleMissionItem = true;
 
         var displayName = string.IsNullOrWhiteSpace(entry.DisplayName)
             ? cloneBase.CloneBaseSpecific.UniqueName

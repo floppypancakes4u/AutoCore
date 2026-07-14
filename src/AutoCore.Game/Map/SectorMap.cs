@@ -1016,18 +1016,27 @@ public class SectorMap
     /// Suppress fam-active mission-giver spawns only when the turn-in / post-mission face is a
     /// <b>different</b> CBID (pad form). Same-NPC return missions (Red Tape / Kelly Sweet class)
     /// must keep the giver interactable for deliver turn-in.
+    /// Active completing deliver CBIDs always win over completed-giver suppress (Room and
+    /// Motherboard class: Hutchins was a past alt-form giver, now a turn-in target).
     /// </summary>
     private void ApplyGiverSuppressionForWorldPhase(Character character)
     {
         var giverCbids = new HashSet<int>();
+        var activeDeliverCbids = new HashSet<int>();
 
         foreach (var quest in character.CurrentQuests)
         {
             var mission = AssetManager.Instance.GetMission(quest.MissionId);
-            if (mission == null || mission.NPC <= 0)
+            if (mission == null)
                 continue;
 
             if (!mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var objective))
+                continue;
+
+            foreach (var cbid in MissionWorldPhaseRules.CollectActiveCompletingDeliverCbids(objective))
+                activeDeliverCbids.Add(cbid);
+
+            if (mission.NPC <= 0)
                 continue;
 
             // Suppress giver only when active deliver targets a different NPC (pad / alternate form).
@@ -1035,22 +1044,50 @@ public class SectorMap
                 giverCbids.Add(mission.NPC);
         }
 
+        // Completed non-pad alt-form givers (Track This / class report): clear prior suppress so
+        // follow-up offers and later turn-ins to the same standing NPC still work.
+        var completedNonPadGiverCbids = new HashSet<int>();
+
         foreach (var missionId in character.CompletedMissionIds)
         {
             var mission = AssetManager.Instance.GetMission(missionId);
             if (mission == null || mission.IsRepeatable != 0 || mission.NPC <= 0)
                 continue;
 
-            // Post-complete: keep pad form only when deliver was to a different CBID than the giver.
-            var hadAlternateDeliver = mission.Objectives.Values.Any(o =>
-                HasAlternateFormDeliver(o, mission.NPC));
-            if (hadAlternateDeliver)
+            // Post-complete suppress only when alternate deliver used a pad-class form
+            // (fam-inactive spawn). Mere "talk to another standing NPC" must not permanently
+            // hide the original giver (Hutchins after Track This / class intros).
+            var hasPadClass = MissionHasPadClassAlternateDeliver(mission);
+            var hasAlt = mission.Objectives != null
+                && mission.Objectives.Values.Any(o => HasAlternateFormDeliver(o, mission.NPC));
+            if (MissionWorldPhaseRules.IsCompletedNonPadAlternateFormGiver(
+                    missionValid: true,
+                    isRepeatable: mission.IsRepeatable != 0,
+                    giverNpcCbid: mission.NPC,
+                    hasPadClassAlternateDeliver: hasPadClass,
+                    hasAnyAlternateFormDeliver: hasAlt))
+            {
+                completedNonPadGiverCbids.Add(mission.NPC);
+                continue;
+            }
+
+            if (hasPadClass)
                 giverCbids.Add(mission.NPC);
         }
+
+        // Never suppress an NPC the player must UseObject for an active completing deliver.
+        MissionWorldPhaseRules.ExcludeActiveDeliverFromGiverSuppress(giverCbids, activeDeliverCbids);
 
         // Same-NPC return missions: clear any prior incorrect suppress so turn-in works again
         // without requiring a full map leave / relog.
         UnsuppressSameNpcDeliverGivers(character, giverCbids);
+
+        // Clear prior completed-giver suppress when that CBID is now an active deliver target
+        // (including alternate-form turn-ins, not only same-NPC returns).
+        UnsuppressPresenceForCbids(character, activeDeliverCbids, "active deliver turn-in");
+
+        // Clear sticky suppress from older phase policy / prior login for non-pad completed givers.
+        UnsuppressPresenceForCbids(character, completedNonPadGiverCbids, "completed non-pad alt giver");
 
         if (giverCbids.Count == 0)
             return;
@@ -1099,8 +1136,8 @@ public class SectorMap
     }
 
     /// <summary>
-    /// For active same-NPC deliver (and completed same-NPC missions), unsuppress fam-active
-    /// spawns matching the giver CBID so UseObject is not rejected.
+    /// For active same-NPC deliver, unsuppress fam-active spawns matching the giver CBID so
+    /// UseObject is not rejected.
     /// </summary>
     private void UnsuppressSameNpcDeliverGivers(Character character, HashSet<int> alternateFormGiverCbids)
     {
@@ -1123,8 +1160,40 @@ public class SectorMap
                 sameNpcGiverCbids.Add(mission.NPC);
         }
 
-        if (sameNpcGiverCbids.Count == 0)
+        UnsuppressPresenceForCbids(character, sameNpcGiverCbids, "same-NPC giver");
+    }
+
+    /// <summary>
+    /// True when any completing alternate-form deliver on the mission targets a CBID that has a
+    /// fam-inactive (pad) spawn on this map — Final Exam class, not standing-NPC turn-ins.
+    /// </summary>
+    private bool MissionHasPadClassAlternateDeliver(Mission mission)
+    {
+        if (mission?.Objectives == null || mission.NPC <= 0)
+            return false;
+
+        foreach (var objective in mission.Objectives.Values)
+        {
+            foreach (var cbid in MissionWorldPhaseRules.CollectPadDeliverCbids(objective, mission.NPC))
+            {
+                if (HasFamInactiveSpawnForType(cbid))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Unsuppress fam-active spawns and live creatures/vehicles whose spawn-list type or CBID
+    /// is in <paramref name="cbids"/> for this character only.
+    /// </summary>
+    private void UnsuppressPresenceForCbids(Character character, HashSet<int> cbids, string reason)
+    {
+        if (character == null || cbids == null || cbids.Count == 0)
             return;
+
+        character.MapPresence.EnsureContinent(ContinentId);
 
         foreach (var kvp in MapData.Templates)
         {
@@ -1134,7 +1203,7 @@ public class SectorMap
             var matches = false;
             foreach (var entry in tpl.Spawns)
             {
-                if (entry.SpawnType > 0 && sameNpcGiverCbids.Contains(entry.SpawnType))
+                if (entry.SpawnType > 0 && cbids.Contains(entry.SpawnType))
                 {
                     matches = true;
                     break;
@@ -1158,27 +1227,33 @@ public class SectorMap
                         character.MapPresence.Unsuppress(creature.ObjectId.Coid);
                     else if (obj is Vehicle vehicle && vehicle.SpawnOwnerCoid == spawnCoid)
                         character.MapPresence.Unsuppress(vehicle.ObjectId.Coid);
-                    else if (obj is Creature c && c.CBID > 0 && sameNpcGiverCbids.Contains(c.CBID))
-                        character.MapPresence.Unsuppress(c.ObjectId.Coid);
-                }
-            }
-
-            // Also unsuppress live creatures with the giver CBID (map identity COIDs).
-            foreach (var obj in Objects.Values)
-            {
-                if (obj is Creature creature
-                    && creature.CBID > 0
-                    && sameNpcGiverCbids.Contains(creature.CBID))
-                {
-                    character.MapPresence.Unsuppress(creature.ObjectId.Coid);
                 }
             }
 
             Logger.WriteLog(LogType.Debug,
-                "SectorMap {0}: phase unsuppress same-NPC giver spawn coid={1} for char={2}",
+                "SectorMap {0}: phase unsuppress {1} spawn coid={2} for char={3}",
                 ContinentId,
+                reason,
                 spawnCoid,
                 character.ObjectId.Coid);
+        }
+
+        // Live map-NPC identity creatures (runtime COIDs) matching the CBID.
+        foreach (var obj in Objects.Values)
+        {
+            if (obj is Creature creature
+                && creature is not Character
+                && creature.CBID > 0
+                && cbids.Contains(creature.CBID))
+            {
+                character.MapPresence.Unsuppress(creature.ObjectId.Coid);
+            }
+            else if (obj is Vehicle vehicle
+                && vehicle.CBID > 0
+                && cbids.Contains(vehicle.CBID))
+            {
+                character.MapPresence.Unsuppress(vehicle.ObjectId.Coid);
+            }
         }
     }
 

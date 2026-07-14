@@ -504,7 +504,8 @@ public partial class TNLConnection : GhostConnection
 
     public void SendGamePacket(BasePacket packet, RPCGuaranteeType type = RPCGuaranteeType.RPCGuaranteedOrdered, bool skipOpcode = false)
     {
-        Logger.WriteLog(LogType.Network, "Outgoing Packet: {0}", packet.Opcode);
+        if (Diagnostics.LogFilters.OutgoingPackets)
+            Logger.WriteLog(LogType.Network, "Outgoing Packet: {0}", packet.Opcode);
 
         if (TestPacketSink != null)
         {
@@ -561,9 +562,12 @@ public partial class TNLConnection : GhostConnection
                 objectCoid = cv.ObjectId?.Coid ?? 0;
                 detail = WireDiag.FormatCreateVehicleDetail(cv);
                 var wireWheelCbid = WireDiag.ExtractNestedWheelCbidFromWire(arr);
-                Logger.WriteLog(LogType.Network,
-                    "CreateVehicle wire coid={0} bytes={1} {2} wireScanWheelCbid={3}",
-                    objectCoid, arr.Length, detail, wireWheelCbid);
+                if (Diagnostics.LogFilters.CreateVehicleWire)
+                {
+                    Logger.WriteLog(LogType.Network,
+                        "CreateVehicle wire coid={0} bytes={1} {2} wireScanWheelCbid={3}",
+                        objectCoid, arr.Length, detail, wireWheelCbid);
+                }
                 if (wireWheelCbid != int.MinValue && wireWheelCbid <= 0)
                 {
                     Logger.WriteLog(LogType.Error,
@@ -631,10 +635,13 @@ public partial class TNLConnection : GhostConnection
             or GameOpcode.InventoryGrabResponse
             or GameOpcode.InventoryDropResponse)
         {
-            var previewLength = Math.Min(arr.Length, 96);
-            Logger.WriteLog(
-                LogType.Debug,
-                $"Outgoing InventoryFlow Packet: {packet.Opcode} bytes={arr.Length} preview={Convert.ToHexString(arr.AsSpan(0, previewLength))}");
+            if (Diagnostics.LogFilters.InventoryFlow)
+            {
+                var previewLength = Math.Min(arr.Length, 96);
+                Logger.WriteLog(
+                    LogType.Debug,
+                    $"Outgoing InventoryFlow Packet: {packet.Opcode} bytes={arr.Length} preview={Convert.ToHexString(arr.AsSpan(0, previewLength))}");
+            }
         }
 
         var arrLength = (uint)arr.Length;
@@ -723,7 +730,8 @@ public partial class TNLConnection : GhostConnection
                 break;
 
             default:
-                Logger.WriteLog(LogType.Network, "Incoming Packet: {0}", gameOpcode);
+                if (Diagnostics.LogFilters.IncomingPackets)
+                    Logger.WriteLog(LogType.Network, "Incoming Packet: {0}", gameOpcode);
                 break;
         }
 
@@ -855,6 +863,10 @@ public partial class TNLConnection : GhostConnection
 
                 case GameOpcode.AutoPatrol:
                     HandleAutoPatrolPacket(reader);
+                    break;
+
+                case GameOpcode.FailMission:
+                    HandleFailMissionPacket(reader);
                     break;
 
                 case GameOpcode.MissionDialogResponse:

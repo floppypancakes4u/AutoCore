@@ -30,6 +30,53 @@ public class WadXmlNpcDataLoaderTests
     }
 
     [TestMethod]
+    public void LoadLootWeights_ParsesDestroyedLootWeight()
+    {
+        File.WriteAllText(_tempXmlPath, """
+            <wad>
+              <tLootWeights>
+                <row><CBIDDestroyed>807</CBIDDestroyed><CBIDLoot>2580</CBIDLoot><sinWeight>500</sinWeight></row>
+                <row><CBIDDestroyed>807</CBIDDestroyed><CBIDLoot>4517</CBIDLoot><sinWeight>250</sinWeight></row>
+                <row><CBIDDestroyed>1192</CBIDDestroyed><CBIDLoot>2580</CBIDLoot><sinWeight>500</sinWeight></row>
+              </tLootWeights>
+            </wad>
+            """);
+
+        var byDestroyed = WadXmlWorldDataLoader.LoadLootWeights(_tempXmlPath);
+
+        Assert.AreEqual(2, byDestroyed.Count);
+        Assert.IsTrue(byDestroyed.ContainsKey(807));
+        Assert.AreEqual(2, byDestroyed[807].Count);
+        Assert.AreEqual(2580, byDestroyed[807][0].LootCbid);
+        Assert.AreEqual((short)500, byDestroyed[807][0].Weight);
+        Assert.AreEqual(4517, byDestroyed[807][1].LootCbid);
+        Assert.AreEqual(1, byDestroyed[1192].Count);
+    }
+
+    [TestMethod]
+    public void LoadConsumables_ParsesLevelAndOffset()
+    {
+        File.WriteAllText(_tempXmlPath, """
+            <wad>
+              <tConsumables>
+                <row><CBIDItem>333</CBIDItem><sinLevelMin>1</sinLevelMin><sinLevelMax>100</sinLevelMax><intOffset>1000</intOffset></row>
+                <row><CBIDItem>2002</CBIDItem><sinLevelMin>1</sinLevelMin><sinLevelMax>100</sinLevelMax><intOffset>10000</intOffset></row>
+              </tConsumables>
+            </wad>
+            """);
+
+        var list = WadXmlWorldDataLoader.LoadConsumables(_tempXmlPath);
+
+        Assert.AreEqual(2, list.Count);
+        Assert.AreEqual(333, list[0].Cbid);
+        Assert.AreEqual((short)1, list[0].LevelMin);
+        Assert.AreEqual((short)100, list[0].LevelMax);
+        Assert.AreEqual(1000, list[0].Offset);
+        Assert.AreEqual(2002, list[1].Cbid);
+        Assert.AreEqual(10000, list[1].Offset);
+    }
+
+    [TestMethod]
     public void LoadVehicleTemplates_ParsesRowFields()
     {
         File.WriteAllText(_tempXmlPath, """

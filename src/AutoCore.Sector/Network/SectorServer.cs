@@ -1,5 +1,6 @@
 ﻿namespace AutoCore.Sector.Network;
 
+using AutoCore.Game.Combat;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Managers;
@@ -134,9 +135,12 @@ public partial class SectorServer : BaseServer, ILoopable
                 }
 
                 var packs = System.Threading.Interlocked.Exchange(ref GhostVehicle.PosePacksSinceDiag, 0);
-                Logger.WriteLog(LogType.Network,
-                    "PathPoseForce dirtyGhosted={0} posePacks2s={1}{2}",
-                    pathPoseDirty, packs, rates);
+                if (LogFilters.PathPoseForce)
+                {
+                    Logger.WriteLog(LogType.Network,
+                        "PathPoseForce dirtyGhosted={0} posePacks2s={1}{2}",
+                        pathPoseDirty, packs, rates);
+                }
             }
 
             // Server-side combat tick: decouple firing from VehicleMoved packet arrival rate.
@@ -150,6 +154,9 @@ public partial class SectorServer : BaseServer, ILoopable
                 combatEntries.Add((coid, () => conn?.CurrentCharacter?.CurrentVehicle?.ProcessCombatIfFiring()));
             }
             SectorCombatTick.ProcessAll(combatEntries);
+
+            // Delayed map-prop corpse despawn (ram wrecks stay ~12.5s then DestroyObject).
+            MapPropCorpseDespawn.Tick();
 
             // Combat pools (heat cool / shield / power / HP regen) — CVOGHBRegeneration @ 3000 ms.
             // Accumulate MainLoop delta into discrete 3000 ms pulses per player vehicle.

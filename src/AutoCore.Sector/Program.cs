@@ -41,6 +41,7 @@ public class Program : ExitableProgram
         Server.Setup(config);
 
         WireIsolationLevers.ApplyFromEnvironmentAndConfigFiles();
+        LogFilters.ApplyFromConfigFiles();
 
         if (!AssetManager.Instance.Initialize(config.GamePath, ServerType.Sector, false))
         {
@@ -53,6 +54,9 @@ public class Program : ExitableProgram
             Logger.WriteLog(LogType.Error, "Critical asset loading failed! Cannot continue without WAD or GLM files.");
             throw new Exception("Critical asset loading failed!");
         }
+
+        // Loot rate from loot.tuning.json (1.0 = retail; higher = more drops).
+        LootTuning.ApplyFromConfigFiles();
 
         // Initialize the loot manager (builds item index from CloneBase data)
         LootManager.Instance.Initialize();

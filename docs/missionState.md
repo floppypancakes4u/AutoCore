@@ -231,14 +231,17 @@ This is how retail seeds starter missions each session (e.g. map 707 grants miss
   `AdvanceOrCompleteObjective`.
 - Patrol: `NpcInteractHandler.HandleAutoPatrol` (0x20B3).
 - Use item/object: `HandleUseObject` (0x2072) → `TryCompleteUseItemObjective`.
-- Deliver turn-in: `TryCompleteDeliverFromDialog` — removes quest, adds to `CompletedMissionIds`,
-  sends `CompleteDynamicObjectivePacket`.
+- Deliver turn-in: `TryCompleteDeliverFromDialog` → shared `AdvanceOrCompleteObjective` with
+  `sendCompleteDynamicObjective: false` / deferred client sync (soft-pedal). Advances sequence when
+  later objectives exist; only on final objective removes quest + `CompletedMissionIds` + rewards
+  (`notifyClient: false`). Optional delayed `0x2070` for multi-req final (patrol+deliver).
 
-**Advance/complete** — `NpcInteractHandler.AdvanceOrCompleteObjective` (1001–1105): send
-`CompleteDynamicObjectivePacket`; if a higher `Sequence` exists → set `ActiveObjectiveSequence`,
-mark old progress full, send `ObjectiveStatePacket`; else remove from `CurrentQuests` + add to
-`CompletedMissionIds`. **Rewards not applied and state not persisted** — logged via
-`IncompleteHandlerLog.Warn` (e.g. 1099).
+**Advance/complete** — `NpcInteractHandler.AdvanceOrCompleteObjective`: optional
+`CompleteDynamicObjectivePacket` (default on for server-driven paths); if a higher `Sequence`
+exists → set `ActiveObjectiveSequence`, mark old progress full, `OnQuestChanged`, send
+`ObjectiveStatePacket`, ensure next cargo; else remove from `CurrentQuests` +
+`CompletedMissionIds` + `ApplyMissionCompleteRewards`. Dialog paths pass flags to skip immediate
+`0x2070` and journal/phase (caller soft-pedals).
 
 **Fail / abandon** — `Reaction.FailMission` (type 72) is a **stub** (`Reaction.cs:235-240`);
 `FailMissionPacket` exists but is not wired to any lifecycle sender; there is no abandon path.

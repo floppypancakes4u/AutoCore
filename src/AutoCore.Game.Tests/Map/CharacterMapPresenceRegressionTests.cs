@@ -34,12 +34,14 @@ public class CharacterMapPresenceRegressionTests
         p.Materialize(20);
         p.TrackOwnedCombat(30);
         p.MarkDeliverTurnInReady(99);
+        p.MarkStalePatrolResync(3979);
         p.EnsureContinent(2);
         Assert.AreEqual(2, p.ContinentId);
         Assert.IsFalse(p.IsSuppressed(10));
         Assert.IsFalse(p.IsMaterialized(20));
         Assert.IsFalse(p.OwnsCombat(30));
         Assert.IsFalse(p.IsDeliverTurnInReady(99));
+        Assert.IsFalse(p.HasStalePatrolResync(3979));
     }
 
     [TestMethod]
@@ -51,12 +53,14 @@ public class CharacterMapPresenceRegressionTests
         p.Materialize(2);
         p.TrackOwnedCombat(3);
         p.MarkDeliverTurnInReady(4);
+        p.MarkStalePatrolResync(3979);
         p.Clear();
         Assert.AreEqual(-1, p.ContinentId);
         Assert.IsFalse(p.IsSuppressed(1));
         Assert.IsFalse(p.IsMaterialized(2));
         Assert.IsFalse(p.OwnsCombat(3));
         Assert.IsFalse(p.IsDeliverTurnInReady(4));
+        Assert.IsFalse(p.HasStalePatrolResync(3979));
     }
 
     [TestMethod]

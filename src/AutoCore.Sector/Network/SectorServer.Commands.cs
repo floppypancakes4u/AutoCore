@@ -12,6 +12,8 @@ public partial class SectorServer
         CommandProcessor.RegisterCommand("sector.wire", ProcessWireCommand);
         // Alias when TrimScope strips "sector." → "wire"
         CommandProcessor.RegisterCommand("wire", ProcessWireCommand);
+        CommandProcessor.RegisterCommand("sector.log", ProcessLogCommand);
+        CommandProcessor.RegisterCommand("log", ProcessLogCommand);
         CommandProcessor.RegisterCommand("sector.tick", ProcessTickCommand);
         CommandProcessor.RegisterCommand("tick", ProcessTickCommand);
     }
@@ -31,6 +33,11 @@ public partial class SectorServer
     private static void ProcessWireCommand(string[] parts)
     {
         WireIsolationLevers.HandleConsoleCommand(parts);
+    }
+
+    private static void ProcessLogCommand(string[] parts)
+    {
+        LogFilters.HandleConsoleCommand(parts);
     }
 
     /// <summary>

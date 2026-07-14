@@ -166,6 +166,165 @@ public class AutoPatrolTests
     }
 
     [TestMethod]
+    public void HandleAutoPatrol_ClientAheadOnPatrol_WhileServerStillOnPriorDeliver_Advances()
+    {
+        // Track This class: client finished deliver dialog locally; server still seq=0 deliver;
+        // AutoPatrol on the next objective's waypoint must reconcile then complete/advance patrol.
+        const int deliverObj = ObjectiveIdA;
+        const int patrolObj = ObjectiveIdB;
+        const int afterPatrolObj = 92202;
+        const long pad = WaypointCoid;
+        const int deliverNpc = 93400;
+
+        var d0 = MissionObjective.CreateForTests(deliverObj, 0, MissionId, 1);
+        d0.Requirements.Add(new ObjectiveRequirementDeliver(d0)
+        {
+            NPCTargetCBID = deliverNpc,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 0,
+            TakeItemAtEnd = false,
+        });
+        var patrol = MissionObjective.CreateForTests(patrolObj, 1, MissionId, 1);
+        var patrolReq = new ObjectiveRequirementPatrol(patrol)
+        {
+            AutoComplete = true,
+            AutoCompleteDistance = 30f,
+            TargetCount = 1,
+        };
+        patrolReq.GenericTargets[0] = pad;
+        patrol.Requirements.Add(patrolReq);
+        var d2 = MissionObjective.CreateForTests(afterPatrolObj, 2, MissionId, 1);
+        d2.Requirements.Add(new ObjectiveRequirementDeliver(d2)
+        {
+            NPCTargetCBID = deliverNpc,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 0,
+            TakeItemAtEnd = true,
+        });
+        AssetManager.Instance.SetTestMission(Mission.CreateForTests(MissionId, d0, patrol, d2));
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceWaypoint(map, pad, new Vector3(5, 0, 0));
+        character.CurrentVehicle.Position = new Vector3(5, 0, 0);
+        GiveQuest(character, MissionId);
+        Assert.AreEqual(0, character.CurrentQuests[0].ActiveObjectiveSequence);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(pad, false),
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests.Count);
+        Assert.AreEqual(2, character.CurrentQuests[0].ActiveObjectiveSequence,
+            "reconcile deliver → complete patrol → active final deliver");
+        Assert.IsFalse(character.CompletedMissionIds.Contains(MissionId));
+    }
+
+    [TestMethod]
+    public void HandleAutoPatrol_HeightDelta_StillInXZRange_Completes()
+    {
+        SeedPatrolMission(MissionId, ObjectiveIdA, WaypointCoid, autoCompleteDist: 25f, nextObjectiveId: null);
+        var (conn, character, map) = CreatePlayer();
+        PlaceWaypoint(map, WaypointCoid, new Vector3(0, 0, 0));
+        // Vehicle high above pad (map-Y mismatch) but same XZ — must still count.
+        character.CurrentVehicle.Position = new Vector3(0, 40, 0);
+        GiveQuest(character, MissionId);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(WaypointCoid, false),
+        });
+
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId),
+            "AutoPatrol range must use XZ so map height skew does not block pads");
+    }
+
+    [TestMethod]
+    public void HandleAutoPatrol_UnlistedTargetMissingFromMap_NoProgress()
+    {
+        SeedPatrolMission(MissionId, ObjectiveIdA, WaypointCoid, autoCompleteDist: 30f, nextObjectiveId: null);
+        var (conn, character, map) = CreatePlayer();
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        GiveQuest(character, MissionId);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(999_888, false),
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests.Count);
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+    }
+
+    [TestMethod]
+    public void HandleAutoPatrol_PastPatrolPadWhileOnLaterDeliver_ResyncsClientOnce()
+    {
+        // Track This: server on final deliver (seq2); client still AutoPatrols finished pad.
+        const int deliverObj = ObjectiveIdA;
+        const int patrolObj = ObjectiveIdB;
+        const int finalDeliverObj = 92202;
+        const long pad = WaypointCoid;
+        const int deliverNpc = 93400;
+
+        var d0 = MissionObjective.CreateForTests(deliverObj, 0, MissionId, 1);
+        d0.Requirements.Add(new ObjectiveRequirementDeliver(d0)
+        {
+            NPCTargetCBID = deliverNpc,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 0,
+        });
+        var patrol = MissionObjective.CreateForTests(patrolObj, 1, MissionId, 1);
+        var patrolReq = new ObjectiveRequirementPatrol(patrol)
+        {
+            AutoComplete = true,
+            AutoCompleteDistance = 30f,
+            TargetCount = 1,
+        };
+        patrolReq.GenericTargets[0] = pad;
+        patrol.Requirements.Add(patrolReq);
+        var d2 = MissionObjective.CreateForTests(finalDeliverObj, 2, MissionId, 1);
+        d2.Requirements.Add(new ObjectiveRequirementDeliver(d2)
+        {
+            NPCTargetCBID = deliverNpc,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 0,
+            TakeItemAtEnd = true,
+        });
+        AssetManager.Instance.SetTestMission(Mission.CreateForTests(MissionId, d0, patrol, d2));
+
+        var (conn, character, map) = CreatePlayer();
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        var quest = new CharacterQuest(MissionId, 2); // already past patrol
+        quest.PopulateFromAssets();
+        character.CurrentQuests.Add(quest);
+        character.MapPresence.EnsureContinent(ContId);
+        _sent.Clear();
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(pad, false),
+        });
+
+        Assert.AreEqual(2, character.CurrentQuests[0].ActiveObjectiveSequence,
+            "must not re-advance server past final deliver");
+        Assert.IsTrue(
+            _sent.OfType<CompleteDynamicObjectivePacket>().Any(p => p.ObjectiveId == patrolObj),
+            "must force-complete finished patrol so client clears waypoints");
+        Assert.IsTrue(
+            _sent.OfType<ObjectiveStatePacket>().Any(p => p.ObjectiveId == finalDeliverObj),
+            "must resync active deliver objective");
+        Assert.IsTrue(character.MapPresence.HasStalePatrolResync(MissionId));
+
+        _sent.Clear();
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(pad, false),
+        });
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count(),
+            "stale patrol resync is one-shot per mission/map");
+    }
+
+    [TestMethod]
     public void HandleAutoPatrol_NullGuards_NoThrow()
     {
         NpcInteractHandler.HandleAutoPatrol(null, new AutoPatrolPacket());
@@ -325,11 +484,13 @@ public class AutoPatrolTests
     }
 
     [TestMethod]
-    public void HandleAutoPatrol_ListedTargetMissingFromWorld_NoProgress()
+    public void HandleAutoPatrol_ListedTargetMissingFromWorld_TrustsClientAndCompletes()
     {
+        // Track This class: GenericTargetCOIDs often absent from continent .fam Templates.
+        // Client only sends AutoPatrol when in AutoCompleteDistance — trust that gate.
         SeedPatrolMission(MissionId, ObjectiveIdA, WaypointCoid, autoCompleteDist: 50f, nextObjectiveId: null);
         var (conn, character, map) = CreatePlayer();
-        // Do not PlaceWaypoint — TryGetWorldPosition must fail.
+        // Do not PlaceWaypoint — TryGetWorldPosition fails; still must advance.
         character.CurrentVehicle.Position = new Vector3(0, 0, 0);
         GiveQuest(character, MissionId);
 
@@ -338,8 +499,8 @@ public class AutoPatrolTests
             Target = new TFID(WaypointCoid, false),
         });
 
-        Assert.AreEqual(1, character.CurrentQuests.Count);
-        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
+        Assert.IsTrue(_sent.OfType<CompleteDynamicObjectivePacket>().Any(p => p.ObjectiveId == ObjectiveIdA));
     }
 
     [TestMethod]

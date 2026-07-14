@@ -4,7 +4,7 @@ using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.Packets.Sector;
-using AutoCore.Game.Structures;
+using AutoCore.Utils;
 
 public class Weapon : SimpleObject
 {
@@ -36,12 +36,23 @@ public class Weapon : SimpleObject
 
     public override void WriteToPacket(CreateSimpleObjectPacket packet)
     {
+        // Wrong clone type: cannot fill CreateWeapon stats. Log and ignore (no NRE, no inventing data).
+        if (packet is CreateWeaponPacket && CloneBaseWeapon == null)
+        {
+            Logger.WriteLog(LogType.Error,
+                "Weapon.WriteToPacket IGNORED: not a weapon clonebase coid={0} cbid={1} cloneType={2} (expected CloneBaseWeapon)",
+                ObjectId.Coid,
+                CBID,
+                CloneBaseObject?.GetType().Name ?? "null");
+            return;
+        }
+
         base.WriteToPacket(packet);
 
         if (packet is CreateWeaponPacket weaponPacket)
         {
             var weaponSpec = CloneBaseWeapon.WeaponSpecific;
-            
+
             weaponPacket.VarianceRange = 0.0f;
             weaponPacket.VarianceRefireRate = 0.0f;
             weaponPacket.VarianceDamageMinimum = 0.0f;

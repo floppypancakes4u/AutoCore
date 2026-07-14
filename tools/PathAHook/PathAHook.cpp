@@ -21,6 +21,14 @@ namespace
     // GhostObject apply after "Assigned a ghost to waiting" (crash 0x005B0EFF).
     constexpr uintptr_t GhostApplyRva = 0x001B0ED0;         // 0x005B0ED0 FUN_005b0ed0
     constexpr uintptr_t GhostOnAddRva = 0x001B0D70;         // 0x005B0D70 GhostObject_OnGhostAdd
+    // Read vehicle+0x258 then +0xb0 — AV 0x004F5566 when wheelset null.
+    constexpr uintptr_t WheelsetFieldB0Rva = 0x000F5560;    // 0x004F5560 FUN_004f5560
+    // S2C DestroyObject 0x2020 — Client_RecvDestroyObject (EAX=game, stack packet).
+    constexpr uintptr_t RecvDestroyObjectRva = 0x004149C0; // 0x008149C0
+    // Waiting-bind TFID map insert — AV 0x005A3B0D when map Myhead null.
+    constexpr uintptr_t WaitingMapInsertRva = 0x001A3B00;  // 0x005A3B00 FUN_005a3b00
+    // Resolve object by TFID parts (thiscall this=hash, stack global/lo/hi).
+    constexpr uintptr_t ResolveObjectTargetRva = 0x000BAE70; // 0x004BAE70
 
     // First 8 bytes at each VA (Ghidra / client PE).
     constexpr unsigned char EquipPrologue[] = { 0x51, 0x53, 0x8b, 0x5c, 0x24, 0x0c, 0x55, 0x8b };
@@ -30,6 +38,12 @@ namespace
     constexpr unsigned char RecvPrologue[] = { 0x56, 0x57, 0x8b, 0xf8, 0x8b, 0x43, 0x04, 0x6a };
     constexpr unsigned char GhostApplyPrologue[] = { 0x55, 0x8b, 0xec, 0x83, 0xe4, 0xf0, 0x83, 0xec };
     constexpr unsigned char GhostOnAddPrologue[] = { 0x8b, 0xc1, 0x83, 0x78, 0x50, 0x00, 0x74, 0x11 };
+    // 8B 81 58 02 00 00  8A 80 …  (mov eax,[ecx+0x258]; mov al,[eax+0xb0])
+    constexpr unsigned char WheelsetFieldB0Prologue[] = { 0x8b, 0x81, 0x58, 0x02, 0x00, 0x00, 0x8a, 0x80 };
+    // 81 EC 38 04 00 00 53 55  (sub esp,0x438; push ebx; push ebp)
+    constexpr unsigned char RecvDestroyPrologue[] = { 0x81, 0xec, 0x38, 0x04, 0x00, 0x00, 0x53, 0x55 };
+    // 51 55 8B 6C 24 10 56 57  (push ecx; push ebp; mov ebp,[esp+0x10]; push esi; push edi)
+    constexpr unsigned char WaitingMapInsertPrologue[] = { 0x51, 0x55, 0x8b, 0x6c, 0x24, 0x10, 0x56, 0x57 };
 
     // GhostObject layout (client RE)
     constexpr size_t GhostBoundObjectOffset = 0x50;   // game object pointer
@@ -421,25 +435,161 @@ namespace
         AppendJsonLine(line);
     }
 
-    // --- GhostObject_OnGhostAdd (thiscall): this=ghost ---
-    using GhostOnAddFn = int(__fastcall*)(void* ghost, void* edx);
+    // --- GhostObject_OnGhostAdd (thiscall): ECX=ghost, [esp+4]=GhostConnection*, RET 4 ---
+    // MUST jmp to original (not call) or [esp+4] is no longer connection → map=ghost+0x244 AV.
+    using GhostOnAddFn = void*; // trampoline address only; invoke via naked jmp
     GhostOnAddFn pOrigGhostOnAdd = nullptr;
     LPVOID pTargetGhostOnAdd = nullptr;
 
-    int __fastcall HookedGhostOnAdd(void* ghost, void* edx)
+    void __stdcall LogGhostOnAdd(void* ghost, void* connection)
     {
         void* bound = ghost ? ReadPtr(ghost, GhostBoundObjectOffset) : nullptr;
         const long long tfidLo = ghost ? ReadLong(ghost, GhostTfidCoidOffset) : 0;
-        char line[320];
+        void* mapGuess = connection
+            ? reinterpret_cast<unsigned char*>(connection) + 0x244
+            : nullptr;
+        void* myhead = mapGuess ? ReadPtr(mapGuess, 4) : nullptr;
+        char line[400];
         sprintf_s(line,
-            "{\"t\":%lu,\"ev\":\"GhostOnAdd\",\"ghost\":\"%p\",\"bound\":\"%p\",\"tfid\":%lld,\"hit\":%ld}",
+            "{\"t\":%lu,\"ev\":\"GhostOnAdd\",\"ghost\":\"%p\",\"bound\":\"%p\",\"tfid\":%lld,"
+            "\"conn\":\"%p\",\"map\":\"%p\",\"myhead\":\"%p\",\"hit\":%ld}",
             static_cast<unsigned long>(GetTickCount()),
             ghost,
             bound,
             static_cast<long long>(tfidLo),
+            connection,
+            mapGuess,
+            myhead,
             static_cast<long>(g_hitCount + 1));
         AppendJsonLine(line);
-        return pOrigGhostOnAdd(ghost, edx);
+    }
+
+    __declspec(naked) void HookedGhostOnAdd()
+    {
+        __asm {
+            // entry: ECX=ghost, [esp]=ret, [esp+4]=connection
+            pushad
+            // [esp+0x1c]=saved ECX (ghost), [esp+0x20]=ret, [esp+0x24]=connection
+            mov eax, [esp + 0x24]   // connection
+            mov ecx, [esp + 0x1c]   // ghost
+            push eax
+            push ecx
+            call LogGhostOnAdd      // __stdcall cleans 8
+            popad
+            jmp dword ptr [pOrigGhostOnAdd]
+        }
+    }
+
+    // --- FUN_004f5560: *(vehicle+0x258)+0xb0 — AV site 0x004F5566 when wheelset null ---
+    using WheelsetFieldB0Fn = unsigned int(__fastcall*)(void* vehicle, void* edx);
+    WheelsetFieldB0Fn pOrigWheelsetFieldB0 = nullptr;
+    LPVOID pTargetWheelsetFieldB0 = nullptr;
+
+    unsigned int __fastcall HookedWheelsetFieldB0(void* vehicle, void* edx)
+    {
+        void* wheel = vehicle ? ReadPtr(vehicle, VehicleWheelsetOffset) : nullptr;
+        const int objCoidLo = vehicle && IsReadable(vehicle, ObjectCoidHiOffset + 4)
+            ? ReadInt(vehicle, ObjectCoidLoOffset) : 0x7FFFFFFF;
+
+        char line[384];
+        if (!wheel || wheel == reinterpret_cast<void*>(static_cast<uintptr_t>(-1)))
+        {
+            sprintf_s(line,
+                "{\"t\":%lu,\"ev\":\"WheelsetDeref_CRASH_IMMINENT\",\"veh\":\"%p\",\"v258\":\"%p\","
+                "\"obj_coid_lo\":%d,\"hit\":%ld}",
+                static_cast<unsigned long>(GetTickCount()),
+                vehicle,
+                wheel,
+                objCoidLo,
+                static_cast<long>(g_hitCount + 1));
+            AppendJsonLine(line);
+            // Skip original so the client survives for more repros (would AV at 0x004F5566).
+            return 0;
+        }
+
+        // Rare success path still log once in a while is too noisy — only log nulls.
+        return pOrigWheelsetFieldB0(vehicle, edx);
+    }
+
+    // --- Client_RecvDestroyObject (0x008149C0): EAX=game, [esp+4]=packet, RET 4 ---
+    using DestroyObjectFn = void(__stdcall*)(void* packet);
+    DestroyObjectFn pOrigDestroyObject = nullptr;
+    LPVOID pTargetDestroyObject = nullptr;
+    uintptr_t g_imageBase = 0;
+
+    void __stdcall LogDestroyObject(void* game, void* packet)
+    {
+        if (!packet || !IsReadable(packet, 0x14))
+            return;
+
+        // After opcode strip, body is Unknown(4)+TFID: coid@+8, global@+0x10 (see Client_RecvDestroyObject).
+        // Log-only (no resolve call — wrong convention can AV).
+        const int coidLo = ReadInt(packet, 8);
+        const int coidHi = ReadInt(packet, 0xc);
+        const int globalFlag = static_cast<int>(ReadByte(packet, 0x10));
+        const long long tfid = (static_cast<long long>(static_cast<unsigned int>(coidHi)) << 32)
+            | static_cast<unsigned int>(coidLo);
+
+        char line[320];
+        sprintf_s(line,
+            "{\"t\":%lu,\"ev\":\"DestroyObject_recv\",\"tfid\":%lld,\"global\":%d,\"game\":\"%p\",\"hit\":%ld}",
+            static_cast<unsigned long>(GetTickCount()),
+            static_cast<long long>(tfid),
+            globalFlag,
+            game,
+            static_cast<long>(g_hitCount + 1));
+        AppendJsonLine(line);
+    }
+
+    __declspec(naked) void HookedDestroyObject()
+    {
+        __asm {
+            // entry: EAX=game, [esp]=ret, [esp+4]=packet
+            pushad
+            // after pushad: [esp+0x1c]=saved EAX (game), [esp+0x20]=ret, [esp+0x24]=packet
+            mov eax, [esp + 0x1c]
+            mov ecx, [esp + 0x24]
+            push ecx              // packet
+            push eax              // game
+            call LogDestroyObject // __stdcall cleans 8
+            popad
+            jmp dword ptr [pOrigDestroyObject]
+        }
+    }
+
+    // --- FUN_005a3b00 waiting-bind map insert (thiscall map*, out*, key*) RET 8 — AV 0x005A3B0D ---
+    using WaitingMapInsertFn = void(__fastcall*)(void* map, void* edx, void* outResult, void* key);
+    WaitingMapInsertFn pOrigWaitingMapInsert = nullptr;
+    LPVOID pTargetWaitingMapInsert = nullptr;
+
+    void __fastcall HookedWaitingMapInsert(void* map, void* edx, void* outResult, void* key)
+    {
+        // Log only — never skip original. Soft-skip previously false-positived on readable heap
+        // and broke player-vehicle GhostOnAdd after a stack-shifted connection pointer.
+        void* myhead = map ? ReadPtr(map, 4) : nullptr;
+        long long keyLo = 0;
+        int keyHi = 0;
+        if (key && IsReadable(key, 16))
+        {
+            keyLo = ReadLong(key, 0);
+            keyHi = ReadInt(key, 8);
+        }
+
+        const bool myheadNull = !myhead || myhead == reinterpret_cast<void*>(static_cast<uintptr_t>(-1));
+        char line[480];
+        sprintf_s(line,
+            "{\"t\":%lu,\"ev\":\"%s\",\"map\":\"%p\",\"myhead\":\"%p\","
+            "\"key_lo\":%lld,\"key_hi\":%d,\"hit\":%ld}",
+            static_cast<unsigned long>(GetTickCount()),
+            myheadNull ? "WaitingMapInsert_CRASH_IMMINENT" : "WaitingMapInsert",
+            map,
+            myhead,
+            static_cast<long long>(keyLo),
+            keyHi,
+            static_cast<long>(g_hitCount + 1));
+        AppendJsonLine(line);
+
+        pOrigWaitingMapInsert(map, edx, outResult, key);
     }
 
     void RemoveAllHooks()
@@ -451,6 +601,9 @@ namespace
         if (pTargetRecv) { MH_DisableHook(pTargetRecv); MH_RemoveHook(pTargetRecv); pTargetRecv = nullptr; }
         if (pTargetGhostApply) { MH_DisableHook(pTargetGhostApply); MH_RemoveHook(pTargetGhostApply); pTargetGhostApply = nullptr; }
         if (pTargetGhostOnAdd) { MH_DisableHook(pTargetGhostOnAdd); MH_RemoveHook(pTargetGhostOnAdd); pTargetGhostOnAdd = nullptr; }
+        if (pTargetWheelsetFieldB0) { MH_DisableHook(pTargetWheelsetFieldB0); MH_RemoveHook(pTargetWheelsetFieldB0); pTargetWheelsetFieldB0 = nullptr; }
+        if (pTargetDestroyObject) { MH_DisableHook(pTargetDestroyObject); MH_RemoveHook(pTargetDestroyObject); pTargetDestroyObject = nullptr; }
+        if (pTargetWaitingMapInsert) { MH_DisableHook(pTargetWaitingMapInsert); MH_RemoveHook(pTargetWaitingMapInsert); pTargetWaitingMapInsert = nullptr; }
         pOrigSetWheelset = nullptr;
         pOrigEquip = nullptr;
         pOrigCreateAction = nullptr;
@@ -458,6 +611,9 @@ namespace
         pOrigRecv = nullptr;
         pOrigGhostApply = nullptr;
         pOrigGhostOnAdd = nullptr;
+        pOrigWheelsetFieldB0 = nullptr;
+        pOrigDestroyObject = nullptr;
+        pOrigWaitingMapInsert = nullptr;
     }
 }
 
@@ -487,6 +643,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SetupPathAHook(LPVOID /*unused*/)
         InterlockedExchange(&g_hookState, 0);
         return 0;
     }
+    g_imageBase = imageBase;
 
     const MH_STATUS st = MH_Initialize();
     if (st != MH_OK && st != MH_ERROR_ALREADY_INITIALIZED)
@@ -508,19 +665,34 @@ extern "C" __declspec(dllexport) DWORD WINAPI SetupPathAHook(LPVOID /*unused*/)
         &HookedGhostApply, &pTargetGhostApply, reinterpret_cast<LPVOID*>(&pOrigGhostApply)) && ok;
     ok = VerifyAndHook(imageBase, GhostOnAddRva, GhostOnAddPrologue, sizeof(GhostOnAddPrologue),
         &HookedGhostOnAdd, &pTargetGhostOnAdd, reinterpret_cast<LPVOID*>(&pOrigGhostOnAdd)) && ok;
+    // Optional soft-guards / extra logs: keep core hooks if these fail.
+    const bool wheelDerefOk = VerifyAndHook(imageBase, WheelsetFieldB0Rva, WheelsetFieldB0Prologue,
+        sizeof(WheelsetFieldB0Prologue),
+        &HookedWheelsetFieldB0, &pTargetWheelsetFieldB0, reinterpret_cast<LPVOID*>(&pOrigWheelsetFieldB0));
+    const bool destroyOk = VerifyAndHook(imageBase, RecvDestroyObjectRva, RecvDestroyPrologue,
+        sizeof(RecvDestroyPrologue),
+        &HookedDestroyObject, &pTargetDestroyObject, reinterpret_cast<LPVOID*>(&pOrigDestroyObject));
+    const bool waitMapOk = VerifyAndHook(imageBase, WaitingMapInsertRva, WaitingMapInsertPrologue,
+        sizeof(WaitingMapInsertPrologue),
+        &HookedWaitingMapInsert, &pTargetWaitingMapInsert, reinterpret_cast<LPVOID*>(&pOrigWaitingMapInsert));
 
-    // Recv is optional: custom register convention; still try.
+    // Recv CreateVehicle is optional: custom register convention; still try.
     const bool recvOk = VerifyAndHook(imageBase, RecvCreateVehicleRva, RecvPrologue, sizeof(RecvPrologue),
         &HookedRecv, &pTargetRecv, reinterpret_cast<LPVOID*>(&pOrigRecv));
 
     if (!ok)
     {
-        char fail[200];
-        sprintf_s(fail, "{\"t\":%lu,\"ev\":\"SetupPathAHook_FAILED\",\"recv\":%d,\"ghost_apply\":%d,\"ghost_onadd\":%d}",
+        char fail[320];
+        sprintf_s(fail,
+            "{\"t\":%lu,\"ev\":\"SetupPathAHook_FAILED\",\"recv\":%d,\"ghost_apply\":%d,\"ghost_onadd\":%d,"
+            "\"wheel_deref\":%d,\"destroy\":%d,\"wait_map\":%d}",
             static_cast<unsigned long>(GetTickCount()),
             recvOk ? 1 : 0,
             pOrigGhostApply ? 1 : 0,
-            pOrigGhostOnAdd ? 1 : 0);
+            pOrigGhostOnAdd ? 1 : 0,
+            wheelDerefOk ? 1 : 0,
+            destroyOk ? 1 : 0,
+            waitMapOk ? 1 : 0);
         AppendJsonLine(fail);
         RemoveAllHooks();
         if (st == MH_OK)
@@ -529,10 +701,16 @@ extern "C" __declspec(dllexport) DWORD WINAPI SetupPathAHook(LPVOID /*unused*/)
         return 0;
     }
 
-    char done[280];
+    char done[400];
     sprintf_s(done,
-        "{\"t\":%lu,\"ev\":\"SetupPathAHook_OK\",\"recv\":%d,\"ghost_apply\":1,\"ghost_onadd\":1,\"base\":\"0x%p\"}",
-        static_cast<unsigned long>(GetTickCount()), recvOk ? 1 : 0, reinterpret_cast<void*>(imageBase));
+        "{\"t\":%lu,\"ev\":\"SetupPathAHook_OK\",\"recv\":%d,\"ghost_apply\":1,\"ghost_onadd\":1,"
+        "\"wheel_deref\":%d,\"destroy\":%d,\"wait_map\":%d,\"base\":\"0x%p\"}",
+        static_cast<unsigned long>(GetTickCount()),
+        recvOk ? 1 : 0,
+        wheelDerefOk ? 1 : 0,
+        destroyOk ? 1 : 0,
+        waitMapOk ? 1 : 0,
+        reinterpret_cast<void*>(imageBase));
     AppendJsonLine(done);
 
     InterlockedExchange(&g_hookState, 2);

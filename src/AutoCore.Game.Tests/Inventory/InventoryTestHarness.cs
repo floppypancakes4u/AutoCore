@@ -6,6 +6,7 @@ using AutoCore.Game.Inventory;
 using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Tests.Inventory.Fakes;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Runtime.CompilerServices;
 using System.Reflection;
 
@@ -86,8 +87,9 @@ public sealed class InventoryTestHarness
     {
         var weapon = new Weapon();
         weapon.SetCoid(coid, true);
-        AttachCloneBase(weapon, cbid, CloneBaseObjectType.Weapon);
-        Vehicle.TryEquipItem(slot, weapon, out _);
+        AttachRegisteredCloneBase(weapon, cbid);
+        Assert.IsTrue(Vehicle.TryEquipItem(slot, weapon, out _),
+            $"EquipWeapon failed slot={slot} cbid={cbid} coid={coid}");
         return weapon;
     }
 
@@ -199,8 +201,29 @@ public sealed class InventoryTestHarness
 
     private static void AttachCloneBase(SimpleObject item, int cbid, CloneBaseObjectType type)
     {
+        // Typed clonebases so Vehicle.TryEquipItem clone-type guards accept the item.
+        CloneBaseObject clone = type switch
+        {
+            CloneBaseObjectType.Weapon => CreateWeaponCloneBase(cbid, flags: 0, subType: 0),
+            _ => CreateObjectCloneBase(cbid, type),
+        };
+
         typeof(ClonedObjectBase)
             .GetProperty(nameof(ClonedObjectBase.CloneBaseObject), BindingFlags.Instance | BindingFlags.Public)!
-            .SetValue(item, CreateObjectCloneBase(cbid, type));
+            .SetValue(item, clone);
+    }
+
+    private void AttachRegisteredCloneBase(SimpleObject item, int cbid)
+    {
+        var registered = CloneBases.GetCloneBase(cbid);
+        if (registered is CloneBaseObject cloneBase)
+        {
+            typeof(ClonedObjectBase)
+                .GetProperty(nameof(ClonedObjectBase.CloneBaseObject), BindingFlags.Instance | BindingFlags.Public)!
+                .SetValue(item, cloneBase);
+            return;
+        }
+
+        AttachCloneBase(item, cbid, CloneBaseObjectType.Weapon);
     }
 }

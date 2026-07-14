@@ -4,6 +4,7 @@ using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
+using AutoCore.Game.TNL;
 using AutoCore.Game.TNL.Ghost;
 using AutoCore.Utils;
 
@@ -39,9 +40,12 @@ public class GraphicsObject : ClonedObjectBase
     protected virtual bool RemoveFromMapOnDeath => true;
 
     /// <summary>
-    /// Pure map props need combat ghosts; vehicles/creatures already ghost themselves.
+    /// Plain <see cref="GhostObject"/> + local map TFID crashes the client at
+    /// <c>0x005B0EFF</c> (FUN_005b0ed0 null iface after waiting-bind). Map props stay
+    /// un-ghosted; server HP / delayed DestroyObject do not need a combat ghost.
+    /// Vehicles/creatures use their own ghost types and override as needed.
     /// </summary>
-    protected virtual bool GhostWhenDamagable => true;
+    protected virtual bool GhostWhenDamagable => false;
 
     public GraphicsObject(GraphicsObjectType objectType)
     {
@@ -151,6 +155,12 @@ public class GraphicsObject : ClonedObjectBase
         base.Revive();
     }
 
+    /// <summary>
+    /// When set (e.g. by ram), loot spawns here instead of <see cref="Position"/>.
+    /// Server map-prop coords can be wrong/stale; vehicle pose is the reliable ram point.
+    /// </summary>
+    public Vector3? DeathLootOverridePosition { get; set; }
+
     public override void OnDeath(DeathType deathType)
     {
         base.OnDeath(deathType);
@@ -165,16 +175,122 @@ public class GraphicsObject : ClonedObjectBase
         if (map == null)
             return;
 
+        // Map props: loot at death point; keep corpse on map ~12.5s then DestroyObject + leave.
+        TrySpawnMapPropDeathLoot(map);
+
         Logger.WriteLog(LogType.Debug,
-            "OnDeath map-prop coid={0} type={1} deathType={2} — DestroyObject broadcast",
+            "OnDeath map-prop coid={0} type={1} deathType={2} cbid={3} pos={4} — corpse {5}ms then despawn",
             objectId.Coid,
             GetType().Name,
-            deathType);
+            deathType,
+            CBID,
+            Position,
+            Combat.MapPropCorpseDespawn.DespawnDelayMs);
 
-        // Leave map first so iterators over map objects stay consistent for send.
-        SetMap(null);
+        Combat.MapPropCorpseDespawn.Schedule(this, map, deathType, Murderer);
+    }
 
-        BroadcastDestroy(map, objectId);
+    /// <summary>Exposed for delayed corpse despawn finalizer.</summary>
+    public static void BroadcastDeathPublic(
+        SectorMap map,
+        Structures.TFID objectId,
+        DeathType deathType,
+        Structures.TFID murderer,
+        GhostObject ghost) =>
+        BroadcastDeath(map, objectId, deathType, murderer, ghost);
+
+    /// <summary>
+    /// Drops salvage/junk near the death point for pure map <see cref="GraphicsObject"/> deaths.
+    /// Vehicles/creatures skip this via <see cref="RemoveFromMapOnDeath"/> = false.
+    /// </summary>
+    private void TrySpawnMapPropDeathLoot(Map.SectorMap map)
+    {
+        try
+        {
+            Character killer = null;
+            ClonedObjectBase murdererObj = null;
+            if (Murderer.Coid > 0)
+            {
+                murdererObj = Managers.ObjectManager.Instance.GetObject(Murderer);
+                killer = murdererObj?.GetSuperCharacter(false);
+            }
+
+            // Prefer killer level for commodity level bands; fall back to map min level.
+            byte level = 1;
+            if (killer != null)
+                level = killer.Level;
+            else if (map.ContinentObject != null && map.ContinentObject.MinLevel > 0)
+                level = (byte)Math.Clamp(map.ContinentObject.MinLevel, 1, 255);
+
+            var lootPos = ResolveMapPropLootPosition(murdererObj);
+            // Prefer killer vehicle rotation (prop quat can be garbage from map deserialize).
+            var lootRot = murdererObj?.Rotation ?? Rotation;
+            if (lootRot.W == 0f && lootRot.X == 0f && lootRot.Y == 0f && lootRot.Z == 0f)
+                lootRot = new Quaternion(0f, 0f, 0f, 1f);
+
+            Logger.WriteLog(LogType.Debug,
+                "Map prop death loot coid={0} cbid={1} lootPos={2} propPos={3} override={4} murderer={5}",
+                ObjectId.Coid,
+                CBID,
+                lootPos,
+                Position,
+                DeathLootOverridePosition.HasValue ? DeathLootOverridePosition.Value.ToString() : "none",
+                murdererObj != null ? murdererObj.Position.ToString() : "none");
+
+            Managers.LootManager.Instance.ProcessDeathLoot(new Managers.LootManager.DeathLootRequest
+            {
+                Map = map,
+                Position = lootPos,
+                Rotation = lootRot,
+                Killer = killer,
+                VictimCbid = CBID,
+                Level = level,
+                LootTableId = 0,
+                TemplateLootChance = 0,
+                GearRolls = 0,
+                UseCreatureDropFormula = false,
+                // Tight scatter — must land at the wreck, not map-scale noise.
+                LootScatterRadius = 0.25f,
+                // Retail: only tLootWeights for this CBID (no commodity pool on random scenery).
+                MapPropSalvage = true,
+            });
+
+            DeathLootOverridePosition = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "Map prop death loot failed coid={0} cbid={1}: {2}",
+                ObjectId.Coid,
+                CBID,
+                ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Map-prop server coords are often wrong/stale vs client fam placement.
+    /// Prefer explicit ram override, then murderer (vehicle) pose, then prop pose.
+    /// </summary>
+    private Vector3 ResolveMapPropLootPosition(ClonedObjectBase murdererObj)
+    {
+        if (DeathLootOverridePosition.HasValue)
+            return DeathLootOverridePosition.Value;
+
+        // Killer vehicle pose is the reliable contact point for ram / combat kills.
+        if (murdererObj != null)
+        {
+            var m = murdererObj.Position;
+            if (Math.Abs(m.X) > 0.01f || Math.Abs(m.Y) > 0.01f || Math.Abs(m.Z) > 0.01f)
+                return m;
+
+            // Murderer at origin is suspicious — fall through to prop if prop looks valid.
+        }
+
+        var p = Position;
+        if (Math.Abs(p.X) > 0.01f || Math.Abs(p.Y) > 0.01f || Math.Abs(p.Z) > 0.01f)
+            return p;
+
+        return murdererObj?.Position ?? p;
     }
 
     public override void CreateGhost()
@@ -291,9 +407,34 @@ public class GraphicsObject : ClonedObjectBase
         }
     }
 
-    protected static void BroadcastDestroy(SectorMap map, Structures.TFID objectId)
+    /// <summary>
+    /// Combat death network sequence (call <b>before</b> <c>SetMap(null)</c> so the client can
+    /// still resolve the object):
+    /// <list type="number">
+    /// <item>Flush ghost HealthMask/corpse so HP bar hits 0.</item>
+    /// <item>For non-silent deaths: <see cref="InitCreateObjectPacket"/> with
+    /// <c>DoDeath=true</c> (client <c>CVOGReaction_RemoveObject(..., death=1)</c> for types 1/3).</item>
+    /// <item><see cref="DestroyObjectPacket"/> with <see cref="DeathType"/> + murderer
+    /// (client CompletelyDestroyObject → primary vtable+0x50 death FX for creature/vehicle).</item>
+    /// </list>
+    /// Silent destroy (loot pickup, re-scope) uses only DestroyObject with death=Silent.
+    /// </summary>
+    protected static void BroadcastDeath(
+        SectorMap map,
+        Structures.TFID objectId,
+        DeathType deathType = DeathType.Silent,
+        Structures.TFID murderer = null,
+        GhostObject ghost = null)
     {
-        var destroyPacket = new DestroyObjectPacket(objectId);
+        if (map == null || objectId == null)
+            return;
+
+        var playDeathFx = deathType != DeathType.Silent;
+        var destroyPacket = new DestroyObjectPacket(objectId, deathType, murderer, force: !playDeathFx);
+        InitCreateObjectPacket initDeath = null;
+        if (playDeathFx)
+            initDeath = new InitCreateObjectPacket(objectId.Coid, create: false, doDeath: true);
+
         foreach (var character in map.Objects.Values.OfType<Character>().Where(c => c.OwningConnection != null))
         {
             try
@@ -301,12 +442,52 @@ public class GraphicsObject : ClonedObjectBase
                 if (ForceNetworkHelperFailureForTests)
                     throw new InvalidOperationException("test-forced destroy send failure");
 
-                character.OwningConnection.SendGamePacket(destroyPacket);
+                var conn = character.OwningConnection;
+
+                // Push corpse/HP=0 ghost before game packets so the client is not mid-alive.
+                if (ghost != null && ghost.IsGhostedTo(conn))
+                {
+                    ghost.SetMaskBits(GhostObject.HealthMask);
+                    conn.FlushDeathGhostUpdate();
+                }
+
+                if (initDeath != null)
+                    conn.SendGamePacket(initDeath);
+
+                conn.SendGamePacket(destroyPacket);
+
+                Logger.WriteLog(LogType.Network,
+                    "DeathNet coid={0} deathType={1} murderer={2} initDoDeath={3} force={4} player={5}",
+                    objectId.Coid,
+                    deathType,
+                    murderer?.Coid ?? -1,
+                    initDeath != null ? 1 : 0,
+                    destroyPacket.Force ? 1 : 0,
+                    character.ObjectId?.Coid ?? 0);
             }
             catch (Exception ex)
             {
-                Logger.WriteLog(LogType.Error, "BroadcastDestroy failed for coid={0}: {1}", objectId.Coid, ex.Message);
+                Logger.WriteLog(LogType.Error, "BroadcastDeath failed for coid={0}: {1}", objectId.Coid, ex.Message);
             }
+        }
+    }
+
+    /// <summary>
+    /// Silent / non-combat despawn (item pickup, foreign re-scope). Prefer
+    /// <see cref="BroadcastDeath"/> for combat kills so death FX can play.
+    /// </summary>
+    protected static void BroadcastDestroy(
+        SectorMap map,
+        Structures.TFID objectId,
+        DeathType deathType = DeathType.Silent,
+        Structures.TFID murderer = null,
+        bool force = false)
+    {
+        BroadcastDeath(map, objectId, deathType, murderer, ghost: null);
+        // Preserve explicit force override when callers pass force=true on silent path.
+        if (force && deathType == DeathType.Silent)
+        {
+            // BroadcastDeath already sent force=true for silent; nothing further.
         }
     }
 }

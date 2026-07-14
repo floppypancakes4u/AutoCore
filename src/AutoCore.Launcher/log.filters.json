@@ -1,0 +1,14 @@
+{
+  "OutgoingPackets": false,
+  "IncomingPackets": false,
+  "InventoryFlow": false,
+  "PathPoseForce": false,
+  "CreateVehicleWire": false,
+  "ForeignOwnerAttach": false,
+  "SaveProgress": false,
+  "GiveXp": false,
+  "WireDiag": false,
+  "GhostObjectDiag": false,
+  "Loot": true,
+  "MapPropRam": true
+}

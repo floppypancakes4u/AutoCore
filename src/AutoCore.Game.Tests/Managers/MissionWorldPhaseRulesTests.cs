@@ -55,6 +55,96 @@ public class MissionWorldPhaseRulesTests
     }
 
     [TestMethod]
+    public void CollectActiveCompletingDeliverCbids_IncludesSameNpc_SkipsInvalid()
+    {
+        Assert.AreEqual(0, MissionWorldPhaseRules.CollectActiveCompletingDeliverCbids(null).Count());
+
+        var obj = MissionObjective.CreateForTests(1, 0, 10, 1);
+        obj.Requirements.Add(new ObjectiveRequirementDeliver(obj)
+        {
+            NPCTargetCBID = 5,
+            NPCTargetCompletes = true,
+        });
+        obj.Requirements.Add(new ObjectiveRequirementDeliver(obj)
+        {
+            NPCTargetCBID = 8,
+            NPCTargetCompletes = true,
+        });
+        obj.Requirements.Add(new ObjectiveRequirementDeliver(obj)
+        {
+            NPCTargetCBID = 9,
+            NPCTargetCompletes = false,
+        });
+        obj.Requirements.Add(new ObjectiveRequirementDeliver(obj)
+        {
+            NPCTargetCBID = 0,
+            NPCTargetCompletes = true,
+        });
+        obj.Requirements.Add(new ObjectiveRequirementKill(obj) { TargetCBID = 1 });
+
+        // Same-NPC (5) is included — unlike CollectPadDeliverCbids.
+        var delivers = MissionWorldPhaseRules.CollectActiveCompletingDeliverCbids(obj).ToList();
+        CollectionAssert.AreEqual(new[] { 5, 8 }, delivers);
+    }
+
+    [TestMethod]
+    public void ExcludeActiveDeliverFromGiverSuppress_ActiveDeliverWins()
+    {
+        var suppress = new HashSet<int> { 11786, 11155, 99 };
+        MissionWorldPhaseRules.ExcludeActiveDeliverFromGiverSuppress(suppress, new[] { 11786, 0, -1 });
+        Assert.IsFalse(suppress.Contains(11786), "Active deliver CBID must not stay in suppress set");
+        Assert.IsTrue(suppress.Contains(11155));
+        Assert.IsTrue(suppress.Contains(99));
+
+        MissionWorldPhaseRules.ExcludeActiveDeliverFromGiverSuppress(null, new[] { 1 });
+        MissionWorldPhaseRules.ExcludeActiveDeliverFromGiverSuppress(suppress, null);
+        Assert.AreEqual(2, suppress.Count);
+    }
+
+    [TestMethod]
+    public void MeetsRaceClassRequirements_FullMatrix()
+    {
+        // Unrestricted — body not required.
+        Assert.IsTrue(MissionWorldPhaseRules.MeetsRaceClassRequirements(-1, -1, false, 0, 0));
+        Assert.IsTrue(MissionWorldPhaseRules.MeetsRaceClassRequirements(-1, -1, true, 9, 9));
+
+        // Restricted without body → fail.
+        Assert.IsFalse(MissionWorldPhaseRules.MeetsRaceClassRequirements(0, -1, false, 0, 0));
+        Assert.IsFalse(MissionWorldPhaseRules.MeetsRaceClassRequirements(-1, 1, false, 0, 1));
+        Assert.IsFalse(MissionWorldPhaseRules.MeetsRaceClassRequirements(0, 1, false, 0, 1));
+
+        // Race only.
+        Assert.IsTrue(MissionWorldPhaseRules.MeetsRaceClassRequirements(0, -1, true, 0, 3));
+        Assert.IsFalse(MissionWorldPhaseRules.MeetsRaceClassRequirements(0, -1, true, 1, 3));
+
+        // Class only (0 = Commando is a real class).
+        Assert.IsTrue(MissionWorldPhaseRules.MeetsRaceClassRequirements(-1, 0, true, 2, 0));
+        Assert.IsFalse(MissionWorldPhaseRules.MeetsRaceClassRequirements(-1, 0, true, 2, 1));
+
+        // Both.
+        Assert.IsTrue(MissionWorldPhaseRules.MeetsRaceClassRequirements(0, 2, true, 0, 2));
+        Assert.IsFalse(MissionWorldPhaseRules.MeetsRaceClassRequirements(0, 2, true, 0, 1));
+        Assert.IsFalse(MissionWorldPhaseRules.MeetsRaceClassRequirements(0, 2, true, 1, 2));
+    }
+
+    [TestMethod]
+    public void IsCompletedNonPadAlternateFormGiver_Matrix()
+    {
+        Assert.IsFalse(MissionWorldPhaseRules.IsCompletedNonPadAlternateFormGiver(
+            false, false, 10, false, true));
+        Assert.IsFalse(MissionWorldPhaseRules.IsCompletedNonPadAlternateFormGiver(
+            true, true, 10, false, true), "Repeatable completed must not use sticky-suppress path");
+        Assert.IsFalse(MissionWorldPhaseRules.IsCompletedNonPadAlternateFormGiver(
+            true, false, 0, false, true));
+        Assert.IsFalse(MissionWorldPhaseRules.IsCompletedNonPadAlternateFormGiver(
+            true, false, 10, true, true), "Pad-class Final Exam must not count as non-pad");
+        Assert.IsFalse(MissionWorldPhaseRules.IsCompletedNonPadAlternateFormGiver(
+            true, false, 10, false, false), "Same-NPC / no alt deliver");
+        Assert.IsTrue(MissionWorldPhaseRules.IsCompletedNonPadAlternateFormGiver(
+            true, false, 11786, false, true), "Track This / class-report giver");
+    }
+
+    [TestMethod]
     public void CollectKillSpawnTypes_KillAndAggregate()
     {
         var obj = MissionObjective.CreateForTests(1, 0, 10, 1);

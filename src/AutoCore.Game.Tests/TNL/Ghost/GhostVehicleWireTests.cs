@@ -425,6 +425,40 @@ public class GhostVehicleWireTests
     }
 
     /// <summary>
+    /// Retail client unpacks WheelSet with ONE presence flag (equip 0x201B). A two-flag pack
+    /// shifts CBID20 and corrupts the rest of the update (null +0x258 / AV 0x004F5566 recovery).
+    /// Payload is CBID20 + coid64 + global1 = 85 bits after the single flag.
+    /// </summary>
+    [TestMethod]
+    public void PackDelta_WheelSet_UsesSinglePresenceFlagNotTwo()
+    {
+        var vehicle = CreateVehicleWithMap(9160);
+        var wheelSet = new WheelSet();
+        wheelSet.SetCoid(9161, true);
+        Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.WheelSet, wheelSet, out _));
+
+        var stream = PackUpdateNonInitial(vehicle, GhostVehicle.WheelSetMask);
+
+        Assert.IsFalse(stream.ReadFlag()); // Skills
+        var bitAfterSkills = stream.GetBitPosition();
+        Assert.IsTrue(stream.ReadFlag(), "single combined WheelSet presence");
+        stream.ReadInt(20); // CBID
+        stream.Read(out long wheelCoid);
+        var global = stream.ReadFlag();
+        var bitsForPayload = stream.GetBitPosition() - bitAfterSkills - 1; // exclude presence flag
+
+        Assert.AreEqual(9161L, wheelCoid);
+        Assert.IsTrue(global);
+        Assert.AreEqual(85UL, bitsForPayload, "CBID20+coid64+global1 after one flag (not two flags).");
+        // Two-flag form would leave one extra unread flag bit before CBID; next hardpoint would desync.
+        Assert.IsFalse(stream.ReadFlag(), "Front weapon off — stream aligned after single-flag wheel");
+        Assert.IsFalse(stream.ReadFlag()); // Turret
+        Assert.IsFalse(stream.ReadFlag()); // Rear
+        Assert.IsFalse(stream.ReadFlag()); // Melee
+        Assert.IsFalse(stream.ReadFlag()); // Ornament
+    }
+
+    /// <summary>
     /// RE: initial wheel hardpoint writes CBID into ghost create-buffer +0x45c (EquipFromCreate).
     /// Default still skips; EnableInitialHardpointPack seeds that field for ghost materialize.
     /// </summary>
@@ -444,8 +478,8 @@ public class GhostVehicleWireTests
             GhostObject.InitialMask | GhostVehicle.WheelSetMask | GhostVehicle.ChangeArmor);
         SkipToMaskSectionAfterInitialBody(stream, ownerPacked: false);
 
-        Assert.IsTrue(stream.ReadFlag(), "WheelSetMask on initial when lever on");
-        Assert.IsTrue(stream.ReadFlag(), "wheel present");
+        // Retail wheel hardpoint: ONE combined presence flag (not mask+present).
+        Assert.IsTrue(stream.ReadFlag(), "WheelSet single presence flag on initial when lever on");
         stream.ReadInt(20); // CBID
         stream.Read(out long wheelCoid);
         Assert.AreEqual(9141L, wheelCoid);

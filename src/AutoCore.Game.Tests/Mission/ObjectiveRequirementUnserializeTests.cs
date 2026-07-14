@@ -214,6 +214,23 @@ public class ObjectiveRequirementUnserializeTests
     }
 
     [TestMethod]
+    public void Create_Patrol_LoadsMoreThanTenGenericTargets()
+    {
+        // Track This class: 15 waypoint pads — old UnSerialize capped at 10.
+        var targets = string.Join("\n", Enumerable.Range(10310, 15).Select(id =>
+            $"<GenericTargetCOID>{id}</GenericTargetCOID>"));
+        var req = (ObjectiveRequirementPatrol)Create("patrol", $@"
+            <AutoComplete>1</AutoComplete>
+            <AutoCompleteDistance>25</AutoCompleteDistance>
+            {targets}
+            <Laps>1</Laps>");
+
+        Assert.AreEqual(15, req.TargetCount);
+        Assert.AreEqual(10310L, req.GenericTargets[0]);
+        Assert.AreEqual(10324L, req.GenericTargets[14]);
+    }
+
+    [TestMethod]
     public void Create_UseItem_ParsesPrimaryAndProgressFields()
     {
         var req = (ObjectiveRequirementUseItem)Create("useitem", @"

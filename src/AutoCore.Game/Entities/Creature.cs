@@ -2,7 +2,7 @@
 
 using System;
 using System.Linq;
-using System.Text;
+using AutoCore.Game.CloneBases;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Npc;
@@ -141,84 +141,33 @@ public class Creature : SimpleObject
             spawn.NotifySpawnedChildDied(this, activator);
         }
 
-        // Generate loot for this creature
+        // Multi-track death loot (gear / junk / consumable / credits / commodity).
         if (map != null)
         {
-            var lootItems = LootManager.Instance.GenerateLoot(this);
-            
-            if (lootItems.Count > 0)
+            if (CloneBaseObject is CloneBaseCreature creatureCloneBase)
             {
-                var random = new System.Random();
-                foreach (var cbid in lootItems)
+                var cs = creatureCloneBase.CreatureSpecific;
+                LootManager.Instance.ProcessDeathLoot(new LootManager.DeathLootRequest
                 {
-                    // Equipment items (armor, weapons, etc.) require auto-loot since the client
-                    // doesn't allow picking them up from the ground
-                    if (LootManager.Instance.RequiresAutoLoot(cbid))
-                    {
-                        if (killerCharacter != null)
-                        {
-                            LootManager.Instance.AutoLootItem(cbid, killerCharacter);
-                        }
-                        else
-                        {
-                            // No killer found - spawn on ground anyway (won't be pickable but visible)
-                            SpawnLootOnGround(cbid, random);
-                        }
-                    }
-                    else
-                    {
-                        // Regular items (consumables, resources) can be picked up from ground
-                        SpawnLootOnGround(cbid, random);
-                    }
-                }
+                    Map = map,
+                    Position = Position,
+                    Rotation = Rotation,
+                    Killer = killerCharacter,
+                    VictimCbid = CBID,
+                    Level = Level,
+                    LootTableId = cs.LootTableId,
+                    UseCreatureDropFormula = true,
+                    CreatureBaseLootChance = cs.BaseLootChance,
+                    GearRolls = 0,
+                });
             }
 
-            // Remove creature from map (SetMap(null) handles calling LeaveMap internally)
+            // Death packets first while the object is still on the map / ghosted, then leave.
+            // Client CompletelyDestroyObject (0x2020 death arg) and InitCreateObject DoDeath
+            // both resolve by TFID and need the live client object.
+            BroadcastDeath(map, creatureObjectId, deathType, Murderer, Ghost);
             SetMap(null);
-
-            // Broadcast destroy packet to all players in the map so they remove the creature client-side
-            BroadcastDestroy(map, creatureObjectId);
-
-            // Notify killer that death animation packet is missing
-            if (killerCharacter?.OwningConnection != null)
-            {
-                try
-                {
-                    var message = "Death animation packet is missing for creature death";
-                    var msgLen = (short)(Encoding.UTF8.GetByteCount(message) + 1); // include null terminator
-                    killerCharacter.OwningConnection.SendGamePacket(new BroadcastPacket
-                    {
-                        ChatType = ChatType.SystemMessage,
-                        SenderCoid = (ulong)creatureObjectId.Coid,
-                        IsGM = false,
-                        Sender = "System",
-                        MessageLength = msgLen,
-                        Message = message
-                    });
-                }
-                catch
-                {
-                    // Never let chat break death handling
-                }
-            }
         }
-    }
-
-    private void SpawnLootOnGround(int cbid, System.Random random)
-    {
-        // Calculate random offset: random angle, 1-2 units distance
-        var angle = (float)(random.NextDouble() * 2.0 * System.Math.PI);
-        var distance = 1.0f + (float)(random.NextDouble() * 1.0); // 1-2 units
-        var offsetX = (float)(System.Math.Cos(angle) * distance);
-        var offsetZ = (float)(System.Math.Sin(angle) * distance);
-        
-        var lootPosition = new Vector3(
-            Position.X + offsetX,
-            Position.Y,
-            Position.Z + offsetZ
-        );
-        
-        LootManager.Instance.SpawnLootItem(cbid, lootPosition, Rotation, Map);
     }
 
     public void HandleMovement(CreatureMovedPacket packet)

@@ -16,6 +16,8 @@ public sealed class InventoryPersistence : IInventoryPersistence
     public IReadOnlyList<CharacterInventoryItem> LoadCargo(long characterCoid)
     {
         using var context = new CharContext();
+        // Ensure optional mission-item column exists before materializing (older DBs).
+        context.EnsureInventorySchema();
         return context.CharacterInventories
             .AsNoTracking()
             .Where(i => i.CharacterCoid == characterCoid)
@@ -39,6 +41,7 @@ public sealed class InventoryPersistence : IInventoryPersistence
             return;
 
         using var context = new CharContext();
+        context.EnsureInventorySchema();
         var row = context.CharacterInventories.FirstOrDefault(i => i.ItemCoid == item.Coid);
         if (row == null)
         {

@@ -21,6 +21,8 @@ public class WorldDBLoader
     // wad.xml-only tables (no World DB equivalent).
     public IDictionary<int, VehicleTemplate> VehicleTemplates { get; set; }
     public IDictionary<int, CreatureAiProfile> CreatureAiProfiles { get; set; }
+    public IDictionary<int, IReadOnlyList<LootWeight>> LootWeights { get; set; }
+    public IReadOnlyList<ConsumableLootEntry> Consumables { get; set; }
 
     public bool Load()
     {
@@ -117,6 +119,21 @@ public class WorldDBLoader
                     {
                         CreatureAiProfiles = WadXmlWorldDataLoader.LoadCreatureAiProfiles(wadXmlPath);
                         Logger.WriteLog(LogType.Initialize, $"WorldDBLoader: Loaded {CreatureAiProfiles.Count} CreatureAiProfiles from wad.xml");
+                    }
+
+                    if (LootWeights == null || LootWeights.Count == 0)
+                    {
+                        LootWeights = WadXmlWorldDataLoader.LoadLootWeights(wadXmlPath);
+                        var weightRows = LootWeights.Values.Sum(v => v.Count);
+                        Logger.WriteLog(LogType.Initialize,
+                            $"WorldDBLoader: Loaded {LootWeights.Count} destroyed-CBIDs / {weightRows} LootWeight rows from wad.xml");
+                    }
+
+                    if (Consumables == null || Consumables.Count == 0)
+                    {
+                        Consumables = WadXmlWorldDataLoader.LoadConsumables(wadXmlPath);
+                        Logger.WriteLog(LogType.Initialize,
+                            $"WorldDBLoader: Loaded {Consumables.Count} Consumables from wad.xml");
                     }
                 }
             }

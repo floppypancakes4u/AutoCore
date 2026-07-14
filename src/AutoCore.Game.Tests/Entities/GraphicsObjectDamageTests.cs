@@ -6,12 +6,16 @@ using AutoCore.Database.World.Models;
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.CloneBases.Specifics;
 using AutoCore.Game.Constants;
+using AutoCore.Game.Combat;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
+using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL;
+using AutoCore.Game.Tests.Inventory.Fakes;
 
 /// <summary>
 /// Map props are GraphicsObject (not SimpleObject/Creature). Combat must reduce HP and
@@ -29,6 +33,11 @@ public class GraphicsObjectDamageTests
     {
         _sent.Clear();
         TNLConnection.TestPacketSink = (_, p) => _sent.Add(p);
+        AssetManagerTestHelper.ClearRegisteredCloneBases();
+        AssetManager.Instance.ClearTestNpcData();
+        LootManager.Instance.ResetForTests();
+        LootTuning.ResetToDefaults();
+        MapPropCorpseDespawn.ResetForTests();
     }
 
     [TestCleanup]
@@ -36,6 +45,11 @@ public class GraphicsObjectDamageTests
     {
         TNLConnection.TestPacketSink = null;
         _sent.Clear();
+        AssetManagerTestHelper.ClearRegisteredCloneBases();
+        AssetManager.Instance.ClearTestNpcData();
+        LootManager.Instance.ResetForTests();
+        LootTuning.ResetToDefaults();
+        MapPropCorpseDespawn.ResetForTests();
     }
 
     [TestMethod]
@@ -53,7 +67,7 @@ public class GraphicsObjectDamageTests
     }
 
     [TestMethod]
-    public void SetInvincible_False_CreatesCombatGhost()
+    public void SetInvincible_False_DoesNotCreatePlainGhostObject()
     {
         var fresh = new GraphicsObject(GraphicsObjectType.Graphics);
         fresh.InitializeHealthForTests(50);
@@ -61,26 +75,21 @@ public class GraphicsObjectDamageTests
 
         fresh.SetInvincible(false);
 
-        Assert.IsNotNull(fresh.Ghost, "MakeNotInvincible must ghost the prop for HealthMask HP sync");
+        // Plain GhostObject + local TFID → client AV 0x005B0EFF (FUN_005b0ed0 null iface).
+        // HP for map props is server-authoritative; client ram FX is local-only.
+        Assert.IsNull(fresh.Ghost, "MakeNotInvincible must not create plain GhostObject (client crash)");
         Assert.IsFalse(fresh.IsInvincible);
     }
 
     [TestMethod]
-    public void TakeDamage_LazilyCreatesCombatGhost()
+    public void TakeDamage_DoesNotCreatePlainGhostObject()
     {
-        var prop = CreateDamagableProp(maxHp: 100);
-        prop.SetInvincible(false);
-        // Clear ghost from SetInvincible path to isolate TakeDamage lazy create:
-        // (SetInvincible already created one — assert first damage still works with ghost present)
-        Assert.IsNotNull(prop.Ghost);
-
         var fresh = new GraphicsObject(GraphicsObjectType.GraphicsPhysics);
         fresh.InitializeHealthForTests(80);
-        // Damagable without going through SetInvincible (e.g. never-invincible prop)
         Assert.IsNull(fresh.Ghost);
 
         Assert.AreEqual(25, fresh.TakeDamage(25));
-        Assert.IsNotNull(fresh.Ghost, "First hit should create combat ghost for HP sync");
+        Assert.IsNull(fresh.Ghost, "TakeDamage must not CreateGhost — ram multi-kill was AV 0x005B0EFF");
         Assert.AreEqual(55, fresh.GetCurrentHP());
     }
 
@@ -111,7 +120,12 @@ public class GraphicsObjectDamageTests
         prop.OnDeath(DeathType.Silent);
 
         Assert.IsTrue(prop.IsCorpse);
-        Assert.IsNull(map.GetObjectByCoid(PropCoid), "Dead map prop must leave the sector map");
+        Assert.IsNotNull(map.GetObjectByCoid(PropCoid), "corpse stays on map until delayed despawn");
+        Assert.AreEqual(1, MapPropCorpseDespawn.PendingCountForTests);
+
+        MapPropCorpseDespawn.FlushAllForTests();
+
+        Assert.IsNull(map.GetObjectByCoid(PropCoid), "after delay, prop leaves the sector map");
         Assert.IsTrue(
             _sent.OfType<DestroyObjectPacket>().Any(p => p.ObjectId.Coid == PropCoid),
             "Clients need DestroyObject so the prop disappears; sent=" +
@@ -142,19 +156,138 @@ public class GraphicsObjectDamageTests
             }
         }
 
+        Assert.IsTrue(prop.IsCorpse);
+        MapPropCorpseDespawn.FlushAllForTests();
         Assert.IsNull(map.GetObjectByCoid(PropCoid));
         Assert.IsTrue(_sent.OfType<DestroyObjectPacket>().Any());
     }
 
-    private static GraphicsObject CreateDamagableProp(int maxHp)
+    [TestMethod]
+    public void GraphicsObject_OnDeath_NoCommodityWithoutLootWeights()
+    {
+        // Retail: rubble/fence/street-light have no tLootWeights → no prop drops.
+        // Commodities (Nuts and Bolts, etc.) come from combatant death, not random scenery.
+        const int propCbid = 8801;
+        const int salvageCbid = 5468; // Salvaged Nuts and Bolts
+        AssetManagerTestHelper.RegisterCloneBase(propCbid, CloneBaseObjectType.Object);
+        AssetManagerTestHelper.RegisterCloneBase(salvageCbid, CloneBaseObjectType.Commodity);
+        LootManager.Instance.SeedCommodityForTests(salvageCbid, minLevel: 1, maxLevel: 100, dropChance: 1f);
+
+        var (character, map) = CreatePlayerOnMap(dropCommodities: true);
+        var prop = CreateDamagableProp(maxHp: 10, cbid: propCbid);
+        prop.SetCoid(PropCoid, false);
+        prop.Position = new Vector3(5, 0, 5);
+        prop.SetMap(map);
+        prop.SetInvincible(false);
+        prop.SetMurderer(character.CurrentVehicle);
+
+        prop.TakeDamage(10);
+        prop.OnDeath(DeathType.Silent);
+
+        Assert.IsFalse(
+            map.Objects.Values.OfType<SimpleObject>().Any(o => o.CBID == salvageCbid),
+            "map props without tLootWeights must not roll commodity pool");
+        MapPropCorpseDespawn.FlushAllForTests();
+    }
+
+    [TestMethod]
+    public void GraphicsObject_OnDeath_LootSpawnsNearOverridePosition()
+    {
+        const int propCbid = 8804;
+        const int junkCbid = 2580;
+        AssetManagerTestHelper.RegisterCloneBase(propCbid, CloneBaseObjectType.Object);
+        AssetManagerTestHelper.RegisterCloneBase(junkCbid, CloneBaseObjectType.Item);
+        LootManager.Instance.SeedGeneratableItemForTests(CloneBaseObjectType.Item, 0, junkCbid, 1);
+        AssetManager.Instance.SetTestLootWeights(new[]
+        {
+            new LootWeight { DestroyedCbid = propCbid, LootCbid = junkCbid, Weight = 500 },
+        });
+
+        var (character, map) = CreatePlayerOnMap(dropCommodities: true);
+        var prop = CreateDamagableProp(maxHp: 10, cbid: propCbid);
+        prop.SetCoid(PropCoid, false);
+        // Wrong/stale prop pose (origin) — loot must follow ram override at vehicle.
+        prop.Position = new Vector3(0, 0, 0);
+        prop.DeathLootOverridePosition = new Vector3(100, 5, 200);
+        prop.SetMap(map);
+        prop.SetInvincible(false);
+        prop.SetMurderer(character.CurrentVehicle);
+
+        prop.TakeDamage(10);
+        prop.OnDeath(DeathType.Silent);
+
+        var loot = map.Objects.Values.OfType<SimpleObject>().FirstOrDefault(o => o.CBID == junkCbid);
+        Assert.IsNotNull(loot, "weighted map prop must drop fixed junk");
+        Assert.IsTrue(loot.Position.Dist(new Vector3(100, 5, 200)) < 2f,
+            $"loot at {loot.Position} should be near override (100,5,200)");
+        MapPropCorpseDespawn.FlushAllForTests();
+    }
+
+    [TestMethod]
+    public void GraphicsObject_OnDeath_DropsFixedJunkFromLootWeights()
+    {
+        const int propCbid = 8802;
+        const int junkCbid = 2580; // Scrap Tire style junk for destroyed CBID
+        AssetManagerTestHelper.RegisterCloneBase(propCbid, CloneBaseObjectType.Object);
+        AssetManagerTestHelper.RegisterCloneBase(junkCbid, CloneBaseObjectType.Item);
+        AssetManager.Instance.SetTestLootWeights(new[]
+        {
+            new LootWeight { DestroyedCbid = propCbid, LootCbid = junkCbid, Weight = 500 },
+        });
+        LootManager.Instance.SeedGeneratableItemForTests(CloneBaseObjectType.Item, 0, 1, 1);
+
+        var (character, map) = CreatePlayerOnMap(dropCommodities: false);
+        var prop = CreateDamagableProp(maxHp: 10, cbid: propCbid);
+        prop.SetCoid(PropCoid, false);
+        prop.Position = new Vector3(8, 0, 8);
+        prop.SetMap(map);
+        prop.SetInvincible(false);
+        prop.SetMurderer(character.CurrentVehicle);
+
+        prop.TakeDamage(10);
+        prop.OnDeath(DeathType.Silent);
+
+        Assert.IsTrue(
+            map.Objects.Values.OfType<SimpleObject>().Any(o => o.CBID == junkCbid),
+            "tLootWeights must apply to destroyed map props by CBID");
+    }
+
+    [TestMethod]
+    public void GraphicsObject_OnDeath_NoCommodityEvenWhenContinentAllows()
+    {
+        const int propCbid = 8803;
+        const int salvageCbid = 5477; // Salvaged Radioactive Material
+        AssetManagerTestHelper.RegisterCloneBase(propCbid, CloneBaseObjectType.Object);
+        AssetManagerTestHelper.RegisterCloneBase(salvageCbid, CloneBaseObjectType.Commodity);
+        LootManager.Instance.SeedCommodityForTests(salvageCbid, minLevel: 1, maxLevel: 100, dropChance: 1f);
+
+        var (character, map) = CreatePlayerOnMap(dropCommodities: true);
+        var prop = CreateDamagableProp(maxHp: 10, cbid: propCbid);
+        prop.SetCoid(PropCoid, false);
+        prop.SetMap(map);
+        prop.SetInvincible(false);
+        prop.SetMurderer(character.CurrentVehicle);
+
+        prop.TakeDamage(10);
+        prop.OnDeath(DeathType.Silent);
+
+        Assert.IsFalse(
+            map.Objects.Values.OfType<SimpleObject>().Any(o => o.CBID == salvageCbid),
+            "radioactive/nuts commodities are combatant tracks, not random prop rams");
+        MapPropCorpseDespawn.FlushAllForTests();
+    }
+
+    private static GraphicsObject CreateDamagableProp(int maxHp, int cbid = 0)
     {
         var prop = new GraphicsObject(GraphicsObjectType.GraphicsPhysics);
         // Unit tests may not have clonebase.wad; seed HP directly after a fake clonebase-style init.
         prop.InitializeHealthForTests(maxHp);
+        if (cbid > 0)
+            prop.LoadCloneBase(cbid);
         return prop;
     }
 
-    private (Character Character, SectorMap Map) CreatePlayerOnMap()
+    private (Character Character, SectorMap Map) CreatePlayerOnMap(bool dropCommodities = true)
     {
         var continent = new ContinentObject
         {
@@ -163,6 +296,9 @@ public class GraphicsObjectDamageTests
             DisplayName = "test",
             IsTown = false,
             IsPersistent = true,
+            DropCommodities = dropCommodities,
+            MinLevel = 1,
+            MaxLevel = 50,
         };
         var map = SectorMap.CreateForTests(continent, new Vector4(0, 0, 0, 0));
         var connection = new TNLConnection();

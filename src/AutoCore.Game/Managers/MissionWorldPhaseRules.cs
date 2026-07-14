@@ -57,6 +57,96 @@ public static class MissionWorldPhaseRules
     }
 
     /// <summary>
+    /// Completing deliver turn-in CBIDs on an objective (includes same-NPC returns).
+    /// Used so active turn-in targets stay interactable even if they were previously
+    /// phase-suppressed as completed alternate-form givers.
+    /// </summary>
+    public static IEnumerable<int> CollectActiveCompletingDeliverCbids(MissionObjective objective)
+    {
+        if (objective?.Requirements == null)
+            yield break;
+
+        foreach (var req in objective.Requirements)
+        {
+            if (req is ObjectiveRequirementDeliver d
+                && d.NPCTargetCompletes
+                && d.NPCTargetCBID > 0)
+            {
+                yield return d.NPCTargetCBID;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Active completing deliver CBIDs always win over completed-giver suppress.
+    /// Removes any CBID in <paramref name="activeDeliverCbids"/> from
+    /// <paramref name="giverCbidsToSuppress"/> in place.
+    /// </summary>
+    public static void ExcludeActiveDeliverFromGiverSuppress(
+        HashSet<int> giverCbidsToSuppress,
+        IEnumerable<int> activeDeliverCbids)
+    {
+        if (giverCbidsToSuppress == null || activeDeliverCbids == null)
+            return;
+
+        foreach (var cbid in activeDeliverCbids)
+        {
+            if (cbid > 0)
+                giverCbidsToSuppress.Remove(cbid);
+        }
+    }
+
+    /// <summary>
+    /// Client <c>CVOGCharacter_CheckMissionRequirements</c>: <c>sinReqRace</c> /
+    /// <c>sinReqClass</c> as short; <c>-1</c> (0xFFFF) means unrestricted.
+    /// <paramref name="hasCharacterBody"/> false when race/class cannot be resolved.
+    /// </summary>
+    public static bool MeetsRaceClassRequirements(
+        short reqRace,
+        short reqClass,
+        bool hasCharacterBody,
+        int characterRace,
+        int characterClass)
+    {
+        var needRace = reqRace != -1;
+        var needClass = reqClass != -1;
+        if (!needRace && !needClass)
+            return true;
+
+        if (!hasCharacterBody)
+            return false;
+
+        if (needRace && characterRace != reqRace)
+            return false;
+
+        if (needClass && characterClass != reqClass)
+            return false;
+
+        return true;
+    }
+
+    /// <summary>
+    /// True when a completed non-repeatable mission with a positive giver NPC used an
+    /// alternate-form deliver that is <b>not</b> pad-class (standing-NPC turn-in only).
+    /// Used to clear sticky giver suppress without undoing Final Exam pad faces.
+    /// </summary>
+    public static bool IsCompletedNonPadAlternateFormGiver(
+        bool missionValid,
+        bool isRepeatable,
+        int giverNpcCbid,
+        bool hasPadClassAlternateDeliver,
+        bool hasAnyAlternateFormDeliver)
+    {
+        if (!missionValid || isRepeatable || giverNpcCbid <= 0)
+            return false;
+
+        if (hasPadClassAlternateDeliver)
+            return false;
+
+        return hasAnyAlternateFormDeliver;
+    }
+
+    /// <summary>
     /// Kill spawn-list types from an active kill objective (template vehicle id or CBID).
     /// </summary>
     public static IEnumerable<int> CollectKillSpawnTypes(MissionObjective objective)

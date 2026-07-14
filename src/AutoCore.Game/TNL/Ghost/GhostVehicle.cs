@@ -423,7 +423,10 @@ public class GhostVehicle : GhostObject
         var packWheelHardpoint = packEquipment
             || (isInitial && EnableInitialHardpointPack);
 
-        PackHardpoint(stream, packWheelHardpoint && (updateMask & WheelSetMask) != 0, parentVehicle.WheelSet);
+        // WheelSet: single combined presence flag (retail unpack @0x005F7720 / equip 0x201B).
+        // Weapons/ornament: two flags (mask then present) / equip 0x201C. See PackHardpoint.
+        var packWheel = packWheelHardpoint && (updateMask & WheelSetMask) != 0;
+        PackHardpoint(stream, packWheel, parentVehicle.WheelSet, singleFlag: true);
         PackHardpoint(stream, packEquipment && (updateMask & FrontWeaponMask) != 0, parentVehicle.WeaponFront);
         PackHardpoint(stream, packEquipment && (updateMask & TurretWeaponMask) != 0, parentVehicle.WeaponTurret);
         PackHardpoint(stream, packEquipment && (updateMask & RearWeaponMask) != 0, parentVehicle.WeaponRear);
@@ -591,6 +594,8 @@ public class GhostVehicle : GhostObject
                         $"tmpl={(packTemplate ? 1 : 0)}/{(wouldPackTemplate ? 1 : 0)} spawn={(packSpawnOwner ? 1 : 0)}/{(wouldPackSpawnOwner ? 1 : 0)} " +
                         $"clientOwner={(clientHasOwner ? 1 : 0)} equip={(packEquipment ? 1 : 0)} " +
                         $"initWheel={(isInitial && EnableInitialHardpointPack ? 1 : 0)} " +
+                        $"wheelPack={(packWheel ? 1 : 0)} wheelCbid={(parentVehicle.WheelSet?.CBID ?? 0)} " +
+                        $"wheelSingleFlag=1 " +
                         $"deferPose={(isInitial && deferForeignPose ? 1 : 0)} " +
                         $"aiWire={(EnableAiStateWire ? 1 : 0)} global={(Parent.ObjectId.Global ? 1 : 0)} " +
                         $"hp={((updateMask & HealthMask) != 0 ? 1 : 0)} cur={Parent.GetCurrentHP()} max={Parent.GetMaximumHP()} corpse={(Parent.GetIsCorpse() ? 1 : 0)} " +
@@ -695,10 +700,32 @@ public class GhostVehicle : GhostObject
     }
 
     /// <summary>
-    /// Wheel/weapon/ornament hardpoint: mask flag, then present flag + CBID20 + coid64 + global.
+    /// Packs a hardpoint identity (CBID20 + coid64 + global).
+    /// <para>
+    /// <b>WheelSet</b> (<paramref name="singleFlag"/> = true): one combined presence flag
+    /// (<c>maskSet &amp;&amp; item != null</c>). Retail <c>VehicleNet_UnpackGhostVehicle</c>
+    /// @0x005F7720 reads a single flag then payload and emits equip opcode 0x201B into the
+    /// create buffer (+0x45c). A second flag corrupts the client's 20-bit CBID read and shifts
+    /// the rest of the ~85-bit update (null +0x258 / AV 0x004F5566 recovery path).
+    /// </para>
+    /// <para>
+    /// <b>Weapons / ornament</b> (default): two flags (mask then present), equip opcode 0x201C.
+    /// </para>
     /// </summary>
-    private static void PackHardpoint(BitStream stream, bool maskSet, ClonedObjectBase item)
+    private static void PackHardpoint(BitStream stream, bool maskSet, ClonedObjectBase item, bool singleFlag = false)
     {
+        if (singleFlag)
+        {
+            if (stream.WriteFlag(maskSet && item != null))
+            {
+                stream.WriteInt((uint)item.CBID, 20);
+                stream.Write(item.ObjectId.Coid);
+                stream.WriteFlag(item.ObjectId.Global);
+            }
+
+            return;
+        }
+
         if (stream.WriteFlag(maskSet) && stream.WriteFlag(item != null))
         {
             stream.WriteInt((uint)item.CBID, 20);

@@ -327,7 +327,7 @@ public static class NpcInteractHandler
             return;
 
         PrepareClientTurnInDialog(conn, character, npcCbid, dialogMissions);
-        SendNpcMissionDialog(conn, npc.ObjectId, dialogMissions);
+        SendNpcMissionDialog(conn, character, npc.ObjectId, npcCbid, dialogMissions);
     }
 
     /// <summary>
@@ -488,11 +488,9 @@ public static class NpcInteractHandler
             objectiveId,
             character.ObjectId.Coid);
 
-        conn?.SendGamePacket(new ObjectiveStatePacket
-        {
-            ObjectiveBitmask = 0u,
-            ObjectiveId = objective.ObjectiveId,
-        });
+        var reconcileState = ObjectiveStateBuilder.Build(objective, quest);
+        if (reconcileState != null)
+            conn?.SendGamePacket(reconcileState);
 
         TriggerManager.Instance.OnMissionStateChanged(
             character.CurrentVehicle ?? (ClonedObjectBase)character);
@@ -632,22 +630,42 @@ public static class NpcInteractHandler
         if (character?.Map == null || packet == null)
             return;
 
+        var giverCoid = packet.MissionGiver?.Coid ?? -1;
         Logger.WriteLog(LogType.Debug,
             "MissionDialogResponse(0x206E): mission={0} accepted={1} npc={2}",
             packet.MissionId,
             packet.Accepted,
-            packet.MissionGiver?.Coid ?? -1);
+            giverCoid);
 
-        var npc = FindNpcByCoid(character, character.Map, packet.MissionGiver?.Coid ?? -1);
-        var npcCbid = npc?.CBID ?? 0;
+        // Same resolution as UseObject: direct COID, vehicle driver, nearby active deliver NPC.
+        // Status-only "already active" happens when npcCbid is 0 or is the giver while deliver
+        // is owed to another CBID — client then shows NotCompleteText (giver chrome).
+        var npc = FindNpcByCoid(character, character.Map, giverCoid)
+            ?? TryResolveNearbyDeliverNpc(
+                character,
+                packet.MissionId,
+                GetPlayerInteractPosition(character),
+                giverCoid);
+        var npcCbid = npc?.CBID ?? ResolveCbidFromMapObject(character.Map, giverCoid);
+        var npcTfid = npc?.ObjectId ?? (giverCoid > 0 ? new TFID(giverCoid, false) : null);
 
         // Client may echo mission id OR an objective id (same pattern as deliver turn-in).
         var resolvedOfferMissionId = ResolveMissionIdForGrant(packet.MissionId);
 
+        // Note: retail turn-in dialogs often send Accepted=false on OK (tests + live captures).
+        // Do not gate deliver completion on Accepted — only offer grant below cares about reject.
         foreach (var missionId in ResolveDialogResponseMissions(character, packet.MissionId, npcCbid))
         {
-            if (TryCompleteDeliverFromDialog(conn, character, missionId, npcCbid, npc?.ObjectId))
+            if (TryCompleteDeliverFromDialog(conn, character, missionId, npcCbid, npcTfid))
                 return;
+        }
+
+        // Second pass: packet mission id may be active with deliver to this NPC even when the
+        // first list was built with npcCbid=0 (FindNpc failed, CBID recovered from map object).
+        if (resolvedOfferMissionId > 0
+            && TryCompleteDeliverFromDialog(conn, character, resolvedOfferMissionId, npcCbid, npcTfid))
+        {
+            return;
         }
 
         if (resolvedOfferMissionId <= 0)
@@ -663,6 +681,7 @@ public static class NpcInteractHandler
         var activeQuest = character.CurrentQuests.FirstOrDefault(q => q.MissionId == resolvedOfferMissionId);
         if (activeQuest != null)
         {
+            LogWhyDeliverDidNotComplete(activeQuest, npcCbid, giverCoid);
             Logger.WriteLog(LogType.Debug,
                 "MissionDialogResponse: mission {0} already active for charCoid={1} — resync client + re-eval triggers",
                 resolvedOfferMissionId,
@@ -670,6 +689,16 @@ public static class NpcInteractHandler
             ResyncActiveMissionToClient(conn, character, activeQuest);
             TriggerManager.Instance.OnMissionStateChanged(
                 character.CurrentVehicle ?? (ClonedObjectBase)character);
+            return;
+        }
+
+        // Offer dialog reject: do not grant.
+        if (!packet.Accepted)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "MissionDialogResponse: offer rejected mission={0} npcCbid={1}",
+                resolvedOfferMissionId,
+                npcCbid);
             return;
         }
 
@@ -712,11 +741,9 @@ public static class NpcInteractHandler
         var objective = GetActiveObjective(quest);
         if (objective != null)
         {
-            conn.SendGamePacket(new ObjectiveStatePacket
-            {
-                ObjectiveBitmask = 0u,
-                ObjectiveId = objective.ObjectiveId,
-            });
+            var resyncState = ObjectiveStateBuilder.Build(objective, quest);
+            if (resyncState != null)
+                conn.SendGamePacket(resyncState);
         }
 
         PushJournalMissionList(conn, character);
@@ -912,6 +939,14 @@ public static class NpcInteractHandler
         return result;
     }
 
+    /// <summary>Test seam for <see cref="CanOfferMission"/>.</summary>
+    internal static bool CanOfferMissionForTests(Character character, int missionId, int npcCbid)
+        => CanOfferMission(character, missionId, npcCbid);
+
+    /// <summary>Test seam for <see cref="GetOfferableMissions"/>.</summary>
+    internal static List<int> GetOfferableMissionsForTests(Character character, int npcCbid)
+        => GetOfferableMissions(character, npcCbid);
+
     private static bool CanOfferMission(Character character, int missionId, int npcCbid)
     {
         var mission = AssetManager.Instance.GetMission(missionId);
@@ -937,6 +972,12 @@ public static class NpcInteractHandler
         if (mission.Continent > 0 && character.Map != null && character.Map.ContinentId != mission.Continent)
             return false;
 
+        // Client CVOGCharacter_CheckMissionRequirements @ 0x005462b0:
+        // sinReqRace / sinReqClass are ushort; 0xFFFF (-1 as short) = no restriction.
+        // 0 is a real id (Human / Commando), not unrestricted.
+        if (!MeetsRaceClassRequirements(character, mission))
+            return false;
+
         if (mission.ReqMissionId != null)
         {
             foreach (var reqId in mission.ReqMissionId)
@@ -949,6 +990,39 @@ public static class NpcInteractHandler
             }
         }
 
+        return true;
+    }
+
+    /// <summary>
+    /// Race/class gate matching client offer eligibility.
+    /// Unrestricted when <see cref="Mission.ReqRace"/> / <see cref="Mission.ReqClass"/> is -1.
+    /// </summary>
+    internal static bool MeetsRaceClassRequirements(Character character, Mission mission)
+    {
+        if (mission == null)
+            return false;
+
+        var hasBody = TryGetCharacterRaceClass(character, out var race, out var classId);
+        return MissionWorldPhaseRules.MeetsRaceClassRequirements(
+            mission.ReqRace,
+            mission.ReqClass,
+            hasBody,
+            race,
+            classId);
+    }
+
+    /// <summary>
+    /// Character race/class from body clonebase (<see cref="CloneBaseCharacter.CharacterSpecific"/>).
+    /// </summary>
+    internal static bool TryGetCharacterRaceClass(Character character, out int race, out int classId)
+    {
+        race = 0;
+        classId = 0;
+        if (character?.CloneBaseObject is not CloneBaseCharacter cbc)
+            return false;
+
+        race = cbc.CharacterSpecific.Race;
+        classId = cbc.CharacterSpecific.Class;
         return true;
     }
 
@@ -1082,6 +1156,73 @@ public static class NpcInteractHandler
             character.CurrentVehicle ?? (ClonedObjectBase)character);
     }
 
+    /// <summary>
+    /// C2S FailMission (0x20B2) from journal abandon confirm. Ignores packet CharacterCoid;
+    /// server session character is authoritative.
+    /// </summary>
+    public static void HandleFailMission(TNLConnection conn, FailMissionPacket packet)
+    {
+        if (conn?.CurrentCharacter == null || packet == null)
+            return;
+
+        if (packet.MissionId <= 0)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "HandleFailMission: invalid missionId={0} charCoid={1}",
+                packet.MissionId,
+                conn.CurrentCharacter.ObjectId.Coid);
+            return;
+        }
+
+        FailMission(conn, conn.CurrentCharacter, packet.MissionId);
+    }
+
+    /// <summary>
+    /// Fail or abandon an active mission: remove from CurrentQuests, delete active DB row
+    /// (not completed), strip mission cargo, send S2C FailMission (0x20B2) + journal.
+    /// Shared by C2S abandon and ReactionType.FailMission.
+    /// </summary>
+    internal static void FailMission(TNLConnection conn, Character character, int missionId)
+    {
+        if (character == null || missionId <= 0)
+            return;
+
+        var quest = character.CurrentQuests.FirstOrDefault(q => q.MissionId == missionId);
+        if (quest == null)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "FailMission: mission {0} not active for charCoid={1}",
+                missionId,
+                character.ObjectId.Coid);
+            return;
+        }
+
+        // Drop mission cargo (deliver/kill items) before removing the quest.
+        MissionCargoService.TakeAndSend(character, quest);
+
+        character.CurrentQuests.Remove(quest);
+        MissionPersistence.Instance.OnMissionFailed(character.ObjectId.Coid, missionId);
+
+        if (conn != null)
+        {
+            conn.SendGamePacket(new FailMissionPacket
+            {
+                CharacterCoid = character.ObjectId.Coid,
+                MissionId = missionId,
+            });
+            PushJournalMissionList(conn, character);
+        }
+
+        Logger.WriteLog(LogType.Debug,
+            "FailMission: failed/abandoned mission {0} for charCoid={1}",
+            missionId,
+            character.ObjectId.Coid);
+
+        var activator = character.CurrentVehicle ?? (ClonedObjectBase)character;
+        TriggerManager.Instance.OnMissionStateChanged(activator);
+        character.Map?.ReplayMissionWorldSetup(activator);
+    }
+
     private static bool HasDeliverTurnIn(CharacterQuest quest, int npcCbid)
     {
         if (npcCbid <= 0)
@@ -1134,28 +1275,22 @@ public static class NpcInteractHandler
             if (objective == null)
                 continue;
 
-            var slot = deliver.FirstStateSlot;
-            if (slot >= ObjectiveStatePacket.SlotCount)
-                continue;
-
-            var packet = new ObjectiveStatePacket
-            {
-                ObjectiveBitmask = 0u,
-                ObjectiveId = objective.ObjectiveId,
-            };
-            packet.SlotProgress[slot] = 1.0f;
-
             var seq = quest.ActiveObjectiveSequence;
             if (seq < quest.ObjectiveProgress.Length && seq < quest.ObjectiveMax.Length)
                 quest.ObjectiveProgress[seq] = quest.ObjectiveMax[seq];
 
-            conn.SendGamePacket(packet);
+            // Client requirement callbacks need lChangeBitmask bits (requirement index).
+            var packet = ObjectiveStateBuilder.BuildTurnInReady(objective);
+            if (packet != null)
+                conn.SendGamePacket(packet);
         }
     }
 
     private static void SendNpcMissionDialog(
         TNLConnection conn,
+        Character character,
         TFID npcTfid,
+        int npcCbid,
         IReadOnlyList<int> missionIds)
     {
         var packet = new NpcMissionDialogPacket
@@ -1164,14 +1299,132 @@ public static class NpcInteractHandler
         };
 
         foreach (var missionId in missionIds)
+        {
             packet.MissionIds.Add(missionId);
+            // Client_RecvNpcMissionDialog copies 8 item COIDs into mission state.
+            // These are mission *reward choice* slots (mission.Item[]), NOT deliver cargo.
+            // Putting cargo COIDs here makes turn-in mode require "select a reward first"
+            // even when the mission has no rewards (Track This: all Item=-1).
+            packet.MissionItemCoids.Add(BuildDialogItemCoids(character, missionId));
+        }
 
         conn.SendGamePacket(packet);
 
         Logger.WriteLog(LogType.Debug,
-            "NpcInteract: NpcMissionDialog(0x206D) npc={0} missions=[{1}]",
+            "NpcInteract: NpcMissionDialog(0x206D) npc={0} cbid={1} missions=[{2}]",
             npcTfid?.Coid ?? -1,
+            npcCbid,
             string.Join(',', missionIds));
+    }
+
+    /// <summary>
+    /// Up to 8 inventory COIDs for mission reward-choice items (mission template Item[]),
+    /// or all -1 when the mission has no selectable rewards.
+    /// Do not put deliver GiveItemOnStart cargo here — client treats non--1 slots as rewards.
+    /// </summary>
+    internal static int[] BuildDialogItemCoids(Character character, int missionId)
+    {
+        var slots = new int[NpcMissionDialogPacket.ItemCoidSlots];
+        for (var i = 0; i < slots.Length; i++)
+            slots[i] = -1;
+
+        if (character == null || missionId <= 0)
+            return slots;
+
+        var mission = AssetManager.Instance.GetMission(missionId);
+        if (mission?.Item == null || mission.Item.Length == 0)
+            return slots;
+
+        // Only when the mission authors selectable reward CBIDs.
+        var hasRewardChoice = false;
+        foreach (var cbid in mission.Item)
+        {
+            if (cbid > 0)
+            {
+                hasRewardChoice = true;
+                break;
+            }
+        }
+
+        if (!hasRewardChoice || character.Inventory == null)
+            return slots;
+
+        var slot = 0;
+        foreach (var rewardCbid in mission.Item)
+        {
+            if (rewardCbid <= 0 || slot >= slots.Length)
+                continue;
+
+            foreach (var item in character.Inventory.Items)
+            {
+                if (item.Cbid != rewardCbid)
+                    continue;
+                if (item.Coid <= 0 || item.Coid > int.MaxValue)
+                    continue;
+                if (slot >= slots.Length)
+                    break;
+                slots[slot++] = (int)item.Coid;
+                break; // one stack per reward CBID slot
+            }
+        }
+
+        return slots;
+    }
+
+    /// <summary>CBID from a map object when FindNpc failed (missing IsNPC flag, etc.).</summary>
+    internal static int ResolveCbidFromMapObject(SectorMap map, long coid)
+    {
+        if (map == null || coid <= 0)
+            return 0;
+
+        var obj = map.GetObjectByCoid(coid);
+        if (obj is Creature creature && creature is not Character && creature.CBID > 0)
+            return creature.CBID;
+
+        if (obj is Vehicle vehicle)
+        {
+            var driver = vehicle.Owner as Creature ?? vehicle.GetSuperCharacter(false);
+            if (driver != null && driver is not Character && driver.CBID > 0)
+                return driver.CBID;
+        }
+
+        if (obj is SpawnPoint spawn && spawn.HasLiveSpawn())
+        {
+            var child = map.GetObjectByCoid(spawn.LastSpawnedCoid);
+            if (child is Creature childNpc && childNpc is not Character && childNpc.CBID > 0)
+                return childNpc.CBID;
+            if (child is Vehicle childVehicle)
+            {
+                var driver = childVehicle.Owner as Creature ?? childVehicle.GetSuperCharacter(false);
+                if (driver != null && driver is not Character && driver.CBID > 0)
+                    return driver.CBID;
+            }
+        }
+
+        return 0;
+    }
+
+    private static void LogWhyDeliverDidNotComplete(CharacterQuest quest, int npcCbid, long giverCoid)
+    {
+        if (quest == null)
+            return;
+
+        var objective = GetActiveObjective(quest);
+        var activeDeliverTargets = objective?.Requirements?
+            .OfType<ObjectiveRequirementDeliver>()
+            .Where(d => d.NPCTargetCompletes && d.NPCTargetCBID > 0)
+            .Select(d => d.NPCTargetCBID)
+            .ToArray() ?? Array.Empty<int>();
+
+        var remaining = HasRemainingDeliverToNpc(quest, npcCbid);
+        Logger.WriteLog(LogType.Debug,
+            "MissionDialogResponse: deliver not completed mission={0} seq={1} npcCbid={2} giverCoid={3} activeDeliverCbids=[{4}] remainingDeliverToNpc={5}",
+            quest.MissionId,
+            quest.ActiveObjectiveSequence,
+            npcCbid,
+            giverCoid,
+            string.Join(',', activeDeliverTargets),
+            remaining ? 1 : 0);
     }
 
     private static bool TryCompleteDeliverFromDialog(
@@ -1186,61 +1439,45 @@ public static class NpcInteractHandler
             return false;
 
         var objective = GetActiveObjective(quest);
-        var objectiveId = objective?.ObjectiveId ?? 0;
+        if (objective == null)
+            return false;
 
         var mission = AssetManager.Instance.GetMission(missionId);
-        var hasLaterObjectives = mission?.Objectives.Values.Any(o =>
-            objective != null && o.Sequence > quest.ActiveObjectiveSequence) == true;
+        if (mission == null)
+            return false;
 
-        if (hasLaterObjectives)
-        {
-            IncompleteHandlerLog.Warn(
-                "DeliverTurnIn",
-                $"mission={missionId} objective={objectiveId} npcCbid={npcCbid} seq={quest.ActiveObjectiveSequence}",
-                "Deliver turn-in removes the entire quest even though later objective sequences exist",
-                "Use AdvanceOrCompleteObjective (shared path): advance sequence when not final; only remove quest + CompletedMissionIds on last objective; apply rewards once.");
-        }
-        else
-        {
-            IncompleteHandlerLog.Warn(
-                "DeliverTurnIn",
-                $"mission={missionId} objective={objectiveId} npcCbid={npcCbid}",
-                "Deliver complete bypasses AdvanceOrCompleteObjective — no shared reward/persist/ObjectiveState path",
-                "Route deliver completion through MissionManager/AdvanceOrCompleteObjective for one generic complete pipeline.");
-        }
+        var objectiveId = objective.ObjectiveId;
+        var seq = quest.ActiveObjectiveSequence;
+        var hasLaterObjectives = mission.Objectives.Values.Any(o => o.Sequence > seq);
 
-        // TakeItemAtEnd before completing so cargo state matches turn-in.
-        MissionCargoService.TakeAndSend(character, quest, objective);
-
-        character.CurrentQuests.Remove(quest);
-        character.CompletedMissionIds.Add(missionId);
-        MissionPersistence.Instance.OnMissionCompleted(character.ObjectId.Coid, missionId);
-
-        // Client already applied local CompleteObjective XP VFX; server must still persist rewards
-        // without re-sending GiveXP delta (would double-count). If the grant levels the character,
-        // GiveXp still sends CharacterLevel so mid-session level updates without relog.
-        // No 0x2070 — soft-pedal below.
-        ApplyMissionCompleteRewards(
+        // Shared advance/complete path. Dialog turn-in must not send immediate 0x2070
+        // (client already ran CVOGReaction_CompleteObjective); stacking 0x2070 / journal /
+        // GroupReactionCall during that window → AV @ 0x007B6DB0. Soft-pedal defers journal +
+        // OnMissionStateChanged; multi-req final may force delayed 0x2070 after the window.
+        AdvanceOrCompleteObjective(
+            conn,
             character,
+            quest,
             mission,
             objective,
             source: "DeliverTurnIn",
-            notifyClient: false);
+            sendCompleteDynamicObjective: false,
+            notifyClientRewards: false,
+            syncClientImmediately: false);
 
-        // Do NOT send CompleteDynamicObjective (0x2070) on dialog turn-in.
-        // Client already ran CVOGReaction_CompleteObjective; that also unlocks next CoreMission
-        // offers and loads interact FX (interact_npc_available_new_mission_core → NDSpecialFX XML).
-        // Stacking 0x2070 / journal / GroupReactionCall (0x206C) during that window → AV @ 0x007B6DB0.
-        // Soft-pedal: no 0x2070, suppress 0x206C briefly, defer journal + OnMissionStateChanged.
-        // Server-driven completes (kill/patrol/useitem) still use AdvanceOrCompleteObjective → 0x2070.
         MissionClientSoftPedal.ArmAfterDialogTurnIn(character.ObjectId.Coid);
 
-        var forceClientComplete = ObjectiveNeedsForceClientCompleteAfterDeliver(objective);
+        // Delayed 0x2070 only on final multi-req (patrol+deliver) so AutoPatrol waypoints clear.
+        // Mid-sequence advance: client already advanced; do not force-complete.
+        var forceClientComplete = !hasLaterObjectives
+            && ObjectiveNeedsForceClientCompleteAfterDeliver(objective);
+
         Logger.WriteLog(LogType.Debug,
-            "MissionDialogResponse: completed deliver mission={0} objective={1} npcCbid={2} (immediate 0x2070={3}; follow-up forceComplete={4}; GRC suppress {5}ms)",
+            "MissionDialogResponse: deliver mission={0} objective={1} npcCbid={2} advanced={3} (immediate 0x2070={4}; follow-up forceComplete={5}; GRC suppress {6}ms)",
             missionId,
             objectiveId,
             npcCbid,
+            hasLaterObjectives ? 1 : 0,
             0,
             forceClientComplete ? 1 : 0,
             MissionClientSoftPedal.GroupReactionSuppressMs);
@@ -1253,7 +1490,7 @@ public static class NpcInteractHandler
             forceClientObjectiveComplete: forceClientComplete);
 
         // Do not auto-open follow-up offer dialog — player re-interacts (UseObject).
-        if (npcCbid > 0)
+        if (npcCbid > 0 && !hasLaterObjectives)
         {
             var followUps = GetOfferableMissions(character, npcCbid);
             if (followUps.Count > 0)
@@ -1290,11 +1527,17 @@ public static class NpcInteractHandler
         if (targetCoid <= 0)
             return;
 
+        // Client may already be on the patrol UI after local CompleteObjective while the server
+        // is still on a prior deliver (dialog desync). Catch up before matching.
+        ReconcileClientAheadPatrolTarget(conn, character, targetCoid);
+
+        var anyQuest = false;
         foreach (var quest in character.CurrentQuests.ToList())
         {
             if (character.CompletedMissionIds.Contains(quest.MissionId))
                 continue;
 
+            anyQuest = true;
             var mission = AssetManager.Instance.GetMission(quest.MissionId);
             if (mission == null
                 || !mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var objective))
@@ -1309,12 +1552,33 @@ public static class NpcInteractHandler
             if (!PatrolListsTarget(patrol, targetCoid))
                 continue;
 
-            if (!TryGetWorldPosition(character.Map, targetCoid, out var targetPos))
-                continue;
-
-            var radius = patrol.AutoCompleteDistance > 0f ? patrol.AutoCompleteDistance : 25f;
-            if (playerPos.DistSq(targetPos) > radius * radius)
-                continue;
+            // Prefer server-side range when the pad exists as a live entity, graphics template,
+            // or VisualWaypoint. Many mission GenericTargetCOIDs (e.g. Track This 10310–10324)
+            // are client-only ghosts never present in continent .fam Templates — client only
+            // emits AutoPatrol when already inside AutoCompleteDistance, so trust that gate.
+            if (TryGetWorldPosition(character.Map, targetCoid, out var targetPos))
+            {
+                var radius = patrol.AutoCompleteDistance > 0f ? patrol.AutoCompleteDistance : 25f;
+                var distXZSq = DistXZSq(playerPos, targetPos);
+                if (distXZSq > radius * radius)
+                {
+                    Logger.WriteLog(LogType.Debug,
+                        "AutoPatrol: target={0} out of range distXZ={1:F1} radius={2:F1} mission={3}",
+                        targetCoid,
+                        MathF.Sqrt(distXZSq),
+                        radius,
+                        quest.MissionId);
+                    continue;
+                }
+            }
+            else
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "AutoPatrol: target={0} listed, no map position on continent={1} mission={2} — trusting client range gate",
+                    targetCoid,
+                    character.Map.ContinentId,
+                    quest.MissionId);
+            }
 
             // Patrol + deliver on same objective (Final Exam class): reaching the pad waypoint
             // must not finish the mission — NPC deliver still required. Client sends AutoPatrol
@@ -1351,6 +1615,172 @@ public static class NpcInteractHandler
             LogPatrolIncomplete(patrol, quest, objective, targetCoid);
             AdvanceOrCompleteObjective(conn, character, quest, mission, objective, source: "AutoPatrol");
             return;
+        }
+
+        // Server already past the patrol that owns this pad (e.g. Track This seq2 deliver while
+        // client still AutoPatrols 10310). Force-complete the finished patrol on the client and
+        // resync the active objective once so waypoints clear and turn-in UI can show.
+        if (TryResyncClientPastPatrol(conn, character, targetCoid))
+            return;
+
+        if (anyQuest)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "AutoPatrol: no matching active patrol for target={0} charCoid={1} quests=[{2}]",
+                targetCoid,
+                character.ObjectId.Coid,
+                string.Join(',', character.CurrentQuests.Select(q =>
+                    $"{q.MissionId}:seq{q.ActiveObjectiveSequence}")));
+        }
+    }
+
+    /// <summary>
+    /// Client still AutoPatrols a pad from a finished objective sequence. Send 0x2070 for that
+    /// patrol objective + journal/active ObjectiveState so the client leaves the waypoint UI.
+    /// One-shot per mission per continent (client spam).
+    /// </summary>
+    private static bool TryResyncClientPastPatrol(
+        TNLConnection conn,
+        Character character,
+        long targetCoid)
+    {
+        if (conn == null || character?.Map == null || targetCoid <= 0)
+            return false;
+
+        character.MapPresence.EnsureContinent(character.Map.ContinentId);
+
+        foreach (var quest in character.CurrentQuests)
+        {
+            if (character.CompletedMissionIds.Contains(quest.MissionId))
+                continue;
+            if (character.MapPresence.HasStalePatrolResync(quest.MissionId))
+                continue;
+
+            var mission = AssetManager.Instance.GetMission(quest.MissionId);
+            if (mission?.Objectives == null)
+                continue;
+
+            // Only resync when the server has a real later active objective (not a bad/empty seq).
+            if (!mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var activeObj)
+                || activeObj == null)
+            {
+                continue;
+            }
+
+            MissionObjective pastPatrolObj = null;
+            foreach (var obj in mission.Objectives.Values)
+            {
+                if (obj.Sequence >= quest.ActiveObjectiveSequence)
+                    continue;
+
+                var patrol = obj.Requirements?.OfType<ObjectiveRequirementPatrol>().FirstOrDefault();
+                if (patrol == null || !patrol.AutoComplete)
+                    continue;
+                if (!PatrolListsTarget(patrol, targetCoid))
+                    continue;
+
+                pastPatrolObj = obj;
+                break;
+            }
+
+            if (pastPatrolObj == null)
+                continue;
+
+            character.MapPresence.MarkStalePatrolResync(quest.MissionId);
+
+            Logger.WriteLog(LogType.Debug,
+                "AutoPatrol: stale client patrol target={0} mission={1} finishedObj={2} activeSeq={3} — force-complete + resync",
+                targetCoid,
+                quest.MissionId,
+                pastPatrolObj.ObjectiveId,
+                quest.ActiveObjectiveSequence);
+
+            conn.SendGamePacket(new CompleteDynamicObjectivePacket
+            {
+                MissionId = quest.MissionId,
+                ObjectiveId = pastPatrolObj.ObjectiveId,
+            });
+
+            ResyncActiveMissionToClient(conn, character, quest);
+            TriggerManager.Instance.OnMissionStateChanged(
+                character.CurrentVehicle ?? (ClonedObjectBase)character);
+            character.Map?.ReplayMissionWorldSetup(
+                character.CurrentVehicle ?? (ClonedObjectBase)character);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// When the client AutoPatrols a waypoint that belongs to a later objective (typical after
+    /// local CompleteObjective on a prior deliver while server stayed on that deliver), advance
+    /// intermediate sequences until the matching patrol is active.
+    /// </summary>
+    private static void ReconcileClientAheadPatrolTarget(
+        TNLConnection conn,
+        Character character,
+        long targetCoid)
+    {
+        if (character == null || targetCoid <= 0)
+            return;
+
+        foreach (var quest in character.CurrentQuests.ToList())
+        {
+            if (character.CompletedMissionIds.Contains(quest.MissionId))
+                continue;
+
+            var mission = AssetManager.Instance.GetMission(quest.MissionId);
+            if (mission?.Objectives == null || mission.Objectives.Count == 0)
+                continue;
+
+            // Earliest objective at/after active whose AutoComplete patrol lists this target.
+            MissionObjective match = null;
+            foreach (var obj in mission.Objectives.Values.OrderBy(o => o.Sequence))
+            {
+                if (obj.Sequence < quest.ActiveObjectiveSequence)
+                    continue;
+
+                var patrol = obj.Requirements?.OfType<ObjectiveRequirementPatrol>().FirstOrDefault();
+                if (patrol == null || !patrol.AutoComplete)
+                    continue;
+                if (!PatrolListsTarget(patrol, targetCoid))
+                    continue;
+
+                match = obj;
+                break;
+            }
+
+            if (match == null || match.Sequence <= quest.ActiveObjectiveSequence)
+                continue;
+
+            // Advance intermediate objectives (e.g. deliver-1) so patrol becomes active.
+            var guard = 0;
+            while (character.CurrentQuests.Contains(quest)
+                && quest.ActiveObjectiveSequence < match.Sequence
+                && guard++ < 16)
+            {
+                if (!mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var current)
+                    || current == null)
+                {
+                    break;
+                }
+
+                Logger.WriteLog(LogType.Debug,
+                    "AutoPatrol: client-ahead reconcile mission={0} seq {1} -> toward {2} (target={3})",
+                    quest.MissionId,
+                    quest.ActiveObjectiveSequence,
+                    match.Sequence,
+                    targetCoid);
+
+                AdvanceOrCompleteObjective(
+                    conn,
+                    character,
+                    quest,
+                    mission,
+                    current,
+                    source: "AutoPatrolReconcile");
+            }
         }
     }
 
@@ -1451,6 +1881,12 @@ public static class NpcInteractHandler
 
     private static bool TryGetWorldPosition(SectorMap map, long coid, out Vector3 position)
     {
+        if (map == null || coid <= 0)
+        {
+            position = default;
+            return false;
+        }
+
         var live = map.GetObjectByCoid(coid);
         if (live != null)
         {
@@ -1458,11 +1894,34 @@ public static class NpcInteractHandler
             return true;
         }
 
-        if (map.MapData.Templates.TryGetValue(coid, out var template)
-            && template is EntityTemplates.GraphicsObjectTemplate graphics)
+        if (map.MapData != null)
         {
-            position = graphics.Location.ToVector3();
-            return true;
+            if (map.MapData.Templates.TryGetValue(coid, out var template)
+                && template is EntityTemplates.GraphicsObjectTemplate graphics)
+            {
+                position = graphics.Location.ToVector3();
+                return true;
+            }
+
+            // Mission pads sometimes appear only as VisualWaypoint rows (id or ObjectCoid).
+            if (map.MapData.VisualWaypoints != null)
+            {
+                if (coid <= int.MaxValue
+                    && map.MapData.VisualWaypoints.TryGetValue((int)coid, out var byId))
+                {
+                    position = byId.Position;
+                    return true;
+                }
+
+                foreach (var wp in map.MapData.VisualWaypoints.Values)
+                {
+                    if (wp.ObjectCoid == coid)
+                    {
+                        position = wp.Position;
+                        return true;
+                    }
+                }
+            }
         }
 
         position = default;
@@ -1470,10 +1929,12 @@ public static class NpcInteractHandler
     }
 
     /// <summary>
-    /// Shared objective advance/complete path for <b>server-driven</b> finishes
-    /// (UseItem, AutoPatrol, Kill, …). Sends CompleteDynamicObjective (0x2070) so the client
-    /// force-completes and retargets UI. Dialog deliver turn-in must <b>not</b> use this packet
-    /// (see <see cref="TryCompleteDeliverFromDialog"/>) — the client already completed locally.
+    /// Shared objective advance/complete path for server-driven finishes (UseItem, AutoPatrol,
+    /// Kill, …) and dialog deliver turn-in. By default sends CompleteDynamicObjective (0x2070)
+    /// so the client force-completes and retargets UI. Dialog deliver must pass
+    /// <paramref name="sendCompleteDynamicObjective"/> = false — the client already completed
+    /// locally — and usually <paramref name="syncClientImmediately"/> = false so soft-pedal
+    /// can defer journal / phase replay (see <see cref="TryCompleteDeliverFromDialog"/>).
     /// </summary>
     internal static void AdvanceOrCompleteObjective(
         TNLConnection conn,
@@ -1481,7 +1942,10 @@ public static class NpcInteractHandler
         CharacterQuest quest,
         Mission mission,
         MissionObjective objective,
-        string source = "Objective")
+        string source = "Objective",
+        bool sendCompleteDynamicObjective = true,
+        bool notifyClientRewards = true,
+        bool syncClientImmediately = true)
     {
         // Stale references after complete/abandon must not re-advance, re-persist, or re-reward.
         // List membership is reference-based; callers hold the live CharacterQuest instance.
@@ -1522,11 +1986,14 @@ public static class NpcInteractHandler
         }
 
         // Server state transitions must succeed without a connection (disconnect mid-complete).
-        conn?.SendGamePacket(new CompleteDynamicObjectivePacket
+        if (sendCompleteDynamicObjective)
         {
-            MissionId = quest.MissionId,
-            ObjectiveId = objective.ObjectiveId,
-        });
+            conn?.SendGamePacket(new CompleteDynamicObjectivePacket
+            {
+                MissionId = quest.MissionId,
+                ObjectiveId = objective.ObjectiveId,
+            });
+        }
 
         // Take mission cargo for the finishing objective before advance/complete.
         MissionCargoService.TakeAndSend(character, quest, objective);
@@ -1552,17 +2019,11 @@ public static class NpcInteractHandler
             var nextObjective = GetActiveObjective(quest);
             if (nextObjective != null)
             {
-                IncompleteHandlerLog.Warn(
-                    "AdvanceOrCompleteObjective",
-                    context + $" nextObjective={nextObjective.ObjectiveId}",
-                    "ObjectiveState sent with Bitmask=0 and SlotProgress all 0 — client partial progress/UI may be wrong",
-                    "Build bitmask + FirstStateSlot floats from active requirement progress; map ObjectiveId correctly for client hash lookup.");
-
-                conn?.SendGamePacket(new ObjectiveStatePacket
-                {
-                    ObjectiveBitmask = 0u,
-                    ObjectiveId = nextObjective.ObjectiveId,
-                });
+                // ObjectiveState is safe during dialog soft-pedal (unlike 0x2070); resync next target
+                // with requirement change bits so client requirement UI retargets.
+                var nextState = ObjectiveStateBuilder.Build(nextObjective, quest);
+                if (nextState != null)
+                    conn?.SendGamePacket(nextState);
             }
 
             // New active objective may GiveItemOnStart (deliver cargo).
@@ -1577,13 +2038,16 @@ public static class NpcInteractHandler
                     "Apply MissionObjective reward fields (and mission-level rewards on final complete) via character economy APIs.");
             }
 
-            if (conn != null)
-                PushJournalMissionList(conn, character);
-            var phaseActivator = character.CurrentVehicle ?? (ClonedObjectBase)character;
-            TriggerManager.Instance.OnMissionStateChanged(phaseActivator);
-            // Kill→deliver (or any advance): re-apply Create for new active deliver/kill targets
-            // even if spawn TriggerEvents bookkeeping was lost.
-            character.Map?.ReplayMissionWorldSetup(phaseActivator);
+            if (syncClientImmediately)
+            {
+                if (conn != null)
+                    PushJournalMissionList(conn, character);
+                var phaseActivator = character.CurrentVehicle ?? (ClonedObjectBase)character;
+                TriggerManager.Instance.OnMissionStateChanged(phaseActivator);
+                // Kill→deliver (or any advance): re-apply Create for new active deliver/kill targets
+                // even if spawn TriggerEvents bookkeeping was lost.
+                character.Map?.ReplayMissionWorldSetup(phaseActivator);
+            }
             return;
         }
 
@@ -1597,14 +2061,22 @@ public static class NpcInteractHandler
             quest.MissionId,
             objective.ObjectiveId);
 
-        ApplyMissionCompleteRewards(character, mission, objective, source);
+        ApplyMissionCompleteRewards(
+            character,
+            mission,
+            objective,
+            source,
+            notifyClient: notifyClientRewards);
 
-        if (conn != null)
-            PushJournalMissionList(conn, character);
-        var completeActivator = character.CurrentVehicle ?? (ClonedObjectBase)character;
-        TriggerManager.Instance.OnMissionStateChanged(completeActivator);
-        // Post-complete pad form / giver suppress (personal presence).
-        character.Map?.ReplayMissionWorldSetup(completeActivator);
+        if (syncClientImmediately)
+        {
+            if (conn != null)
+                PushJournalMissionList(conn, character);
+            var completeActivator = character.CurrentVehicle ?? (ClonedObjectBase)character;
+            TriggerManager.Instance.OnMissionStateChanged(completeActivator);
+            // Post-complete pad form / giver suppress (personal presence).
+            character.Map?.ReplayMissionWorldSetup(completeActivator);
+        }
     }
 
     /// <summary>

@@ -28,8 +28,11 @@ The older `cv-debug` / cdb path freezes the client (attach break + DirectInput).
 | ActivateEnterWorld | `0x00503F30` | vehicle, `+0x258` enter/exit |
 | GhostOnAdd | `0x005B0D70` | ghost, bound object, tfid |
 | GhostApply | `0x005B0ED0` | FUN_005b0ed0: bound/buf/tfid/buf_opcode/cbid; probes `vtbl+0x1C8`; logs `GhostApply_CRASH_IMMINENT` and **skips** original when iface is null (AV `0x005B0EFF`) |
+| WheelsetFieldB0 | `0x004F5560` | FUN_004f5560: reads `vehicle+0x258` then `+0xb0`; logs `WheelsetDeref_CRASH_IMMINENT` and **skips** original when wheelset null (AV `0x004F5566`) |
+| RecvDestroyObject | `0x008149C0` | S2C `0x2020`: logs `DestroyObject_recv` with TFID, resolve hit, `v258`, `owner_ac` (vehicle+0xAC) |
+| WaitingMapInsert | `0x005A3B00` | FUN_005a3b00 waiting-bind TFID map insert; logs `WaitingMapInsert` / `WaitingMapInsert_CRASH_IMMINENT` and **skips** when Myhead null (AV `0x005A3B0D`) |
 
-All detours call the original function (except GhostApply null-iface skip); they never `int3` or suspend.
+All detours call the original function except: GhostApply null-iface skip, WheelsetFieldB0 null-wheel skip, WaitingMapInsert null-Myhead skip. They never `int3` or suspend.
 
 See also [GHOST_OBJECT_DIAG.md](GHOST_OBJECT_DIAG.md) for server correlation.
 

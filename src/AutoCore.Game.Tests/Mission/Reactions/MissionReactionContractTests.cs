@@ -28,7 +28,7 @@ public class MissionReactionContractTests
     {
         ReactionType.GiveMission,
         ReactionType.CompleteObjective,
-        ReactionType.FailMission,       // stub — still catalogued
+        ReactionType.FailMission,
         ReactionType.SetActiveObjective,
         // GiveMissionDialog is client-notify only (no server quest mutation) — not in mutating set.
     };
@@ -175,22 +175,28 @@ public class MissionReactionContractTests
     [TestMethod]
     [TestCategory("MissionCritical")]
     [TestCategory("MissionContract")]
-    public void FailMission_Stub_DoesNotClearQuest_OrComplete()
+    public void FailMission_ClearsQuest_PersistsRemove_SendsFailPacket_DoesNotComplete()
     {
         var o0 = _fx.CreateSimpleObjective(ObjectiveA, 0, MissionId);
         _fx.SeedMission(MissionId, 0, o0);
         var player = _fx.CreatePlayer();
         _fx.GiveQuest(player.Character, MissionId);
         _fx.PersistWrites.Clear();
+        _fx.Sent.Clear();
 
         var reaction = _fx.PlaceReaction(player.Map, _fx.NextCoid(), ReactionType.FailMission, MissionId);
-        Assert.IsTrue(reaction.TriggerIfPossible(player.Character));
+        // false: skip 0x206C — S2C FailMission is the client channel.
+        Assert.IsFalse(reaction.TriggerIfPossible(player.Character));
         _fx.FlushPersist();
 
-        MissionInvariantAssertions.AssertActiveMission(player.Character, MissionId, 0);
+        MissionInvariantAssertions.AssertNotActive(player.Character, MissionId);
         Assert.IsFalse(player.Character.CompletedMissionIds.Contains(MissionId));
-        Assert.AreEqual(0, _fx.PersistWrites.Count);
-        Assert.AreEqual(0, _fx.CountPackets<FailMissionPacket>());
+        Assert.IsTrue(_fx.PersistWrites.Any(w =>
+            w.Kind == QuestPersistKind.Remove && w.MissionId == MissionId));
+        Assert.AreEqual(1, _fx.CountPackets<FailMissionPacket>());
+        var fail = _fx.Sent.OfType<FailMissionPacket>().Single();
+        Assert.AreEqual(MissionId, fail.MissionId);
+        Assert.AreEqual(player.Character.ObjectId.Coid, fail.CharacterCoid);
     }
 
     [TestMethod]

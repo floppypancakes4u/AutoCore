@@ -13,11 +13,18 @@ public static class KillXpAward
 {
     /// <summary>
     /// If <paramref name="victim"/> has a murderer character, compute and grant kill XP.
+    /// Only combatants (<see cref="Creature"/> / <see cref="Vehicle"/>) award kill XP —
+    /// pure map props and inventory <see cref="SimpleObject"/>s do not (docs/XP.md).
     /// Safe to call from any OnDeath path.
     /// </summary>
     public static void TryAward(ClonedObjectBase victim)
     {
         if (victim == null || victim.Murderer.Coid <= 0)
+            return;
+
+        // Map scenery / inventory junk: OnDeath still runs for loot + mission kill credit,
+        // but kill XP is creature/vehicle only (level table + XPPercent).
+        if (victim is not (Creature or Vehicle))
             return;
 
         Character killer;

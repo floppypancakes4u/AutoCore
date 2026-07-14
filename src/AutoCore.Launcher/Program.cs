@@ -56,6 +56,9 @@ public class Program : ExitableProgram
             throw new Exception("Critical asset loading failed!");
         }
 
+        // Loot rate from loot.tuning.json (1.0 = retail; higher = more drops).
+        AutoCore.Game.Diagnostics.LootTuning.ApplyFromConfigFiles();
+
         // Initialize the loot manager (builds item index from CloneBase data)
         LootManager.Instance.Initialize();
 
@@ -65,6 +68,8 @@ public class Program : ExitableProgram
         }
 
         AutoCore.Game.Diagnostics.WireIsolationLevers.ApplyFromEnvironmentAndConfigFiles();
+        // After wire levers so log.filters.json can quiet WireDiag / GhostObjectDiag without rebuild.
+        AutoCore.Game.Diagnostics.LogFilters.ApplyFromConfigFiles();
 
         AuthServer.Setup(authConfig);
         if (!AuthServer.Start())
