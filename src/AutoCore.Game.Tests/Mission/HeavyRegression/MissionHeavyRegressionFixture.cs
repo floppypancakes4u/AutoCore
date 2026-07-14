@@ -3,7 +3,9 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace AutoCore.Game.Tests.Mission.HeavyRegression;
 
 using AutoCore.Database.World.Models;
+using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
+using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
 using AutoCore.Game.Mission;
@@ -12,6 +14,7 @@ using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Global;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
+using AutoCore.Game.Tests.Inventory;
 using AutoCore.Game.TNL;
 
 /// <summary>
@@ -193,4 +196,141 @@ public sealed class MissionHeavyRegressionFixture : IDisposable
 
     public ObjectiveStatePacket LastObjectiveState(int objectiveId)
         => Sent.OfType<ObjectiveStatePacket>().LastOrDefault(p => p.ObjectiveId == objectiveId);
+
+    /// <summary>
+    /// Attach a recording cargo inventory so mission gear grant/take paths can run.
+    /// </summary>
+    public InventoryTestHarness AttachInventory(Character character, long? characterCoid = null)
+    {
+        var harness = new InventoryTestHarness(characterCoid ?? character.ObjectId.Coid);
+        character.AttachInventoryForTests(harness.Inventory);
+        return harness;
+    }
+
+    public static void PlaceWorldObject(SectorMap map, long coid, int cbid = 0, Vector3? position = null)
+    {
+        var obj = new SimpleObject(GraphicsObjectType.Graphics);
+        obj.SetCoid(coid, false);
+        if (cbid > 0)
+            obj.SetCbidForTests(cbid);
+        obj.Position = position ?? new Vector3(0, 0, 0);
+        obj.SetMap(map);
+    }
+
+    public static UseObjectPacket UsePacket(long targetCoid, int objectiveId = -1) => new()
+    {
+        Target = new TFID(targetCoid, false),
+        ObjectiveId = objectiveId,
+    };
+
+    public void UseObject(TNLConnection conn, long targetCoid, int objectiveId = -1)
+        => NpcInteractHandler.HandleUseObject(conn, UsePacket(targetCoid, objectiveId));
+
+    public static void GrantMissionCargo(
+        Character character,
+        int cbid,
+        int quantity = 1,
+        long? itemCoid = null)
+    {
+        long coid;
+        if (itemCoid.HasValue)
+            coid = itemCoid.Value;
+        else if (character.Map != null)
+            coid = character.Map.LocalCoidCounter++;
+        else
+            coid = character.ObjectId.Coid + 10_000;
+
+        character.Inventory.GrantMissionCargoItem(
+            cbid,
+            CloneBaseObjectType.QuestObject,
+            $"mission_{cbid}",
+            coid,
+            character.ObjectId.Coid,
+            quantity);
+    }
+
+    /// <summary>
+    /// Generic multi-site UseItem shape (not retail-specific):
+    /// seq0 give multi-use secondary (no destroy), seq1 consume secondary, optional deliver turn-in.
+    /// </summary>
+    public void SeedMultiSiteUseItem(
+        int missionId,
+        int obj0Id,
+        int obj1Id,
+        int? deliverObjId,
+        long siteA,
+        long siteB,
+        int worldPrimaryCbid,
+        int secondaryCbid,
+        int deliverNpcCbid = 0)
+    {
+        var o0 = MissionObjective.CreateForTests(obj0Id, 0, missionId, 0);
+        o0.Requirements.Add(new ObjectiveRequirementUseItem(o0)
+        {
+            PrimaryCBID = worldPrimaryCbid,
+            PrimaryInWorld = true,
+            PrimaryDestroy = true,
+            PrimaryExplode = true,
+            SecondaryCBID = secondaryCbid,
+            SecondaryGiveAtStart = true,
+            SecondaryMultipleUse = true,
+            SecondaryDestroy = false,
+            RepeatCount = 1,
+            FirstStateSlot = 0,
+        });
+
+        var o1 = MissionObjective.CreateForTests(obj1Id, 1, missionId, 0);
+        o1.Requirements.Add(new ObjectiveRequirementUseItem(o1)
+        {
+            PrimaryCBID = worldPrimaryCbid,
+            PrimaryInWorld = true,
+            PrimaryDestroy = true,
+            PrimaryExplode = true,
+            SecondaryCBID = secondaryCbid,
+            SecondaryGiveAtStart = false,
+            SecondaryMultipleUse = false,
+            SecondaryDestroy = true,
+            RepeatCount = 1,
+            FirstStateSlot = 0,
+        });
+
+        if (deliverObjId is int delId && deliverNpcCbid > 0)
+        {
+            var o2 = MissionObjective.CreateForTests(delId, 2, missionId, 0);
+            o2.Requirements.Add(new ObjectiveRequirementDeliver(o2)
+            {
+                NPCTargetCBID = deliverNpcCbid,
+                NPCTargetCompletes = true,
+                TakeItemAtEnd = true,
+                ItemCBID = -1,
+                FirstStateSlot = 0,
+            });
+            AssetManager.Instance.SetTestMission(Mission.CreateForTests(missionId, o0, o1, o2));
+        }
+        else
+        {
+            AssetManager.Instance.SetTestMission(Mission.CreateForTests(missionId, o0, o1));
+        }
+
+        // Site COIDs are placed by the test; CBID matching uses worldPrimaryCbid.
+        _ = siteA;
+        _ = siteB;
+    }
+
+    /// <summary>Single-objective UseItem with configurable requirement flags.</summary>
+    public void SeedSingleUseItem(
+        int missionId,
+        int objectiveId,
+        Action<ObjectiveRequirementUseItem> configure)
+    {
+        var obj = MissionObjective.CreateForTests(objectiveId, 0, missionId, 0);
+        var use = new ObjectiveRequirementUseItem(obj)
+        {
+            RepeatCount = 1,
+            FirstStateSlot = 0,
+        };
+        configure?.Invoke(use);
+        obj.Requirements.Add(use);
+        AssetManager.Instance.SetTestMission(Mission.CreateForTests(missionId, obj));
+    }
 }
