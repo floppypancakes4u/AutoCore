@@ -48,6 +48,10 @@ public sealed class ChatCommandService
             case "/clearCargo":
                 return ClearCargo(character);
 
+            case "/removeMissionCargo":
+            case "/removemissioncargo":
+                return RemoveMissionCargo(character, parts);
+
             case "/cargoinfo":
             case "/cargoInfo":
                 return CargoInfo(character);
@@ -512,6 +516,26 @@ public sealed class ChatCommandService
             return new ChatCommandExecutionResult(true, "No character loaded.");
 
         var result = character.Inventory.ClearCargo(character.ObjectId.Coid);
+        return new ChatCommandExecutionResult(true, result.Message, result.Packets);
+    }
+
+    /// <summary>
+    /// Remove mission-inventory cargo stacks (IsMissionItem). Optional CBID filter.
+    /// Usage: <c>/removeMissionCargo</c> or <c>/removeMissionCargo &lt;cbid&gt;</c>
+    /// </summary>
+    private static ChatCommandExecutionResult RemoveMissionCargo(Character character, string[] parts)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        var cbidFilter = 0;
+        if (parts.Length >= 2)
+        {
+            if (!int.TryParse(parts[1], out cbidFilter) || cbidFilter <= 0)
+                return new ChatCommandExecutionResult(true, "Usage: /removeMissionCargo [cbid]");
+        }
+
+        var result = character.Inventory.RemoveMissionCargo(character.ObjectId.Coid, cbidFilter);
         return new ChatCommandExecutionResult(true, result.Message, result.Packets);
     }
 

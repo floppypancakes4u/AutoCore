@@ -4,6 +4,7 @@ namespace AutoCore.Game.Tests.Mission;
 
 using AutoCore.Game.Managers;
 using AutoCore.Game.Mission;
+using AutoCore.Game.Mission.Requirements;
 using AutoCore.Game.Structures;
 
 [TestClass]
@@ -61,6 +62,60 @@ public class CharacterQuestAndMissionStringTests
         quest.PopulateFromMission(null);
         quest.PopulateFromMission(Mission.CreateForTests(2));
         Assert.AreEqual(CharacterQuest.MaxObjectives, quest.ObjectiveProgress.Length);
+    }
+
+    [TestMethod]
+    public void CharacterQuest_PopulateFromMission_UseItemRepeatCount_BecomesObjectiveMax()
+    {
+        var obj = MissionObjective.CreateForTests(1, 0, 9100, completeCount: 0);
+        obj.Requirements.Add(new ObjectiveRequirementUseItem(obj) { RepeatCount = 3, FirstStateSlot = 0 });
+        var mission = Mission.CreateForTests(9100, obj);
+
+        var quest = new CharacterQuest(9100, 0);
+        quest.PopulateFromMission(mission);
+
+        Assert.AreEqual(3, quest.ObjectiveMax[0]);
+    }
+
+    [TestMethod]
+    public void CharacterQuest_PopulateFromMission_CompleteCount_TakesPrecedenceOverUseItemRepeat()
+    {
+        var obj = MissionObjective.CreateForTests(1, 0, 9101, completeCount: 5);
+        obj.Requirements.Add(new ObjectiveRequirementUseItem(obj) { RepeatCount = 2, FirstStateSlot = 0 });
+        var mission = Mission.CreateForTests(9101, obj);
+
+        var quest = new CharacterQuest(9101, 0);
+        quest.PopulateFromMission(mission);
+
+        Assert.AreEqual(5, quest.ObjectiveMax[0]);
+    }
+
+    [TestMethod]
+    public void CharacterQuest_Write_UseItem_UsesAbsoluteSlotProgress()
+    {
+        var obj = MissionObjective.CreateForTests(77, 0, 9102, completeCount: 0);
+        obj.Requirements.Add(new ObjectiveRequirementUseItem(obj)
+        {
+            RepeatCount = 4,
+            FirstStateSlot = 1,
+        });
+        AssetManager.Instance.SetTestMission(Mission.CreateForTests(9102, obj));
+
+        var quest = new CharacterQuest(9102, 0);
+        quest.PopulateFromAssets();
+        quest.ObjectiveProgress[0] = 2;
+
+        using var ms = new MemoryStream();
+        using (var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+            quest.Write(writer);
+
+        // Layout: missionId i32, reserved i32, 10×i32 saved state, objectiveId i32, 4×float slots, reserved i32
+        ms.Position = 4 + 4 + 40 + 4; // start of float slots
+        using var reader = new BinaryReader(ms);
+        var slot0 = reader.ReadSingle();
+        var slot1 = reader.ReadSingle();
+        Assert.AreEqual(0f, slot0, 0.001f);
+        Assert.AreEqual(2f, slot1, 0.001f, "UseItem client Eval expects absolute use count, not 0..1 ratio");
     }
 
     [TestMethod]

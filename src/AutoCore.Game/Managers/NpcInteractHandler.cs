@@ -497,132 +497,15 @@ public static class NpcInteractHandler
     }
 
     /// <summary>
-    /// Active UseItem requirement: match target by PrimaryCOID and/or PrimaryCBID (and optional
-    /// packet objective id). Advances or completes the objective (same path as AutoPatrol).
-    /// ProgressTime channeling is deferred — immediate complete for now.
+    /// Active UseItem requirement via <see cref="MissionUseItemProgress"/>.
+    /// ProgressTime is client-authoritative (channel then UseObject); server validates on packet.
     /// </summary>
     private static bool TryCompleteUseItemObjective(
         TNLConnection conn,
         Character character,
         long targetCoid,
         int packetObjectiveId)
-    {
-        foreach (var quest in character.CurrentQuests.ToList())
-        {
-            if (character.CompletedMissionIds.Contains(quest.MissionId))
-                continue;
-
-            var mission = AssetManager.Instance.GetMission(quest.MissionId);
-            if (mission == null
-                || !mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var objective))
-            {
-                continue;
-            }
-
-            var useItem = objective.Requirements.OfType<ObjectiveRequirementUseItem>().FirstOrDefault();
-            if (useItem == null)
-                continue;
-
-            // Optional client hint: UseObject carries matching objective id when known.
-            if (packetObjectiveId > 0 && packetObjectiveId != objective.ObjectiveId)
-                continue;
-
-            if (!UseItemMatchesTarget(character.Map, useItem, targetCoid))
-                continue;
-
-            Logger.WriteLog(LogType.Debug,
-                "UseObject: use-item mission={0} seq={1} objective={2} target={3}",
-                quest.MissionId,
-                quest.ActiveObjectiveSequence,
-                objective.ObjectiveId,
-                targetCoid);
-
-            LogUseItemIncomplete(useItem, quest, objective, targetCoid);
-            AdvanceOrCompleteObjective(conn, character, quest, mission, objective, source: "UseItem");
-            return true;
-        }
-
-        return false;
-    }
-
-    private static void LogUseItemIncomplete(
-        ObjectiveRequirementUseItem useItem,
-        CharacterQuest quest,
-        MissionObjective objective,
-        long targetCoid)
-    {
-        var context =
-            $"mission={quest.MissionId} seq={quest.ActiveObjectiveSequence} objective={objective.ObjectiveId} target={targetCoid}";
-
-        if (useItem.ProgressTime > 0)
-        {
-            IncompleteHandlerLog.Warn(
-                "UseItem",
-                context,
-                $"ProgressTime={useItem.ProgressTime} ignored — interact completes immediately (no channeling/interrupt)",
-                "Implement server-side channel timer + ProgressInterruptable; send progress UI; complete only after ProgressTime.");
-        }
-
-        if (useItem.RepeatCount > 1)
-        {
-            IncompleteHandlerLog.Warn(
-                "UseItem",
-                context,
-                $"RepeatCount={useItem.RepeatCount} ignored — single interact finishes the whole objective",
-                "Track uses in ObjectiveProgress[FirstStateSlot]; complete only when count reaches RepeatCount; emit ObjectiveState slots.");
-        }
-
-        if (useItem.PrimaryDestroy || useItem.SecondaryDestroy)
-        {
-            IncompleteHandlerLog.Warn(
-                "UseItem",
-                context,
-                "PrimaryDestroy/SecondaryDestroy not applied — no inventory/world item removal",
-                "Remove or consume matching inventory/world items when the use succeeds.");
-        }
-
-        if (useItem.PrimaryGiveAtStart || useItem.SecondaryGiveAtStart
-            || useItem.PrimaryCompletedItem > 0 || useItem.CompletedItem > 0)
-        {
-            IncompleteHandlerLog.Warn(
-                "UseItem",
-                context,
-                "Give/completed item fields ignored — no item grant on use or objective complete",
-                "Grant PrimaryCompletedItem/CompletedItem (and start items) via inventory service when use completes.");
-        }
-
-        if (useItem.CompletedMission > 0)
-        {
-            IncompleteHandlerLog.Warn(
-                "UseItem",
-                context,
-                $"CompletedMission={useItem.CompletedMission} not auto-granted",
-                "On use-item objective complete, grant/chain CompletedMission through MissionManager.");
-        }
-    }
-
-    private static bool UseItemMatchesTarget(SectorMap map, ObjectiveRequirementUseItem useItem, long targetCoid)
-    {
-        if (useItem.PrimaryItem > 0 && useItem.PrimaryItem == targetCoid)
-            return true;
-
-        if (useItem.PrimaryCBID > 0 && MapObjectHasCbid(map, targetCoid, useItem.PrimaryCBID))
-            return true;
-
-        return false;
-    }
-
-    private static bool MapObjectHasCbid(SectorMap map, long coid, int cbid)
-    {
-        var live = map.GetObjectByCoid(coid);
-        if (live != null)
-            return live.CBID == cbid;
-
-        if (map.MapData.Templates.TryGetValue(coid, out var template))
-            return template.CBID == cbid;
-
-        return false;
-    }
+        => MissionUseItemProgress.TryHandleUseObject(conn, character, targetCoid, packetObjectiveId);
 
     public static void HandleMissionDialogResponse(TNLConnection conn, MissionDialogResponsePacket packet)
     {
@@ -1101,11 +984,10 @@ public static class NpcInteractHandler
     {
         if (character.CurrentQuests.Any(q => q.MissionId == missionId))
         {
-            // Duplicate grant path: still resync UI (journal may be empty after bad restore).
+            // Duplicate grant path: top up cargo first, then resync UI.
             var existing = character.CurrentQuests.First(q => q.MissionId == missionId);
-            ResyncActiveMissionToClient(conn, character, existing);
-            // Idempotent: top up missing GiveItemOnStart cargo without duplicating.
             MissionCargoService.EnsureAndSend(character, existing);
+            ResyncActiveMissionToClient(conn, character, existing);
             TriggerManager.Instance.OnMissionStateChanged(
                 character.CurrentVehicle ?? (ClonedObjectBase)character);
             return;
@@ -1116,11 +998,12 @@ public static class NpcInteractHandler
         character.CurrentQuests.Add(quest);
         MissionPersistence.Instance.OnQuestChanged(character, quest);
 
+        // Mission cargo (deliver/useitem GiveAtStart) before journal resync so the client has
+        // CreateSimpleObject packets for quest items before UI binds mission inventory.
+        MissionCargoService.EnsureAndSend(character, quest);
+
         // Seed client objective state so journal can show the new objective.
         ResyncActiveMissionToClient(conn, character, quest);
-
-        // Deliver GiveItemOnStart → mission cargo (server-authoritative; idempotent).
-        MissionCargoService.EnsureAndSend(character, quest);
 
         Logger.WriteLog(LogType.Debug,
             "MissionDialogResponse: granted mission {0} to charCoid={1}",
@@ -1211,8 +1094,8 @@ public static class NpcInteractHandler
             return;
         }
 
-        // Drop mission cargo (deliver/kill items) before removing the quest.
-        MissionCargoService.TakeAndSend(character, quest);
+        // Reclaim GiveAtStart (useitem secondary/primary + deliver) and TakeItemAtEnd cargo.
+        MissionCargoService.TakeOnAbandonAndSend(character, quest);
 
         character.CurrentQuests.Remove(quest);
         MissionPersistence.Instance.OnMissionFailed(character.ObjectId.Coid, missionId);

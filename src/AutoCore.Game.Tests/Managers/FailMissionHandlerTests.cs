@@ -2,7 +2,10 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace AutoCore.Game.Tests.Managers;
 
+using AutoCore.Game.Constants;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Mission;
+using AutoCore.Game.Mission.Requirements;
 using AutoCore.Game.Packets.Global;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Tests.Mission.Infrastructure;
@@ -106,6 +109,40 @@ public class FailMissionHandlerTests
         var fail = _fx.Sent.OfType<FailMissionPacket>().Single();
         Assert.AreEqual(5001L, fail.CharacterCoid);
         Assert.AreEqual(0, player.Character.CurrentQuests.Count);
+    }
+
+    [TestMethod]
+    [TestCategory("MissionCritical")]
+    public void FailMission_RemovesUseItemSecondaryGiveAtStartCargo()
+    {
+        const int secondaryCbid = 11849;
+        var o0 = MissionObjective.CreateForTests(ObjectiveId, 0, MissionId, 0);
+        o0.Requirements.Add(new ObjectiveRequirementUseItem(o0)
+        {
+            SecondaryCBID = secondaryCbid,
+            SecondaryGiveAtStart = true,
+            SecondaryMultipleUse = true,
+            RepeatCount = 1,
+            FirstStateSlot = 0,
+        });
+        _fx.SeedMission(MissionId, 0, o0);
+        var player = _fx.CreatePlayer(characterCoid: 18400);
+        _fx.GiveQuest(player.Character, MissionId);
+        MissionCargoService.EnsureAndSend(player.Character, player.Character.CurrentQuests[0]);
+        Assert.IsTrue(player.Character.Inventory.CountByCbid(secondaryCbid) >= 1);
+
+        _fx.Sent.Clear();
+        NpcInteractHandler.FailMission(player.Connection, player.Character, MissionId);
+
+        Assert.AreEqual(0, player.Character.Inventory.CountByCbid(secondaryCbid),
+            "Abandon must reclaim UseItem SecondaryGiveAtStart cargo");
+        Assert.AreEqual(0, player.Character.CurrentQuests.Count);
+
+        // Client mission inventory only clears live via 0x2049 bDelete (CargoSendAll alone is not enough).
+        var destroy = _fx.Sent.OfType<InventoryDestroyItemPacket>().ToList();
+        Assert.IsTrue(destroy.Count >= 1, "Abandon must send InventoryDestroyItem so UI updates without relog");
+        Assert.IsTrue(destroy.All(p => p.Delete));
+        Assert.IsTrue(_fx.Sent.OfType<InventoryCargoSendAllPacket>().Any());
     }
 
     [TestMethod]

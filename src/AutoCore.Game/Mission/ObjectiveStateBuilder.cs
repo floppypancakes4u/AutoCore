@@ -57,6 +57,7 @@ public static class ObjectiveStateBuilder
 
     /// <summary>
     /// Build from a live quest's progress arrays for the given objective sequence.
+    /// UseItem requirements use absolute slot counts (client Eval compares to RepeatCount).
     /// </summary>
     public static ObjectiveStatePacket Build(MissionObjective objective, CharacterQuest quest)
     {
@@ -71,7 +72,45 @@ public static class ObjectiveStateBuilder
             ? quest.ObjectiveMax[seq]
             : Math.Max(1, objective.CompleteCount);
 
+        var useItem = objective.Requirements?.OfType<ObjectiveRequirementUseItem>().FirstOrDefault();
+        if (useItem != null)
+            return BuildUseItemCount(objective, useItem, progress);
+
         return Build(objective, progress, maximum);
+    }
+
+    /// <summary>
+    /// UseItem mid-progress / resync. Client
+    /// <c>CVOGObjectiveRequirement_UseItem_Eval</c> treats the slot float as an absolute use
+    /// count (0,1,2…) compared against <see cref="ObjectiveRequirementUseItem.RepeatCount"/>,
+    /// not a 0..1 ratio.
+    /// </summary>
+    public static ObjectiveStatePacket BuildUseItemCount(
+        MissionObjective objective,
+        ObjectiveRequirementUseItem useItem,
+        int usesCompleted)
+    {
+        if (objective == null || useItem == null)
+            return null;
+
+        var packet = new ObjectiveStatePacket
+        {
+            ObjectiveId = objective.ObjectiveId,
+        };
+
+        var reqIndex = objective.Requirements?.IndexOf(useItem) ?? 0;
+        if (reqIndex < 0)
+            reqIndex = 0;
+        if (reqIndex < 32)
+            packet.ObjectiveBitmask = 1u << reqIndex;
+        else
+            packet.ObjectiveBitmask = 1u;
+
+        var slot = useItem.FirstStateSlot;
+        if (slot < ObjectiveStatePacket.SlotCount)
+            packet.SlotProgress[slot] = Math.Max(0, usesCompleted);
+
+        return packet;
     }
 
     /// <summary>

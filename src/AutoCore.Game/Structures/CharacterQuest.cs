@@ -68,16 +68,25 @@ public class CharacterQuest
                 ? Math.Max(1, ObjectiveMax[ActiveObjectiveSequence])
                 : 1;
 
-            // Multi-pad patrol: client GetTarget/Eval cast slot floats to int pad counts
-            // (absolute 0,1,2…), not 0..1 ratios. Ratio would freeze on pad 0 after journal sync.
+            // Multi-pad patrol + UseItem: client Eval casts slot floats to absolute counts
+            // (0,1,2…), not 0..1 ratios.
             var multiPad = objective.Requirements?
                 .OfType<ObjectiveRequirementPatrol>()
                 .FirstOrDefault(p => MissionPatrolProgress.CountListedTargets(p) > 1
                     || (p.Laps > 1 && MissionPatrolProgress.CountListedTargets(p) > 0));
+            var useItem = objective.Requirements?
+                .OfType<ObjectiveRequirementUseItem>()
+                .FirstOrDefault();
 
             if (multiPad != null)
             {
                 var slot = multiPad.FirstStateSlot;
+                if (slot < slots.Length)
+                    slots[slot] = Math.Max(0, progress);
+            }
+            else if (useItem != null)
+            {
+                var slot = useItem.FirstStateSlot;
                 if (slot < slots.Length)
                     slots[slot] = Math.Max(0, progress);
             }
@@ -130,6 +139,30 @@ public class CharacterQuest
             ObjectiveMax[i] = 1;
 
         foreach (var objective in mission.Objectives.Values)
-            ObjectiveMax[objective.Sequence] = objective.CompleteCount > 0 ? objective.CompleteCount : 1;
+            ObjectiveMax[objective.Sequence] = ResolveObjectiveMax(objective);
+    }
+
+    /// <summary>
+    /// CompleteCount when authored; otherwise UseItem RepeatCount when present; else 1.
+    /// </summary>
+    internal static int ResolveObjectiveMax(MissionObjective objective)
+    {
+        if (objective == null)
+            return 1;
+
+        if (objective.CompleteCount > 0)
+            return objective.CompleteCount;
+
+        var maxRepeat = 0;
+        if (objective.Requirements != null)
+        {
+            foreach (var req in objective.Requirements)
+            {
+                if (req is ObjectiveRequirementUseItem useItem && useItem.RepeatCount > maxRepeat)
+                    maxRepeat = useItem.RepeatCount;
+            }
+        }
+
+        return maxRepeat > 0 ? maxRepeat : 1;
     }
 }

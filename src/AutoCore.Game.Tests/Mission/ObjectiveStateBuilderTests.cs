@@ -104,4 +104,43 @@ public class ObjectiveStateBuilderTests
         var zeroMax = ObjectiveStateBuilder.Build(obj, progress: 1, maximum: 0);
         Assert.AreEqual(1.0f, zeroMax.SlotProgress[1], 0.001f);
     }
+
+    [TestMethod]
+    public void BuildUseItemCount_WritesAbsoluteSlotFloat()
+    {
+        var obj = MissionObjective.CreateForTests(5006, 0, 4006, 0);
+        var use = new ObjectiveRequirementUseItem(obj)
+        {
+            RepeatCount = 3,
+            FirstStateSlot = 0,
+        };
+        obj.Requirements.Add(use);
+
+        var packet = ObjectiveStateBuilder.BuildUseItemCount(obj, use, usesCompleted: 2);
+
+        Assert.AreEqual(5006, packet.ObjectiveId);
+        Assert.AreEqual(1u, packet.ObjectiveBitmask);
+        Assert.AreEqual(2f, packet.SlotProgress[0], 0.001f);
+        Assert.AreNotEqual(2f / 3f, packet.SlotProgress[0], 0.001f);
+    }
+
+    [TestMethod]
+    public void Build_FromQuest_UseItem_UsesAbsoluteProgress()
+    {
+        var obj = MissionObjective.CreateForTests(5007, 0, 4007, 0);
+        obj.Requirements.Add(new ObjectiveRequirementUseItem(obj)
+        {
+            RepeatCount = 4,
+            FirstStateSlot = 0,
+        });
+        var quest = new CharacterQuest(4007, 0)
+        {
+            ObjectiveProgress = new[] { 1 },
+            ObjectiveMax = new[] { 4 },
+        };
+
+        var packet = ObjectiveStateBuilder.Build(obj, quest);
+
+        Assert.AreEqual(1f, packet.SlotProgress[0], 0.001f, "UseItem must not normalize to 0..1");
+    }
 }

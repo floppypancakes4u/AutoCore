@@ -45,11 +45,11 @@ public class ObjectiveRequirementUseItem : ObjectiveRequirement
         if (primCBID != null && !primCBID.IsEmpty)
             PrimaryCBID = (int)primCBID;
 
-        var primDestroy = elem.Element("TargetIsPlayer");
+        var primDestroy = elem.Element("PrimaryDestroy");
         if (primDestroy != null && !primDestroy.IsEmpty)
             PrimaryDestroy = (int)primDestroy != 0;
 
-        var primInWorld = elem.Element("TargetIsPlayer");
+        var primInWorld = elem.Element("PrimaryInWorld");
         if (primInWorld != null && !primInWorld.IsEmpty)
             PrimaryInWorld = (int)primInWorld != 0;
 
@@ -79,15 +79,15 @@ public class ObjectiveRequirementUseItem : ObjectiveRequirement
 
         var secDestroy = elem.Element("SecondaryDestroy");
         if (secDestroy != null && !secDestroy.IsEmpty)
-            PrimaryDestroy = (int)secDestroy != 0;
+            SecondaryDestroy = (int)secDestroy != 0;
 
         var secGiveStart = elem.Element("SecondaryGiveAtStart");
         if (secGiveStart != null && !secGiveStart.IsEmpty)
-            PrimaryDestroy = (int)secGiveStart != 0;
+            SecondaryGiveAtStart = (int)secGiveStart != 0;
 
         var secMultiUse = elem.Element("SecondaryMultipleUse");
         if (secMultiUse != null && !secMultiUse.IsEmpty)
-            PrimaryDestroy = (int)secMultiUse != 0;
+            SecondaryMultipleUse = (int)secMultiUse != 0;
 
         var progTime = elem.Element("ProgressTime");
         if (progTime != null && !progTime.IsEmpty)
@@ -99,7 +99,7 @@ public class ObjectiveRequirementUseItem : ObjectiveRequirement
 
         var progInterruptable = elem.Element("ProgressInterruptable");
         if (progInterruptable != null && !progInterruptable.IsEmpty)
-            PrimaryDestroy = (int)progInterruptable != 0;
+            ProgressInterruptable = (int)progInterruptable != 0;
 
         var progInterrText = elem.Element("ProgressInterruptText");
         if (progInterrText != null && !progInterrText.IsEmpty)

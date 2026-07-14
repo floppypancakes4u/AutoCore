@@ -1048,14 +1048,14 @@ public class Reaction : ClonedObjectBase
             missionId,
             character.ObjectId.Coid);
 
+        // Mission cargo before journal resync (same order as dialog GrantMission).
+        Mission.MissionCargoService.EnsureAndSend(character, quest);
+
         // 0x206C still tells the client to apply GiveMission; also push journal/objective
         // state so sector UI matches server authority even if the reaction batch is dropped.
         var conn = character.OwningConnection;
         if (conn != null)
             NpcInteractHandler.ResyncActiveMissionToClient(conn, character, quest);
-
-        // Deliver GiveItemOnStart → mission cargo (same path as dialog GrantMission).
-        Mission.MissionCargoService.EnsureAndSend(character, quest);
 
         TriggerManager.Instance.OnMissionStateChanged(character.CurrentVehicle ?? (ClonedObjectBase)character);
         return true;

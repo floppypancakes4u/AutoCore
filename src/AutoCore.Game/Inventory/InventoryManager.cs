@@ -128,6 +128,50 @@ public sealed class InventoryManager
             packets);
     }
 
+    /// <summary>
+    /// Remove cargo stacks flagged as mission gear (<see cref="CharacterInventoryItem.IsMissionItem"/>).
+    /// Optional <paramref name="cbidFilter"/> limits to one CBID (still mission-only).
+    /// Sends InventoryDestroyItem (0x2049 bDelete) per stack so client mission inventory updates live.
+    /// </summary>
+    public InventoryCommandResult RemoveMissionCargo(long characterCoid, int cbidFilter = 0)
+    {
+        var removedStacks = 0;
+        var removedQty = 0;
+        var packets = new List<BasePacket>();
+
+        for (var i = _items.Count - 1; i >= 0; i--)
+        {
+            var item = _items[i];
+            if (!item.IsMissionItem)
+                continue;
+            if (cbidFilter > 0 && item.Cbid != cbidFilter)
+                continue;
+
+            removedStacks++;
+            var qty = Math.Max(1, item.Quantity);
+            removedQty += qty;
+            packets.Add(new InventoryDestroyItemPacket(item.Coid, qty, delete: true, itemGlobal: true));
+            _items.RemoveAt(i);
+            if (characterCoid != 0)
+                PersistCargoDelete(characterCoid, item.Coid);
+        }
+
+        packets.Add(InventoryPacketFactory.CreateCargoSendAll(this));
+
+        if (removedStacks == 0)
+        {
+            var scope = cbidFilter > 0 ? $" for CBID {cbidFilter}" : string.Empty;
+            return new InventoryCommandResult(
+                $"No mission cargo{scope} to remove.",
+                packets);
+        }
+
+        var filterNote = cbidFilter > 0 ? $" (CBID {cbidFilter})" : string.Empty;
+        return new InventoryCommandResult(
+            $"Removed {removedQty} mission cargo unit(s) in {removedStacks} stack(s){filterNote}.",
+            packets);
+    }
+
     public string DescribeCargoStatus()
     {
         var occupied = GetOccupiedSlotCount();
@@ -423,6 +467,8 @@ public sealed class InventoryManager
     /// <summary>
     /// Removes up to <paramref name="quantity"/> of cargo stacks matching <paramref name="cbid"/>.
     /// Prefers mission-item stacks, then any remaining matching CBID.
+    /// Emits S2C <see cref="InventoryDestroyItemPacket"/> (0x2049, bDelete) per removed stack so
+    /// mission inventory / object UI clears without relog.
     /// </summary>
     public InventoryCommandResult RemoveCargoByCbid(long characterCoid, int cbid, int quantity)
     {
@@ -435,17 +481,29 @@ public sealed class InventoryManager
 
         var remaining = quantity;
         var removedCoids = new List<long>();
+        var removedQtys = new List<int>();
 
         // Prefer mission gear stacks first (deliver TakeItemAtEnd).
-        remaining = RemoveMatchingStacks(characterCoid, cbid, remaining, missionOnly: true, removedCoids);
+        remaining = RemoveMatchingStacks(
+            characterCoid, cbid, remaining, missionOnly: true, removedCoids, removedQtys);
         if (remaining > 0)
-            remaining = RemoveMatchingStacks(characterCoid, cbid, remaining, missionOnly: false, removedCoids);
+        {
+            remaining = RemoveMatchingStacks(
+                characterCoid, cbid, remaining, missionOnly: false, removedCoids, removedQtys);
+        }
 
         var removedQty = quantity - remaining;
-        IReadOnlyList<BasePacket> packets = new BasePacket[]
+        var packets = new List<BasePacket>();
+        for (var i = 0; i < removedCoids.Count; i++)
         {
-            InventoryPacketFactory.CreateCargoSendAll(this)
-        };
+            packets.Add(new InventoryDestroyItemPacket(
+                removedCoids[i],
+                quantity: removedQtys[i],
+                delete: true,
+                itemGlobal: true));
+        }
+
+        packets.Add(InventoryPacketFactory.CreateCargoSendAll(this));
 
         return new InventoryCommandResult(
             $"Removed {removedQty} of CBID {cbid} from cargo ({removedCoids.Count} stack(s)).",
@@ -457,7 +515,8 @@ public sealed class InventoryManager
         int cbid,
         int remaining,
         bool missionOnly,
-        List<long> removedCoids)
+        List<long> removedCoids,
+        List<int> removedQtys = null)
     {
         if (remaining < 1)
             return remaining;
@@ -478,12 +537,17 @@ public sealed class InventoryManager
                 _items[i] = reduced;
                 if (characterCoid != 0)
                     PersistCargoUpsert(characterCoid, reduced);
+                // Partial stack reduce: still notify client destroy qty for removed amount.
+                removedCoids.Add(item.Coid);
+                removedQtys?.Add(remaining);
                 remaining = 0;
                 break;
             }
 
-            remaining -= Math.Max(1, item.Quantity);
+            var stackQty = Math.Max(1, item.Quantity);
+            remaining -= stackQty;
             removedCoids.Add(item.Coid);
+            removedQtys?.Add(stackQty);
             _items.RemoveAt(i);
             if (characterCoid != 0)
                 PersistCargoDelete(characterCoid, item.Coid);
@@ -1335,7 +1399,19 @@ public sealed class InventoryManager
         if (_persistence == null || characterCoid == 0 || item == null)
             return;
 
-        _persistence.UpsertCargo(characterCoid, item);
+        try
+        {
+            _persistence.UpsertCargo(characterCoid, item);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "PersistCargoUpsert failed char={0} coid={1} cbid={2}: {3}",
+                characterCoid,
+                item.Coid,
+                item.Cbid,
+                ex.Message);
+        }
     }
 
     private void PersistCargoMove(long characterCoid, CharacterInventoryItem item)
@@ -1343,7 +1419,18 @@ public sealed class InventoryManager
         if (_persistence == null || characterCoid == 0 || item == null)
             return;
 
-        _persistence.MoveCargo(characterCoid, item);
+        try
+        {
+            _persistence.MoveCargo(characterCoid, item);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "PersistCargoMove failed char={0} coid={1}: {2}",
+                characterCoid,
+                item.Coid,
+                ex.Message);
+        }
     }
 
     private void PersistCargoDelete(long characterCoid, long itemCoid)
@@ -1351,7 +1438,18 @@ public sealed class InventoryManager
         if (_persistence == null || characterCoid == 0)
             return;
 
-        _persistence.DeleteCargo(characterCoid, itemCoid);
+        try
+        {
+            _persistence.DeleteCargo(characterCoid, itemCoid);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "PersistCargoDelete failed char={0} coid={1}: {2}",
+                characterCoid,
+                itemCoid,
+                ex.Message);
+        }
     }
 
     private void PersistCargoClear(long characterCoid)
@@ -1359,7 +1457,17 @@ public sealed class InventoryManager
         if (_persistence == null || characterCoid == 0)
             return;
 
-        _persistence.ClearCargo(characterCoid);
+        try
+        {
+            _persistence.ClearCargo(characterCoid);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "PersistCargoClear failed char={0}: {1}",
+                characterCoid,
+                ex.Message);
+        }
     }
 
     private string BuildCargoFullMessage()

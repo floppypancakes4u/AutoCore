@@ -1857,7 +1857,9 @@ public class Vehicle : SimpleObject
         if (Target.GetCurrentHP() <= 0)
         {
             Target.SetMurderer(this);
-            Target.OnDeath(DeathType.Silent);
+            // Match /kill: Violent so DestroyObject carries death type for client VFX.
+            // Silent only force-despawns (no CompletelyDestroyObject death FX).
+            Target.OnDeath(DeathType.Violent);
         }
     }
 

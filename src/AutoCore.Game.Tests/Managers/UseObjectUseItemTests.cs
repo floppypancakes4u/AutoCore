@@ -119,19 +119,18 @@ public class UseObjectUseItemTests
     }
 
     [TestMethod]
-    public void HandleUseObject_UseItem_IncompleteFlags_StillCompletesAndLogs()
+    public void HandleUseObject_UseItem_ProgressTimeAndDestroyFlags_StillCompletesOnRepeatCountOne()
     {
-        // Exercise LogUseItemIncomplete branches (ProgressTime, RepeatCount, destroy, give, chain).
+        // ProgressTime is client-authoritative; server completes on validated UseObject.
         SeedUseItemMission(MissionId, ObjectiveId, WorldObjectCoid, primaryCbid: -1, configure: u =>
         {
             u.ProgressTime = 5;
-            u.RepeatCount = 3;
+            u.RepeatCount = 1;
             u.PrimaryDestroy = true;
-            u.SecondaryDestroy = true;
+            u.PrimaryInWorld = true;
             u.PrimaryGiveAtStart = true;
             u.PrimaryCompletedItem = 10;
             u.CompletedItem = 11;
-            u.CompletedMission = 999;
         });
 
         var (conn, character, map) = CreatePlayer();
@@ -147,6 +146,99 @@ public class UseObjectUseItemTests
 
         Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
         Assert.IsTrue(_sent.OfType<CompleteDynamicObjectivePacket>().Any());
+        Assert.IsTrue(character.MapPresence.IsSuppressed(WorldObjectCoid));
+        // PrimaryExplode default false → quiet InitCreateObject remove
+        var remove = _sent.OfType<InitCreateObjectPacket>()
+            .Single(p => !p.Create && p.ObjectCoid == WorldObjectCoid);
+        Assert.IsFalse(remove.DoDeath);
+    }
+
+    [TestMethod]
+    public void HandleUseObject_UseItem_PrimaryExplode_SendsInitCreateObjectDoDeath()
+    {
+        SeedUseItemMission(MissionId, ObjectiveId, WorldObjectCoid, primaryCbid: -1, configure: u =>
+        {
+            u.PrimaryDestroy = true;
+            u.PrimaryInWorld = true;
+            u.PrimaryExplode = true;
+            u.RepeatCount = 1;
+        });
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceWorldObject(map, WorldObjectCoid, new Vector3(0, 0, 0));
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        GiveQuest(character, MissionId);
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(WorldObjectCoid, false),
+            ObjectiveId = -1,
+        });
+
+        var remove = _sent.OfType<InitCreateObjectPacket>()
+            .Single(p => !p.Create && p.ObjectCoid == WorldObjectCoid);
+        Assert.IsTrue(remove.DoDeath, "PrimaryExplode must use prop death FX path (0x20B7 doDeath)");
+        Assert.IsTrue(character.MapPresence.IsSuppressed(WorldObjectCoid));
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
+    }
+
+    [TestMethod]
+    public void HandleUseObject_UseItem_NoPrimaryDestroy_DoesNotSendInitCreateRemove()
+    {
+        SeedUseItemMission(MissionId, ObjectiveId, WorldObjectCoid, primaryCbid: -1, configure: u =>
+        {
+            u.PrimaryDestroy = false;
+            u.PrimaryInWorld = true;
+            u.PrimaryExplode = true;
+            u.RepeatCount = 1;
+        });
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceWorldObject(map, WorldObjectCoid, new Vector3(0, 0, 0));
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        GiveQuest(character, MissionId);
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(WorldObjectCoid, false),
+            ObjectiveId = -1,
+        });
+
+        Assert.IsFalse(_sent.OfType<InitCreateObjectPacket>().Any(p => !p.Create));
+        Assert.IsFalse(character.MapPresence.IsSuppressed(WorldObjectCoid));
+    }
+
+    [TestMethod]
+    public void HandleUseObject_UseItem_RepeatCountThree_RequiresThreeUses()
+    {
+        SeedUseItemMission(MissionId, ObjectiveId, WorldObjectCoid, primaryCbid: -1, configure: u =>
+        {
+            u.RepeatCount = 3;
+        });
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceWorldObject(map, WorldObjectCoid, new Vector3(0, 0, 0));
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        GiveQuest(character, MissionId);
+
+        for (var i = 0; i < 2; i++)
+        {
+            NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+            {
+                Target = new TFID(WorldObjectCoid, false),
+                ObjectiveId = -1,
+            });
+            Assert.AreEqual(1, character.CurrentQuests.Count);
+            Assert.AreEqual(i + 1, character.CurrentQuests[0].ObjectiveProgress[0]);
+        }
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(WorldObjectCoid, false),
+            ObjectiveId = -1,
+        });
+
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
     }
 
     [TestMethod]

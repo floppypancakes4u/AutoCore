@@ -233,10 +233,12 @@ public class ObjectiveRequirementUnserializeTests
     [TestMethod]
     public void Create_UseItem_ParsesPrimaryAndProgressFields()
     {
+        // Real missions.glm tags (not TargetIsPlayer). Secondary* must not clobber PrimaryDestroy.
         var req = (ObjectiveRequirementUseItem)Create("useitem", @"
             <PrimaryCOID>999</PrimaryCOID>
             <PrimaryCBID>15461</PrimaryCBID>
-            <TargetIsPlayer>1</TargetIsPlayer>
+            <PrimaryDestroy>0</PrimaryDestroy>
+            <PrimaryInWorld>1</PrimaryInWorld>
             <PrimaryUseText>use</PrimaryUseText>
             <PrimaryGiveAtStart>1</PrimaryGiveAtStart>
             <PrimaryMultipleUse>1</PrimaryMultipleUse>
@@ -258,20 +260,49 @@ public class ObjectiveRequirementUnserializeTests
 
         Assert.AreEqual(999L, req.PrimaryItem);
         Assert.AreEqual(15461, req.PrimaryCBID);
+        Assert.IsFalse(req.PrimaryDestroy);
+        Assert.IsTrue(req.PrimaryInWorld);
         Assert.AreEqual("use", req.PrimaryUseText);
         Assert.IsTrue(req.PrimaryGiveAtStart);
         Assert.IsTrue(req.PrimaryMultipleUse);
         Assert.IsTrue(req.PrimaryExplode);
         Assert.AreEqual(5, req.PrimaryCompletedItem);
         Assert.AreEqual(6, req.SecondaryCBID);
+        Assert.IsTrue(req.SecondaryDestroy);
+        Assert.IsTrue(req.SecondaryGiveAtStart);
+        Assert.IsTrue(req.SecondaryMultipleUse);
         Assert.AreEqual(3, req.ProgressTime);
         Assert.AreEqual("wait", req.ProgressText);
+        Assert.IsTrue(req.ProgressInterruptable);
         Assert.AreEqual("stop", req.ProgressInterruptText);
         Assert.AreEqual("done", req.CompleteText);
         Assert.AreEqual(7, req.CompletedItem);
         Assert.AreEqual(8, req.CompletedMission);
         Assert.AreEqual(2, req.RepeatCount);
         Assert.AreEqual(707, req.ContinentID);
+    }
+
+    [TestMethod]
+    public void Create_UseItem_PrimaryDestroyAlone_DoesNotRequireSecondaryFlags()
+    {
+        var req = (ObjectiveRequirementUseItem)Create("useitem", @"
+            <PrimaryCOID>-1</PrimaryCOID>
+            <PrimaryCBID>12100</PrimaryCBID>
+            <PrimaryDestroy>1</PrimaryDestroy>
+            <PrimaryInWorld>1</PrimaryInWorld>
+            <SecondaryCBID>11800</SecondaryCBID>
+            <SecondaryDestroy>0</SecondaryDestroy>
+            <SecondaryGiveAtStart>1</SecondaryGiveAtStart>
+            <SecondaryMultipleUse>1</SecondaryMultipleUse>
+            <ProgressInterruptable>0</ProgressInterruptable>
+            <RepeatCount>1</RepeatCount>");
+
+        Assert.IsTrue(req.PrimaryDestroy);
+        Assert.IsTrue(req.PrimaryInWorld);
+        Assert.IsFalse(req.SecondaryDestroy);
+        Assert.IsTrue(req.SecondaryGiveAtStart);
+        Assert.IsTrue(req.SecondaryMultipleUse);
+        Assert.IsFalse(req.ProgressInterruptable);
     }
 
     [TestMethod]
