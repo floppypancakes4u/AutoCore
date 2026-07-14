@@ -5,9 +5,10 @@ using AutoCore.Game.Managers;
 using AutoCore.Game.TNL.Ghost;
 
 /// <summary>
-/// Server-side vehicle combat pools (heat cool, shield/power/HP regen) matching client
+/// Server-side vehicle combat pools (heat cool, shield/power regen) matching client
 /// <c>CVOGHBRegeneration</c> / <c>FUN_005fbea0</c> @ 0x005FBEA0.
 /// Retail fires one discrete pulse every 3000 ms (HB period at +0x8 for races 0/1/2).
+/// HP does not recharge on this pulse (product design; shield/power still do).
 /// </summary>
 public static class VehicleCombatPool
 {
@@ -182,7 +183,15 @@ public static class VehicleCombatPool
             vehicle.ShieldEmptyDebounce = 0;
         }
 
+        // Ghost dirty consolidated in NotifyClientIfChanged (ShieldMask); owner absolute
+        // MultipleStatUpdate is sent from SetCurrentShield when triggerGhostUpdate is true —
+        // pool tick batches ghost once, so notify owner explicitly when shield changes.
+        var before = vehicle.CurrentShield;
         vehicle.SetCurrentShield(vehicle.CurrentShield + vehicle.ShieldRegenRate, triggerGhostUpdate: false);
+        // Owner StatUpdate is required even when ghost is batched: client UI tracks +0x144
+        // via FUN_0080B3A0 type=1 more reliably than owner-combat ghost deltas alone.
+        if (vehicle.CurrentShield != before)
+            vehicle.NotifyShieldChanged(includeMax: false);
     }
 
     private static void TickPower(Vehicle vehicle, Character owner)
@@ -202,16 +211,13 @@ public static class VehicleCombatPool
         CharacterLevelManager.Instance.SetCurrentMana(owner, next, sendPacket: false);
     }
 
+    /// <summary>
+    /// Product design: vehicle HP does not recharge. Race-item <c>RaceRegenRate</c> may still be
+    /// cached on the vehicle for future use, but is not applied each pool pulse.
+    /// Shield and power continue to regen via <see cref="TickShield"/> / <see cref="TickPower"/>.
+    /// </summary>
     private static void TickHp(Vehicle vehicle)
     {
-        if (vehicle.HpRegenRate <= 0)
-            return;
-
-        var cur = vehicle.GetCurrentHP();
-        var max = vehicle.GetMaximumHP();
-        if (cur >= max || cur <= 0)
-            return;
-
-        vehicle.SetCurrentHP(cur + vehicle.HpRegenRate, triggerGhostUpdate: false);
+        // Intentionally no-op.
     }
 }

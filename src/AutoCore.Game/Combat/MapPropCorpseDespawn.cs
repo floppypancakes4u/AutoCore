@@ -147,7 +147,14 @@ public static class MapPropCorpseDespawn
                 p.ObjectId.Coid,
                 live.CBID);
 
-            GraphicsObject.BroadcastDeathPublic(map, p.ObjectId, p.DeathType, p.Murderer, live.Ghost);
+            // After the corpse wait, force a silent teardown (FX already played at impact / death).
+            GraphicsObject.BroadcastDeathPublic(
+                map,
+                p.ObjectId,
+                DeathType.Silent,
+                p.Murderer,
+                live.Ghost,
+                useInitCreateDeath: false);
             if (ReferenceEquals(live.Map, map))
                 live.SetMap(null);
         }

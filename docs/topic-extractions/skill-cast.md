@@ -9,10 +9,20 @@ restores the activating object's HP, dirties its health ghost state, and sends
 `SkillStatusEffect` (0x2031) to the owning player. Missing or unsupported definitions return
 false and make no state change.
 
-Retail skill 857 is `INC Repair station heal`. Its Heal element uses equation type 1 with a
-base value of `0.15`; fractional equation-1 heals are evaluated against the target's maximum
-pool, so each authored cast restores 15% maximum HP. Absolute heals (e.g. base `3` with
-per-level growth) stay absolute and are not multiplied by max HP.
+Retail skill 857 is `INC Repair station heal`. Authored elements (clonebase.wad):
+
+| Element | Id | Equation | Base | Effect |
+|---------|----|----------|------|--------|
+| `esetHeal` | **10** | 1 | 0.15 | **15% max HP** per pulse |
+| `esetPower` | **12** | 1 | 0.15 | **15% max power** per pulse |
+| `esetShield` | **58** | — | — | **not present** |
+
+Fractional equation-1 heals are evaluated against the target's maximum pool.
+Absolute heals (e.g. base `3` with per-level growth) stay absolute and are not multiplied by max HP.
+
+**Shield:** repair pads do **not** restore shield. Shield refills only via race-item
+`RaceShieldRegenerate` on the 3000 ms combat-pool pulse (and skills that actually
+author `esetShield=58`). Server `RestoreHealth` is HP-only.
 
 Collision triggers containing a `SkillCast` reaction pulse that reaction once per second while
 the collider remains inside. Pulse deadlines are keyed by vehicle, trigger, and reaction, allowing

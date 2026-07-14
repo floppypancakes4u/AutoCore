@@ -162,10 +162,10 @@ public class Creature : SimpleObject
                 });
             }
 
-            // Death packets first while the object is still on the map / ghosted, then leave.
-            // Client CompletelyDestroyObject (0x2020 death arg) and InitCreateObject DoDeath
-            // both resolve by TFID and need the live client object.
-            BroadcastDeath(map, creatureObjectId, deathType, Murderer, Ghost);
+            // Creature path: DestroyObject with DeathType only (CompletelyDestroyObject →
+            // vtable+0x50 death FX). Do NOT send InitCreateObject DoDeath — RemoveObject
+            // strips creatures without FX and then DestroyObject fails to resolve.
+            BroadcastDeath(map, creatureObjectId, deathType, Murderer, Ghost, useInitCreateDeath: false);
             SetMap(null);
         }
     }

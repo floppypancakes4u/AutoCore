@@ -83,9 +83,9 @@ public class NpcVehicleDeathTests
         var destroy = _sent.OfType<DestroyObjectPacket>().FirstOrDefault(p => p.ObjectId.Coid == VehicleCoid);
         Assert.IsNotNull(destroy, "clients need a DestroyObject broadcast so the wreck disappears");
         Assert.AreEqual(DeathType.Violent, destroy.DeathType);
-        Assert.IsTrue(
-            _sent.OfType<InitCreateObjectPacket>().Any(p => p.ObjectCoid == VehicleCoid && p.DoDeath),
-            "combat vehicle death must send InitCreateObject DoDeath");
+        Assert.IsFalse(
+            _sent.OfType<InitCreateObjectPacket>().Any(p => p.DoDeath),
+            "vehicles must not use InitCreateObject DoDeath (props-only path)");
         Assert.IsTrue(
             _sent.OfType<CreateSimpleObjectPacket>().Any(p => p.CBID == LootItemCbid),
             "template loot must be rolled and spawned; sent=" + string.Join(',', _sent.Select(p => p.Opcode)));

@@ -158,7 +158,7 @@ public partial class SectorServer : BaseServer, ILoopable
             // Delayed map-prop corpse despawn (ram wrecks stay ~12.5s then DestroyObject).
             MapPropCorpseDespawn.Tick();
 
-            // Combat pools (heat cool / shield / power / HP regen) — CVOGHBRegeneration @ 3000 ms.
+            // Combat pools (heat cool / shield / power) — CVOGHBRegeneration @ 3000 ms. HP does not regen.
             // Accumulate MainLoop delta into discrete 3000 ms pulses per player vehicle.
             var poolDeltaMs = (int)Math.Clamp(delta, 1, 250);
             foreach (var kvp in Interface.MapConnections)

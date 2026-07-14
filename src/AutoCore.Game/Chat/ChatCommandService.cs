@@ -366,7 +366,7 @@ public sealed class ChatCommandService
         if (vehicle == null)
             return new ChatCommandExecutionResult(true, "You are not in a vehicle!");
 
-        // Shield is ghost-only on the retail client (vehicle+0x144 / ShieldMask).
+        // Ghost ShieldMask + owner MultipleStatUpdate (0x2010 type=1 → Vehicle_SetCurrentShield).
         vehicle.SetCurrentShield(shield);
         return new ChatCommandExecutionResult(
             true,

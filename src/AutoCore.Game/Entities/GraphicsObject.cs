@@ -190,14 +190,15 @@ public class GraphicsObject : ClonedObjectBase
         Combat.MapPropCorpseDespawn.Schedule(this, map, deathType, Murderer);
     }
 
-    /// <summary>Exposed for delayed corpse despawn finalizer.</summary>
+    /// <summary>Exposed for delayed corpse despawn finalizer (map props only).</summary>
     public static void BroadcastDeathPublic(
         SectorMap map,
         Structures.TFID objectId,
         DeathType deathType,
         Structures.TFID murderer,
-        GhostObject ghost) =>
-        BroadcastDeath(map, objectId, deathType, murderer, ghost);
+        GhostObject ghost,
+        bool useInitCreateDeath = true) =>
+        BroadcastDeath(map, objectId, deathType, murderer, ghost, useInitCreateDeath);
 
     /// <summary>
     /// Drops salvage/junk near the death point for pure map <see cref="GraphicsObject"/> deaths.
@@ -408,32 +409,54 @@ public class GraphicsObject : ClonedObjectBase
     }
 
     /// <summary>
-    /// Combat death network sequence (call <b>before</b> <c>SetMap(null)</c> so the client can
-    /// still resolve the object):
-    /// <list type="number">
-    /// <item>Flush ghost HealthMask/corpse so HP bar hits 0.</item>
-    /// <item>For non-silent deaths: <see cref="InitCreateObjectPacket"/> with
-    /// <c>DoDeath=true</c> (client <c>CVOGReaction_RemoveObject(..., death=1)</c> for types 1/3).</item>
-    /// <item><see cref="DestroyObjectPacket"/> with <see cref="DeathType"/> + murderer
-    /// (client CompletelyDestroyObject → primary vtable+0x50 death FX for creature/vehicle).</item>
+    /// Combat death network (call <b>before</b> <c>SetMap(null)</c>).
+    /// <para>
+    /// Client RE (important split):
+    /// </para>
+    /// <list type="bullet">
+    /// <item><b>Map props</b> (clone types 1 / 3): <see cref="InitCreateObjectPacket"/>
+    /// DoDeath → <c>CVOGReaction_RemoveObject(..., death=1)</c> → vfunc+0x50(Violent).
+    /// Do <b>not</b> also send DestroyObject first — RemoveObject already tears down.</item>
+    /// <item><b>Creature / vehicle</b> (types 18 / 14): only
+    /// <see cref="DestroyObjectPacket"/> with non-silent <see cref="DeathType"/> →
+    /// CompletelyDestroyObject → primary vtable+0x50 death FX.
+    /// InitCreateObject DoDeath is harmful: RemoveObject removes without FX, so DestroyObject
+    /// fails to resolve.</item>
     /// </list>
-    /// Silent destroy (loot pickup, re-scope) uses only DestroyObject with death=Silent.
     /// </summary>
+    /// <param name="useInitCreateDeath">
+    /// True only for Object / ObjectGraphicsPhysics map props. False for creatures/vehicles.
+    /// </param>
     protected static void BroadcastDeath(
         SectorMap map,
         Structures.TFID objectId,
         DeathType deathType = DeathType.Silent,
         Structures.TFID murderer = null,
-        GhostObject ghost = null)
+        GhostObject ghost = null,
+        bool useInitCreateDeath = false)
     {
         if (map == null || objectId == null)
             return;
 
         var playDeathFx = deathType != DeathType.Silent;
-        var destroyPacket = new DestroyObjectPacket(objectId, deathType, murderer, force: !playDeathFx);
+
+        // Props: InitCreateObject DoDeath alone (RemoveObject owns death FX + teardown).
+        // Creatures/vehicles: DestroyObject with death type (CompletelyDestroyObject → OnDeath FX).
+        // Silent: DestroyObject force-teardown (loot pickup, re-scope).
         InitCreateObjectPacket initDeath = null;
-        if (playDeathFx)
+        DestroyObjectPacket destroyPacket = null;
+        if (playDeathFx && useInitCreateDeath)
+        {
             initDeath = new InitCreateObjectPacket(objectId.Coid, create: false, doDeath: true);
+        }
+        else
+        {
+            destroyPacket = new DestroyObjectPacket(
+                objectId,
+                deathType,
+                murderer,
+                force: !playDeathFx);
+        }
 
         foreach (var character in map.Objects.Values.OfType<Character>().Where(c => c.OwningConnection != null))
         {
@@ -444,7 +467,6 @@ public class GraphicsObject : ClonedObjectBase
 
                 var conn = character.OwningConnection;
 
-                // Push corpse/HP=0 ghost before game packets so the client is not mid-alive.
                 if (ghost != null && ghost.IsGhostedTo(conn))
                 {
                     ghost.SetMaskBits(GhostObject.HealthMask);
@@ -454,15 +476,17 @@ public class GraphicsObject : ClonedObjectBase
                 if (initDeath != null)
                     conn.SendGamePacket(initDeath);
 
-                conn.SendGamePacket(destroyPacket);
+                if (destroyPacket != null)
+                    conn.SendGamePacket(destroyPacket);
 
                 Logger.WriteLog(LogType.Network,
-                    "DeathNet coid={0} deathType={1} murderer={2} initDoDeath={3} force={4} player={5}",
+                    "DeathNet coid={0} deathType={1} murderer={2} initDoDeath={3} destroy={4} force={5} player={6}",
                     objectId.Coid,
                     deathType,
                     murderer?.Coid ?? -1,
                     initDeath != null ? 1 : 0,
-                    destroyPacket.Force ? 1 : 0,
+                    destroyPacket != null ? 1 : 0,
+                    destroyPacket?.Force == true ? 1 : 0,
                     character.ObjectId?.Coid ?? 0);
             }
             catch (Exception ex)
@@ -473,8 +497,7 @@ public class GraphicsObject : ClonedObjectBase
     }
 
     /// <summary>
-    /// Silent / non-combat despawn (item pickup, foreign re-scope). Prefer
-    /// <see cref="BroadcastDeath"/> for combat kills so death FX can play.
+    /// Silent / non-combat despawn (item pickup, foreign re-scope).
     /// </summary>
     protected static void BroadcastDestroy(
         SectorMap map,
@@ -483,11 +506,6 @@ public class GraphicsObject : ClonedObjectBase
         Structures.TFID murderer = null,
         bool force = false)
     {
-        BroadcastDeath(map, objectId, deathType, murderer, ghost: null);
-        // Preserve explicit force override when callers pass force=true on silent path.
-        if (force && deathType == DeathType.Silent)
-        {
-            // BroadcastDeath already sent force=true for silent; nothing further.
-        }
+        BroadcastDeath(map, objectId, deathType, murderer, ghost: null, useInitCreateDeath: false);
     }
 }

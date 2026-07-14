@@ -888,6 +888,31 @@ public class NpcInteractUseObjectTests
     }
 
     [TestMethod]
+    public void HandleMissionDialogResponse_AcceptOffer_AcceptedFalse_StillGrants()
+    {
+        // Live log LOA 2945: client OK on offer dialog wires Accepted=false; server was rejecting
+        // grant while client already showed patrol waypoints → AutoPatrol with quests=[].
+        SeedOfferMission(MissionB, NpcCbid, reqMissionId: MissionA, continentId: ContinentId, objectiveId: ObjectiveB);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CompletedMissionIds.Add(MissionA);
+        _sent.Clear();
+
+        NpcInteractHandler.HandleMissionDialogResponse(conn, new MissionDialogResponsePacket
+        {
+            MissionId = MissionB,
+            Accepted = false,
+            MissionGiver = new TFID(NpcCoid, false),
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests.Count,
+            "retail offer OK often has Accepted=false — must still grant when CanOffer");
+        Assert.AreEqual(MissionB, character.CurrentQuests[0].MissionId);
+        Assert.IsTrue(_sent.OfType<ObjectiveStatePacket>().Any(p => p.ObjectiveId == ObjectiveB));
+    }
+
+    [TestMethod]
     public void HandleMissionDialogResponse_AcceptWithObjectiveId_GrantsParentMission()
     {
         // Retail Final Exam-style accept: dialog packet may echo first objective id (5422)

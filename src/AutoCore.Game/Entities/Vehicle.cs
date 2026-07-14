@@ -82,7 +82,9 @@ public class Vehicle : SimpleObject
     /// <summary>Power regen per 3000 ms pool pulse from power plant.</summary>
     public int PowerRegenRate { get; private set; }
 
-    /// <summary>HP regen per 3000 ms pool pulse from RaceItem RaceRegenRate (Tribe Locus).</summary>
+    /// <summary>
+    /// Cached RaceItem RaceRegenRate (Tribe Locus). Not applied — vehicle HP does not recharge.
+    /// </summary>
     public int HpRegenRate { get; private set; }
 
     /// <summary>Wall-clock ms accumulated toward the next 3000 ms client pool pulse.</summary>
@@ -162,7 +164,10 @@ public class Vehicle : SimpleObject
     }
 
     /// <summary>
-    /// Sets current shield and dirties <see cref="GhostVehicle.ShieldMask"/> for client sync.
+    /// Sets current shield. When <paramref name="triggerGhostUpdate"/> is true, dirties
+    /// <see cref="GhostVehicle.ShieldMask"/> for observers and sends owner absolute
+    /// <see cref="GameOpcode.MultipleStatUpdate"/> (0x2010 type=1 → client
+    /// <c>Vehicle_SetCurrentShield</c>).
     /// </summary>
     public void SetCurrentShield(int shield, bool triggerGhostUpdate = true)
     {
@@ -173,7 +178,28 @@ public class Vehicle : SimpleObject
         CurrentShield = newShield;
 
         if (triggerGhostUpdate)
-            EnsureGhostMaskDelivery(GhostVehicle.ShieldMask);
+            NotifyShieldChanged();
+    }
+
+    /// <summary>
+    /// Owner HUD + ghost replication after current shield changes.
+    /// Retail: ghost ShieldMask (32-bit @ vehicle+0x144) for net objects; absolute
+    /// MultipleStatUpdate (0x2010) / StatUpdate (0x20AA) type=1 for reliable owner apply
+    /// via <c>FUN_0080B3A0</c> → <c>Vehicle_SetCurrentShield</c>. CharacterLevel has no shield field
+    /// (HP/power only).
+    /// </summary>
+    public void NotifyShieldChanged(bool includeMax = false)
+    {
+        var mask = GhostVehicle.ShieldMask;
+        if (includeMax)
+            mask |= GhostVehicle.ShieldMaxMask;
+        EnsureGhostMaskDelivery(mask);
+
+        if (Owner is Character owner && owner.OwningConnection != null)
+        {
+            owner.OwningConnection.SendGamePacket(
+                MultipleStatUpdatePacket.ForVehicleShield(ObjectId, CurrentShield));
+        }
     }
 
     /// <summary>
@@ -199,7 +225,71 @@ public class Vehicle : SimpleObject
 
         EnsureGhostMaskDelivery(GhostVehicle.ShieldMaxMask);
         if (CurrentShield != oldShield)
-            EnsureGhostMaskDelivery(GhostVehicle.ShieldMask);
+            NotifyShieldChanged(includeMax: false);
+    }
+
+    /// <summary>
+    /// Damage hits shield first, then remaining damage reduces HP.
+    /// Returns total applied (shield absorbed + HP lost) for floaters / aggro.
+    /// </summary>
+    /// <remarks>
+    /// Retail client <c>FUN_004f62e0</c> also drains shield before HP when MaxShield &gt; 0.
+    /// <c>EMSG_Sector_Damage</c> (0x2023) can apply local HP prediction via
+    /// <c>FUN_00812A60</c>; after any hit we push absolute owner Health (CharacterLevel +
+    /// HealthMask) so shield-absorbed damage does not leave the HP bar stuck low, and we
+    /// re-dirty ShieldMax+Shield so the client race-item shield gauge tracks server state.
+    /// </remarks>
+    public override int TakeDamage(int damage)
+    {
+        if (IsInvincible || IsCorpse || damage <= 0)
+            return 0;
+
+        // Race item may equip after pools were zeroed; re-seed capacity if needed.
+        if (MaxShield <= 0 && RaceItem?.CloneBaseObject != null)
+            ApplyRaceItemShieldFromEquipped(startAtFull: true);
+
+        var shieldBefore = CurrentShield;
+        var shieldAbsorb = 0;
+        if (CurrentShield > 0 && MaxShield > 0)
+        {
+            shieldAbsorb = Math.Min(damage, CurrentShield);
+            // Ghost notify deferred until after full resolution so we can send Max+Current together.
+            SetCurrentShield(CurrentShield - shieldAbsorb, triggerGhostUpdate: false);
+        }
+
+        var remainder = damage - shieldAbsorb;
+        var hpDamage = remainder > 0 ? base.TakeDamage(remainder) : 0;
+
+        if (shieldAbsorb > 0)
+        {
+            // Ghost max+current for observers; MultipleStatUpdate absolute current for owner HUD.
+            NotifyShieldChanged(includeMax: true);
+        }
+
+        // Shield-only hits skip SimpleObject.TakeDamage (no CharacterLevel / HealthMask).
+        // Client DamagePacket prediction still lowers local HP — push absolute truth.
+        if (shieldAbsorb > 0 && hpDamage == 0)
+        {
+            DirtyHealthMasks(GhostObject.HealthMask);
+            NotifyOwnerHealthHud();
+        }
+
+        if (shieldAbsorb > 0 || hpDamage > 0)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "TakeDamage: vehicle coid={0} dmg={1} shield {2}->{3}/{4} absorb={5} hpNow={6}/{7} hpDmg={8}",
+                ObjectId.Coid,
+                damage,
+                shieldBefore,
+                CurrentShield,
+                MaxShield,
+                shieldAbsorb,
+                GetCurrentHP(),
+                GetMaximumHP(),
+                hpDamage);
+        }
+
+        return shieldAbsorb + hpDamage;
     }
 
     /// <summary>
@@ -1832,8 +1922,9 @@ public class Vehicle : SimpleObject
 
         GenerateAndSpawnTemplateLoot(killerCharacter);
 
-        // Death packets while still on-map/ghosted, then leave.
-        BroadcastDeath(map, vehicleObjectId, deathType, Murderer, Ghost);
+        // Vehicle path: DestroyObject with DeathType only (same CompletelyDestroyObject
+        // death FX as creatures). InitCreateObject DoDeath is for map props only.
+        BroadcastDeath(map, vehicleObjectId, deathType, Murderer, Ghost, useInitCreateDeath: false);
         SetMap(null);
     }
 

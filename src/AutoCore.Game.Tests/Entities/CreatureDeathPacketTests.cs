@@ -67,11 +67,9 @@ public class CreatureDeathPacketTests
         Assert.AreEqual(murdererTf.Global, destroy.Murderer.Global);
         Assert.IsFalse(destroy.Force, "animated death uses force=0 so client can play FX before teardown");
 
-        var initDeath = _sent.OfType<InitCreateObjectPacket>()
-            .FirstOrDefault(p => p.ObjectCoid == CreatureCoid && !p.Create && p.DoDeath);
-        Assert.IsNotNull(initDeath,
-            "InitCreateObject DoDeath must be sent for combat deaths; sent=" +
-            string.Join(',', _sent.Select(p => p.Opcode)));
+        Assert.IsFalse(
+            _sent.OfType<InitCreateObjectPacket>().Any(p => p.DoDeath),
+            "creatures must not use InitCreateObject DoDeath (RemoveObject strips without FX)");
 
         Assert.IsFalse(
             _sent.OfType<BroadcastPacket>().Any(p =>

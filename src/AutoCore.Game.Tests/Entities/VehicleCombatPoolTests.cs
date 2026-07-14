@@ -16,8 +16,9 @@ using AutoCore.Game.Tests.Inventory.Fakes;
 using AutoCore.Game.Combat;
 
 /// <summary>
-/// Server combat pools (HP regen, shield, heat, power) match client
+/// Server combat pools (shield, heat, power) match client
 /// <c>CVOGHBRegeneration</c> / <c>FUN_005fbea0</c> (3000 ms pulses for races 0/1/2).
+/// HP does not recharge on the pool pulse.
 /// </summary>
 [TestClass]
 public class VehicleCombatPoolTests
@@ -218,7 +219,7 @@ public class VehicleCombatPoolTests
     }
 
     [TestMethod]
-    public void Tick_HpChanged_DirtiesHealthMaskOnGhost()
+    public void Tick_DoesNotRegenHp_EvenWithHpRegenRateSet()
     {
         var vehicle = new Vehicle();
         vehicle.SetCoid(88_061, true);
@@ -230,9 +231,9 @@ public class VehicleCombatPoolTests
 
         VehicleCombatPool.Tick(vehicle, owner: null, weaponsFiring: false);
 
-        Assert.AreEqual(104, vehicle.GetCurrentHP());
-        Assert.IsTrue(GhostHasDirtyMask(vehicle.Ghost!, GhostObject.HealthMask),
-            "HP regen must dirty HealthMask for ghost replication (same path as /hp)");
+        Assert.AreEqual(100, vehicle.GetCurrentHP(), "product design: vehicle HP does not recharge");
+        Assert.IsFalse(GhostHasDirtyMask(vehicle.Ghost!, GhostObject.HealthMask),
+            "no HP change means HealthMask must stay clean");
     }
 
     [TestMethod]
@@ -428,7 +429,7 @@ public class VehicleCombatPoolTests
     }
 
     [TestMethod]
-    public void TickCombatPools_HpRegen_UsesRaceRegenRate()
+    public void TickCombatPools_HpDoesNotRegen_EvenWithRaceRegenRate()
     {
         var vehicle = new Vehicle();
         vehicle.SetMaximumHP(500);
@@ -436,8 +437,10 @@ public class VehicleCombatPoolTests
         vehicle.SetHpRegenRateForTests(4);
 
         VehicleCombatPool.Tick(vehicle, owner: null, weaponsFiring: false);
+        VehicleCombatPool.Advance(vehicle, owner: null, deltaMs: 3000, weaponsFiring: false);
 
-        Assert.AreEqual(104, vehicle.GetCurrentHP());
+        Assert.AreEqual(100, vehicle.GetCurrentHP(),
+            "RaceRegenRate must not restore HP (shield/power still pulse; HP does not)");
     }
 
     [TestMethod]
