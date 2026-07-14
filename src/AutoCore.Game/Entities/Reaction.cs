@@ -270,7 +270,14 @@ public class Reaction : ClonedObjectBase
 
             case ReactionType.OpenStore:
                 // Client opens store UI via 0x206C; GenericVar1 = store object COID.
-                Managers.VendorStoreService.NoteOpened(GetCharacterFromActivator(activator), Template.GenericVar1);
+                // Pass owning connection so buy session stock COIDs can be materialized.
+                {
+                    var shopper = GetCharacterFromActivator(activator);
+                    Managers.VendorStoreService.NoteOpened(
+                        shopper,
+                        Template.GenericVar1,
+                        shopper?.OwningConnection);
+                }
                 return true;
 
             case ReactionType.OpenBodyShop:

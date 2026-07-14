@@ -44,11 +44,22 @@ Packet size **0x40** including opcode:
 | Offset | Field |
 |--------|--------|
 | +0x00 | opcode `0x2027` |
-| +0x18 | TFID 16B (item; Coid often **CBID** for store catalog lines) |
+| +0x18 | TFID 16B (item; **store-slot COID** on buy, cargo item COID on sell) |
+| +0x28 | store COID i64 (present on buy live captures, e.g. 9819) |
 | +0x38 | `IsBuy` byte (1=buy, 0=sell) |
 | +0x3c | quantity i32 |
 
 Server logs full hex on each transaction for further RE if layout differs by UI path.
+
+### Buy path
+
+Client does **not** send catalog CBID for buy; it sends a store inventory object TFID.
+
+**Buyback (sell → buy same item):** after a successful sell, the client keeps the sold item TFID on the store UI. Live: `itemCoid=11131` after selling that stack. Server lists buyback by that COID (`VendorStore: buyback listed …`) and buy matches it first (`source=buyback`), charging the same unit sell price. Restore uses the **original COID** via `RestoreCargoWithoutCreate` (0x2047 + CargoSendAll only) — never a second `CreateSimpleObject`, which would leave a spare invalid icon.
+
+**Catalog stock:** session map `slotCoid → stock line` + optional `CreateSimpleObject` creates; match by session COID or CBID fallback.
+
+Grant cargo via `AddItem`, charge credits, ack `0x2028` with grant COID @+0x08 and slot TFID @+0x18. StoreClose clears buyback listings.
 
 ### StoreTransactionResponse (0x2028) — client FUN_00810670
 

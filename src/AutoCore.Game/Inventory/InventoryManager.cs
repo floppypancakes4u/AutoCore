@@ -277,6 +277,77 @@ public sealed class InventoryManager
         return AddItemInternal(entry, itemCreator, coid, characterCoid, quantity, false, allocateAdditionalCoid, "Added");
     }
 
+    /// <summary>
+    /// Re-insert cargo for a COID the client still holds (store buyback of a just-sold TFID).
+    /// Emits 0x2047 + CargoSendAll only — no CreateSimpleObject — so the client does not get a
+    /// second invalid object alongside the live store-slot TFID.
+    /// </summary>
+    public InventoryCommandResult RestoreCargoWithoutCreate(
+        CharacterInventoryItem item,
+        long characterCoid = 0)
+    {
+        if (item == null || item.Coid <= 0 || item.Cbid <= 0 || item.Quantity < 1)
+        {
+            return new InventoryCommandResult(
+                "Cannot restore cargo: invalid item.",
+                packets: Array.Empty<BasePacket>());
+        }
+
+        if (FindByCoid(item.Coid) != null)
+        {
+            return new InventoryCommandResult(
+                $"Cannot restore cargo: coid {item.Coid} already in cargo.",
+                packets: Array.Empty<BasePacket>());
+        }
+
+        var occupied = _items
+            .Select(i => i.InventoryPositionY * Width + i.InventoryPositionX)
+            .ToHashSet();
+        if (!TryGetFirstFreeCargoSlot(occupied, out var x, out var y))
+        {
+            return new InventoryCommandResult(
+                "Cannot restore cargo: inventory full.",
+                packets: Array.Empty<BasePacket>());
+        }
+
+        var restored = item with
+        {
+            InventoryPositionX = x,
+            InventoryPositionY = y,
+            Quantity = Math.Max(1, item.Quantity),
+        };
+
+        if (!TryAdd(restored))
+        {
+            return new InventoryCommandResult(
+                $"Cannot restore cargo coid={item.Coid}.",
+                packets: Array.Empty<BasePacket>());
+        }
+
+        if (characterCoid != 0)
+            PersistCargoUpsert(characterCoid, restored);
+
+        var packets = new List<BasePacket>
+        {
+            new InventoryAddItemResponsePacket
+            {
+                ItemCoid = restored.Coid,
+                InventoryPositionX = restored.InventoryPositionX,
+                InventoryPositionY = restored.InventoryPositionY,
+                AddToExistingItem = false,
+                Quantity = restored.Quantity,
+                WasSuccessful = true,
+            },
+            InventoryPacketFactory.CreateCargoSendAll(this),
+        };
+
+        return new InventoryCommandResult(
+            $"Restored cargo coid={restored.Coid} cbid={restored.Cbid} qty={restored.Quantity}.",
+            packets,
+            addedItem: restored,
+            acceptedQuantity: restored.Quantity);
+    }
+
     private InventoryCommandResult AddItemInternal(
         InventoryCatalogEntry entry,
         IInventoryItemCreator itemCreator,

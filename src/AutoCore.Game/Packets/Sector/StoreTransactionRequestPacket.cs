@@ -9,7 +9,8 @@ using AutoCore.Game.Structures;
 /// Client build (autoassault 0x00860be2 / 0x00860cbd): stack packet size 0x40 including opcode.
 /// Layout (absolute, with opcode):
 ///   +0x00 opcode i32
-///   +0x18 TFID 16B (selected item — Coid often CBID for store catalog goods)
+///   +0x18 TFID 16B (selected item — client store-slot COID, or catalog CBID)
+///   +0x28 store COID i64 (often present on buy; live sell may leave zero)
 ///   +0x38 byte IsBuy (1=buy from store, 0=sell to store)
 ///   +0x3c i32 Quantity
 /// </summary>
@@ -21,6 +22,8 @@ public sealed class StoreTransactionRequestPacket : BasePacket
     public byte[] RawBytes { get; private set; } = [];
 
     public TFID Item { get; set; } = new();
+    /// <summary>Store object COID when present at +0x28 (buy path live captures).</summary>
+    public long StoreCoid { get; set; }
     public bool IsBuy { get; set; }
     public int Quantity { get; set; } = 1;
 
@@ -38,6 +41,7 @@ public sealed class StoreTransactionRequestPacket : BasePacket
         if (RawBytes.Length >= 0x40)
         {
             Item = ReadTfidAt(RawBytes, 0x18);
+            StoreCoid = BitConverter.ToInt64(RawBytes, 0x28);
             IsBuy = RawBytes[0x38] != 0;
             Quantity = Math.Max(1, BitConverter.ToInt32(RawBytes, 0x3c));
             return;
@@ -51,6 +55,8 @@ public sealed class StoreTransactionRequestPacket : BasePacket
             if (maybeOpcode == (int)GameOpcode.StoreTransactionRequest && RawBytes.Length >= 0x3c)
             {
                 Item = RawBytes.Length >= 0x28 ? ReadTfidAt(RawBytes, 0x18) : new TFID();
+                if (RawBytes.Length >= 0x30)
+                    StoreCoid = BitConverter.ToInt64(RawBytes, 0x28);
                 if (RawBytes.Length > 0x38)
                     IsBuy = RawBytes[0x38] != 0;
                 if (RawBytes.Length >= 0x40)
@@ -59,6 +65,8 @@ public sealed class StoreTransactionRequestPacket : BasePacket
             }
 
             Item = ReadTfidAt(RawBytes, 0x14);
+            if (RawBytes.Length >= 0x2c)
+                StoreCoid = BitConverter.ToInt64(RawBytes, 0x24);
             if (RawBytes.Length > 0x34)
                 IsBuy = RawBytes[0x34] != 0;
             if (RawBytes.Length >= 0x3c)
