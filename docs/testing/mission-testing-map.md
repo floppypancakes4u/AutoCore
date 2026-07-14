@@ -12,7 +12,7 @@ Trace source: implementation as of 2026-07-12 (not enum wish-lists).
 | Not tracked | Dialog accept (`MissionDialogResponse`) | Offer path | Active | GrantMission | Ineligible → no-op |
 | Active | Kill credit (`MissionKillProgress`) | Active kill/kill_aggregate req matches | Progress++ or complete | ObjectiveState on partial; Advance on threshold | Wrong player/CBID; already completed mission skipped |
 | Active | UseItem UseObject | Active useitem req | Advance/complete | AdvanceOrCompleteObjective | Wrong target |
-| Active | AutoPatrol | Patrol AutoComplete + in radius | Advance/complete **or** ensure deliver NPC | Sibling deliver blocks complete | Multi-waypoint incomplete behavior |
+| Active | AutoPatrol | Patrol AutoComplete + in radius | Partial pad progress → advance/complete **or** ensure deliver NPC | Sibling deliver blocks complete | Multi-waypoint/sequential/laps via `MissionPatrolProgress` |
 | Active | Deliver dialog turn-in | Active deliver NPC match | Advance **or** complete | Soft-pedal (no 0x2070 when client already completed); rewards | Wrong NPC; not deliver objective |
 | Active mid-seq | `AdvanceOrCompleteObjective` (has next) | Called from kill/patrol/useitem/reaction | seq → next | 0x2070; progress max on old seq; Upsert; ObjectiveState next; phase replay | Multi-req treated satisfied (incomplete) |
 | Active final | `AdvanceOrCompleteObjective` (no next) | Final objective | Not active; in CompletedMissionIds | Remove quest; Complete persist; rewards; journal; phase replay | Duplicate call after remove → no quest |

@@ -692,14 +692,15 @@ public static class NpcInteractHandler
             return;
         }
 
-        // Offer dialog reject: do not grant.
+        // Live log (LOA 2945): client dialog OK often wires Accepted=false — same as deliver turn-in.
+        // Do not treat Accepted as reject for offers; CanOfferMission is the real gate.
+        // Cancel/close typically does not send 0x206E with an offerable mission id.
         if (!packet.Accepted)
         {
-            Logger.WriteLog(LogType.Debug,
-                "MissionDialogResponse: offer rejected mission={0} npcCbid={1}",
+            MissionFlowDiag.Log(
+                "Dialog OFFER packet Accepted=false mission={0} npcCbid={1} — still attempting grant (retail wire)",
                 resolvedOfferMissionId,
                 npcCbid);
-            return;
         }
 
         if (!CanOfferMission(character, resolvedOfferMissionId, npcCbid))
@@ -710,9 +711,22 @@ public static class NpcInteractHandler
                 packet.MissionId,
                 character.ObjectId.Coid,
                 npcCbid);
+            MissionFlowDiag.Log(
+                "Dialog OFFER blocked CanOffer mission={0} packet={1} char={2} npcCbid={3} {4}",
+                resolvedOfferMissionId,
+                packet.MissionId,
+                character.ObjectId.Coid,
+                npcCbid,
+                MissionFlowDiag.QuestSummary(character));
             return;
         }
 
+        MissionFlowDiag.Log(
+            "Dialog OFFER grant mission={0} acceptedFlag={1} npcCbid={2} char={3}",
+            resolvedOfferMissionId,
+            packet.Accepted,
+            npcCbid,
+            character.ObjectId.Coid);
         GrantMission(conn, character, resolvedOfferMissionId);
     }
 
@@ -1527,9 +1541,29 @@ public static class NpcInteractHandler
         if (targetCoid <= 0)
             return;
 
+        MissionFlowDiag.Log(
+            "AutoPatrol IN coid={0} char={1} cont={2} pos=({3:F1},{4:F1},{5:F1}) {6}",
+            targetCoid,
+            character.ObjectId.Coid,
+            character.Map.ContinentId,
+            playerPos.X, playerPos.Y, playerPos.Z,
+            MissionFlowDiag.QuestSummary(character));
+
         // Client may already be on the patrol UI after local CompleteObjective while the server
         // is still on a prior deliver (dialog desync). Catch up before matching.
+        var seqBeforeReconcile = character.CurrentQuests
+            .Select(q => (q.MissionId, q.ActiveObjectiveSequence)).ToList();
         ReconcileClientAheadPatrolTarget(conn, character, targetCoid);
+        var seqAfterReconcile = character.CurrentQuests
+            .Select(q => (q.MissionId, q.ActiveObjectiveSequence)).ToList();
+        if (!seqBeforeReconcile.SequenceEqual(seqAfterReconcile))
+        {
+            MissionFlowDiag.Log(
+                "AutoPatrol RECONCILE changed before={0} after={1} target={2}",
+                string.Join(',', seqBeforeReconcile.Select(t => $"m{t.MissionId}:s{t.ActiveObjectiveSequence}")),
+                string.Join(',', seqAfterReconcile.Select(t => $"m{t.MissionId}:s{t.ActiveObjectiveSequence}")),
+                targetCoid);
+        }
 
         var anyQuest = false;
         foreach (var quest in character.CurrentQuests.ToList())
@@ -1562,6 +1596,13 @@ public static class NpcInteractHandler
                 var distXZSq = DistXZSq(playerPos, targetPos);
                 if (distXZSq > radius * radius)
                 {
+                    MissionFlowDiag.Log(
+                        "AutoPatrol REJECT range target={0} distXZ={1:F1} radius={2:F1} mission={3} seq={4}",
+                        targetCoid,
+                        MathF.Sqrt(distXZSq),
+                        radius,
+                        quest.MissionId,
+                        quest.ActiveObjectiveSequence);
                     Logger.WriteLog(LogType.Debug,
                         "AutoPatrol: target={0} out of range distXZ={1:F1} radius={2:F1} mission={3}",
                         targetCoid,
@@ -1573,6 +1614,12 @@ public static class NpcInteractHandler
             }
             else
             {
+                MissionFlowDiag.Log(
+                    "AutoPatrol TRUST no-map-pos target={0} cont={1} mission={2} seq={3}",
+                    targetCoid,
+                    character.Map.ContinentId,
+                    quest.MissionId,
+                    quest.ActiveObjectiveSequence);
                 Logger.WriteLog(LogType.Debug,
                     "AutoPatrol: target={0} listed, no map position on continent={1} mission={2} — trusting client range gate",
                     targetCoid,
@@ -1599,6 +1646,12 @@ public static class NpcInteractHandler
                         continue;
                     }
 
+                    MissionFlowDiag.Log(
+                        "AutoPatrol SIBLING-DELIVER target={0} mission={1} seq={2} deliverCbid={3}",
+                        targetCoid,
+                        quest.MissionId,
+                        quest.ActiveObjectiveSequence,
+                        deliver.NPCTargetCBID);
                     Logger.WriteLog(LogType.Debug,
                         "AutoPatrol: patrol target={0} mission={1} seq={2} — sibling deliver; ensuring pad NPC cbid={3} once",
                         targetCoid,
@@ -1613,7 +1666,18 @@ public static class NpcInteractHandler
             }
 
             LogPatrolIncomplete(patrol, quest, objective, targetCoid);
+            MissionFlowDiag.Log(
+                "AutoPatrol ADVANCE mission={0} seq={1} obj={2} target={3} listedTargets={4}",
+                quest.MissionId,
+                quest.ActiveObjectiveSequence,
+                objective.ObjectiveId,
+                targetCoid,
+                CountPatrolTargets(patrol));
             AdvanceOrCompleteObjective(conn, character, quest, mission, objective, source: "AutoPatrol");
+            MissionFlowDiag.Log(
+                "AutoPatrol AFTER advance mission={0} {1}",
+                quest.MissionId,
+                MissionFlowDiag.QuestSummary(character));
             return;
         }
 
@@ -1625,6 +1689,11 @@ public static class NpcInteractHandler
 
         if (anyQuest)
         {
+            MissionFlowDiag.Log(
+                "AutoPatrol NO-MATCH target={0} char={1} {2}",
+                targetCoid,
+                character.ObjectId.Coid,
+                MissionFlowDiag.QuestSummary(character));
             Logger.WriteLog(LogType.Debug,
                 "AutoPatrol: no matching active patrol for target={0} charCoid={1} quests=[{2}]",
                 targetCoid,
@@ -1688,6 +1757,12 @@ public static class NpcInteractHandler
 
             character.MapPresence.MarkStalePatrolResync(quest.MissionId);
 
+            MissionFlowDiag.Log(
+                "AutoPatrol STALE-RESYNC target={0} mission={1} finishedObj={2} activeSeq={3}",
+                targetCoid,
+                quest.MissionId,
+                pastPatrolObj.ObjectiveId,
+                quest.ActiveObjectiveSequence);
             Logger.WriteLog(LogType.Debug,
                 "AutoPatrol: stale client patrol target={0} mission={1} finishedObj={2} activeSeq={3} — force-complete + resync",
                 targetCoid,
@@ -1766,6 +1841,12 @@ public static class NpcInteractHandler
                     break;
                 }
 
+                MissionFlowDiag.Log(
+                    "AutoPatrol RECONCILE-ADVANCE mission={0} seq {1} -> toward {2} target={3}",
+                    quest.MissionId,
+                    quest.ActiveObjectiveSequence,
+                    match.Sequence,
+                    targetCoid);
                 Logger.WriteLog(LogType.Debug,
                     "AutoPatrol: client-ahead reconcile mission={0} seq {1} -> toward {2} (target={3})",
                     quest.MissionId,
@@ -1953,6 +2034,11 @@ public static class NpcInteractHandler
             return;
         if (!character.CurrentQuests.Contains(quest))
         {
+            MissionFlowDiag.Log(
+                "Advance STALE ignore mission={0} source={1} char={2}",
+                quest.MissionId,
+                source,
+                character.ObjectId.Coid);
             Logger.WriteLog(LogType.Debug,
                 "AdvanceOrCompleteObjective: ignoring stale quest mission={0} source={1} coid={2}",
                 quest.MissionId,
@@ -1963,6 +2049,16 @@ public static class NpcInteractHandler
 
         var seq = quest.ActiveObjectiveSequence;
         var hasNext = mission.Objectives.Values.Any(o => o.Sequence > seq);
+        MissionFlowDiag.Log(
+            "Advance IN source={0} mission={1} seq={2} obj={3} hasNext={4} send0x2070={5} syncImm={6} {7}",
+            source,
+            quest.MissionId,
+            seq,
+            objective.ObjectiveId,
+            hasNext,
+            sendCompleteDynamicObjective,
+            syncClientImmediately,
+            MissionFlowDiag.QuestSummary(character));
         var context =
             $"source={source} mission={quest.MissionId} seq={seq} objective={objective.ObjectiveId} xp={objective.XP} credits={objective.Credits}";
 
@@ -2015,6 +2111,15 @@ public static class NpcInteractHandler
                 seq,
                 nextSeq,
                 objective.ObjectiveId);
+            MissionFlowDiag.Log(
+                "Advance SEQ {0}->{1} source={2} mission={3} finishedObj={4} nextObj={5} syncImm={6}",
+                seq,
+                nextSeq,
+                source,
+                quest.MissionId,
+                objective.ObjectiveId,
+                mission.Objectives.TryGetValue(nextSeq, out var nObj) ? nObj.ObjectiveId : -1,
+                syncClientImmediately);
 
             var nextObjective = GetActiveObjective(quest);
             if (nextObjective != null)
@@ -2048,6 +2153,14 @@ public static class NpcInteractHandler
                 // even if spawn TriggerEvents bookkeeping was lost.
                 character.Map?.ReplayMissionWorldSetup(phaseActivator);
             }
+            else
+            {
+                MissionFlowDiag.Log(
+                    "Advance DEFERRED mission-state (soft-pedal) source={0} mission={1} seq={2}",
+                    source,
+                    quest.MissionId,
+                    nextSeq);
+            }
             return;
         }
 
@@ -2055,6 +2168,12 @@ public static class NpcInteractHandler
         character.CompletedMissionIds.Add(quest.MissionId);
         MissionPersistence.Instance.OnMissionCompleted(character.ObjectId.Coid, quest.MissionId);
 
+        MissionFlowDiag.Log(
+            "Advance COMPLETE mission={0} obj={1} source={2} syncImm={3}",
+            quest.MissionId,
+            objective.ObjectiveId,
+            source,
+            syncClientImmediately);
         Logger.WriteLog(LogType.Debug,
             "{0}: completed mission={1} objective={2}",
             source,

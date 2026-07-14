@@ -9,7 +9,7 @@ Explicit inventory of untested, partially tested, or N/A paths. Prefer documenti
 | FailMission does not clear quests | `Reaction` stub | `MissionReactionContractTests.FailMission_Stub_*` |
 | Multi-req objective one-shot complete | Advance IncompleteHandlerLog | `ObjectiveProgressContractTests.MultiRequirement_*` |
 | CompleteCount > 1 ignored | Advance log | Characterization in Advance path |
-| Multi-waypoint/sequential/lap patrol | AutoPatrol logs | Existing incomplete warnings |
+| Multi-waypoint/sequential/lap patrol | **fixed** — `MissionPatrolProgress` | `AutoPatrolTests` multi-pad + `MissionPatrolProgressTests` |
 | Client-only reactions (UI/waypoints/text) | return true + 0x206C | Out of mission authority scope |
 | Kill credits only first matching mission | MissionKillProgress early return | `Scenario_TwoMissions_SameKill_*` documents contract |
 

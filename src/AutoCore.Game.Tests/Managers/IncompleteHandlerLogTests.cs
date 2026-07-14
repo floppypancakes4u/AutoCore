@@ -81,8 +81,6 @@ public class IncompleteHandlerLogTests
         Assert.IsTrue(
             _incomplete.Any(m => m.Contains("[AutoPatrol]") && m.Contains("Multi-waypoint")),
             "Expected multi-waypoint incomplete log, got: " + string.Join(" | ", _incomplete));
-        // Single patrol requirement: AdvanceOrCompleteObjective only logs multi-req / CompleteCount gaps.
-        // Multi-waypoint progress gaps are owned by the AutoPatrol incomplete logs above.
     }
 
     [TestMethod]

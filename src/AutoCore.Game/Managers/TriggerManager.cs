@@ -270,22 +270,68 @@ public class TriggerManager : Singleton<TriggerManager>
     /// </summary>
     public void OnMissionStateChanged(ClonedObjectBase activator)
     {
-        if (activator?.Map == null)
+        // Callers often pass CurrentVehicle; vehicle.Map can be null while character.Map is set.
+        var character = activator?.GetAsCharacter() ?? activator?.GetSuperCharacter(false);
+        var map = activator?.Map ?? character?.Map;
+        if (activator == null || map == null)
+        {
+            MissionFlowDiag.Log(
+                "OnMissionStateChanged SKIP no-map activator={0} char={1}",
+                activator?.ObjectId.Coid ?? -1,
+                character?.ObjectId.Coid ?? -1);
             return;
+        }
+
+        // Prefer character vehicle/body that has the map for trigger volume checks.
+        var reevalActivator = activator;
+        if (reevalActivator.Map == null && character != null)
+        {
+            reevalActivator = character.CurrentVehicle?.Map != null
+                ? (ClonedObjectBase)character.CurrentVehicle
+                : character.Map != null
+                    ? character
+                    : activator;
+            if (reevalActivator.Map == null)
+            {
+                MissionFlowDiag.Log(
+                    "OnMissionStateChanged SKIP unresolved map char={0} vehicle={1}",
+                    character.ObjectId.Coid,
+                    character.CurrentVehicle?.ObjectId.Coid ?? -1);
+                return;
+            }
+
+            MissionFlowDiag.Log(
+                "OnMissionStateChanged remap activator {0} -> {1} (map was null)",
+                activator.ObjectId.Coid,
+                reevalActivator.ObjectId.Coid);
+        }
 
         if (_missionReevalActive)
         {
             _missionReevalPending = true;
+            MissionFlowDiag.Log(
+                "OnMissionStateChanged COALESCE nested pending map={0} activator={1}",
+                reevalActivator.Map.ContinentId,
+                reevalActivator.ObjectId.Coid);
             return;
         }
 
         _missionReevalActive = true;
         try
         {
+            var pass = 0;
             do
             {
                 _missionReevalPending = false;
-                RunMissionStateReevalPass(activator);
+                pass++;
+                MissionFlowDiag.Log(
+                    "OnMissionStateChanged PASS={0} map={1} activator={2} depth={3} {4}",
+                    pass,
+                    reevalActivator.Map.ContinentId,
+                    reevalActivator.ObjectId.Coid,
+                    _cascadeDepth,
+                    character != null ? MissionFlowDiag.QuestSummary(character) : "quests=?");
+                RunMissionStateReevalPass(reevalActivator);
             }
             while (_missionReevalPending && _cascadeDepth < MaxCascadeDepth);
         }
@@ -303,7 +349,13 @@ public class TriggerManager : Singleton<TriggerManager>
             character.EnsureLogicVariables();
 
         if (character != null)
+        {
+            MissionFlowDiag.Log(
+                "MissionReeval CheckTriggersForPlayer char={0} {1}",
+                character.ObjectId.Coid,
+                MissionFlowDiag.QuestSummary(character));
             CheckTriggersForPlayer(character);
+        }
         else
             CheckTriggersFor(activator);
 
@@ -383,6 +435,13 @@ public class TriggerManager : Singleton<TriggerManager>
                 continue;
 
             _firedConditionalTriggers[key] = true;
+            MissionFlowDiag.Log(
+                "REMOTE-TRIGGER FIRE trigger={0} name='{1}' actor={2} watchVar={3} reactions=[{4}]",
+                kvp.Key.Coid,
+                trigger.Template.Name ?? string.Empty,
+                actorCoid,
+                watchVarId?.ToString() ?? "mission",
+                string.Join(',', trigger.Template.Reactions));
             Logger.WriteLog(LogType.Debug,
                 "TriggerManager: remote condition fire trigger={0} actor={1} watchVar={2}",
                 kvp.Key.Coid,
@@ -398,6 +457,13 @@ public class TriggerManager : Singleton<TriggerManager>
         if (character == null)
             return;
 
+        MissionFlowDiag.Log(
+            "PLAYER-TRIGGER trigger={0} name='{1}' player={2} activator={3} reactions=[{4}]",
+            trigger.ObjectId.Coid,
+            trigger.Template.Name ?? string.Empty,
+            character.ObjectId.Coid,
+            activator.ObjectId.Coid,
+            string.Join(',', trigger.Template.Reactions));
         Logger.WriteLog(LogType.Debug,
             "Player trigger occurred: playerCoid={0} activatorCoid={1} trigger={2} name='{3}' reactions=[{4}]",
             character.ObjectId.Coid,

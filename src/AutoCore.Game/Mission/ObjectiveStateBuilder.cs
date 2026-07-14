@@ -1,5 +1,6 @@
 namespace AutoCore.Game.Mission;
 
+using AutoCore.Game.Mission.Requirements;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 
@@ -13,7 +14,7 @@ public static class ObjectiveStateBuilder
 {
     /// <summary>
     /// Build an ObjectiveState packet from objective-level progress/max.
-    /// Progress is written into each requirement's authored <c>FirstStateSlot</c> float.
+    /// Progress is written into each requirement's authored <c>FirstStateSlot</c> float as a 0..1 ratio.
     /// Bitmask bits mark every requirement index that should receive a client callback.
     /// </summary>
     public static ObjectiveStatePacket Build(MissionObjective objective, int progress, int maximum)
@@ -83,5 +84,39 @@ public static class ObjectiveStateBuilder
 
         var maximum = Math.Max(1, objective.CompleteCount);
         return Build(objective, progress: maximum, maximum: maximum);
+    }
+
+    /// <summary>
+    /// Multi-pad patrol mid-route sync only. Client
+    /// <c>CVOGObjectiveRequirement_Patrol_GetTarget/Eval</c> treats the patrol slot float as an
+    /// <b>absolute pad count</b> (0,1,2…), not a 0..1 ratio. Do not use for kill/deliver or
+    /// create-packet restore.
+    /// </summary>
+    public static ObjectiveStatePacket BuildPatrolPadCount(
+        MissionObjective objective,
+        ObjectiveRequirementPatrol patrol,
+        int padsCompleted)
+    {
+        if (objective == null || patrol == null)
+            return null;
+
+        var packet = new ObjectiveStatePacket
+        {
+            ObjectiveId = objective.ObjectiveId,
+        };
+
+        var reqIndex = objective.Requirements?.IndexOf(patrol) ?? 0;
+        if (reqIndex < 0)
+            reqIndex = 0;
+        if (reqIndex < 32)
+            packet.ObjectiveBitmask = 1u << reqIndex;
+        else
+            packet.ObjectiveBitmask = 1u;
+
+        var slot = patrol.FirstStateSlot;
+        if (slot < ObjectiveStatePacket.SlotCount)
+            packet.SlotProgress[slot] = Math.Max(0, padsCompleted);
+
+        return packet;
     }
 }

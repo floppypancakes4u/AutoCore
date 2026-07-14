@@ -5,6 +5,7 @@ namespace AutoCore.Game.Tests.Mission;
 using AutoCore.Game.Mission;
 using AutoCore.Game.Mission.Requirements;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.Structures;
 
 /// <summary>
 /// Client 0x2071 applies slot floats always, but only invokes requirement callbacks
@@ -13,6 +14,7 @@ using AutoCore.Game.Packets.Sector;
 [TestClass]
 public class ObjectiveStateBuilderTests
 {
+
     [TestMethod]
     public void Build_SetsBitmaskForRequirementIndex_AndSlotFloatFromProgress()
     {

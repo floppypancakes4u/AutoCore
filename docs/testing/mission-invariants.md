@@ -42,7 +42,7 @@ Each invariant is either **tested**, **partial**, **gap**, or **n/a** for AutoCo
 1. `ReactionType.FailMission` — no quest mutation  
 2. Multi-requirement objectives — single Advance satisfies all  
 3. `CompleteCount > 1` ignored on Advance  
-4. Multi-waypoint / sequential / multi-lap patrol incomplete  
+4. Multi-waypoint / sequential / multi-lap patrol — **fixed** (`MissionPatrolProgress` + AutoPatrol partial progress)
 5. Many UI reactions client-only via 0x206C  
 6. `MissionKillProgress` credits only the **first** matching active quest per kill event  
 

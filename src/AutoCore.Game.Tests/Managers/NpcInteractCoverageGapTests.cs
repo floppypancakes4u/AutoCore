@@ -34,12 +34,15 @@ public class NpcInteractCoverageGapTests
     private const int ContId = 707;
 
     private readonly List<BasePacket> _sent = new();
+    private readonly List<string> _incomplete = new();
 
     [TestInitialize]
     public void SetUp()
     {
         _sent.Clear();
+        _incomplete.Clear();
         TNLConnection.TestPacketSink = (_, p) => _sent.Add(p);
+        IncompleteHandlerLog.TestSink = msg => _incomplete.Add(msg);
         AssetManager.Instance.ClearTestMissions();
         TriggerManager.Instance.ClearAllForTests();
         NpcInteractHandler.InvalidateMissionIndex();
@@ -50,11 +53,13 @@ public class NpcInteractCoverageGapTests
     public void TearDown()
     {
         TNLConnection.TestPacketSink = null;
+        IncompleteHandlerLog.TestSink = null;
         AssetManager.Instance.ClearTestMissions();
         TriggerManager.Instance.ClearAllForTests();
         NpcInteractHandler.InvalidateMissionIndex();
         NpcInteractHandler.ResetDialogTurnInFollowupForTests();
         _sent.Clear();
+        _incomplete.Clear();
     }
 
     [TestMethod]
@@ -102,7 +107,6 @@ public class NpcInteractCoverageGapTests
         };
         patrol.GenericTargets[0] = Wp1;
         patrol.GenericTargets[1] = Wp2;
-        // TargetCount stays 0 → CountPatrolTargets uses array occupancy via length scan in LogPatrolIncomplete
         o1.Requirements.Add(patrol);
         AssetManager.Instance.SetTestMission(Mission.CreateForTests(MissionId, o1));
 
@@ -116,7 +120,10 @@ public class NpcInteractCoverageGapTests
             Target = new TFID(Wp1, false),
         });
 
+        // HEAD behavior: any listed pad completes the objective (known incomplete multi-pad).
         Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
+        Assert.IsTrue(_incomplete.Any(m => m.Contains("AutoFail")));
+        Assert.IsTrue(_incomplete.Any(m => m.Contains("ContinentCBID")));
     }
 
     [TestMethod]
