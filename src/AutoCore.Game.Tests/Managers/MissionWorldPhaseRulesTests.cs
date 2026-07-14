@@ -172,6 +172,41 @@ public class MissionWorldPhaseRulesTests
     }
 
     [TestMethod]
+    public void MeetsMissionPrerequisites_And_RequiresAll()
+    {
+        var completed = new HashSet<int> { 10 };
+        Assert.IsFalse(MissionWorldPhaseRules.MeetsMissionPrerequisites(
+            new[] { 10, 20, 30, -1 }, requirementsOred: 0, completed));
+        completed.Add(20);
+        completed.Add(30);
+        Assert.IsTrue(MissionWorldPhaseRules.MeetsMissionPrerequisites(
+            new[] { 10, 20, 30, -1 }, requirementsOred: 0, completed));
+    }
+
+    [TestMethod]
+    public void MeetsMissionPrerequisites_Ored_AnyOneClassReport()
+    {
+        // Retail Freelancer/Shields Up: RequirementsOred=-1, four mutually exclusive class reports.
+        var reqs = new[] { 2945, 2939, 2941, 2943 };
+        Assert.IsFalse(MissionWorldPhaseRules.MeetsMissionPrerequisites(
+            reqs, requirementsOred: -1, completedMissionIds: new HashSet<int>()));
+        Assert.IsTrue(MissionWorldPhaseRules.MeetsMissionPrerequisites(
+            reqs, requirementsOred: -1, completedMissionIds: new HashSet<int> { 2945 }));
+        Assert.IsTrue(MissionWorldPhaseRules.MeetsMissionPrerequisites(
+            reqs, requirementsOred: 1, completedMissionIds: new HashSet<int> { 2941 }));
+        Assert.IsFalse(MissionWorldPhaseRules.MeetsMissionPrerequisites(
+            reqs, requirementsOred: 0, completedMissionIds: new HashSet<int> { 2945 }));
+    }
+
+    [TestMethod]
+    public void MeetsMissionPrerequisites_EmptyOrNull_Passes()
+    {
+        Assert.IsTrue(MissionWorldPhaseRules.MeetsMissionPrerequisites(null, 0, null));
+        Assert.IsTrue(MissionWorldPhaseRules.MeetsMissionPrerequisites(
+            new[] { -1, -1, -1, -1 }, 0, new HashSet<int>()));
+    }
+
+    [TestMethod]
     public void HasBlockingDeliverSibling_And_ForceComplete()
     {
         Assert.IsFalse(MissionWorldPhaseRules.HasBlockingDeliverSibling(null, RequirementType.Patrol));

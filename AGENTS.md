@@ -1,3 +1,13 @@
+## Scripts
+
+Reusable automation and reverse-engineering tools live under [`scripts/`](scripts/). See **[`SCRIPTS.md`](SCRIPTS.md)** for a full index (what each script does and how to find it).
+
+**Placement rules:**
+
+* Prefer **reusable** scripts whenever possible: CLI args instead of hardcoded IDs, shared path helpers, and a short plate comment at the top describing purpose and usage.
+* Put **all reusable** scripts in **`/scripts`** and list them in **`SCRIPTS.md`** (keep descriptions to two sentences max).
+* Put **temporary, one-time** probes and throwaway experiments in **`/tmp`** only. Do not leave one-offs in the repo root, `tmp-map/`, or other ad-hoc folders. Delete or promote them when done—if a one-off proves useful, promote it into `/scripts` with a plate comment and a `SCRIPTS.md` entry.
+
 ## Engineering Standards
 
 All code changes must follow TDD.

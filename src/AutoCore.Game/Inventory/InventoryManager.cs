@@ -542,6 +542,53 @@ public sealed class InventoryManager
     /// Emits S2C <see cref="InventoryDestroyItemPacket"/> (0x2049, bDelete) per removed stack so
     /// mission inventory / object UI clears without relog.
     /// </summary>
+    /// <summary>
+    /// Remove a specific cargo stack by COID (full stack).
+    /// When <paramref name="emitClientDestroy"/> is true (default), emits DestroyItem +
+    /// DestroyObject + CargoSendAll. For vendor sell, pass false: client
+    /// StoreTransactionResponse (0x2028 / FUN_00810670) must still resolve the TFID to
+    /// destroy cargo / clear the drag cursor (FUN_007fc150). Pre-destroying orphans the hand.
+    /// </summary>
+    public InventoryCommandResult RemoveCargoByCoid(
+        long characterCoid,
+        long itemCoid,
+        bool itemGlobal = true,
+        bool emitClientDestroy = true)
+    {
+        var index = _items.FindLastIndex(i => i.Coid == itemCoid);
+        if (index < 0)
+        {
+            return new InventoryCommandResult(
+                $"Item {itemCoid} not in cargo.",
+                packets: Array.Empty<BasePacket>());
+        }
+
+        var item = _items[index];
+        var qty = Math.Max(1, item.Quantity);
+        _items.RemoveAt(index);
+        if (characterCoid != 0)
+            PersistCargoDelete(characterCoid, item.Coid);
+
+        var packets = new List<BasePacket>();
+        if (emitClientDestroy)
+        {
+            packets.Add(new InventoryDestroyItemPacket(item.Coid, qty, delete: true, itemGlobal: itemGlobal));
+            packets.Add(new DestroyObjectPacket(new TFID(item.Coid, itemGlobal))
+            {
+                DeathType = DeathType.Silent,
+                Force = true,
+            });
+        }
+
+        packets.Add(InventoryPacketFactory.CreateCargoSendAll(this));
+
+        return new InventoryCommandResult(
+            $"Removed cargo coid={item.Coid} cbid={item.Cbid} qty={qty}.",
+            packets,
+            addedItem: null,
+            acceptedQuantity: qty);
+    }
+
     public InventoryCommandResult RemoveCargoByCbid(long characterCoid, int cbid, int quantity)
     {
         if (cbid <= 0 || quantity < 1)

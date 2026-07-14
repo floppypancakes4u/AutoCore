@@ -424,7 +424,34 @@ public partial class TNLConnection
             return;
         }
 
-        NpcInteractHandler.HandleUseObject(this, packet);
+        ObjectUseManager.Handle(this, packet);
+    }
+
+    private void HandleStoreTransactionRequestPacket(BinaryReader reader)
+    {
+        var packet = new StoreTransactionRequestPacket();
+        try
+        {
+            packet.Read(reader);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error, "HandleStoreTransactionRequestPacket: parse failed: {0}", ex.Message);
+            return;
+        }
+
+        VendorStoreService.HandleTransaction(this, packet);
+    }
+
+    private void HandleStoreClosePacket(BinaryReader reader)
+    {
+        // Optional body ignored for now; session clear is enough for buy/sell.
+        var character = CurrentCharacter;
+        if (character != null)
+            VendorStoreService.NoteOpened(character, 0);
+        Logger.WriteLog(LogType.Debug,
+            "StoreClose: charCoid={0}",
+            character?.ObjectId.Coid ?? -1);
     }
 
     private void HandleAutoPatrolPacket(BinaryReader reader)

@@ -268,6 +268,20 @@ public class Reaction : ClonedObjectBase
                 // Client applies boost presentation/effect from the reaction COID via 0x206C.
                 return true;
 
+            case ReactionType.OpenStore:
+                // Client opens store UI via 0x206C; GenericVar1 = store object COID.
+                Managers.VendorStoreService.NoteOpened(GetCharacterFromActivator(activator), Template.GenericVar1);
+                return true;
+
+            case ReactionType.OpenBodyShop:
+            case ReactionType.OpenRefinery:
+            case ReactionType.OpenGarage:
+            case ReactionType.OpenSkillTrainer:
+            case ReactionType.OpenArena:
+            case ReactionType.OpenClanManager:
+                // Client opens facility UI from reaction COID via GroupReactionCall (0x206C).
+                return true;
+
             case ReactionType.Death:
                 return HandleDeath(activator);
 
