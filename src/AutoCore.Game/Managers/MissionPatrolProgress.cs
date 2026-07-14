@@ -162,12 +162,13 @@ public static class MissionPatrolProgress
             };
         }
 
-        // Lap-relative expected index. Client often advances its own slot float before (or
-        // without) a successful server AutoPatrol — if we only accept the exact next COID,
-        // a single rejected first pad desyncs forever and the tracker freezes on pad 0
-        // ("Report to Jimmy Chrome" title on the first road pad).
+        // Exact sequential only. Client GetTarget/Eval use absolute pad counts
+        // (CVOGObjectiveRequirement_Patrol_GetTarget/Eval @ 0x0060e370 / 0x0060e0f0);
+        // progress is not advanced client-side without ObjectiveState. Catch-up to a later
+        // pad (old behavior) could complete the whole route on one wrong COID and jump the
+        // UI to the deliver NPC (LOA Jimmy Chrome).
         var expectedIndex = progress % targets;
-        if (hitIndex < expectedIndex)
+        if (hitIndex != expectedIndex)
         {
             return new HitResult
             {
@@ -179,22 +180,7 @@ public static class MissionPatrolProgress
             };
         }
 
-        // Accept exact next, or catch up to a later pad on this lap (client-ahead).
-        var lapBase = progress - expectedIndex;
-        var next = lapBase + hitIndex + 1;
-        if (next <= progress)
-        {
-            return new HitResult
-            {
-                Accepted = false,
-                NewProgress = progress,
-                IsComplete = false,
-                DisplayProgress = progress,
-                Needed = needed,
-            };
-        }
-
-        next = Math.Min(next, needed);
+        var next = Math.Min(progress + 1, needed);
         return new HitResult
         {
             Accepted = true,

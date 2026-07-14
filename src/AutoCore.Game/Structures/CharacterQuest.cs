@@ -2,6 +2,7 @@ namespace AutoCore.Game.Structures;
 
 using AutoCore.Game.Managers;
 using AutoCore.Game.Mission;
+using AutoCore.Game.Mission.Requirements;
 
 /// <summary>
 /// Represents a player's current quest/mission state.
@@ -66,16 +67,33 @@ public class CharacterQuest
             var maximum = ActiveObjectiveSequence < ObjectiveMax.Length
                 ? Math.Max(1, ObjectiveMax[ActiveObjectiveSequence])
                 : 1;
-            var normalized = Math.Clamp((float)progress / maximum, 0.0f, 1.0f);
-            var authoredSlots = objective.Requirements
-                .Select(requirement => (int)requirement.FirstStateSlot)
-                .Where(slot => slot < slots.Length)
-                .Distinct()
-                .ToList();
-            if (authoredSlots.Count == 0)
-                authoredSlots.Add(0);
-            foreach (var slot in authoredSlots)
-                slots[slot] = normalized;
+
+            // Multi-pad patrol: client GetTarget/Eval cast slot floats to int pad counts
+            // (absolute 0,1,2…), not 0..1 ratios. Ratio would freeze on pad 0 after journal sync.
+            var multiPad = objective.Requirements?
+                .OfType<ObjectiveRequirementPatrol>()
+                .FirstOrDefault(p => MissionPatrolProgress.CountListedTargets(p) > 1
+                    || (p.Laps > 1 && MissionPatrolProgress.CountListedTargets(p) > 0));
+
+            if (multiPad != null)
+            {
+                var slot = multiPad.FirstStateSlot;
+                if (slot < slots.Length)
+                    slots[slot] = Math.Max(0, progress);
+            }
+            else
+            {
+                var normalized = Math.Clamp((float)progress / maximum, 0.0f, 1.0f);
+                var authoredSlots = objective.Requirements
+                    .Select(requirement => (int)requirement.FirstStateSlot)
+                    .Where(slot => slot < slots.Length)
+                    .Distinct()
+                    .ToList();
+                if (authoredSlots.Count == 0)
+                    authoredSlots.Add(0);
+                foreach (var slot in authoredSlots)
+                    slots[slot] = normalized;
+            }
         }
 
         foreach (var slot in slots)

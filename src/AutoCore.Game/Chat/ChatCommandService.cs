@@ -69,6 +69,10 @@ public sealed class ChatCommandService
             case "/removecurrentmission":
                 return RemoveCurrentMission(character);
 
+            case "/removeMission":
+            case "/removemission":
+                return RemoveMission(character, parts);
+
             case "/giveMission":
             case "/givemission":
                 return GiveMission(character, parts);
@@ -259,6 +263,50 @@ public sealed class ChatCommandService
         return new ChatCommandExecutionResult(
             true,
             $"Removed {activeCount} active mission(s) for coid {coid} (memory + DB). Completed missions preserved. Relog to reset the client journal.");
+    }
+
+    /// <summary>
+    /// Abandon an active mission by id (FailMission path) and/or erase it from completed.
+    /// Full wipe for that mission id: active + completed memory and DB rows, client journal sync.
+    /// Usage: <c>/removeMission &lt;id&gt;</c>
+    /// </summary>
+    private static ChatCommandExecutionResult RemoveMission(Character character, string[] parts)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        if (parts.Length < 2 || !int.TryParse(parts[1], out var missionId) || missionId <= 0)
+            return new ChatCommandExecutionResult(true, "Usage: /removeMission <id>");
+
+        var wasActive = character.CurrentQuests.Any(q => q.MissionId == missionId);
+        var wasCompleted = character.CompletedMissionIds.Contains(missionId);
+
+        if (!wasActive && !wasCompleted)
+            return new ChatCommandExecutionResult(true, $"Mission {missionId} not found (not active or completed).");
+
+        if (wasActive)
+            NpcInteractHandler.FailMission(character.OwningConnection, character, missionId);
+
+        if (wasCompleted)
+            character.CompletedMissionIds.Remove(missionId);
+
+        // Ensure active + completed DB rows are dropped even when only completed (FailMission no-ops).
+        MissionPersistence.Instance.OnMissionRemoved(character.ObjectId.Coid, missionId);
+
+        // FailMission already pushed journal when active; completed-only still needs a resync.
+        if (!wasActive && character.OwningConnection != null)
+            NpcInteractHandler.PushJournalMissionList(character.OwningConnection, character);
+
+        var partsDesc = (wasActive, wasCompleted) switch
+        {
+            (true, true) => "active + completed",
+            (true, false) => "active",
+            _ => "completed",
+        };
+
+        return new ChatCommandExecutionResult(
+            true,
+            $"Removed mission {missionId} ({partsDesc}; memory + DB). Client journal updated.");
     }
 
     /// <summary>

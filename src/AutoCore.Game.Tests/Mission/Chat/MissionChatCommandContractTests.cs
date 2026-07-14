@@ -122,12 +122,88 @@ public class MissionChatCommandContractTests
 
     [TestMethod]
     [TestCategory("MissionCritical")]
+    public void RemoveMission_Active_AbandonsAndRemovesFromActive()
+    {
+        var o0 = _fx.CreateSimpleObjective(ObjectiveId, 0, MissionId);
+        _fx.SeedMission(MissionId, 0, o0);
+        var player = _fx.CreatePlayer();
+        _fx.GiveQuest(player.Character, MissionId);
+        _fx.Sent.Clear();
+
+        var result = ChatCommandService.Instance.Execute(player.Character, $"/removeMission {MissionId}");
+        Assert.IsTrue(result.Handled);
+        StringAssert.Contains(result.Message, "Removed");
+        Assert.AreEqual(0, player.Character.CurrentQuests.Count);
+        Assert.IsFalse(player.Character.CompletedMissionIds.Contains(MissionId));
+        _fx.FlushPersist();
+        Assert.IsTrue(_fx.PersistWrites.Any(w =>
+            w.MissionId == MissionId && w.Kind == QuestPersistKind.Remove));
+        Assert.IsTrue(_fx.Sent.OfType<AutoCore.Game.Packets.Sector.FailMissionPacket>()
+            .Any(p => p.MissionId == MissionId));
+    }
+
+    [TestMethod]
+    [TestCategory("MissionCritical")]
+    public void RemoveMission_Completed_RemovesFromCompleted()
+    {
+        var player = _fx.CreatePlayer();
+        player.Character.CompletedMissionIds.Add(MissionId);
+
+        var result = ChatCommandService.Instance.Execute(player.Character, $"/removeMission {MissionId}");
+        Assert.IsTrue(result.Handled);
+        StringAssert.Contains(result.Message, "Removed");
+        Assert.IsFalse(player.Character.CompletedMissionIds.Contains(MissionId));
+        _fx.FlushPersist();
+        Assert.IsTrue(_fx.PersistWrites.Any(w =>
+            w.MissionId == MissionId && w.Kind == QuestPersistKind.Remove));
+    }
+
+    [TestMethod]
+    [TestCategory("MissionCritical")]
+    public void RemoveMission_ActiveAndCompleted_ClearsBoth()
+    {
+        var o0 = _fx.CreateSimpleObjective(ObjectiveId, 0, MissionId);
+        _fx.SeedMission(MissionId, 0, o0);
+        var player = _fx.CreatePlayer();
+        _fx.GiveQuest(player.Character, MissionId);
+        // Dirty dual state: also mark completed (should not normally happen).
+        player.Character.CompletedMissionIds.Add(MissionId);
+
+        var result = ChatCommandService.Instance.Execute(player.Character, $"/removeMission {MissionId}");
+        Assert.IsTrue(result.Handled);
+        Assert.AreEqual(0, player.Character.CurrentQuests.Count);
+        Assert.IsFalse(player.Character.CompletedMissionIds.Contains(MissionId));
+    }
+
+    [TestMethod]
+    [TestCategory("MissionCritical")]
+    public void RemoveMission_NotPresent_ReportsNotFound()
+    {
+        var player = _fx.CreatePlayer();
+        var result = ChatCommandService.Instance.Execute(player.Character, $"/removeMission {MissionId}");
+        Assert.IsTrue(result.Handled);
+        StringAssert.Contains(result.Message, "not found");
+    }
+
+    [TestMethod]
+    [TestCategory("MissionCritical")]
+    public void RemoveMission_Usage_WhenMissingId()
+    {
+        var player = _fx.CreatePlayer();
+        var result = ChatCommandService.Instance.Execute(player.Character, "/removeMission");
+        Assert.IsTrue(result.Handled);
+        StringAssert.Contains(result.Message, "Usage");
+    }
+
+    [TestMethod]
+    [TestCategory("MissionCritical")]
     public void MissionCommands_NullCharacter_Safe()
     {
         Assert.IsTrue(ChatCommandService.Instance.Execute(null, "/showMissions").Handled);
         Assert.IsTrue(ChatCommandService.Instance.Execute(null, "/clearAllMissions").Handled);
         Assert.IsTrue(ChatCommandService.Instance.Execute(null, "/giveMission 1").Handled);
         Assert.IsTrue(ChatCommandService.Instance.Execute(null, "/completeMission 1").Handled);
+        Assert.IsTrue(ChatCommandService.Instance.Execute(null, "/removeMission 1").Handled);
     }
 
     [TestMethod]

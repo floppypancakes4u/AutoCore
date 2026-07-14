@@ -54,8 +54,18 @@ public class MissionPersistence : Singleton<MissionPersistence>
         MaybeFlush();
     }
 
-    /// <summary>Enqueue fail/abandon: delete the active-quest row only (no completed-mission insert).</summary>
+    /// <summary>Enqueue fail/abandon: delete the active-quest row (and any stale completed row).</summary>
     public void OnMissionFailed(long coid, int missionId)
+    {
+        _persistQueue.Enqueue(coid, missionId, QuestPersistOp.Remove());
+        MaybeFlush();
+    }
+
+    /// <summary>
+    /// Full erase for one mission id: drop active and completed rows. Used by /removeMission
+    /// (and safe after FailMission when completed was also present).
+    /// </summary>
+    public void OnMissionRemoved(long coid, int missionId)
     {
         _persistQueue.Enqueue(coid, missionId, QuestPersistOp.Remove());
         MaybeFlush();
@@ -226,11 +236,17 @@ public class MissionPersistence : Singleton<MissionPersistence>
 
                 case QuestPersistKind.Remove:
                 {
-                    // Fail/abandon: drop active row only — free retry, not a completed grant.
+                    // Fail/abandon or /removeMission: drop active row and any completed row
+                    // so the mission can be re-granted cleanly (free retry + completed wipe).
                     var row = context.CharacterQuests
                         .FirstOrDefault(q => q.CharacterCoid == coid && q.MissionId == missionId);
                     if (row != null)
                         context.CharacterQuests.Remove(row);
+
+                    var done = context.CharacterCompletedMissions
+                        .FirstOrDefault(c => c.CharacterCoid == coid && c.MissionId == missionId);
+                    if (done != null)
+                        context.CharacterCompletedMissions.Remove(done);
 
                     break;
                 }

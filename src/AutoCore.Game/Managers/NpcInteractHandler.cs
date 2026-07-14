@@ -1667,8 +1667,28 @@ public static class NpcInteractHandler
 
             // Multi-pad / multi-lap (LOA class): require every listed GenericTarget (× Laps)
             // before AdvanceOrComplete. Single-pad (Live and Direct class): immediate advance.
+            var listedTargets = CountPatrolTargets(patrol);
             var neededPads = MissionPatrolProgress.NeededCount(patrol);
-            if (neededPads > 1)
+            MissionFlowDiag.Log(
+                "AutoPatrol MATCH mission={0} seq={1} obj={2} target={3} listed={4} needed={5} targetCount={6} laps={7} seqOrder={8} progress={9}/{10}",
+                quest.MissionId,
+                quest.ActiveObjectiveSequence,
+                objective.ObjectiveId,
+                targetCoid,
+                listedTargets,
+                neededPads,
+                patrol.TargetCount,
+                patrol.Laps,
+                patrol.Sequential,
+                quest.ActiveObjectiveSequence < quest.ObjectiveProgress.Length
+                    ? quest.ObjectiveProgress[quest.ActiveObjectiveSequence]
+                    : -1,
+                quest.ActiveObjectiveSequence < quest.ObjectiveMax.Length
+                    ? quest.ObjectiveMax[quest.ActiveObjectiveSequence]
+                    : -1);
+
+            // Prefer listedTargets > 1 (not only NeededCount) so Laps=1 multi-pad always gates.
+            if (listedTargets > 1 || neededPads > 1)
             {
                 if (!TryApplyMultiPadPatrolHit(
                         conn,
@@ -1693,7 +1713,7 @@ public static class NpcInteractHandler
                 quest.ActiveObjectiveSequence,
                 objective.ObjectiveId,
                 targetCoid,
-                CountPatrolTargets(patrol));
+                listedTargets);
             AdvanceOrCompleteObjective(conn, character, quest, mission, objective, source: "AutoPatrol");
             MissionFlowDiag.Log(
                 "AutoPatrol AFTER advance mission={0} {1}",
@@ -1946,6 +1966,9 @@ public static class NpcInteractHandler
         if (hit.IsComplete)
             return true;
 
+        // Mid-route: absolute pad count only (client GetTarget casts slot float to int).
+        // Do not PushJournal here — CharacterQuest.Write uses 0..1 ratios which would
+        // overwrite absolute pad indices and freeze the tracker on pad 0.
         var padState = ObjectiveStateBuilder.BuildPatrolPadCount(
             objective,
             patrol,
@@ -1954,7 +1977,6 @@ public static class NpcInteractHandler
             conn.SendGamePacket(padState);
 
         MissionPersistence.Instance.OnQuestChanged(character, quest);
-        PushJournalMissionList(conn, character);
         Logger.WriteLog(LogType.Debug,
             "AutoPatrol: multi-pad progress mission={0} seq={1} target={2} {3}/{4}",
             quest.MissionId,

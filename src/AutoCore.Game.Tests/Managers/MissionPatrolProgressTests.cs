@@ -59,13 +59,13 @@ public class MissionPatrolProgressTests
         Assert.IsFalse(rehit.Accepted);
         Assert.AreEqual(1, rehit.NewProgress);
 
-        // Client-ahead catch-up: later pad is accepted and jumps progress to that index+1.
+        // Strict sequential: later pad must not skip the route (would jump to deliver NPC).
         var skip = MissionPatrolProgress.TryApplyHit(patrol, a.NewProgress, 30);
-        Assert.IsTrue(skip.Accepted);
-        Assert.IsTrue(skip.IsComplete);
-        Assert.AreEqual(3, skip.NewProgress);
+        Assert.IsFalse(skip.Accepted, "must not catch-up to last pad");
+        Assert.IsFalse(skip.IsComplete);
+        Assert.AreEqual(1, skip.NewProgress);
 
-        // Fresh route: strict middle then last.
+        // Exact next then last.
         var b = MissionPatrolProgress.TryApplyHit(patrol, 1, 20);
         Assert.IsTrue(b.Accepted);
         Assert.IsFalse(b.IsComplete);
@@ -76,6 +76,18 @@ public class MissionPatrolProgressTests
         Assert.IsTrue(c.IsComplete);
         Assert.AreEqual(3, c.NewProgress);
         Assert.AreEqual(3, c.DisplayProgress);
+    }
+
+    [TestMethod]
+    public void Sequential_LastPadFirst_DoesNotCompleteRoute()
+    {
+        var obj = MissionObjective.CreateForTests(1, 0, 1, 1);
+        var patrol = MakePatrol(obj, sequential: true, laps: 1, 10, 20, 30);
+
+        var hit = MissionPatrolProgress.TryApplyHit(patrol, 0, 30);
+        Assert.IsFalse(hit.Accepted);
+        Assert.IsFalse(hit.IsComplete);
+        Assert.AreEqual(0, hit.NewProgress);
     }
 
     [TestMethod]

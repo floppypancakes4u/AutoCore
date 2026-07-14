@@ -219,6 +219,68 @@ public class LiveAndDirectPatrolRegressionTests
     }
 
     [TestMethod]
+    public void LoaShaped_FirstPad_DoesNotAdvanceToDeliver_AndSendsAbsolutePadCount()
+    {
+        // Regression: first pad must stay on patrol (seq 0), send absolute pad count 1,
+        // never 0x2070 / deliver sequence (Jimmy NPC as next waypoint).
+        var pads = new long[] { 6518, 6519, 6520, 6521, 6522, 6523, 6524 };
+        var obj = MissionObjective.CreateForTests(Obj0, 0, MissionId, 1);
+        var patrol = new ObjectiveRequirementPatrol(obj)
+        {
+            AutoComplete = true,
+            AutoCompleteDistance = 30f,
+            Sequential = true,
+            Laps = 1,
+            TargetCount = pads.Length,
+            FirstStateSlot = 0,
+        };
+        for (var i = 0; i < pads.Length; i++)
+            patrol.GenericTargets[i] = pads[i];
+        obj.Requirements.Add(patrol);
+        var deliver = MissionObjective.CreateForTests(Obj1, 1, MissionId, 1);
+        deliver.Requirements.Add(new ObjectiveRequirementDeliver(deliver)
+        {
+            NPCTargetCBID = 2472,
+            NPCTargetCompletes = true,
+        });
+        AssetManager.Instance.SetTestMission(Mission.CreateForTests(MissionId, obj, deliver));
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceWaypoint(map, pads[0], new Vector3(0, 0, 0));
+        // Also place a later pad in range — sequential must not skip to it.
+        PlaceWaypoint(map, pads[pads.Length - 1], new Vector3(1, 0, 0));
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        GiveQuest(character, MissionId);
+        _sent.Clear();
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(pads[0], false),
+        });
+
+        Assert.AreEqual(0, character.CurrentQuests[0].ActiveObjectiveSequence);
+        Assert.AreEqual(1, character.CurrentQuests[0].ObjectiveProgress[0]);
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count(),
+            "first pad must not 0x2070 (that retargets client to deliver NPC)");
+        var padState = _sent.OfType<ObjectiveStatePacket>()
+            .FirstOrDefault(p => p.ObjectiveId == Obj0);
+        Assert.IsNotNull(padState, "mid-route ObjectiveState required");
+        Assert.AreEqual(1f, padState.SlotProgress[0], 0.001f,
+            "client GetTarget casts slot to int pad index — must be absolute 1, not ratio");
+
+        // Hitting last pad while progress expects pad 1 must not complete.
+        character.CurrentVehicle.Position = new Vector3(1, 0, 0);
+        _sent.Clear();
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(pads[pads.Length - 1], false),
+        });
+        Assert.AreEqual(0, character.CurrentQuests[0].ActiveObjectiveSequence);
+        Assert.AreEqual(1, character.CurrentQuests[0].ObjectiveProgress[0]);
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+    }
+
+    [TestMethod]
     public void LoaShaped_MultiPadOneObjective_RequiresAllPads_ThenAdvancesToDeliver()
     {
         // LOA 2945 shape: 7 sequential pads on seq0, then deliver Jimmy Chrome.
