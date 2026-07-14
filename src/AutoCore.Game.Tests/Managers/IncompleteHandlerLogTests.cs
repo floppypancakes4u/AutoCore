@@ -65,7 +65,7 @@ public class IncompleteHandlerLogTests
     }
 
     [TestMethod]
-    public void AutoPatrol_MultiTarget_LogsIncompleteMultiWaypoint()
+    public void AutoPatrol_MultiTarget_NoLongerLogsIncompleteMultiWaypoint()
     {
         SeedMultiTargetPatrol();
         var (conn, character, map) = CreatePlayer();
@@ -78,13 +78,14 @@ public class IncompleteHandlerLogTests
             Target = new TFID(WaypointA, false),
         });
 
-        Assert.IsTrue(
+        Assert.IsFalse(
             _incomplete.Any(m => m.Contains("[AutoPatrol]") && m.Contains("Multi-waypoint")),
-            "Expected multi-waypoint incomplete log, got: " + string.Join(" | ", _incomplete));
+            "Multi-pad progress is implemented — unexpected: " + string.Join(" | ", _incomplete));
+        Assert.AreEqual(1, character.CurrentQuests.Count, "first of two pads must not complete");
     }
 
     [TestMethod]
-    public void AutoPatrol_LapsGreaterThanOne_LogsIncompleteLaps()
+    public void AutoPatrol_LapsGreaterThanOne_NoLongerLogsIncompleteLaps_RequiresMultipleHits()
     {
         var obj = MissionObjective.CreateForTests(ObjectiveId, 0, MissionId, 1);
         var patrol = new ObjectiveRequirementPatrol(obj)
@@ -108,9 +109,23 @@ public class IncompleteHandlerLogTests
             Target = new TFID(WaypointA, false),
         });
 
-        Assert.IsTrue(
+        Assert.IsFalse(
             _incomplete.Any(m => m.Contains("[AutoPatrol]") && m.Contains("Laps=3")),
-            "Expected Laps incomplete log, got: " + string.Join(" | ", _incomplete));
+            "Laps progress is implemented — unexpected: " + string.Join(" | ", _incomplete));
+        Assert.IsFalse(character.CompletedMissionIds.Contains(MissionId), "1 of 3 laps");
+        Assert.AreEqual(1, character.CurrentQuests[0].ObjectiveProgress[0]);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(WaypointA, false),
+        });
+        Assert.AreEqual(2, character.CurrentQuests[0].ObjectiveProgress[0]);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(WaypointA, false),
+        });
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId), "3 laps complete");
     }
 
     [TestMethod]

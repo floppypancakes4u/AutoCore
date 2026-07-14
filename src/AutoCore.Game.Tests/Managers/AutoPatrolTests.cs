@@ -589,11 +589,61 @@ public class AutoPatrolTests
     }
 
     [TestMethod]
-    public void HandleAutoPatrol_MultiWaypoint_CurrentBehavior_CompletesOnFirstPad()
+    public void HandleAutoPatrol_MultiWaypoint_FirstPad_DoesNotComplete_SecondPad_Completes()
     {
-        // Characterization before multi-pad fix: any listed pad completes the whole objective.
         const long pad0 = 98010;
         const long pad1 = 98011;
+        var objA = MissionObjective.CreateForTests(ObjectiveIdA, 0, MissionId, 1);
+        var patrol = new ObjectiveRequirementPatrol(objA)
+        {
+            AutoComplete = true,
+            AutoCompleteDistance = 30f,
+            TargetCount = 2,
+            Sequential = true,
+            FirstStateSlot = 0,
+        };
+        patrol.GenericTargets[0] = pad0;
+        patrol.GenericTargets[1] = pad1;
+        objA.Requirements.Add(patrol);
+        AssetManager.Instance.SetTestMission(Mission.CreateForTests(MissionId, objA));
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceWaypoint(map, pad0, new Vector3(0, 0, 0));
+        PlaceWaypoint(map, pad1, new Vector3(10, 0, 0));
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        GiveQuest(character, MissionId);
+        _sent.Clear();
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(pad0, false),
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests.Count, "first pad must not finish the mission");
+        Assert.IsFalse(character.CompletedMissionIds.Contains(MissionId));
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+        Assert.AreEqual(1, character.CurrentQuests[0].ObjectiveProgress[0]);
+        Assert.IsTrue(
+            _sent.OfType<ObjectiveStatePacket>().Any(p =>
+                p.ObjectiveId == ObjectiveIdA && p.SlotProgress[0] >= 1f),
+            "mid-route pad count ObjectiveState expected");
+
+        character.CurrentVehicle.Position = new Vector3(10, 0, 0);
+        _sent.Clear();
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(pad1, false),
+        });
+
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
+        Assert.IsTrue(_sent.OfType<CompleteDynamicObjectivePacket>().Any(p => p.ObjectiveId == ObjectiveIdA));
+    }
+
+    [TestMethod]
+    public void HandleAutoPatrol_MultiWaypoint_RehitSamePad_DoesNotAdvance()
+    {
+        const long pad0 = 98020;
+        const long pad1 = 98021;
         var objA = MissionObjective.CreateForTests(ObjectiveIdA, 0, MissionId, 1);
         var patrol = new ObjectiveRequirementPatrol(objA)
         {
@@ -616,9 +666,35 @@ public class AutoPatrolTests
         {
             Target = new TFID(pad0, false),
         });
+        Assert.AreEqual(1, character.CurrentQuests[0].ObjectiveProgress[0]);
+
+        _sent.Clear();
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(pad0, false),
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests[0].ObjectiveProgress[0], "re-hit must not double-count");
+        Assert.IsFalse(character.CompletedMissionIds.Contains(MissionId));
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+    }
+
+    [TestMethod]
+    public void HandleAutoPatrol_SinglePad_StillCompletesImmediately()
+    {
+        // Live and Direct class: one GenericTarget per objective — must not wait for multi-pad.
+        SeedPatrolMission(MissionId, ObjectiveIdA, WaypointCoid, 30f, nextObjectiveId: null);
+        var (conn, character, map) = CreatePlayer();
+        PlaceWaypoint(map, WaypointCoid, new Vector3(0, 0, 0));
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        GiveQuest(character, MissionId);
+
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(WaypointCoid, false),
+        });
 
         Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
-        Assert.IsTrue(_sent.OfType<CompleteDynamicObjectivePacket>().Any(p => p.ObjectiveId == ObjectiveIdA));
     }
 
 

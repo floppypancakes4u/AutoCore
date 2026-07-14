@@ -1665,6 +1665,27 @@ public static class NpcInteractHandler
                 return;
             }
 
+            // Multi-pad / multi-lap (LOA class): require every listed GenericTarget (× Laps)
+            // before AdvanceOrComplete. Single-pad (Live and Direct class): immediate advance.
+            var neededPads = MissionPatrolProgress.NeededCount(patrol);
+            if (neededPads > 1)
+            {
+                if (!TryApplyMultiPadPatrolHit(
+                        conn,
+                        character,
+                        quest,
+                        mission,
+                        objective,
+                        patrol,
+                        targetCoid,
+                        neededPads))
+                {
+                    return;
+                }
+
+                // Complete — fall through to AdvanceOrComplete.
+            }
+
             LogPatrolIncomplete(patrol, quest, objective, targetCoid);
             MissionFlowDiag.Log(
                 "AutoPatrol ADVANCE mission={0} seq={1} obj={2} target={3} listedTargets={4}",
@@ -1875,18 +1896,73 @@ public static class NpcInteractHandler
         => MissionWorldPhaseRules.HasBlockingDeliverSibling(objective, satisfiedType);
 
     private static int CountPatrolTargets(ObjectiveRequirementPatrol patrol)
+        => MissionPatrolProgress.CountListedTargets(patrol);
+
+    /// <summary>
+    /// Apply one multi-pad AutoPatrol hit. Returns true when the patrol is complete and the
+    /// caller should <see cref="AdvanceOrCompleteObjective"/>. Returns false when the hit was
+    /// rejected, already counted, or only partial progress (mid-route ObjectiveState sent).
+    /// </summary>
+    private static bool TryApplyMultiPadPatrolHit(
+        TNLConnection conn,
+        Character character,
+        CharacterQuest quest,
+        Mission mission,
+        MissionObjective objective,
+        ObjectiveRequirementPatrol patrol,
+        long targetCoid,
+        int neededPads)
     {
-        var count = Math.Max(patrol.TargetCount, 0);
-        if (count == 0)
+        var seq = quest.ActiveObjectiveSequence;
+        MissionKillProgress.EnsureProgressCapacity(quest, seq);
+
+        var current = quest.ObjectiveProgress[seq];
+        var hit = MissionPatrolProgress.TryApplyHit(patrol, current, targetCoid);
+        if (!hit.Accepted)
         {
-            for (var i = 0; i < patrol.GenericTargets.Length; i++)
-            {
-                if (patrol.GenericTargets[i] > 0)
-                    count++;
-            }
+            MissionFlowDiag.Log(
+                "AutoPatrol PAD-REJECT mission={0} seq={1} target={2} progress={3} needed={4}",
+                quest.MissionId,
+                seq,
+                targetCoid,
+                current,
+                neededPads);
+            return false;
         }
 
-        return count;
+        quest.ObjectiveProgress[seq] = hit.NewProgress;
+        if (quest.ObjectiveMax[seq] < hit.Needed)
+            quest.ObjectiveMax[seq] = hit.Needed;
+
+        MissionFlowDiag.Log(
+            "AutoPatrol PAD-HIT mission={0} seq={1} target={2} progress={3}/{4} complete={5}",
+            quest.MissionId,
+            seq,
+            targetCoid,
+            hit.DisplayProgress,
+            hit.Needed,
+            hit.IsComplete);
+
+        if (hit.IsComplete)
+            return true;
+
+        var padState = ObjectiveStateBuilder.BuildPatrolPadCount(
+            objective,
+            patrol,
+            hit.DisplayProgress);
+        if (padState != null)
+            conn.SendGamePacket(padState);
+
+        MissionPersistence.Instance.OnQuestChanged(character, quest);
+        PushJournalMissionList(conn, character);
+        Logger.WriteLog(LogType.Debug,
+            "AutoPatrol: multi-pad progress mission={0} seq={1} target={2} {3}/{4}",
+            quest.MissionId,
+            seq,
+            targetCoid,
+            hit.DisplayProgress,
+            hit.Needed);
+        return false;
     }
 
     private static void LogPatrolIncomplete(
@@ -1899,32 +1975,7 @@ public static class NpcInteractHandler
         var context =
             $"mission={quest.MissionId} seq={quest.ActiveObjectiveSequence} objective={objective.ObjectiveId} target={targetCoid} listedTargets={listed}";
 
-        if (listed > 1)
-        {
-            IncompleteHandlerLog.Warn(
-                "AutoPatrol",
-                context,
-                "Multi-waypoint patrol: any listed target currently completes the entire objective (no per-point progress)",
-                "Track visited GenericTargets (Sequential order if Sequential=true); only AdvanceOrComplete when all points (or current lap) are done; update ObjectiveState slots/bitmask per FirstStateSlot.");
-        }
-
-        if (patrol.Laps > 1)
-        {
-            IncompleteHandlerLog.Warn(
-                "AutoPatrol",
-                context,
-                $"Laps={patrol.Laps} ignored — single pass completes the objective",
-                "Maintain lap counter on CharacterQuest progress; require Laps full circuits before complete.");
-        }
-
-        if (patrol.Sequential && listed > 1)
-        {
-            IncompleteHandlerLog.Warn(
-                "AutoPatrol",
-                context,
-                "Sequential=true ignored — targets may be hit in any order",
-                "Enforce GenericTargets order; reject or ignore out-of-order AutoPatrol until previous COID cleared.");
-        }
+        // Multi-waypoint, Laps, and Sequential order are handled by MissionPatrolProgress.
 
         if (patrol.AutoFail)
         {

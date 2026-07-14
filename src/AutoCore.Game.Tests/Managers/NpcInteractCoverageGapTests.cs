@@ -91,7 +91,7 @@ public class NpcInteractCoverageGapTests
     }
 
     [TestMethod]
-    public void AutoPatrol_MultiWaypointSequentialLaps_CompletesAndLogsIncomplete()
+    public void AutoPatrol_MultiWaypointSequentialLaps_RequiresAllPadsAndLaps()
     {
         var o1 = MissionObjective.CreateForTests(ObjA, 0, MissionId, 1);
         var patrol = new ObjectiveRequirementPatrol(o1)
@@ -104,6 +104,7 @@ public class NpcInteractCoverageGapTests
             Laps = 2,
             Sequential = true,
             FirstStateSlot = 0,
+            TargetCount = 2,
         };
         patrol.GenericTargets[0] = Wp1;
         patrol.GenericTargets[1] = Wp2;
@@ -112,16 +113,37 @@ public class NpcInteractCoverageGapTests
 
         var (conn, character, map) = CreatePlayer();
         PlaceWaypoint(map, Wp1, new Vector3(0, 0, 0));
+        PlaceWaypoint(map, Wp2, new Vector3(10, 0, 0));
         character.CurrentVehicle.Position = new Vector3(0, 0, 0);
         GiveQuest(character, MissionId);
 
+        // Lap 1: Wp1 then Wp2
         NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
         {
             Target = new TFID(Wp1, false),
         });
+        Assert.IsFalse(character.CompletedMissionIds.Contains(MissionId));
+        character.CurrentVehicle.Position = new Vector3(10, 0, 0);
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(Wp2, false),
+        });
+        Assert.IsFalse(character.CompletedMissionIds.Contains(MissionId), "lap 1 of 2");
 
-        // HEAD behavior: any listed pad completes the objective (known incomplete multi-pad).
+        // Lap 2: Wp1 then Wp2
+        character.CurrentVehicle.Position = new Vector3(0, 0, 0);
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(Wp1, false),
+        });
+        character.CurrentVehicle.Position = new Vector3(10, 0, 0);
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(Wp2, false),
+        });
+
         Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
+        // AutoFail / ContinentId still incomplete features (logged on final advance).
         Assert.IsTrue(_incomplete.Any(m => m.Contains("AutoFail")));
         Assert.IsTrue(_incomplete.Any(m => m.Contains("ContinentCBID")));
     }

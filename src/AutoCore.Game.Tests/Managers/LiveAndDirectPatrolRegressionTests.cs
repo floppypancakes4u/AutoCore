@@ -219,9 +219,9 @@ public class LiveAndDirectPatrolRegressionTests
     }
 
     [TestMethod]
-    public void LoaShaped_MultiPadOneObjective_CurrentBehavior_CompletesOnFirstPad()
+    public void LoaShaped_MultiPadOneObjective_RequiresAllPads_ThenAdvancesToDeliver()
     {
-        // LOA 2945 characterization BEFORE multi-pad fix: any listed pad finishes the objective.
+        // LOA 2945 shape: 7 sequential pads on seq0, then deliver Jimmy Chrome.
         var pads = new long[] { 6518, 6519, 6520, 6521, 6522, 6523, 6524 };
         var obj = MissionObjective.CreateForTests(Obj0, 0, MissionId, 1);
         var patrol = new ObjectiveRequirementPatrol(obj)
@@ -231,6 +231,7 @@ public class LiveAndDirectPatrolRegressionTests
             Sequential = true,
             Laps = 1,
             TargetCount = pads.Length,
+            FirstStateSlot = 0,
         };
         for (var i = 0; i < pads.Length; i++)
             patrol.GenericTargets[i] = pads[i];
@@ -244,20 +245,49 @@ public class LiveAndDirectPatrolRegressionTests
         AssetManager.Instance.SetTestMission(Mission.CreateForTests(MissionId, obj, deliver));
 
         var (conn, character, map) = CreatePlayer();
-        PlaceWaypoint(map, pads[0], new Vector3(0, 0, 0));
+        for (var i = 0; i < pads.Length; i++)
+            PlaceWaypoint(map, pads[i], new Vector3(i * 10f, 0, 0));
         character.CurrentVehicle.Position = new Vector3(0, 0, 0);
         GiveQuest(character, MissionId);
         _sent.Clear();
 
+        // First pad: stay on patrol objective.
         NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
         {
             Target = new TFID(pads[0], false),
         });
+        Assert.AreEqual(1, character.CurrentQuests.Count);
+        Assert.AreEqual(0, character.CurrentQuests[0].ActiveObjectiveSequence,
+            "first pad must not skip remaining LOA pads");
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
+        Assert.AreEqual(1, character.CurrentQuests[0].ObjectiveProgress[0]);
+
+        // Middle pads.
+        for (var i = 1; i < pads.Length - 1; i++)
+        {
+            character.CurrentVehicle.Position = new Vector3(i * 10f, 0, 0);
+            NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+            {
+                Target = new TFID(pads[i], false),
+            });
+            Assert.AreEqual(0, character.CurrentQuests[0].ActiveObjectiveSequence,
+                $"after pad[{i}] still on patrol");
+            Assert.AreEqual(i + 1, character.CurrentQuests[0].ObjectiveProgress[0]);
+        }
+
+        // Last pad: advance to deliver sequence.
+        _sent.Clear();
+        character.CurrentVehicle.Position = new Vector3((pads.Length - 1) * 10f, 0, 0);
+        NpcInteractHandler.HandleAutoPatrol(conn, new AutoPatrolPacket
+        {
+            Target = new TFID(pads[pads.Length - 1], false),
+        });
 
         Assert.AreEqual(1, character.CurrentQuests.Count, "mission remains (deliver left)");
         Assert.AreEqual(1, character.CurrentQuests[0].ActiveObjectiveSequence,
-            "CURRENT: first pad skips remaining pads and advances to deliver");
+            "all pads done → deliver objective");
         Assert.IsTrue(_sent.OfType<CompleteDynamicObjectivePacket>().Any(p => p.ObjectiveId == Obj0));
+        Assert.IsTrue(_sent.OfType<ObjectiveStatePacket>().Any(p => p.ObjectiveId == Obj1));
     }
 
     [TestMethod]
