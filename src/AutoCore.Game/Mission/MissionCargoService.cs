@@ -239,7 +239,8 @@ public static class MissionCargoService
                 coid,
                 character.ObjectId.Coid,
                 missing,
-                itemCreator);
+                itemCreator,
+                allocateCoid);
 
             // Bare packet fallback when clonebase/factory cannot build typed QuestObject creates.
             if ((result.Packets == null || result.Packets.Count == 0) && itemCreator != null)
@@ -251,7 +252,8 @@ public static class MissionCargoService
                     coid,
                     character.ObjectId.Coid,
                     missing,
-                    itemCreator: null);
+                    itemCreator: null,
+                    allocateAdditionalCoid: allocateCoid);
             }
 
             if (result.Packets != null && result.Packets.Count > 0)

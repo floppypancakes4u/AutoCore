@@ -266,42 +266,156 @@ public sealed class InventoryManager
         return true;
     }
 
-    public InventoryCommandResult AddItem(InventoryCatalogEntry entry, IInventoryItemCreator itemCreator, long coid, long characterCoid = 0, int quantity = 1)
+    public InventoryCommandResult AddItem(
+        InventoryCatalogEntry entry,
+        IInventoryItemCreator itemCreator,
+        long coid,
+        long characterCoid = 0,
+        int quantity = 1,
+        Func<long> allocateAdditionalCoid = null)
     {
-        if (!TryGetFirstFreeCargoSlot(out var x, out var y))
-            return new InventoryCommandResult(BuildCargoFullMessage());
+        return AddItemInternal(entry, itemCreator, coid, characterCoid, quantity, false, allocateAdditionalCoid, "Added");
+    }
 
-        var createResult = itemCreator.Create(entry, coid, x, y);
-        if (!createResult.WasSuccessful)
-            return new InventoryCommandResult($"Cannot add CBID {entry.Cbid}: {createResult.Error}");
+    private InventoryCommandResult AddItemInternal(
+        InventoryCatalogEntry entry,
+        IInventoryItemCreator itemCreator,
+        long firstCoid,
+        long characterCoid,
+        int quantity,
+        bool isMissionItem,
+        Func<long> allocateAdditionalCoid,
+        string action)
+    {
+        if (entry == null || itemCreator == null || quantity < 1)
+            return new InventoryCommandResult("Cannot add item: invalid acquisition request.", remainingQuantity: Math.Max(0, quantity));
 
-        // New stacks take quantity from the create packet; send AddItemResponse next
-        // so the client places the object before CargoSendAll.
-        createResult.Packet.Quantity = quantity;
-        var item = new CharacterInventoryItem(entry.Cbid, entry.Type, createResult.DisplayName, coid, x, y, quantity);
-        if (!TryAdd(item))
-            return new InventoryCommandResult(BuildCargoAddRejectedMessage(coid, x, y));
-
-        if (characterCoid != 0)
-            PersistCargoUpsert(characterCoid, item);
-
-        IReadOnlyList<BasePacket> packets = new BasePacket[]
+        var cloneBase = _cloneBases.GetCloneBase(entry.Cbid);
+        // Runtime acquisition paths have clonebase metadata. Preserve legacy cargo for
+        // unknown records (for example, old persisted test data) rather than splitting
+        // an item whose client stack cap cannot be determined.
+        var (maxStack, stackable) = cloneBase == null
+            ? (int.MaxValue, true)
+            : InventoryStackPolicy.GetLimits(cloneBase);
+        if (_items.Any(item => item.Coid == firstCoid))
+            return new InventoryCommandResult(BuildCargoAddRejectedMessage(firstCoid, 0, 0), remainingQuantity: quantity);
+        var remaining = quantity;
+        var updates = new List<CharacterInventoryItem>();
+        if (stackable)
         {
-            createResult.Packet,
-            new InventoryAddItemResponsePacket
+            foreach (var current in _items
+                         .Where(item => item.Cbid == entry.Cbid && item.Quantity < maxStack)
+                         .OrderBy(item => item.InventoryPositionY)
+                         .ThenBy(item => item.InventoryPositionX))
             {
-                ItemCoid = coid,
-                InventoryPositionX = x,
-                InventoryPositionY = y,
-                AddToExistingItem = false,
-                Quantity = quantity,
-                WasSuccessful = true
-            },
-            InventoryPacketFactory.CreateCargoSendAll(this)
-        };
+                var merge = InventoryStackPolicy.ComputeMergeAmount(current.Quantity, remaining, maxStack);
+                if (merge <= 0)
+                    continue;
 
-        var quantitySuffix = quantity > 1 ? $" x{quantity}" : string.Empty;
-        return new InventoryCommandResult($"Added {createResult.DisplayName} ({entry.Cbid}){quantitySuffix} to cargo slot {x},{y}.", packets, item);
+                updates.Add(current with { Quantity = current.Quantity + merge });
+                remaining -= merge;
+                if (remaining == 0)
+                    break;
+            }
+        }
+
+        var plannedAdds = new List<(CharacterInventoryItem Item, InventoryItemCreateResult Create)>();
+        var usedCoids = _items.Select(item => item.Coid).ToHashSet();
+        var occupiedSlots = _items.Select(item => item.InventoryPositionY * Width + item.InventoryPositionX).ToHashSet();
+        var nextCoid = firstCoid;
+        while (remaining > 0 && TryGetFirstFreeCargoSlot(occupiedSlots, out var x, out var y))
+        {
+            if (nextCoid <= 0 || !usedCoids.Add(nextCoid))
+                break;
+
+            var stackQuantity = stackable ? Math.Min(remaining, maxStack) : 1;
+            var create = itemCreator.Create(entry, nextCoid, x, y);
+            if (!create.WasSuccessful)
+            {
+                if (updates.Count == 0 && plannedAdds.Count == 0)
+                    return new InventoryCommandResult($"Cannot add CBID {entry.Cbid}: {create.Error}", remainingQuantity: quantity);
+                break;
+            }
+
+            create.Packet.Quantity = stackQuantity;
+            create.Packet.IsInInventory = true;
+            create.Packet.PossibleMissionItem = isMissionItem;
+            var item = new CharacterInventoryItem(entry.Cbid, entry.Type, create.DisplayName, nextCoid, x, y, stackQuantity, isMissionItem);
+            plannedAdds.Add((item, create));
+            occupiedSlots.Add(y * Width + x);
+            remaining -= stackQuantity;
+            if (remaining > 0)
+                nextCoid = allocateAdditionalCoid?.Invoke() ?? 0;
+        }
+
+        var packets = new List<BasePacket>();
+        foreach (var updated in updates)
+        {
+            var index = _items.FindIndex(item => item.Coid == updated.Coid);
+            _items[index] = updated;
+            if (characterCoid != 0)
+                PersistCargoUpsert(characterCoid, updated);
+            packets.Add(new InventoryAddItemResponsePacket
+            {
+                ItemCoid = updated.Coid,
+                InventoryPositionX = updated.InventoryPositionX,
+                InventoryPositionY = updated.InventoryPositionY,
+                AddToExistingItem = true,
+                Quantity = updated.Quantity,
+                WasSuccessful = true
+            });
+        }
+
+        foreach (var (item, create) in plannedAdds)
+        {
+            if (!TryAdd(item))
+                throw new InvalidOperationException("Planned cargo slot was no longer available.");
+            if (characterCoid != 0)
+                PersistCargoUpsert(characterCoid, item);
+            packets.Add(create.Packet);
+            packets.Add(new InventoryAddItemResponsePacket
+            {
+                ItemCoid = item.Coid,
+                InventoryPositionX = item.InventoryPositionX,
+                InventoryPositionY = item.InventoryPositionY,
+                AddToExistingItem = false,
+                Quantity = item.Quantity,
+                WasSuccessful = true
+            });
+        }
+
+        var accepted = quantity - remaining;
+        if (accepted == 0)
+            return new InventoryCommandResult(BuildCargoFullMessage(), remainingQuantity: quantity);
+
+        packets.Add(InventoryPacketFactory.CreateCargoSendAll(this));
+        var representative = plannedAdds.FirstOrDefault().Item ?? updates.FirstOrDefault();
+        var quantitySuffix = quantity > 1 ? $" x{accepted}" : string.Empty;
+        var remainderSuffix = remaining > 0 ? $" ({remaining} could not fit)" : string.Empty;
+        return new InventoryCommandResult(
+            $"{action} {representative.DisplayName} ({entry.Cbid}){quantitySuffix} to cargo slot {representative.InventoryPositionX},{representative.InventoryPositionY}.{remainderSuffix}",
+            packets,
+            representative,
+            accepted,
+            remaining,
+            plannedAdds.Select(add => add.Item).ToArray(),
+            updates);
+    }
+
+    private bool TryGetFirstFreeCargoSlot(ISet<int> occupiedSlots, out byte x, out byte y)
+    {
+        for (var slot = 0; slot < SlotCount; slot++)
+        {
+            if (occupiedSlots.Contains(slot))
+                continue;
+            x = (byte)(slot % Width);
+            y = (byte)(slot / Width);
+            return true;
+        }
+
+        x = 0;
+        y = 0;
+        return false;
     }
 
     /// <summary>
@@ -365,73 +479,30 @@ public sealed class InventoryManager
         long coid,
         long characterCoid,
         int quantity = 1,
-        IInventoryItemCreator itemCreator = null)
+        IInventoryItemCreator itemCreator = null,
+        Func<long> allocateAdditionalCoid = null)
     {
         if (cbid <= 0)
             return new InventoryCommandResult($"Cannot grant mission cargo: invalid CBID {cbid}.");
         if (quantity < 1)
             return new InventoryCommandResult("Cannot grant mission cargo: quantity must be at least 1.");
-        if (!TryGetFirstFreeCargoSlot(out var x, out var y))
-            return new InventoryCommandResult(BuildCargoFullMessage());
 
-        if (!InventoryItemTypePolicy.IsInventoryCapable(type))
-            type = CloneBaseObjectType.Item;
-
-        var name = string.IsNullOrWhiteSpace(displayName) ? $"CBID {cbid}" : displayName;
-        var entry = new InventoryCatalogEntry(cbid, type, name);
-        CreateSimpleObjectPacket createPacket;
-
-        if (itemCreator != null)
-        {
-            var createResult = itemCreator.Create(entry, coid, x, y);
-            if (!createResult.WasSuccessful)
-                return new InventoryCommandResult($"Cannot grant mission cargo CBID {cbid}: {createResult.Error}");
-
-            createPacket = createResult.Packet;
-            if (!string.IsNullOrWhiteSpace(createResult.DisplayName))
-                name = createResult.DisplayName;
-        }
-        else
-        {
-            createPacket = InventoryItemCreator.CreatePacketFor(type);
-            createPacket.CBID = cbid;
-            createPacket.ObjectId = new TFID { Coid = coid, Global = true };
-            createPacket.InventoryPositionX = x;
-            createPacket.InventoryPositionY = y;
-            createPacket.IsInInventory = true;
-            createPacket.IsIdentified = true;
-            createPacket.IsBound = false;
-        }
-
-        createPacket.Quantity = quantity;
-        createPacket.IsInInventory = true;
-        createPacket.IsIdentified = true;
-        createPacket.PossibleMissionItem = true;
-
-        var item = new CharacterInventoryItem(cbid, type, name, coid, x, y, quantity, IsMissionItem: true);
-        if (!TryAdd(item))
-            return new InventoryCommandResult(BuildCargoAddRejectedMessage(coid, x, y));
+        return AddItemInternal(
+            new InventoryCatalogEntry(
+                cbid,
+                InventoryItemTypePolicy.IsInventoryCapable(type) ? type : CloneBaseObjectType.Item,
+                string.IsNullOrWhiteSpace(displayName) ? $"CBID {cbid}" : displayName),
+            itemCreator ?? FallbackInventoryItemCreator.Instance,
+            coid,
+            characterCoid,
+            quantity,
+            isMissionItem: true,
+            allocateAdditionalCoid,
+            "Granted mission cargo");
 
         // Persist before client packets so a DB failure is logged with the grant attempt.
         // Still deliver live packets if persist fails — login ensure will re-grant.
-        var persistOk = true;
-        if (characterCoid != 0)
-        {
-            try
-            {
-                PersistCargoUpsert(characterCoid, item);
-            }
-            catch (Exception ex)
-            {
-                persistOk = false;
-                Logger.WriteLog(LogType.Error,
-                    "GrantMissionCargoItem: persist failed char={0} coid={1} cbid={2}: {3}",
-                    characterCoid,
-                    coid,
-                    cbid,
-                    ex.Message);
-            }
-        }
+        #if false
         else
         {
             persistOk = false;
@@ -462,6 +533,7 @@ public sealed class InventoryManager
             $"Granted mission cargo {name} ({cbid}){quantitySuffix} at {x},{y}.{persistNote}",
             packets,
             item);
+        #endif
     }
 
     /// <summary>
@@ -508,6 +580,24 @@ public sealed class InventoryManager
         return new InventoryCommandResult(
             $"Removed {removedQty} of CBID {cbid} from cargo ({removedCoids.Count} stack(s)).",
             packets);
+    }
+
+    private sealed class FallbackInventoryItemCreator : IInventoryItemCreator
+    {
+        public static FallbackInventoryItemCreator Instance { get; } = new();
+
+        public InventoryItemCreateResult Create(InventoryCatalogEntry entry, long coid, byte x, byte y)
+        {
+            var packet = InventoryItemCreator.CreatePacketFor(entry.Type);
+            packet.CBID = entry.Cbid;
+            packet.ObjectId = new TFID { Coid = coid, Global = true };
+            packet.InventoryPositionX = x;
+            packet.InventoryPositionY = y;
+            packet.IsInInventory = true;
+            packet.IsIdentified = true;
+            packet.IsBound = false;
+            return InventoryItemCreateResult.Success(packet, entry.DisplayName);
+        }
     }
 
     private int RemoveMatchingStacks(

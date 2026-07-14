@@ -48,7 +48,8 @@ public sealed class InventoryCommandService
             return new InventoryCommandResult("Cannot add item: character or map is not available.");
 
         var coid = runtime.AllocateItemCoid();
-        return runtime.Inventory.AddItem(entry, _itemCreator, coid, runtime.CharacterCoid, quantity);
+        return runtime.Inventory.AddItem(entry, _itemCreator, coid, runtime.CharacterCoid, quantity,
+            runtime.AllocateItemCoid);
     }
 
     private (bool Success, InventoryCatalogEntry Entry, string Error) ResolveEntry(string identifier)
