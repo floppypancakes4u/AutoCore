@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
-  <ItemGroup>
-    <Reference Include="AutoCore.Game"><HintPath>C:\Users\josh\Documents\GitHub\AutoCore\src\AutoCore.Game\bin\Debug\net8.0\AutoCore.Game.dll</HintPath></Reference>
-    <Reference Include="AutoCore.Utils"><HintPath>C:\Users\josh\Documents\GitHub\AutoCore\src\AutoCore.Game\bin\Debug\net8.0\AutoCore.Utils.dll</HintPath></Reference>
-    <Reference Include="AutoCore.Database"><HintPath>C:\Users\josh\Documents\GitHub\AutoCore\src\AutoCore.Game\bin\Debug\net8.0\AutoCore.Database.dll</HintPath></Reference>
-  </ItemGroup>
-</Project>

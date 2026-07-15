@@ -277,6 +277,77 @@ public sealed class InventoryManager
         return AddItemInternal(entry, itemCreator, coid, characterCoid, quantity, false, allocateAdditionalCoid, "Added");
     }
 
+    /// <summary>
+    /// Re-insert cargo for a COID the client still holds (store buyback of a just-sold TFID).
+    /// Emits 0x2047 + CargoSendAll only — no CreateSimpleObject — so the client does not get a
+    /// second invalid object alongside the live store-slot TFID.
+    /// </summary>
+    public InventoryCommandResult RestoreCargoWithoutCreate(
+        CharacterInventoryItem item,
+        long characterCoid = 0)
+    {
+        if (item == null || item.Coid <= 0 || item.Cbid <= 0 || item.Quantity < 1)
+        {
+            return new InventoryCommandResult(
+                "Cannot restore cargo: invalid item.",
+                packets: Array.Empty<BasePacket>());
+        }
+
+        if (FindByCoid(item.Coid) != null)
+        {
+            return new InventoryCommandResult(
+                $"Cannot restore cargo: coid {item.Coid} already in cargo.",
+                packets: Array.Empty<BasePacket>());
+        }
+
+        var occupied = _items
+            .Select(i => i.InventoryPositionY * Width + i.InventoryPositionX)
+            .ToHashSet();
+        if (!TryGetFirstFreeCargoSlot(occupied, out var x, out var y))
+        {
+            return new InventoryCommandResult(
+                "Cannot restore cargo: inventory full.",
+                packets: Array.Empty<BasePacket>());
+        }
+
+        var restored = item with
+        {
+            InventoryPositionX = x,
+            InventoryPositionY = y,
+            Quantity = Math.Max(1, item.Quantity),
+        };
+
+        if (!TryAdd(restored))
+        {
+            return new InventoryCommandResult(
+                $"Cannot restore cargo coid={item.Coid}.",
+                packets: Array.Empty<BasePacket>());
+        }
+
+        if (characterCoid != 0)
+            PersistCargoUpsert(characterCoid, restored);
+
+        var packets = new List<BasePacket>
+        {
+            new InventoryAddItemResponsePacket
+            {
+                ItemCoid = restored.Coid,
+                InventoryPositionX = restored.InventoryPositionX,
+                InventoryPositionY = restored.InventoryPositionY,
+                AddToExistingItem = false,
+                Quantity = restored.Quantity,
+                WasSuccessful = true,
+            },
+            InventoryPacketFactory.CreateCargoSendAll(this),
+        };
+
+        return new InventoryCommandResult(
+            $"Restored cargo coid={restored.Coid} cbid={restored.Cbid} qty={restored.Quantity}.",
+            packets,
+            addedItem: restored,
+            acceptedQuantity: restored.Quantity);
+    }
+
     private InventoryCommandResult AddItemInternal(
         InventoryCatalogEntry entry,
         IInventoryItemCreator itemCreator,
@@ -542,6 +613,53 @@ public sealed class InventoryManager
     /// Emits S2C <see cref="InventoryDestroyItemPacket"/> (0x2049, bDelete) per removed stack so
     /// mission inventory / object UI clears without relog.
     /// </summary>
+    /// <summary>
+    /// Remove a specific cargo stack by COID (full stack).
+    /// When <paramref name="emitClientDestroy"/> is true (default), emits DestroyItem +
+    /// DestroyObject + CargoSendAll. For vendor sell, pass false: client
+    /// StoreTransactionResponse (0x2028 / FUN_00810670) must still resolve the TFID to
+    /// destroy cargo / clear the drag cursor (FUN_007fc150). Pre-destroying orphans the hand.
+    /// </summary>
+    public InventoryCommandResult RemoveCargoByCoid(
+        long characterCoid,
+        long itemCoid,
+        bool itemGlobal = true,
+        bool emitClientDestroy = true)
+    {
+        var index = _items.FindLastIndex(i => i.Coid == itemCoid);
+        if (index < 0)
+        {
+            return new InventoryCommandResult(
+                $"Item {itemCoid} not in cargo.",
+                packets: Array.Empty<BasePacket>());
+        }
+
+        var item = _items[index];
+        var qty = Math.Max(1, item.Quantity);
+        _items.RemoveAt(index);
+        if (characterCoid != 0)
+            PersistCargoDelete(characterCoid, item.Coid);
+
+        var packets = new List<BasePacket>();
+        if (emitClientDestroy)
+        {
+            packets.Add(new InventoryDestroyItemPacket(item.Coid, qty, delete: true, itemGlobal: itemGlobal));
+            packets.Add(new DestroyObjectPacket(new TFID(item.Coid, itemGlobal))
+            {
+                DeathType = DeathType.Silent,
+                Force = true,
+            });
+        }
+
+        packets.Add(InventoryPacketFactory.CreateCargoSendAll(this));
+
+        return new InventoryCommandResult(
+            $"Removed cargo coid={item.Coid} cbid={item.Cbid} qty={qty}.",
+            packets,
+            addedItem: null,
+            acceptedQuantity: qty);
+    }
+
     public InventoryCommandResult RemoveCargoByCbid(long characterCoid, int cbid, int quantity)
     {
         if (cbid <= 0 || quantity < 1)
