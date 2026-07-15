@@ -28,6 +28,8 @@ Game-data tools default to `C:\Program Files (x86)\NetDevil\Auto Assault`; overr
 
 | Script | What it does |
 |--------|----------------|
+| [`chromium-overlay.cmd`](scripts/chromium-overlay.cmd) | Thin wrapper for the experimental CEF game overlay launcher (`tools/ChromiumOverlay`). Passes args through to `ChromiumLauncher.exe`. |
+| [`aa-set-windowed.ps1`](scripts/aa-set-windowed.ps1) | Sets `MODE_WINDOWED=1` (or `-Fullscreen`) in `exe/vog.ini`. Layered CEF overlays need windowed mode. |
 | [`init-databases.ps1`](scripts/init-databases.ps1) | Creates the MySQL databases required by AutoCore (auth/world/character, etc.) using local MySQL credentials. |
 | [`recreate-char-db.ps1`](scripts/recreate-char-db.ps1) | Drops and recreates the character database so schema can be reset cleanly during development. |
 | [`setup-client.ps1`](scripts/setup-client.ps1) | Adds or removes a Windows hosts-file entry so the retail Auto Assault client points at a local auth server (run as Administrator). |

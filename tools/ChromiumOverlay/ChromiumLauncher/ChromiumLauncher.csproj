@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>ChromiumOverlay</RootNamespace>
+    <AssemblyName>ChromiumLauncher</AssemblyName>
+    <PlatformTarget>x86</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ChromiumOverlay.Core\ChromiumOverlay.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Prebuilt x86 injector (same as PathADebug / DevTool). -->
+    <Reference Include="AutoLoginInjector">
+      <HintPath>..\..\..\AutoCore.DevTool\lib\AutoLoginInjector.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+  <!-- Copy host + bridge next to launcher when present (post-build optional). -->
+  <Target Name="CopyBridgeIfPresent" AfterTargets="Build">
+    <ItemGroup>
+      <_Bridge Include="$(MSBuildThisFileDirectory)..\ChromiumBridge\ChromiumBridge.dll" Condition="Exists('$(MSBuildThisFileDirectory)..\ChromiumBridge\ChromiumBridge.dll')" />
+    </ItemGroup>
+    <!-- ContinueOnError: game may lock ChromiumBridge.dll after inject. -->
+    <Copy SourceFiles="@(_Bridge)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" ContinueOnError="true" Condition="'@(_Bridge)' != ''" />
+  </Target>
+</Project>

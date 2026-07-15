@@ -1,0 +1,10 @@
+# Native bridge output
+ChromiumBridge/*.dll
+ChromiumBridge/*.exp
+ChromiumBridge/*.lib
+ChromiumBridge/*.obj
+ChromiumBridge/*.pdb
+ChromiumBridge/*.ilk
+
+# CefSharp / CEF local caches (NuGet restores to user packages; leave bin/obj ignored by default patterns)
+**/cef-cache/
