@@ -570,6 +570,8 @@ public class SpawnPoint : ClonedObjectBase
         // Pure terrain when heightfield present (CreateTemplateVehicle cast).
         vehicle.Position = NpcTicker.SnapToTerrain(Map, Position);
         vehicle.Rotation = Rotation;
+        // Same as template path: chassis clonebase invincible bit must not block combat.
+        vehicle.SetInvincible(false);
 
         // Raw-CBID spawn lists have no VehicleTemplate row, so the driver can only come from
         // the vehicle clonebase's own VehicleSpecific.DefaultDriver.

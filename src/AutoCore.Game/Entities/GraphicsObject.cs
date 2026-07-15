@@ -175,11 +175,21 @@ public class GraphicsObject : ClonedObjectBase
         if (map == null)
             return;
 
-        // Map props: loot at death point; keep corpse on map ~12.5s then DestroyObject + leave.
+        // Map props: loot at death point; keep corpse on map ~12.5s then leave.
+        // Broadcast DestroyObject immediately so weapon fire is visible — ram has client-local
+        // collision FX, but server gun hits have no client prediction for un-ghosted scenery.
         TrySpawnMapPropDeathLoot(map);
 
+        BroadcastDeath(
+            map,
+            objectId,
+            deathType,
+            Murderer,
+            Ghost,
+            useInitCreateDeath: deathType != DeathType.Silent);
+
         Logger.WriteLog(LogType.Debug,
-            "OnDeath map-prop coid={0} type={1} deathType={2} cbid={3} pos={4} — corpse {5}ms then despawn",
+            "OnDeath map-prop coid={0} type={1} deathType={2} cbid={3} pos={4} — destroy now, leave map in {5}ms",
             objectId.Coid,
             GetType().Name,
             deathType,

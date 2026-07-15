@@ -30,6 +30,10 @@ public struct WeaponSpecific
     public byte SprayTargets;
     public byte SubType;
     public byte TurretSize;
+    /// <summary>
+    /// Cosine of TacArc half-angle (client <c>rlValidArc</c>), NOT degrees.
+    /// In-cone when horizontal aim·dir &gt; ValidArc. ≤−1 = full 360°; ≥1 ≈ zero-width (strict).
+    /// </summary>
     public float ValidArc;
 
     public static WeaponSpecific ReadNew(BinaryReader reader)

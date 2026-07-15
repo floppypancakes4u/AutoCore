@@ -13,7 +13,8 @@ using AutoCore.Utils;
 /// Server approximation of client <c>CollisionListener::DoVehicleCollision</c> (<c>FUN_005d9290</c>):
 /// moving vehicles damage collidable, non-invincible pure map props on contact.
 /// Soft props (ObjectGraphicsPhysics / low MinHitPoints) are destroyed in one hit.
-/// TacArc soft-target shooting is intentionally out of scope.
+/// Weapon TacArc soft-targets reuse <see cref="IsRamEligibleMapProp"/> so the same
+/// scenery (rails, fences, billboards) can be shot as well as rammed.
 /// </summary>
 public static class VehicleMapPropRam
 {
@@ -48,8 +49,22 @@ public static class VehicleMapPropRam
     // vehicleCoid -> (propCoid -> lastHitMs)
     private static readonly Dictionary<long, Dictionary<long, int>> LastHitMsByVehicle = new();
 
+    [ThreadStatic]
+    private static List<ClonedObjectBase> _spatialQueryBuffer;
+
+    /// <summary>Entities returned by the last <see cref="Process"/> spatial query (test/metrics).</summary>
+    internal static int LastSpatialCandidateCount { get; private set; }
+
+    /// <summary>Ram-eligible props inside contact radius on the last <see cref="Process"/> (test/metrics).</summary>
+    internal static int LastNearbyEligibleCount { get; private set; }
+
     /// <summary>Test seam: clear cooldown table.</summary>
-    internal static void ResetCooldownsForTests() => LastHitMsByVehicle.Clear();
+    internal static void ResetCooldownsForTests()
+    {
+        LastHitMsByVehicle.Clear();
+        LastSpatialCandidateCount = 0;
+        LastNearbyEligibleCount = 0;
+    }
 
     /// <summary>
     /// Run after a vehicle position/velocity update. Safe no-op when speed is low or map empty.
@@ -70,33 +85,34 @@ public static class VehicleMapPropRam
 
         var map = vehicle.Map;
         var vehiclePos = vehicle.Position;
-        var radiusSq = ContactRadius * ContactRadius;
         var now = Environment.TickCount;
-        var eligible = 0;
-        var nearby = 0;
 
-        // Pick the single closest eligible prop in range (not every prop in the sphere).
+        // Spatial cells (128u) + QueryRadius — never walk the full map (thousands of props).
+        var buffer = _spatialQueryBuffer ??= new List<ClonedObjectBase>(64);
+        map.Grid.QueryRadius(vehiclePos, ContactRadius, buffer);
+        LastSpatialCandidateCount = buffer.Count;
+
+        // Pick the single closest ram-eligible prop already inside the contact sphere.
         GraphicsObject closest = null;
         var closestDistSq = float.MaxValue;
+        var nearby = 0;
 
-        foreach (var obj in map.Objects.Values.ToArray())
+        foreach (var obj in buffer)
         {
             if (!IsRamEligibleMapProp(obj))
                 continue;
 
-            eligible++;
+            nearby++;
             var prop = (GraphicsObject)obj;
             var distSq = prop.Position.DistSq(vehiclePos);
-            if (distSq > radiusSq)
-                continue;
-
-            nearby++;
             if (distSq < closestDistSq)
             {
                 closestDistSq = distSq;
                 closest = prop;
             }
         }
+
+        LastNearbyEligibleCount = nearby;
 
         var hits = 0;
         if (closest != null
@@ -106,14 +122,14 @@ public static class VehicleMapPropRam
             hits = ApplyRamHit(vehicle, closest, speed);
         }
 
-        // Helps diagnose "I ram but no log": often eligible=0 (client-only scenery) or speed low.
+        // candidates = spatial query size; nearby = ram-eligible among those (not full-map eligible).
         if (hits == 0 && LogFilters.MapPropRam && (now % 2000) < 50)
         {
             LogFilters.WriteIf(
                 LogFilters.MapPropRam,
                 LogType.Debug,
-                "MapPropRam scan: vehicle={0} speed={1:0.0} eligibleProps={2} nearby={3} (no hit)",
-                vehicle.ObjectId.Coid, speed, eligible, nearby);
+                "MapPropRam scan: vehicle={0} speed={1:0.0} candidates={2} nearby={3} (no hit)",
+                vehicle.ObjectId.Coid, speed, LastSpatialCandidateCount, nearby);
         }
 
         return hits;

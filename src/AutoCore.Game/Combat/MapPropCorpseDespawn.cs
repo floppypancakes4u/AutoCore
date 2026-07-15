@@ -147,14 +147,8 @@ public static class MapPropCorpseDespawn
                 p.ObjectId.Coid,
                 live.CBID);
 
-            // After the corpse wait, force a silent teardown (FX already played at impact / death).
-            GraphicsObject.BroadcastDeathPublic(
-                map,
-                p.ObjectId,
-                DeathType.Silent,
-                p.Murderer,
-                live.Ghost,
-                useInitCreateDeath: false);
+            // DestroyObject was already sent at OnDeath (weapon/ram). Only leave the map now so
+            // loot/corpse bookkeeping can finish without a second destroy spam.
             if (ReferenceEquals(live.Map, map))
                 live.SetMap(null);
         }

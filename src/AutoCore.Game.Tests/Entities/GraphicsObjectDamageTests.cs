@@ -120,16 +120,16 @@ public class GraphicsObjectDamageTests
         prop.OnDeath(DeathType.Silent);
 
         Assert.IsTrue(prop.IsCorpse);
-        Assert.IsNotNull(map.GetObjectByCoid(PropCoid), "corpse stays on map until delayed despawn");
+        Assert.IsNotNull(map.GetObjectByCoid(PropCoid), "corpse stays on map until delayed leave");
         Assert.AreEqual(1, MapPropCorpseDespawn.PendingCountForTests);
+        Assert.IsTrue(
+            _sent.OfType<DestroyObjectPacket>().Any(p => p.ObjectId.Coid == PropCoid),
+            "DestroyObject must ship on OnDeath (weapons have no client-local break FX); sent=" +
+            string.Join(',', _sent.Select(p => p.Opcode)));
 
         MapPropCorpseDespawn.FlushAllForTests();
 
         Assert.IsNull(map.GetObjectByCoid(PropCoid), "after delay, prop leaves the sector map");
-        Assert.IsTrue(
-            _sent.OfType<DestroyObjectPacket>().Any(p => p.ObjectId.Coid == PropCoid),
-            "Clients need DestroyObject so the prop disappears; sent=" +
-            string.Join(',', _sent.Select(p => p.Opcode)));
     }
 
     [TestMethod]

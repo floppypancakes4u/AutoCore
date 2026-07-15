@@ -107,6 +107,31 @@ public class VehicleMapPropRamTests
     }
 
     [TestMethod]
+    public void Process_SpatialQuery_ExcludesDistantPropsFromCandidates()
+    {
+        // Full-map scan used to count ~thousands eligibleProps; spatial query only nearby cells.
+        const int propCbid = 9911;
+        RegisterPhysicsProp(propCbid, minHp: 1, maxHp: 10, collidable: true);
+
+        var (vehicle, map) = CreateVehicleOnMap(speed: 30f);
+        vehicle.Position = new Vector3(0, 0, 0);
+        // Far props in other cells (well beyond ContactRadius 10 and cell neighborhood for R=10).
+        for (var i = 0; i < 20; i++)
+            CreatePropOnMap(map, coid: 88200 + i, cbid: propCbid, maxHp: 10,
+                position: new Vector3(500 + i * 10, 0, 500));
+
+        var near = CreatePropOnMap(map, coid: 88299, cbid: propCbid, maxHp: 10,
+            position: new Vector3(2, 0, 0));
+
+        var hits = VehicleMapPropRam.Process(vehicle);
+        Assert.IsTrue(hits >= 1);
+        Assert.IsTrue(near.IsCorpse);
+        Assert.IsTrue(VehicleMapPropRam.LastSpatialCandidateCount < 20,
+            $"spatial candidates should be local, got {VehicleMapPropRam.LastSpatialCandidateCount}");
+        Assert.IsTrue(VehicleMapPropRam.LastNearbyEligibleCount >= 1);
+    }
+
+    [TestMethod]
     public void NonCollidableProp_IsSkipped()
     {
         const int propCbid = 9905;

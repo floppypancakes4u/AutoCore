@@ -231,6 +231,18 @@ public class GhostVehicle : GhostObject
         // TODO?
     }
 
+    /// <summary>
+    /// Wire <c>IsActive</c> = not town. When the vehicle has left the map (Map null mid-ghost),
+    /// default true so pack does not throw — town vehicles rarely need a late initial after leave.
+    /// </summary>
+    public static bool ResolveIsActiveForPack(ClonedObjectBase parent)
+    {
+        var continent = parent?.Map?.MapData?.ContinentObject;
+        if (continent == null)
+            return true;
+        return !continent.IsTown;
+    }
+
     public override ulong PackUpdate(GhostConnection connection, ulong updateMask, BitStream stream)
     {
         if (Parent == null)
@@ -318,7 +330,9 @@ public class GhostVehicle : GhostObject
             stream.Write(parentVehicle.PrimaryColor);
             stream.Write(parentVehicle.SecondaryColor);
 
-            stream.WriteFlag(!Parent.Map.MapData.ContinentObject.IsTown); // IsActive
+            // LeaveMap / SetMap(null) can race with ghost initial pack; never NRE here or
+            // MainLoop aborts the tick and NPC pose updates freeze on the client.
+            stream.WriteFlag(ResolveIsActiveForPack(Parent)); // IsActive
 
             stream.Write(parentVehicle.Trim);
 

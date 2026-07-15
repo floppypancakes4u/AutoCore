@@ -666,6 +666,56 @@ public class GhostVehicleWireTests
         StringAssert.Contains(entry.Detail, "path=0/1");
     }
 
+    [TestMethod]
+    public void PackInitial_MapNull_DoesNotThrow_WritesIsActiveTrue()
+    {
+        // Live bug: LeaveMap/SetMap(null) while ghost still packing initial/re-scope → NRE on
+        // Parent.Map.MapData.ContinentObject.IsTown, aborting MainLoop ghost sends so NPCs freeze.
+        var vehicle = CreateVehicleWithMap(9180);
+        vehicle.SetMap(null);
+
+        BitStream stream = null;
+        try
+        {
+            stream = PackInitial(vehicle);
+        }
+        catch (Exception ex)
+        {
+            Assert.Fail($"PackUpdate must not throw when Map is null: {ex}");
+        }
+
+        SkipToPathBlock(stream);
+        // SkipToPathBlock already consumed IsActive; just ensure pack completed.
+        Assert.IsNotNull(stream);
+    }
+
+    [TestMethod]
+    public void ResolveIsActiveForPack_NullMap_DefaultsTrue()
+    {
+        Assert.IsTrue(GhostVehicle.ResolveIsActiveForPack(null));
+        var vehicle = new Vehicle();
+        vehicle.SetCoid(9181, true);
+        Assert.IsTrue(GhostVehicle.ResolveIsActiveForPack(vehicle));
+    }
+
+    [TestMethod]
+    public void ResolveIsActiveForPack_TownMap_False()
+    {
+        var continent = new ContinentObject
+        {
+            Id = 9182,
+            MapFileName = "tm_town",
+            DisplayName = "town",
+            IsTown = true,
+            IsPersistent = true,
+        };
+        var map = SectorMap.CreateForTests(continent, new Vector4(0, 0, 0, 0));
+        var vehicle = new Vehicle();
+        vehicle.SetCoid(9182, true);
+        vehicle.SetMap(map);
+        Assert.IsFalse(GhostVehicle.ResolveIsActiveForPack(vehicle));
+    }
+
     private static Vehicle CreateVehicleWithMap(long coid)
     {
         var map = CreateTestMap((int)coid);

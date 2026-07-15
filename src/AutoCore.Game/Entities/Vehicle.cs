@@ -487,22 +487,46 @@ public class Vehicle : SimpleObject
         int actualDamage,
         DamagePacket.DamageEntryFlags flags = default)
     {
+        var packet = new DamagePacket { Source = source ?? new TFID() };
+        packet.AddHit(victim?.ObjectId ?? new TFID(), actualDamage, flags);
+        TrySendDamagePacketMulti(attacker, packet, source, new[] { victim });
+    }
+
+    /// <summary>
+    /// Multi-hit TacArc / splash packet: one 0x2023 with N entries to attacker ∪ all victims.
+    /// Throttled once per attacker vehicle COID (full multi-hit payload still sent together).
+    /// </summary>
+    internal static void TrySendDamagePacketMulti(
+        Character? attacker,
+        DamagePacket packet,
+        TFID source,
+        IReadOnlyList<ClonedObjectBase> victims)
+    {
+        if (packet == null || packet.Entries.Count == 0)
+            return;
+
         try
         {
-            var connections = new List<TNL.TNLConnection>(2);
+            var connections = new HashSet<TNL.TNLConnection>();
             var attackerConn = attacker?.OwningConnection;
             if (attackerConn != null)
                 connections.Add(attackerConn);
 
-            var victimConn = victim?.GetSuperCharacter(false)?.OwningConnection;
-            if (victimConn != null && !ReferenceEquals(victimConn, attackerConn))
-                connections.Add(victimConn);
+            if (victims != null)
+            {
+                foreach (var victim in victims)
+                {
+                    var victimConn = victim?.GetSuperCharacter(false)?.OwningConnection;
+                    if (victimConn != null)
+                        connections.Add(victimConn);
+                }
+            }
 
             if (connections.Count == 0)
                 return;
 
             var now = Environment.TickCount64;
-            var key = source?.Coid ?? 0; // attacker vehicle COID
+            var key = source?.Coid ?? 0;
             if (key != 0)
             {
                 if (_lastCombatMsgByAttackerMs.TryGetValue(key, out var last) && now - last < 100)
@@ -511,11 +535,7 @@ public class Vehicle : SimpleObject
             }
 
             foreach (var conn in connections)
-            {
-                var packet = new DamagePacket { Source = source ?? new TFID() };
-                packet.AddHit(victim?.ObjectId ?? new TFID(), actualDamage, flags);
                 conn.SendGamePacket(packet, skipOpcode: true);
-            }
         }
         catch
         {
@@ -1717,88 +1737,32 @@ public class Vehicle : SimpleObject
     }
 
     // Called from both movement packets AND the server tick, so holding fire works even if VehicleMoved packets are sparse.
+    // Hard Target is OPTIONAL — TacArc soft acquisition handles cone fire (client multi-slot model).
     [ExcludeFromCodeCoverage]
     public void ProcessCombatIfFiring()
     {
         if (Ghost == null)
             return;
 
-        // Process combat when firing (server authoritative)
-        if (Firing > 0 && Target != null && !Target.IsCorpse && !Target.IsInvincible)
-        {
-
-            // (Reuse the existing combat implementation by re-entering HandleMovement�s block via a local call path.)
-            // NOTE: The actual combat logic remains unchanged; this method just makes it reachable from the server loop.
-            // We intentionally keep all the existing logs in-place by calling the same code path.
-            //
-            // For now, simply inline-call the same logic by invoking HandleMovement's tail via a no-op pattern:
-            // the code below is identical to the previous block, kept in this file for clarity.
-            //
-            // To keep this patch small, we call into the existing logic by temporarily delegating to a private helper.
+        if (Firing > 0)
             ProcessCombatInternal();
-        }
     }
 
+    /// <summary>
+    /// Multi-slot TacArc combat: fire every armed slot into its own cone; accumulate multi-hit 0x2023.
+    /// Client anchors: SetWeaponsFiring @0x5021d0, FindDistanceToTarget @0x4e9aa0, OnFire @0x56e000.
+    /// </summary>
     [ExcludeFromCodeCoverage]
     private void ProcessCombatInternal()
     {
-        // Process combat when firing (server authoritative)
-        if (Firing <= 0 || Target == null || Target.IsCorpse || Target.IsInvincible)
+        if (Firing <= 0)
             return;
 
-
-
-        // Determine which weapon is firing (bit flags: 1=front, 2=turret, 4=rear)
-        Weapon firingWeapon = null;
-        ref var lastFireRef = ref _lastFireMsTurret; // default
-        if ((Firing & 1) != 0 && WeaponFront != null)
-        {
-            firingWeapon = WeaponFront;
-            lastFireRef = ref _lastFireMsFront;
-        }
-        else if ((Firing & 2) != 0 && WeaponTurret != null)
-        {
-            firingWeapon = WeaponTurret;
-            lastFireRef = ref _lastFireMsTurret;
-        }
-        else if ((Firing & 4) != 0 && WeaponRear != null)
-        {
-            firingWeapon = WeaponRear;
-            lastFireRef = ref _lastFireMsRear;
-        }
-
-
-        if (firingWeapon == null || firingWeapon.CloneBaseWeapon == null)
-        {
-            return;
-        }
-
-        var nowMs = Environment.TickCount64;
-        var weaponSpec = firingWeapon.CloneBaseWeapon.WeaponSpecific;
-
-        // Cooldown / rate-of-fire gating
-        var cooldownMs = weaponSpec.RechargeTime > 0 ? weaponSpec.RechargeTime : 500;
-        if (nowMs - lastFireRef < cooldownMs)
-            return;
-
-        // Overheat lock: client FUN_0056aca0 blocks fire while heat >= max.
+        // Overheat lock: client FUN_0056aca0 blocks fire while heat >= max (all slots).
         if (MaxHeat > 0 && CurrentHeat >= MaxHeat)
             return;
 
-        lastFireRef = nowMs;
-
-        // Weapon heat per shot (client FUN_0056ad00 → FUN_004f7210).
-        if (weaponSpec.Heat > 0)
-            AddHeat(weaponSpec.Heat);
-
-        // Range gating
-        var dist = Position.Dist(Target.Position);
-        if ((weaponSpec.RangeMin > 0 && dist < weaponSpec.RangeMin) || (weaponSpec.RangeMax > 0 && dist > weaponSpec.RangeMax))
-        {
-            return;
-        }
-
-        // Attribute-aware hit + damage (client RE: Combat/Perception/Theory/class/crit).
+        var nowMs = Environment.TickCount64;
         var attackerLevel = Owner?.GetAsCreature()?.GetLevel() ?? 1;
         var attackerChar = Owner?.GetAsCharacter();
         var combat = attackerChar?.AttributeCombat ?? (short)1;
@@ -1808,55 +1772,300 @@ public class Vehicle : SimpleObject
         if (attackerChar?.CloneBaseObject is CloneBaseCharacter atkCb)
             attackerClass = atkCb.CharacterSpecific.Class;
 
-        var victimLevel = 1;
-        short victimPerception = 1;
-        var targetDefenseBonus = 0;
-        short[] resists = null;
+        var vehicleYaw = TacArcGeometry.YawFromQuaternion(Rotation.X, Rotation.Y, Rotation.Z, Rotation.W);
+        var ownerCoid = Owner?.ObjectId.Coid;
+        // Client hostility uses owner-chain faction (vfunc+0x298 / GetIDFaction), not chassis Faction.
+        // NPC vehicles often share a chassis clonebase faction with the player while the driver is hostile.
+        var shooterFaction = GetIDFaction();
+        var candidates = BuildFireCandidates();
+        // Hard lock must address a vehicle/foot NPC, never a player Character body.
+        var hardLock = Target is Character hardChar && hardChar.CurrentVehicle != null
+            ? hardChar.CurrentVehicle
+            : Target;
+        var hardCoid = hardLock is { IsCorpse: false, IsInvincible: false }
+            && IsWeaponCombatantTarget(hardLock)
+            ? hardLock.ObjectId.Coid
+            : (long?)null;
 
-        if (Target is Vehicle targetVeh)
+        var packet = new DamagePacket { Source = ObjectId };
+        var victimsHit = new List<ClonedObjectBase>();
+        var rng = new Random(unchecked((int)(nowMs ^ ObjectId.Coid)));
+
+        // Independent slots: front / turret / rear (not exclusive if/else-if).
+        TryFireSlot(0x01, WeaponFront, vehicleYaw + 0f, includeHardTarget: false, ref _lastFireMsFront);
+        TryFireSlot(0x02, WeaponTurret, vehicleYaw + WantedTurretDirection, includeHardTarget: true, ref _lastFireMsTurret);
+        TryFireSlot(0x04, WeaponRear, vehicleYaw + MathF.PI, includeHardTarget: false, ref _lastFireMsRear);
+
+        if (packet.Entries.Count > 0)
+            TrySendDamagePacketMulti(attackerChar, packet, ObjectId, victimsHit);
+
+        void TryFireSlot(byte bit, Weapon weapon, float aimYaw, bool includeHardTarget, ref long lastFireMs)
         {
-            victimLevel = targetVeh.Owner?.GetAsCreature()?.GetLevel() ?? 1;
-            var vicChar = targetVeh.Owner?.GetAsCharacter();
-            if (vicChar != null)
-                victimPerception = vicChar.AttributePerception;
-            else if (targetVeh.Owner?.GetAsCreature()?.CloneBaseObject is CloneBaseCreature creCb)
-                victimPerception = creCb.CreatureSpecific.AttributePerception;
+            if ((Firing & bit) == 0 || weapon?.CloneBaseWeapon == null)
+                return;
 
-            if (targetVeh.Armor?.CloneBaseArmor?.ArmorSpecific != null)
+            var weaponSpec = weapon.CloneBaseWeapon.WeaponSpecific;
+            var cooldownMs = weaponSpec.RechargeTime > 0 ? weaponSpec.RechargeTime : 500;
+            if (nowMs - lastFireMs < cooldownMs)
+                return;
+
+            // Re-check heat: earlier slots may have added heat this tick.
+            if (MaxHeat > 0 && CurrentHeat >= MaxHeat)
+                return;
+
+            lastFireMs = nowMs;
+            if (weaponSpec.Heat > 0)
+                AddHeat(weaponSpec.Heat);
+
+            var aim = TacArcGeometry.AimFromYaw(aimYaw);
+            var hits = WeaponFireTargetAcquisition.Acquire(
+                Position,
+                aim,
+                shooterFaction,
+                ObjectId.Coid,
+                ownerCoid,
+                weaponSpec,
+                candidates,
+                hardCoid,
+                includeHardTarget);
+
+            if (hits.Count == 0)
+                return;
+
+            Vector3? primaryPos = hits[0].Position;
+            var alreadyHit = new HashSet<long>();
+
+            for (var i = 0; i < hits.Count; i++)
             {
-                var armorSpec = targetVeh.Armor.CloneBaseArmor.ArmorSpecific;
-                targetDefenseBonus = armorSpec.DefenseBonus;
-                resists = armorSpec.Resistances?.Damage;
+                var hit = hits[i];
+                if (!TryResolveTarget(hit.Coid, out var tgt))
+                    continue;
+
+                var isSpray = i > 0;
+                var falloffDist = isSpray && primaryPos.HasValue
+                    ? primaryPos.Value.Dist(hit.Position)
+                    : 0f;
+                ApplyWeaponHit(tgt, weaponSpec, attackerLevel, attackerClass, combat, theory, atkPerception,
+                    attackerChar, rng, isSpray, falloffDist, packet, victimsHit);
+                alreadyHit.Add(hit.Coid);
+            }
+
+            // Explosion splash (omnidirectional around primary impact).
+            if (weaponSpec.ExplosionRadius > 0f && primaryPos.HasValue)
+            {
+                var splash = WeaponFireTargetAcquisition.AcquireExplosion(
+                    primaryPos.Value,
+                    weaponSpec.ExplosionRadius,
+                    Faction,
+                    ObjectId.Coid,
+                    ownerCoid,
+                    candidates,
+                    alreadyHit);
+
+                foreach (var s in splash)
+                {
+                    if (!TryResolveTarget(s.Coid, out var splashTgt))
+                        continue;
+                    ApplyWeaponHit(splashTgt, weaponSpec, attackerLevel, attackerClass, combat, theory, atkPerception,
+                        attackerChar, rng, isSprayTarget: true, distFromPrimary: s.DistanceFromShooter,
+                        packet, victimsHit);
+                }
             }
         }
-        else if (Target is Creature cre)
+    }
+
+    /// <summary>Retail max weapon range — absolute cap for TacArc soft-target spatial queries.</summary>
+    public const float AbsoluteMaxWeaponRange = 120f;
+
+    [ThreadStatic]
+    private static List<ClonedObjectBase> _fireCandidateQueryBuffer;
+
+    /// <summary>
+    /// True for entities weapons may soft/hard target. Excludes <see cref="Character"/> —
+    /// players are always hit via their vehicle. Character is a Creature, so a naive
+    /// <c>is Creature</c> check would let NPCs kill the player body, LeaveMap them, reset the
+    /// sector world, and freeze NPC ticks / break /warp while the client still shows a live car.
+    /// </summary>
+    internal static bool IsWeaponCombatantTarget(ClonedObjectBase obj) =>
+        obj is Vehicle || (obj is Creature && obj is not Character);
+
+    /// <summary>
+    /// Max <c>RangeMax</c> among equipped front/turret/rear weapons, clamped to
+    /// <see cref="AbsoluteMaxWeaponRange"/>. Used as the TacArc soft-target spatial query radius.
+    /// </summary>
+    internal float GetMaxEquippedWeaponRange()
+    {
+        var max = 0f;
+        Consider(WeaponFront);
+        Consider(WeaponTurret);
+        Consider(WeaponRear);
+        if (max <= 0f)
+            return AbsoluteMaxWeaponRange;
+        return Math.Clamp(max, 0f, AbsoluteMaxWeaponRange);
+
+        void Consider(Weapon weapon)
         {
-            victimLevel = cre.GetLevel();
-            if (cre.CloneBaseObject is CloneBaseCreature cbc)
+            if (weapon?.CloneBaseWeapon == null)
+                return;
+            var r = weapon.CloneBaseWeapon.WeaponSpecific.RangeMax;
+            if (r > max)
+                max = r;
+        }
+    }
+
+    /// <summary>Clamp helper for tests / fire-candidate query radius.</summary>
+    internal static float ClampFireQueryRange(float maxEquippedRange) =>
+        Math.Clamp(maxEquippedRange <= 0f ? AbsoluteMaxWeaponRange : maxEquippedRange, 0f, AbsoluteMaxWeaponRange);
+
+    private List<WeaponFireTargetAcquisition.Candidate> BuildFireCandidates()
+    {
+        var list = new List<WeaponFireTargetAcquisition.Candidate>();
+        if (Map?.Objects == null)
+            return list;
+
+        // Spatial query at max equipped weapon range (≤ 120) — not a full map walk.
+        var queryRange = GetMaxEquippedWeaponRange();
+        var buffer = _fireCandidateQueryBuffer ??= new List<ClonedObjectBase>(128);
+        Map.Grid.QueryRadius(Position, queryRange, buffer);
+
+        foreach (var obj in buffer)
+        {
+            if (obj == null)
+                continue;
+
+            // Combatants: foot NPCs + vehicles only (never player Character bodies).
+            // Faction = owner-chain GetIDFaction (driver/character root), not chassis Faction.
+            if (IsWeaponCombatantTarget(obj))
             {
-                victimPerception = cbc.CreatureSpecific.AttributePerception;
-                targetDefenseBonus = cbc.CreatureSpecific.DefensiveBonus;
+                list.Add(new WeaponFireTargetAcquisition.Candidate(
+                    obj.ObjectId.Coid,
+                    obj.Position,
+                    obj.GetIDFaction(),
+                    obj.IsCorpse,
+                    obj.IsInvincible,
+                    isDamageable: obj.GetCurrentHP() > 0,
+                    isCombatant: true,
+                    ignoresHostility: false));
+                continue;
             }
-            resists = cre.CloneBaseObject?.SimpleObjectSpecific.DamageArmor?.Damage;
+
+            // Same set as VehicleMapPropRam: collidable pure GraphicsObject scenery
+            // (rails, fences, billboards). Skip faction hostility so map faction == player still hits.
+            if (Combat.VehicleMapPropRam.IsRamEligibleMapProp(obj) && obj.GetCurrentHP() > 0)
+            {
+                list.Add(new WeaponFireTargetAcquisition.Candidate(
+                    obj.ObjectId.Coid,
+                    obj.Position,
+                    obj.GetIDFaction(),
+                    obj.IsCorpse,
+                    obj.IsInvincible,
+                    isDamageable: true,
+                    isCombatant: false,
+                    ignoresHostility: true));
+            }
         }
 
-        var hitChance = CombatHitChanceCalculator.Calculate(
-            attackerLevel,
-            combat,
-            weaponSpec.OffenseBonus,
-            weaponSpec.HitBonusPerLevel,
-            weaponSpec.AccucaryModifier,
-            victimLevel,
-            victimPerception,
-            targetDefenseBonus);
-
-        var rng = new Random(unchecked((int)(nowMs ^ ObjectId.Coid ^ Target.ObjectId.Coid)));
-        if (rng.NextDouble() > hitChance)
+        // Ensure hard Target is present even if not in Map.Objects / outside query radius.
+        // Prefer the vehicle if the client latched a Character TFID.
+        var hardEntity = Target is Character ch && ch.CurrentVehicle != null
+            ? ch.CurrentVehicle
+            : Target;
+        if (hardEntity is { IsCorpse: false } hard &&
+            IsWeaponCombatantTarget(hard) &&
+            list.TrueForAll(c => c.Coid != hard.ObjectId.Coid))
         {
-            // No floater on miss: client only shows "Miss" via a local-sim flag we cannot set
-            // from the Damage packet (event+0x2A is hardcoded 0 in the recv path).
+            list.Add(new WeaponFireTargetAcquisition.Candidate(
+                hard.ObjectId.Coid,
+                hard.Position,
+                hard.GetIDFaction(),
+                hard.IsCorpse,
+                hard.IsInvincible,
+                hard.GetCurrentHP() > 0,
+                isCombatant: true,
+                ignoresHostility: false));
+        }
+
+        return list;
+    }
+
+    private bool TryResolveTarget(long coid, out ClonedObjectBase target)
+    {
+        target = Map?.GetObjectByCoid(coid)
+            ?? Map?.GetObject(coid)
+            ?? ObjectManager.Instance?.GetObject(new TFID(coid, false));
+        return target != null;
+    }
+
+    private void ApplyWeaponHit(
+        ClonedObjectBase target,
+        CloneBases.Specifics.WeaponSpecific weaponSpec,
+        int attackerLevel,
+        int attackerClass,
+        short combat,
+        short theory,
+        short atkPerception,
+        Character attackerChar,
+        Random rng,
+        bool isSprayTarget,
+        float distFromPrimary,
+        DamagePacket packet,
+        List<ClonedObjectBase> victimsHit)
+    {
+        if (target == null || target.IsCorpse || target.IsInvincible)
             return;
+
+        // Never weapon-kill a player Character body (see IsWeaponCombatantTarget).
+        if (target is Character)
+            return;
+
+        // Inanimate / non-creature always hit (client AutoHit); creatures/vehicles roll.
+        if (target is Creature || target is Vehicle)
+        {
+            var victimLevel = 1;
+            short victimPerception = 1;
+            var targetDefenseBonus = 0;
+
+            if (target is Vehicle targetVeh)
+            {
+                victimLevel = targetVeh.Owner?.GetAsCreature()?.GetLevel() ?? 1;
+                var vicChar = targetVeh.Owner?.GetAsCharacter();
+                if (vicChar != null)
+                    victimPerception = vicChar.AttributePerception;
+                else if (targetVeh.Owner?.GetAsCreature()?.CloneBaseObject is CloneBaseCreature creCb)
+                    victimPerception = creCb.CreatureSpecific.AttributePerception;
+
+                if (targetVeh.Armor?.CloneBaseArmor?.ArmorSpecific != null)
+                    targetDefenseBonus = targetVeh.Armor.CloneBaseArmor.ArmorSpecific.DefenseBonus;
+            }
+            else if (target is Creature cre)
+            {
+                victimLevel = cre.GetLevel();
+                if (cre.CloneBaseObject is CloneBaseCreature cbc)
+                {
+                    victimPerception = cbc.CreatureSpecific.AttributePerception;
+                    targetDefenseBonus = cbc.CreatureSpecific.DefensiveBonus;
+                }
+            }
+
+            var hitChance = CombatHitChanceCalculator.Calculate(
+                attackerLevel,
+                combat,
+                weaponSpec.OffenseBonus,
+                weaponSpec.HitBonusPerLevel,
+                weaponSpec.AccucaryModifier,
+                victimLevel,
+                victimPerception,
+                targetDefenseBonus);
+
+            if (rng.NextDouble() > hitChance)
+                return;
         }
+
+        short[] resists = null;
+        if (target is Vehicle tv && tv.Armor?.CloneBaseArmor?.ArmorSpecific != null)
+            resists = tv.Armor.CloneBaseArmor.ArmorSpecific.Resistances?.Damage;
+        else
+            resists = target.CloneBaseObject?.SimpleObjectSpecific.DamageArmor?.Damage;
 
         var dmgResult = CombatDamageCalculator.Compute(
             attackerLevel,
@@ -1873,34 +2082,21 @@ public class Vehicle : SimpleObject
             rng);
 
         var damage = dmgResult.Damage;
-        var hpBefore = Target.GetCurrentHP();
-        var actualDamage = Target.TakeDamage(damage, this);
+        var falloff = TacArcGeometry.SprayFalloff(isSprayTarget, distFromPrimary, weaponSpec.RangeMax);
+        damage = Math.Max(1, (int)MathF.Round(damage * falloff));
 
+        var actualDamage = target.TakeDamage(damage, this);
         if (actualDamage <= 0)
-        {
-            Logger.WriteLog(LogType.Debug,
-                "Combat: TakeDamage returned 0 for {0} coid={1} inv={2} corpse={3} hp={4}/{5} rolled={6}",
-                Target.GetType().Name,
-                Target.ObjectId.Coid,
-                Target.IsInvincible,
-                Target.IsCorpse,
-                hpBefore,
-                Target.GetMaximumHP(),
-                damage);
-        }
-        else
-        {
-            // Non-zero amount required for client combat-text / local HP apply (FUN_00812A60).
-            var flags = dmgResult.IsCrit ? DamagePacket.DamageEntryFlags.Crit : default;
-            TrySendDamagePacket(attackerChar, Target, ObjectId, actualDamage, flags);
-        }
+            return;
 
-        if (Target.GetCurrentHP() <= 0)
+        var flags = dmgResult.IsCrit ? DamagePacket.DamageEntryFlags.Crit : default;
+        packet.AddHit(target.ObjectId, actualDamage, flags);
+        victimsHit.Add(target);
+
+        if (target.GetCurrentHP() <= 0)
         {
-            Target.SetMurderer(this);
-            // Match /kill: Violent so DestroyObject carries death type for client VFX.
-            // Silent only force-despawns (no CompletelyDestroyObject death FX).
-            Target.OnDeath(DeathType.Violent);
+            target.SetMurderer(this);
+            target.OnDeath(DeathType.Violent);
         }
     }
 
