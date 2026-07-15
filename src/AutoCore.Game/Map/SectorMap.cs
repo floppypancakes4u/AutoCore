@@ -1808,24 +1808,86 @@ public class SectorMap
         TriggerReactionsInternal(activator, reactions, 0);
     }
 
-    private void TriggerReactionsInternal(ClonedObjectBase activator, List<long> reactions, int depth)
+    /// <summary>
+    /// Like <see cref="TriggerReactions"/> but returns how many reactions successfully ran
+    /// (and would contribute to 0x206C when send is enabled).
+    /// </summary>
+    public int TriggerReactionsCount(ClonedObjectBase activator, List<long> reactions)
+        => TriggerReactionsInternal(activator, reactions, 0);
+
+    /// <summary>
+    /// Ensure a map reaction exists live (place from <see cref="MapData.Templates"/> if needed).
+    /// </summary>
+    internal Reaction GetOrMaterializeReaction(long reactionCoid)
+    {
+        if (reactionCoid <= 0)
+            return null;
+
+        if (GetObjectByCoid(reactionCoid) is Reaction existing)
+            return existing;
+
+        if (MapData?.Templates == null
+            || !MapData.Templates.TryGetValue(reactionCoid, out var tpl)
+            || tpl is not ReactionTemplate rt)
+        {
+            return null;
+        }
+
+        try
+        {
+            var placed = rt.Create() as Reaction;
+            if (placed == null)
+                return null;
+            if (placed.ObjectId.Coid <= 0)
+                placed.SetCoid(rt.COID != 0 ? rt.COID : reactionCoid, false);
+            placed.SetMap(this);
+            Logger.WriteLog(LogType.Debug,
+                "SectorMap {0}: materialized reaction coid={1} type={2}",
+                ContinentId,
+                reactionCoid,
+                rt.ReactionType);
+            return placed;
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "SectorMap {0}: materialize reaction {1} failed: {2}",
+                ContinentId,
+                reactionCoid,
+                ex.Message);
+            return null;
+        }
+    }
+
+    private int TriggerReactionsInternal(ClonedObjectBase activator, List<long> reactions, int depth)
     {
         const int MaxReactionDepth = 10;
         if (depth >= MaxReactionDepth)
         {
             Logger.WriteLog(LogType.Error, $"Reaction chain exceeded max depth of {MaxReactionDepth}, stopping to prevent infinite loop");
-            return;
+            return 0;
         }
+
+        if (reactions == null || reactions.Count == 0)
+            return 0;
 
         var clientPacket = new GroupReactionCallPacket();
         GroupReactionCallPacket broadcastPacket = null;
         GroupReactionCallPacket convoyPacket = null;
         var childReactionsToTrigger = new List<List<long>>();
+        var triggeredCount = 0;
 
         foreach (var reactionCoid in reactions)
         {
-            var foundObj = Objects.FirstOrDefault(o => o.Key.Coid == reactionCoid && !o.Key.Global);
-            if (foundObj.Value is not Reaction reaction)
+            var reaction = GetOrMaterializeReaction(reactionCoid);
+            if (reaction == null)
+            {
+                // Prefer non-global local map reaction (historical path).
+                var foundObj = Objects.FirstOrDefault(o => o.Key.Coid == reactionCoid && !o.Key.Global);
+                reaction = foundObj.Value as Reaction;
+            }
+
+            if (reaction == null)
             {
                 Logger.WriteLog(LogType.Error, $"Map {MapData.ContinentObject.Id} tried to trigger reaction {reactionCoid}, but the Reaction object isn't found!");
                 continue;
@@ -1835,6 +1897,7 @@ public class SectorMap
 
             if (reaction.TriggerIfPossible(activator))
             {
+                triggeredCount++;
                 // SingleClientOnly=true for activator-only presence mutations (Create/Delete/etc.).
                 // DoForAllPlayers broadcast uses a separate packet; flag stays false there.
                 var singleClientOnly = !reaction.Template.DoForAllPlayers;
@@ -1893,7 +1956,7 @@ public class SectorMap
         // Process child reactions after sending the parent reaction packets
         foreach (var childReactions in childReactionsToTrigger)
         {
-            TriggerReactionsInternal(activator, childReactions, depth + 1);
+            triggeredCount += TriggerReactionsInternal(activator, childReactions, depth + 1);
         }
 
         if (SendGroupReactionCall && broadcastPacket is not null && broadcastPacket.Count > 0)
@@ -1913,6 +1976,8 @@ public class SectorMap
         {
             Logger.WriteLog(LogType.Debug, $"DoForConvoy GroupReactionCall skipped (no convoy system) on map {ContinentId}");
         }
+
+        return triggeredCount;
     }
 
     /// <summary>Character that receives S2C reaction packets for this activator.</summary>

@@ -861,6 +861,15 @@ public partial class TNLConnection : GhostConnection
                     HandleUseObjectPacket(reader);
                     break;
 
+                case GameOpcode.StoreTransactionRequest:
+                    HandleStoreTransactionRequestPacket(reader);
+                    break;
+
+                case GameOpcode.StoreClose:
+                    // Client closed store UI — clear server session when present.
+                    HandleStoreClosePacket(reader);
+                    break;
+
                 case GameOpcode.AutoPatrol:
                     HandleAutoPatrolPacket(reader);
                     break;

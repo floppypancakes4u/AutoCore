@@ -289,6 +289,60 @@ public class MissionOfferRaceClassFilterTests
     }
 
     [TestMethod]
+    public void CanOfferMission_RequirementsOred_OneOfFourClassReports_Offers()
+    {
+        // Freelancer/Shields Up pattern: any one class report unlocks the offer.
+        const int terraCbid = 11792;
+        const int freelancerId = 6101;
+        var obj = MissionObjective.CreateForTests(61010, 0, freelancerId, 1);
+        var mission = Mission.CreateForTests(freelancerId, obj);
+        mission.NPC = terraCbid;
+        mission.Continent = ContId;
+        mission.ReqRace = 0;
+        mission.ReqClass = -1;
+        mission.ReqLevelMin = 1;
+        mission.ReqLevelMax = 2000;
+        mission.ReqMissionId = new[] { 2945, 2939, 2941, 2943 };
+        mission.RequirementsOred = -1;
+        mission.IsRepeatable = 0;
+        AssetManager.Instance.SetTestMission(mission);
+        NpcInteractHandler.InvalidateMissionIndex();
+
+        var (character, map) = CreatePlayerOnMap(classId: 3);
+        character.SetMap(map);
+        character.CompletedMissionIds.Add(2945); // only bounty-hunter report
+
+        Assert.IsTrue(
+            NpcInteractHandler.CanOfferMissionForTests(character, freelancerId, terraCbid),
+            "OR prereqs: one completed class report must unlock Freelancer-style offers");
+    }
+
+    [TestMethod]
+    public void CanOfferMission_RequirementsAnd_StillRequiresAll()
+    {
+        const int missionId = 6102;
+        var obj = MissionObjective.CreateForTests(61020, 0, missionId, 1);
+        var mission = Mission.CreateForTests(missionId, obj);
+        mission.NPC = NpcCbid;
+        mission.Continent = ContId;
+        mission.ReqRace = 0;
+        mission.ReqClass = -1;
+        mission.ReqLevelMin = 1;
+        mission.ReqLevelMax = 2000;
+        mission.ReqMissionId = new[] { 10, 20, -1, -1 };
+        mission.RequirementsOred = 0;
+        mission.IsRepeatable = 0;
+        AssetManager.Instance.SetTestMission(mission);
+
+        var (character, map) = CreatePlayerOnMap(0);
+        character.SetMap(map);
+        character.CompletedMissionIds.Add(10);
+        Assert.IsFalse(NpcInteractHandler.CanOfferMissionForTests(character, missionId, NpcCbid));
+        character.CompletedMissionIds.Add(20);
+        Assert.IsTrue(NpcInteractHandler.CanOfferMissionForTests(character, missionId, NpcCbid));
+    }
+
+    [TestMethod]
     public void CreateForTests_DefaultsRaceClassUnrestricted()
     {
         var m = Mission.CreateForTests(42);

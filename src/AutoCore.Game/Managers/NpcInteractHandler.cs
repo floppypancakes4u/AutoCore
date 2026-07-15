@@ -214,38 +214,31 @@ public static class NpcInteractHandler
         return _missionGiverCbids != null && _missionGiverCbids.Contains(cbid);
     }
 
+    /// <summary>
+    /// Legacy entry: full UseObject pipeline (use-item, store/facility, mission dialog).
+    /// Prefer <see cref="ObjectUseManager.Handle"/> for new call sites.
+    /// </summary>
     public static void HandleUseObject(TNLConnection conn, UseObjectPacket packet)
+        => ObjectUseManager.Handle(conn, packet);
+
+    /// <summary>
+    /// Mission dialog branch of UseObject. Returns true when a dialog packet was sent.
+    /// Does not handle use-item, stores, or other facilities.
+    /// </summary>
+    internal static bool TryHandleMissionDialog(TNLConnection conn, Character character, UseObjectPacket packet)
     {
-        var character = conn?.CurrentCharacter;
         if (character?.Map == null || packet == null)
-            return;
+            return false;
 
         var targetCoid = packet.Target?.Coid ?? -1;
-        Logger.WriteLog(LogType.Debug,
-            "UseObject: charCoid={0} target={1} objectiveId={2}",
-            character.ObjectId.Coid,
-            targetCoid,
-            packet.ObjectiveId);
-
         if (targetCoid <= 0)
-            return;
+            return false;
 
-        // Personal mission presence: COIDs deleted for this character are not interactable.
         character.MapPresence.EnsureContinent(character.Map.ContinentId);
         if (character.MapPresence.IsSuppressed(targetCoid))
-        {
-            Logger.WriteLog(LogType.Debug,
-                "UseObject: rejected suppressed coid={0} for char={1}",
-                targetCoid,
-                character.ObjectId.Coid);
-            return;
-        }
+            return false;
 
         var playerPos = GetPlayerInteractPosition(character);
-
-        // World-object interact (use-item / use-object objectives) before NPC dialog.
-        if (TryCompleteUseItemObjective(conn, character, targetCoid, packet.ObjectiveId))
-            return;
 
         // Resolve NPC: live creature, spawn-marker → child, or nearby active deliver target.
         // Client 0x206C Create often uses map-local COIDs while server pad NPCs use global
@@ -254,26 +247,14 @@ public static class NpcInteractHandler
             ?? TryResolveNearbyDeliverNpc(character, packet.ObjectiveId, playerPos, targetCoid);
 
         if (npc == null)
-        {
-            Logger.WriteLog(LogType.Debug,
-                "UseObject: no NPC resolved for target={0} objectiveId={1}",
-                targetCoid,
-                packet.ObjectiveId);
-            return;
-        }
+            return false;
 
         if (character.MapPresence.IsSuppressed(npc.ObjectId.Coid))
-        {
-            Logger.WriteLog(LogType.Debug,
-                "UseObject: resolved NPC coid={0} is suppressed for char={1}",
-                npc.ObjectId.Coid,
-                character.ObjectId.Coid);
-            return;
-        }
+            return false;
 
         var npcCbid = npc.CBID;
         if (npcCbid <= 0)
-            return;
+            return false;
 
         var targetPos = GetNpcInteractPosition(npc, character.Map);
         var distXZSq = DistXZSq(playerPos, targetPos);
@@ -295,7 +276,7 @@ public static class NpcInteractHandler
                     playerPos,
                     targetPos,
                     dialogMissions.Count);
-                return;
+                return false;
             }
 
             Logger.WriteLog(LogType.Debug,
@@ -307,14 +288,7 @@ public static class NpcInteractHandler
         }
 
         if (dialogMissions.Count == 0)
-        {
-            Logger.WriteLog(LogType.Debug,
-                "UseObject: no dialog missions for NPC cbid={0} objectiveId={1} activeQuests=[{2}]",
-                npcCbid,
-                packet.ObjectiveId,
-                string.Join(',', character.CurrentQuests.Select(q => q.MissionId)));
-            return;
-        }
+            return false;
 
         // Client often advances objectives (0x206C / local UI) before the server — e.g. patrol
         // done client-side while ActiveObjectiveSequence is still 0. Reconcile from objectiveId
@@ -324,10 +298,11 @@ public static class NpcInteractHandler
         // Re-build after reconcile so deliver-active sequence is reflected if hint advanced it.
         dialogMissions = BuildDialogMissions(character, npcCbid, packet.ObjectiveId);
         if (dialogMissions.Count == 0)
-            return;
+            return false;
 
         PrepareClientTurnInDialog(conn, character, npcCbid, dialogMissions);
         SendNpcMissionDialog(conn, character, npc.ObjectId, npcCbid, dialogMissions);
+        return true;
     }
 
     /// <summary>
@@ -875,16 +850,14 @@ public static class NpcInteractHandler
         if (!MeetsRaceClassRequirements(character, mission))
             return false;
 
-        if (mission.ReqMissionId != null)
+        // Client prereq gate: RequirementsOred non-zero = any listed id; zero = all (AND).
+        // Freelancer/Shields Up use Ored=-1 with four class-report ids (mutually exclusive).
+        if (!MissionWorldPhaseRules.MeetsMissionPrerequisites(
+                mission.ReqMissionId,
+                mission.RequirementsOred,
+                character.CompletedMissionIds))
         {
-            foreach (var reqId in mission.ReqMissionId)
-            {
-                if (reqId <= 0)
-                    continue;
-
-                if (!character.CompletedMissionIds.Contains(reqId))
-                    return false;
-            }
+            return false;
         }
 
         return true;

@@ -126,6 +126,44 @@ public static class MissionWorldPhaseRules
     }
 
     /// <summary>
+    /// Prerequisite mission-id gate matching client offer eligibility.
+    /// <paramref name="requirementsOred"/> non-zero (retail often -1 / XML 1) = any listed
+    /// prereq completed; zero = all listed prereqs completed. Ids ≤ 0 are ignored.
+    /// </summary>
+    public static bool MeetsMissionPrerequisites(
+        IReadOnlyList<int> reqMissionIds,
+        int requirementsOred,
+        ISet<int> completedMissionIds)
+    {
+        if (reqMissionIds == null || reqMissionIds.Count == 0)
+            return true;
+
+        completedMissionIds ??= new HashSet<int>();
+
+        var required = 0;
+        var satisfied = 0;
+        for (var i = 0; i < reqMissionIds.Count; i++)
+        {
+            var reqId = reqMissionIds[i];
+            if (reqId <= 0)
+                continue;
+
+            required++;
+            if (completedMissionIds.Contains(reqId))
+                satisfied++;
+        }
+
+        if (required == 0)
+            return true;
+
+        // Non-zero = OR (Freelancer / Shields Up class-report chain). Zero = AND.
+        if (requirementsOred != 0)
+            return satisfied > 0;
+
+        return satisfied == required;
+    }
+
+    /// <summary>
     /// True when a completed non-repeatable mission with a positive giver NPC used an
     /// alternate-form deliver that is <b>not</b> pad-class (standing-NPC turn-in only).
     /// Used to clear sticky giver suppress without undoing Final Exam pad faces.

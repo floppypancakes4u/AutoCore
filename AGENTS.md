@@ -17,7 +17,7 @@ Agents often work from a **git worktree** (parallel checkout of another branch) 
 Treat the workspace as a worktree (not the primary checkout) if any of these hold:
 
 * `git rev-parse --git-dir` and `git rev-parse --git-common-dir` resolve to **different** paths
-* `.git` is a **file** (points at the main repo’s worktree metadata) rather than a directory
+* `.git` is a **file** (points at the main repo's worktree metadata) rather than a directory
 * The path is under a known worktree root (e.g. `.worktrees/`, `.claude/worktrees/`, or a sibling folder listed by `git worktree list`)
 
 Confirm with `git worktree list` when unsure. Note the current branch and path in your reasoning when live-server steps are involved.
@@ -31,8 +31,8 @@ src/AutoCore.Launcher/bin/Debug/net8.0/AutoCore.Launcher.exe
 ```
 
 * **Unit/integration tests** (`dotnet test` on test projects): no Launcher required; build only the projects under test.
-* **Live server / client repro from a worktree:** you must **build this worktree’s** `AutoCore.Launcher` (or the solution that outputs into that Launcher directory) so the binaries you run match the branch under test. Do not assume the main checkout’s Launcher is the correct build.
-* A running Launcher **locks output DLLs** — stop it before rebuilding that tree’s Launcher/solution output.
+* **Live server / client repro from a worktree:** you must **build this worktree's** `AutoCore.Launcher` (or the solution that outputs into that Launcher directory) so the binaries you run match the branch under test. Do not assume the main checkout's Launcher is the correct build.
+* A running Launcher **locks output DLLs** — stop it before rebuilding that tree's Launcher/solution output.
 
 ### Never start Launcher without explicit approval
 
@@ -41,16 +41,17 @@ Default configs share the same ports and databases across checkouts (e.g. Auth `
 **Rules:**
 
 1. **Do not** start, restart, or stop `AutoCore.Launcher` (or Auth/Global/Sector processes) unless the user **explicitly asks** or **approves** after you ask.
-2. When live verification is needed from a worktree, **ask first**: confirm whether to stop any existing Launcher (often on the main checkout), build this worktree’s Launcher, and start it — or whether the user will run servers themselves.
-3. Prefer **ask → wait for yes** over auto-starting. If the user says to launch (or “start the servers”, “run Launcher”, etc.), then build Launcher in **this** workspace and start only that instance.
+2. When live verification is needed from a worktree, **ask first**: confirm whether to stop any existing Launcher (often on the main checkout), build this worktree's Launcher, and start it — or whether the user will run servers themselves.
+3. Prefer **ask → wait for yes** over auto-starting. If the user says to launch (or "start the servers", "run Launcher", etc.), then build Launcher in **this** workspace and start only that instance.
 4. After work, do not leave an extra Launcher running unless the user wants it; if you started it with approval, offer to stop it when done.
 
 ### Practical sequence (only after approval)
 
 1. Stop any existing `AutoCore.Launcher` (user-approved).
 2. `dotnet build src/AutoCore.Launcher/AutoCore.Launcher.csproj` (or full `src/AutoCore.sln`) **in this worktree**.
-3. Start Launcher **as a background shell task** from this worktree’s output directory (see below).
+3. Start Launcher **as a background shell task** by running `src/AutoCore.Launcher/bin/Debug/net8.0/AutoCore.Launcher.exe` from this worktree’s output directory (see below).
 4. Point the client at this stack; when finished, stop Launcher before switching back to another checkout’s servers.
+
 
 ### How to start Launcher (background task — required)
 
