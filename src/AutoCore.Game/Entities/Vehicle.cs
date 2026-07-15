@@ -64,6 +64,29 @@ public class Vehicle : SimpleObject
     public float WantedTurretDirection { get; set; }
     public byte Firing { get; set; }
     public VehicleMovedFlags VehicleFlags { get; set; }
+
+    /// <summary>
+    /// Float compare epsilon for combat aim wire dirtiness (avoid spam on tiny float noise).
+    /// </summary>
+    private const float CombatAimWireEpsilon = 1e-4f;
+
+    /// <summary>
+    /// Updates <see cref="WantedTurretDirection"/> / <see cref="Firing"/> for observers and dirties
+    /// <see cref="GhostObject.PositionMask"/> so <c>GhostVehicle</c> packs both (client +0x15c + fire bits).
+    /// Call from NPC combat when aiming or firing; also when clearing fire so remotes stop muzzle FX.
+    /// </summary>
+    internal void SetCombatWeaponWire(float wantedTurretDirection, byte firing)
+    {
+        var aim = VehicleTurretAim.NormalizeToTwoPi(wantedTurretDirection);
+        var aimChanged = MathF.Abs(WantedTurretDirection - aim) > CombatAimWireEpsilon;
+        var fireChanged = Firing != firing;
+
+        WantedTurretDirection = aim;
+        Firing = firing;
+
+        if (aimChanged || fireChanged)
+            Ghost?.SetMaskBits(GhostObject.PositionMask);
+    }
     public InventoryManager Inventory => Owner?.GetAsCharacter()?.Inventory;
 
     public int CurrentShield { get; private set; }
@@ -803,6 +826,7 @@ public class Vehicle : SimpleObject
     /// <summary>
     /// True when <paramref name="item"/> may occupy <paramref name="slot"/> (runtime type + clonebase).
     /// Clonebase null is allowed (unit tests / pre-load); wrong clonebase type is not.
+    /// Hardpoint Flags still apply: front-only weapons cannot occupy the turret slot.
     /// </summary>
     public static bool IsCompatibleWithEquipmentSlot(
         VehicleEquipmentSlot slot,

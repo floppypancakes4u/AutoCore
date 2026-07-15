@@ -142,6 +142,156 @@ public class VehicleEquipmentTests
         Assert.AreSame(weapon, vehicle.WeaponFront);
     }
 
+    /// <summary>
+    /// Retail sometimes lists a front-only CBID under CBIDWeaponTurret. Flags are authoritative:
+    /// resolve to WeaponFront, never force the turret hardpoint.
+    /// </summary>
+    [TestMethod]
+    public void ResolveTemplateEquipSlot_FrontOnlyWeapon_FromTurretColumn_MapsToFront()
+    {
+        var weapon = new Weapon();
+        weapon.SetCoid(306, true);
+        var clone = (CloneBaseWeapon)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseWeapon));
+        clone.CloneBaseSpecific = new CloneBaseSpecific
+        {
+            Type = (int)CloneBaseObjectType.Weapon,
+            CloneBaseId = 13952,
+        };
+        clone.WeaponSpecific = new WeaponSpecific
+        {
+            Flags = VehicleEquipmentSlotResolver.WeaponFlagFront | 0x01,
+        };
+        weapon.AssignCloneBaseForTests(clone);
+
+        var resolved = SpawnPoint.ResolveTemplateEquipSlot(VehicleEquipmentSlot.WeaponTurret, weapon);
+        Assert.AreEqual(VehicleEquipmentSlot.WeaponFront, resolved);
+
+        var vehicle = new Vehicle();
+        Assert.IsFalse(vehicle.TryEquipItem(VehicleEquipmentSlot.WeaponTurret, weapon, out _));
+        Assert.IsNull(vehicle.WeaponTurret);
+        Assert.IsTrue(vehicle.TryEquipItem(resolved, weapon, out _));
+        Assert.AreSame(weapon, vehicle.WeaponFront);
+    }
+
+    [TestMethod]
+    public void ResolveTemplateEquipSlot_TrueTurretWeapon_StaysOnTurretColumn()
+    {
+        var weapon = new Weapon();
+        weapon.SetCoid(308, true);
+        var clone = (CloneBaseWeapon)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseWeapon));
+        clone.CloneBaseSpecific = new CloneBaseSpecific
+        {
+            Type = (int)CloneBaseObjectType.Weapon,
+            CloneBaseId = 2195,
+        };
+        clone.WeaponSpecific = new WeaponSpecific
+        {
+            Flags = VehicleEquipmentSlotResolver.WeaponFlagTurret,
+        };
+        weapon.AssignCloneBaseForTests(clone);
+
+        var resolved = SpawnPoint.ResolveTemplateEquipSlot(VehicleEquipmentSlot.WeaponTurret, weapon);
+        Assert.AreEqual(VehicleEquipmentSlot.WeaponTurret, resolved);
+    }
+
+    [TestMethod]
+    public void ResolveTemplateEquipSlot_NonWeapon_KeepsTemplateColumn()
+    {
+        var armor = new Armor();
+        armor.SetCoid(309, true);
+        var resolved = SpawnPoint.ResolveTemplateEquipSlot(VehicleEquipmentSlot.Armor, armor);
+        Assert.AreEqual(VehicleEquipmentSlot.Armor, resolved);
+    }
+
+    [TestMethod]
+    public void ResolveTemplateEquipSlot_WeaponWithoutCloneBase_KeepsTemplateColumn()
+    {
+        var weapon = new Weapon();
+        weapon.SetCoid(310, true);
+        // No AssignCloneBaseForTests → CloneBaseWeapon null.
+        var resolved = SpawnPoint.ResolveTemplateEquipSlot(VehicleEquipmentSlot.WeaponTurret, weapon);
+        Assert.AreEqual(VehicleEquipmentSlot.WeaponTurret, resolved);
+    }
+
+    [TestMethod]
+    public void ResolveTemplateEquipSlot_RearWeapon_FromTurretColumn_MapsToRear()
+    {
+        var weapon = new Weapon();
+        weapon.SetCoid(311, true);
+        var clone = (CloneBaseWeapon)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseWeapon));
+        clone.CloneBaseSpecific = new CloneBaseSpecific
+        {
+            Type = (int)CloneBaseObjectType.Weapon,
+            CloneBaseId = 9002,
+        };
+        clone.WeaponSpecific = new WeaponSpecific
+        {
+            Flags = VehicleEquipmentSlotResolver.WeaponFlagRear,
+        };
+        weapon.AssignCloneBaseForTests(clone);
+
+        var resolved = SpawnPoint.ResolveTemplateEquipSlot(VehicleEquipmentSlot.WeaponTurret, weapon);
+        Assert.AreEqual(VehicleEquipmentSlot.WeaponRear, resolved);
+    }
+
+    [TestMethod]
+    public void TryApplyTemplateEquip_FrontOnlyFromTurretColumn_EquipsFront()
+    {
+        var vehicle = new Vehicle();
+        var weapon = MakeWeapon(320, flags: VehicleEquipmentSlotResolver.WeaponFlagFront);
+
+        Assert.IsTrue(SpawnPoint.TryApplyTemplateEquip(
+            vehicle, VehicleEquipmentSlot.WeaponTurret, weapon, out var slot, out var skipped));
+        Assert.IsFalse(skipped);
+        Assert.AreEqual(VehicleEquipmentSlot.WeaponFront, slot);
+        Assert.AreSame(weapon, vehicle.WeaponFront);
+        Assert.IsNull(vehicle.WeaponTurret);
+    }
+
+    [TestMethod]
+    public void TryApplyTemplateEquip_RemapToOccupiedFront_SkipsWithoutOverwrite()
+    {
+        var vehicle = new Vehicle();
+        var existing = MakeWeapon(321, flags: VehicleEquipmentSlotResolver.WeaponFlagFront);
+        Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.WeaponFront, existing, out _));
+
+        var second = MakeWeapon(322, flags: VehicleEquipmentSlotResolver.WeaponFlagFront);
+        Assert.IsFalse(SpawnPoint.TryApplyTemplateEquip(
+            vehicle, VehicleEquipmentSlot.WeaponTurret, second, out var slot, out var skipped));
+        Assert.IsTrue(skipped, "must skip when remapped hardpoint already filled");
+        Assert.AreEqual(VehicleEquipmentSlot.WeaponFront, slot);
+        Assert.AreSame(existing, vehicle.WeaponFront, "existing front weapon must not be overwritten");
+        Assert.IsNull(vehicle.WeaponTurret);
+    }
+
+    [TestMethod]
+    public void TryApplyTemplateEquip_TypeMismatch_FailsNotSkipped()
+    {
+        var vehicle = new Vehicle();
+        var armor = new Armor();
+        armor.SetCoid(323, true);
+
+        Assert.IsFalse(SpawnPoint.TryApplyTemplateEquip(
+            vehicle, VehicleEquipmentSlot.WeaponTurret, armor, out _, out var skipped));
+        Assert.IsFalse(skipped, "type mismatch is a hard fail, not an occupied-slot skip");
+        Assert.IsNull(vehicle.WeaponTurret);
+    }
+
+    private static Weapon MakeWeapon(long coid, byte flags)
+    {
+        var weapon = new Weapon();
+        weapon.SetCoid(coid, true);
+        var clone = (CloneBaseWeapon)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseWeapon));
+        clone.CloneBaseSpecific = new CloneBaseSpecific
+        {
+            Type = (int)CloneBaseObjectType.Weapon,
+            CloneBaseId = (int)(9000 + coid),
+        };
+        clone.WeaponSpecific = new WeaponSpecific { Flags = flags };
+        weapon.AssignCloneBaseForTests(clone);
+        return weapon;
+    }
+
     [TestMethod]
     public void TryEquipItem_UnspecifiedWeapon_AllowedOnMelee_TemplateStyle()
     {

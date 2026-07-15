@@ -134,6 +134,9 @@ public static class NpcCombatAi
         var desired = rangeMax > 0f ? rangeMax * EngageCloseFactor : 0f;
         var closed = entity.Position.Dist(target.Position) <= desired;
 
+        // Track turret toward the target while closing (no fire until Combat / in range).
+        UpdateVehicleCombatAim(entity, target, firing: 0);
+
         CombatMove(entity, npcAi, target.Position, atRange: closed, dt);
 
         // After the profile's flee/engage timer, commit to Combat (where flee evaluation runs).
@@ -159,20 +162,37 @@ public static class NpcCombatAi
         var rangeMax = WeaponRangeMax(weapon);
         var inRange = rangeMax <= 0f || entity.Position.Dist(target.Position) <= rangeMax;
 
-        // Fire when the target is in weapon range — independent of movement (client parity: FireWeapons
-        // runs every tick with a may-fire flag, not gated on whether the NPC also pursued this tick).
+        // Aim every combat tick so remotes see turrets track (WantedTurretDirection on PositionMask).
+        // Fire when in range — independent of movement (client FireWeapons always runs with may-fire).
         if (entity is Vehicle vehicle && weapon != null && inRange)
         {
             vehicle.SetTargetObject(target);
-            vehicle.Firing = bit;
+            UpdateVehicleCombatAim(vehicle, target, firing: bit);
             vehicle.ProcessCombatIfFiring();
         }
         else
         {
-            CeaseFire(entity);
+            // Out of range / no weapon: still aim at the target; clear fire bits for observers.
+            UpdateVehicleCombatAim(entity, target, firing: 0);
         }
 
         CombatMove(entity, npcAi, target.Position, atRange: inRange, dt);
+    }
+
+    /// <summary>
+    /// Publishes chassis-relative turret yaw (+ optional fire mask) on the vehicle ghost pose.
+    /// No-op for non-vehicles.
+    /// </summary>
+    private static void UpdateVehicleCombatAim(ClonedObjectBase entity, ClonedObjectBase target, byte firing)
+    {
+        if (entity is not Vehicle vehicle || target == null)
+            return;
+
+        var wanted = VehicleTurretAim.ComputeWantedDirection(
+            vehicle.Position,
+            vehicle.Rotation,
+            target.Position);
+        vehicle.SetCombatWeaponWire(wanted, firing);
     }
 
     /// <summary>
@@ -276,8 +296,9 @@ public static class NpcCombatAi
 
     private static void CeaseFire(ClonedObjectBase entity)
     {
+        // Clear fire and aim so remotes stop muzzle FX and reset turret; dirties PositionMask.
         if (entity is Vehicle vehicle)
-            vehicle.Firing = 0;
+            vehicle.SetCombatWeaponWire(0f, 0);
     }
 
     // ----- flee (val1–val4) -----------------------------------------------------------------

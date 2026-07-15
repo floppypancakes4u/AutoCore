@@ -169,6 +169,172 @@ public class NpcCombatAiTests
     }
 
     [TestMethod]
+    public void Combat_InRange_SetsWantedTurretDirection_AndDirtiesPositionMask()
+    {
+        var map = CreateFieldMap();
+        var connection = new TNLConnection();
+        connection.SetGhostFrom(true);
+        connection.SetGhostTo(false);
+
+        // Face +Z (identity rot); target to +X → relative aim ≈ π/2.
+        var npc = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: 3, visionRange: 60f, speed: 10f);
+        npc.Rotation = new Quaternion(0f, 0f, 0f, 1f);
+        EquipFrontWeapon(npc, rangeMax: 50f);
+        npc.CreateGhost();
+        connection.ActivateGhosting();
+        connection.ObjectLocalScopeAlways(npc.Ghost);
+        var ghostInfo = npc.Ghost.GetFirstObjectRef();
+        Assert.IsNotNull(ghostInfo);
+
+        var (player, _) = PlacePlayerVehicle(map, new Vector3(40f, 0f, 0f), faction: 0);
+        player.ApplyTemplateBaseHp(100_000);
+
+        npc.SetTargetObject(player);
+        npc.NpcAi.CombatState = HBAICombatState.Combat;
+        ghostInfo.UpdateMask = 0;
+
+        NpcCombatAi.Tick(map, npc, nowMs: 100_000, dt: 0.1f);
+        NetObject.CollapseDirtyList();
+
+        Assert.AreEqual(MathF.PI * 0.5f, npc.WantedTurretDirection, 1e-3f,
+            "turret must aim right toward a +X target while chassis faces +Z");
+        Assert.AreEqual((byte)1, npc.Firing);
+        Assert.AreEqual(GhostObject.PositionMask, ghostInfo.UpdateMask & GhostObject.PositionMask,
+            "aim/fire change must dirty PositionMask so WantedTurretDirection ships on the ghost");
+    }
+
+    [TestMethod]
+    public void Combat_OutOfRange_TracksTurret_ClearsFiring_DirtiesPositionMask()
+    {
+        var map = CreateFieldMap();
+        var connection = new TNLConnection();
+        connection.SetGhostFrom(true);
+        connection.SetGhostTo(false);
+
+        var npc = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: 3, visionRange: 200f, speed: 10f);
+        npc.Rotation = new Quaternion(0f, 0f, 0f, 1f);
+        EquipFrontWeapon(npc, rangeMax: 10f);
+        npc.CreateGhost();
+        connection.ActivateGhosting();
+        connection.ObjectLocalScopeAlways(npc.Ghost);
+        var ghostInfo = npc.Ghost.GetFirstObjectRef();
+        Assert.IsNotNull(ghostInfo);
+
+        // Beyond weapon range (10) but within vision; on +X for a clear π/2 aim.
+        var (player, _) = PlacePlayerVehicle(map, new Vector3(40f, 0f, 0f), faction: 0);
+
+        npc.SetTargetObject(player);
+        npc.NpcAi.CombatState = HBAICombatState.Combat;
+        npc.Firing = 1; // was firing; going out of range must clear
+        ghostInfo.UpdateMask = 0;
+
+        NpcCombatAi.Tick(map, npc, nowMs: 100_000, dt: 0.1f);
+        NetObject.CollapseDirtyList();
+
+        Assert.AreEqual((byte)0, npc.Firing, "out of range must not fire");
+        Assert.AreEqual(MathF.PI * 0.5f, npc.WantedTurretDirection, 1e-3f,
+            "out of range must still track the turret toward the target");
+        Assert.AreEqual(GhostObject.PositionMask, ghostInfo.UpdateMask & GhostObject.PositionMask,
+            "aim update without movement must still dirty PositionMask");
+    }
+
+    [TestMethod]
+    public void Combat_TurretWeaponOnly_SetsFiringBit2_AndAims()
+    {
+        var map = CreateFieldMap();
+        var npc = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: 3, visionRange: 60f);
+        npc.Rotation = new Quaternion(0f, 0f, 0f, 1f);
+        EquipTurretWeapon(npc, rangeMax: 50f);
+        npc.CreateGhost();
+        var (player, _) = PlacePlayerVehicle(map, new Vector3(0f, 0f, 20f), faction: 0);
+        player.ApplyTemplateBaseHp(100_000);
+
+        npc.SetTargetObject(player);
+        npc.NpcAi.CombatState = HBAICombatState.Combat;
+
+        NpcCombatAi.Tick(map, npc, nowMs: 100_000, dt: 0.1f);
+
+        Assert.AreEqual((byte)2, npc.Firing, "turret-only loadout uses firing bit 2");
+        Assert.AreEqual(0f, npc.WantedTurretDirection, 1e-3f, "target dead ahead → relative aim 0");
+    }
+
+    [TestMethod]
+    public void Combat_Leash_ClearsFiringAndTurretAim()
+    {
+        var map = CreateFieldMap();
+        var npc = PlaceNpcVehicle(map, new Vector3(200f, 0f, 0f), driverFaction: 3, visionRange: 60f, speed: 10f);
+        EquipFrontWeapon(npc, rangeMax: 50f);
+        npc.NpcAi.HomePosition = new Vector3(0f, 0f, 0f);
+        var (player, _) = PlacePlayerVehicle(map, new Vector3(205f, 0f, 0f), faction: 0);
+
+        npc.SetTargetObject(player);
+        npc.NpcAi.CombatState = HBAICombatState.Combat;
+        npc.Firing = 1;
+        npc.WantedTurretDirection = 1.5f;
+
+        NpcCombatAi.Tick(map, npc, nowMs: 100_000, dt: 0.1f);
+
+        Assert.IsNull(npc.Target);
+        Assert.AreEqual((byte)0, npc.Firing);
+        Assert.AreEqual(0f, npc.WantedTurretDirection, 1e-4f, "disengage must clear wanted turret aim");
+    }
+
+    [TestMethod]
+    public void Engage_AimsAtTarget_WithoutFiring()
+    {
+        var map = CreateFieldMap();
+        var npc = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: 3, visionRange: 60f, engageTimerMs: 8000f);
+        npc.Rotation = new Quaternion(0f, 0f, 0f, 1f);
+        EquipFrontWeapon(npc, rangeMax: 50f);
+        var (player, _) = PlacePlayerVehicle(map, new Vector3(40f, 0f, 0f), faction: 0);
+
+        npc.SetTargetObject(player);
+        npc.NpcAi.CombatState = HBAICombatState.Engage;
+        npc.NpcAi.EngageStartedMs = 100_000L; // timer not elapsed
+
+        NpcCombatAi.Tick(map, npc, nowMs: 100_000, dt: 0.1f);
+
+        Assert.AreEqual(HBAICombatState.Engage, npc.NpcAi.CombatState);
+        Assert.AreEqual((byte)0, npc.Firing, "engage tracks without firing");
+        Assert.AreEqual(MathF.PI * 0.5f, npc.WantedTurretDirection, 1e-3f, "engage still aims turret");
+    }
+
+    [TestMethod]
+    public void SetCombatWeaponWire_SameValues_DoesNotDirtyPositionMask()
+    {
+        var map = CreateFieldMap();
+        var connection = new TNLConnection();
+        connection.SetGhostFrom(true);
+        connection.SetGhostTo(false);
+
+        var npc = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: 3, visionRange: 60f);
+        npc.CreateGhost();
+        connection.ActivateGhosting();
+        connection.ObjectLocalScopeAlways(npc.Ghost);
+        var ghostInfo = npc.Ghost.GetFirstObjectRef();
+        Assert.IsNotNull(ghostInfo);
+
+        npc.SetCombatWeaponWire(1.0f, 1);
+        NetObject.CollapseDirtyList();
+        ghostInfo.UpdateMask = 0;
+
+        npc.SetCombatWeaponWire(1.0f, 1); // identical → no dirty
+        NetObject.CollapseDirtyList();
+
+        Assert.AreEqual(0ul, ghostInfo.UpdateMask & GhostObject.PositionMask,
+            "unchanged aim/fire must not re-dirty PositionMask");
+    }
+
+    [TestMethod]
+    public void SetCombatWeaponWire_WithoutGhost_DoesNotThrow()
+    {
+        var npc = new Vehicle();
+        npc.SetCombatWeaponWire(2.5f, 2);
+        Assert.AreEqual(2.5f, npc.WantedTurretDirection, 1e-4f);
+        Assert.AreEqual((byte)2, npc.Firing);
+    }
+
+    [TestMethod]
     public void Combat_BeyondPatrolDistance_LeashesHome_ClearsTargetAndFiring()
     {
         var map = CreateFieldMap();
@@ -315,6 +481,12 @@ public class NpcCombatAiTests
     }
 
     private static void EquipFrontWeapon(Vehicle vehicle, float rangeMax)
+        => EquipWeapon(vehicle, VehicleEquipmentSlot.WeaponFront, rangeMax, coid: 9_999_001);
+
+    private static void EquipTurretWeapon(Vehicle vehicle, float rangeMax)
+        => EquipWeapon(vehicle, VehicleEquipmentSlot.WeaponTurret, rangeMax, coid: 9_999_002);
+
+    private static void EquipWeapon(Vehicle vehicle, VehicleEquipmentSlot slot, float rangeMax, long coid)
     {
         var spec = new WeaponSpecific
         {
@@ -333,10 +505,10 @@ public class NpcCombatAiTests
         cloneBase.CloneBaseSpecific = new CloneBaseSpecific { CloneBaseId = WeaponCbid, Type = (int)CloneBaseObjectType.Weapon };
 
         var weapon = new Weapon();
-        weapon.SetCoid(9_999_001, false);
+        weapon.SetCoid(coid, false);
         typeof(ClonedObjectBase).GetProperty(nameof(ClonedObjectBase.CloneBaseObject))!
             .SetValue(weapon, cloneBase);
 
-        vehicle.TryEquipItem(VehicleEquipmentSlot.WeaponFront, weapon, out _);
+        Assert.IsTrue(vehicle.TryEquipItem(slot, weapon, out _), $"failed to equip {slot}");
     }
 }
