@@ -4,6 +4,7 @@ using AutoCore.Game.Constants;
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.CloneBases.Specifics;
 using AutoCore.Game.EntityTemplates;
+using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
 using AutoCore.Game.Npc;
@@ -728,11 +729,58 @@ public class SpawnPoint : ClonedObjectBase
         item.LoadCloneBase(cbid);
         item.SetupCBFields();
 
-        if (!vehicle.TryEquipItem(slot, item, out _))
+        // Some retail rows list a front-only CBID under CBIDWeaponTurret (e.g. Template 196 /
+        // CBID 13952 Flags=0x03). Hardpoint Flags are authoritative: equip the legal mount, not the
+        // wrong column. Never force a front-only weapon onto the turret hardpoint.
+        if (!TryApplyTemplateEquip(vehicle, slot, item, out var equipSlot, out var skippedOccupied))
         {
-            Logger.WriteLog(LogType.Error,
-                $"SpawnPoint {Template.COID}: template vehicle (TemplateId={vehicle.TemplateId}) failed to equip slot={slot} itemCbid={cbid}");
+            if (!skippedOccupied)
+            {
+                Logger.WriteLog(LogType.Error,
+                    $"SpawnPoint {Template.COID}: template vehicle (TemplateId={vehicle.TemplateId}) failed to equip slot={equipSlot} (templateCol={slot}) itemCbid={cbid}");
+            }
         }
+    }
+
+    /// <summary>
+    /// Maps a template equipment column to a hardpoint the item may legally occupy.
+    /// Weapons use <see cref="VehicleEquipmentSlotResolver"/> when the column mismatches Flags.
+    /// </summary>
+    internal static VehicleEquipmentSlot ResolveTemplateEquipSlot(VehicleEquipmentSlot templateColumn, SimpleObject item)
+    {
+        if (item is not Weapon weapon || weapon.CloneBaseWeapon == null)
+            return templateColumn;
+
+        if (Vehicle.IsCompatibleWithEquipmentSlot(templateColumn, item, out _))
+            return templateColumn;
+
+        // dropPositionX=0 is only a fallback when Flags are empty; prefer Flags bits first.
+        if (VehicleEquipmentSlotResolver.TryResolveWeaponSlot(weapon.CloneBaseWeapon, dropPositionX: 0, out var resolved))
+            return resolved;
+
+        return templateColumn;
+    }
+
+    /// <summary>
+    /// Applies template-column equip rules: remap by hardpoint Flags, skip overwrite of occupied
+    /// remapped slots. Returns false when equip failed or was skipped because remapped target full.
+    /// </summary>
+    internal static bool TryApplyTemplateEquip(
+        Vehicle vehicle,
+        VehicleEquipmentSlot templateColumn,
+        SimpleObject item,
+        out VehicleEquipmentSlot equipSlot,
+        out bool skippedOccupied)
+    {
+        skippedOccupied = false;
+        equipSlot = ResolveTemplateEquipSlot(templateColumn, item);
+        if (equipSlot != templateColumn && vehicle.GetEquippedItem(equipSlot) != null)
+        {
+            skippedOccupied = true;
+            return false;
+        }
+
+        return vehicle.TryEquipItem(equipSlot, item, out _);
     }
 
     /// <summary>
