@@ -5,47 +5,80 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AutoCore Chromium Overlay</title>
   <style>
-    html, body, * {
-      pointer-events: none !important;
-      user-select: none !important;
-    }
+    html, body, * { pointer-events: none !important; user-select: none !important; }
     html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
+      margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
       background: transparent !important;
       font-family: Segoe UI, system-ui, sans-serif;
     }
-    .wrap {
-      padding: 24px 32px;
-      background: transparent;
-    }
+    .wrap { padding: 20px 28px; background: transparent; max-width: 420px; }
     h1 {
-      margin: 0;
-      font-size: 72px;
-      line-height: 1.1;
+      margin: 0 0 12px 0;
+      font-size: 48px;
+      line-height: 1.05;
       font-weight: 700;
-      color: #ffffff;
-      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85), 0 0 2px #000;
-      background: transparent;
+      color: #fff;
+      text-shadow: 0 2px 10px rgba(0,0,0,0.9), 0 0 2px #000;
+    }
+    .bars { display: flex; flex-direction: column; gap: 10px; }
+    .row { display: flex; flex-direction: column; gap: 3px; }
+    .label {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      text-shadow: 0 1px 4px #000;
+    }
+    .label.hp { color: #7CFF9A; }
+    .label.power { color: #7EC8FF; }
+    .label.shield { color: #C9A7FF; }
+    .track {
+      height: 18px;
+      border-radius: 4px;
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.25);
+      overflow: hidden;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.6);
+    }
+    .fill { height: 100%; width: 0%; transition: width 0.12s linear; }
+    .fill.hp { background: linear-gradient(90deg, #1f8f45, #5dff8a); }
+    .fill.power { background: linear-gradient(90deg, #1a6fb5, #6ec8ff); }
+    .fill.shield { background: linear-gradient(90deg, #6b3fb8, #d0a8ff); }
+    .nums {
+      font-size: 14px;
+      color: #fff;
+      text-shadow: 0 1px 4px #000;
+      font-variant-numeric: tabular-nums;
     }
     #state {
-      margin-top: 16px;
-      font-size: 14px;
+      margin-top: 10px;
+      font-size: 11px;
       color: #b8f0c8;
-      text-shadow: 0 1px 4px #000;
+      text-shadow: 0 1px 3px #000;
       white-space: pre-wrap;
-      max-width: 80vw;
-      background: transparent;
+      opacity: 0.85;
     }
+    .muted { opacity: 0.55; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>Hello World</h1>
-    <pre id="state">waiting for bridge…</pre>
+    <div class="bars">
+      <div class="row">
+        <div class="label hp">HP <span class="nums" id="hpNums">—/—</span></div>
+        <div class="track"><div class="fill hp" id="hpFill"></div></div>
+      </div>
+      <div class="row">
+        <div class="label power">Power <span class="nums" id="powerNums">—/—</span></div>
+        <div class="track"><div class="fill power" id="powerFill"></div></div>
+      </div>
+      <div class="row">
+        <div class="label shield">Shield <span class="nums" id="shieldNums">—/—</span></div>
+        <div class="track"><div class="fill shield" id="shieldFill"></div></div>
+      </div>
+    </div>
+    <pre id="state" class="muted">waiting for bridge…</pre>
   </div>
   <script src="app.js"></script>
 </body>

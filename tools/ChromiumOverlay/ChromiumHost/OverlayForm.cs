@@ -14,7 +14,7 @@ namespace ChromiumOverlay;
 internal sealed class OverlayForm : Form
 {
     private readonly int _gamePid;
-    private readonly bool _enableCef;
+    private bool _enableCef;
     private readonly ChromiumWebBrowser? _browser;
     private readonly System.Windows.Forms.Timer _trackTimer;
     private readonly System.Windows.Forms.Timer _stateTimer;
@@ -219,16 +219,19 @@ internal sealed class OverlayForm : Form
         {
             g.Clear(Color.Transparent);
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-            using var font = new Font("Segoe UI", 72, FontStyle.Bold, GraphicsUnit.Pixel);
-            using var small = new Font("Consolas", 16, FontStyle.Regular, GraphicsUnit.Pixel);
+            using var font = new Font("Segoe UI", 56, FontStyle.Bold, GraphicsUnit.Pixel);
+            using var barFont = new Font("Segoe UI", 18, FontStyle.Bold, GraphicsUnit.Pixel);
+            using var small = new Font("Consolas", 14, FontStyle.Regular, GraphicsUnit.Pixel);
             using var white = new SolidBrush(Color.White);
-            using var green = new SolidBrush(Color.FromArgb(255, 160, 255, 180));
+            using var green = new SolidBrush(Color.FromArgb(255, 120, 255, 150));
+            using var blue = new SolidBrush(Color.FromArgb(255, 120, 200, 255));
             using var shadow = new SolidBrush(Color.FromArgb(220, 0, 0, 0));
-            g.DrawString("Hello World", font, shadow, 28, 28);
-            g.DrawString("Hello World", font, white, 24, 24);
-            g.DrawString(_statusLine, small, green, 28, 110);
+            g.DrawString("Hello World", font, shadow, 26, 22);
+            g.DrawString("Hello World", font, white, 24, 20);
+            g.DrawString(_statusLine, barFont, shadow, 29, 91);
+            g.DrawString(_statusLine, barFont, green, 28, 90);
             var mode = _enableCef ? "CEF+GDI" : "GDI-only (CEF init failed)";
-            g.DrawString(mode, small, green, 28, 132);
+            g.DrawString(mode, small, blue, 28, 150);
         }
         PresentBitmap(bmp);
     }
@@ -467,7 +470,21 @@ internal sealed class OverlayForm : Form
             if (!_channel.TryReadJson(out var json))
                 return;
             _lastSeq = seq;
-            _statusLine = json.Length > 120 ? json[..120] + "…" : json;
+            if (!PlayerCombatPools.TryParseJson(json, out var pools))
+            {
+                _statusLine = "waiting for bridge…";
+            }
+            else if (pools.HasVehicle)
+            {
+                _statusLine =
+                    $"HP {Fmt(pools.Hp, pools.MaxHp)}  " +
+                    $"PWR {Fmt(pools.Power, pools.MaxPower)}  " +
+                    $"SHD {Fmt(pools.Shield, pools.MaxShield)}";
+            }
+            else
+            {
+                _statusLine = "no vehicle — enter world";
+            }
 
             if (_browser is { IsBrowserInitialized: true })
                 _ = _browser.EvaluateScriptAsync($"window.__applyGameState({json});");
@@ -487,6 +504,24 @@ internal sealed class OverlayForm : Form
             try { return GameStateChannel.Create(); }
             catch { return null; }
         }
+    }
+
+    private static string Fmt(int cur, int max)
+    {
+        if (cur < 0)
+            return "—/—";
+        if (max < 0)
+            return $"{cur}/—";
+        return $"{cur}/{max}";
+    }
+
+    private static void DrawPoolLine(
+        Graphics g, Font font, Brush brush, Brush shadow, float x, float y, string label, string status)
+    {
+        // status is like "HP a/b  PWR c/d  SHD e/f" when vehicle is present.
+        g.DrawString(status, font, shadow, x + 1, y + 1);
+        g.DrawString(status, font, brush, x, y);
+        _ = label;
     }
 
     private static IntPtr FindMainWindow(int pid)

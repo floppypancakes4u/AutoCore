@@ -107,8 +107,17 @@ If the game is up but you see no overlay:
    ```
    Then restart the game (windowed 1024×768) and re-run the launcher.
 
+## Player combat pools (HP / Power / Shield)
+
+Bridge reads the local player vehicle (in-process) and publishes:
+
+```json
+{"hasVehicle":true,"hp":80,"maxHp":100,"power":40,"maxPower":50,"shield":20,"maxShield":30,...}
+```
+
+Offsets (bak client / DevTool): shield `+0x144/+0x148`, power `+0x12C/+0x12E` (int16), HP via vtable `+0x248/+0x240` (SEH-guarded). Values appear after you are **in-world on a vehicle**.
+
 ## Extending (game → CEF)
 
-1. Add MinHook detours in `ChromiumBridge.cpp`
-2. `PublishJson` with live fields
-3. Host already pushes JSON into `window.__applyGameState`
+1. Extend the publisher JSON in `ChromiumBridge.cpp`
+2. Host pushes into `window.__applyGameState` / GDI status line
