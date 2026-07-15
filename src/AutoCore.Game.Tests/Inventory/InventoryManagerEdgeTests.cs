@@ -37,12 +37,12 @@ public class InventoryManagerEdgeTests
     }
 
     [TestMethod]
-    public void LoadItems_FiltersInvalidSlotsAndNullEntries()
+    public void LoadItems_RepacksOutOfRangeOriginsAndSkipsNull()
     {
         var inventory = new InventoryManager();
         inventory.SetCapacity(4, 1);
 
-        inventory.LoadItems(new CharacterInventoryItem[]
+        var changed = inventory.LoadItems(new CharacterInventoryItem[]
         {
             null,
             new CharacterInventoryItem(1, CloneBaseObjectType.Item, "Valid", 100, 0, 0, 1),
@@ -50,8 +50,14 @@ public class InventoryManagerEdgeTests
             new CharacterInventoryItem(3, CloneBaseObjectType.Item, "InvalidY", 102, 0, 2, 1),
         });
 
-        Assert.AreEqual(1, inventory.Items.Count);
-        Assert.AreEqual(100, inventory.FindByCoid(100).Coid);
+        Assert.IsTrue(changed);
+        Assert.AreEqual(3, inventory.Items.Count);
+        Assert.IsNotNull(inventory.FindByCoid(100));
+        Assert.IsNotNull(inventory.FindByCoid(101));
+        Assert.IsNotNull(inventory.FindByCoid(102));
+        // Out-of-range origins are first-fit reassigned into the 4×1 grid.
+        Assert.IsTrue(inventory.FindByCoid(101).InventoryPositionX < 4);
+        Assert.IsTrue(inventory.FindByCoid(102).InventoryPositionY < 1);
     }
 
     [TestMethod]
@@ -150,22 +156,26 @@ public class InventoryManagerEdgeTests
     }
 
     [TestMethod]
-    public void LoadItems_SkipsDuplicateSlotEntries()
+    public void LoadItems_RepacksDuplicateSlotOrigins()
     {
         var inventory = new InventoryManager();
         inventory.SetCapacity(4, 1);
 
-        inventory.LoadItems(new CharacterInventoryItem[]
+        var changed = inventory.LoadItems(new CharacterInventoryItem[]
         {
             new(1, CloneBaseObjectType.Item, "First", 100, 0, 0, 1),
             new(2, CloneBaseObjectType.Item, "DuplicateSlot", 101, 0, 0, 1),
             new(3, CloneBaseObjectType.Item, "Second", 102, 1, 0, 1),
         });
 
-        Assert.AreEqual(2, inventory.Items.Count);
-        Assert.AreEqual(100, inventory.FindByCoid(100).Coid);
-        Assert.AreEqual(102, inventory.FindByCoid(102).Coid);
-        Assert.IsTrue(inventory.TryGetFirstFreeCargoSlot(out _, out _));
+        Assert.IsTrue(changed);
+        Assert.AreEqual(3, inventory.Items.Count);
+        Assert.IsNotNull(inventory.FindByCoid(100));
+        Assert.IsNotNull(inventory.FindByCoid(101));
+        Assert.IsNotNull(inventory.FindByCoid(102));
+        // No two items share the same origin after re-pack.
+        var origins = inventory.Items.Select(i => (i.InventoryPositionX, i.InventoryPositionY)).ToHashSet();
+        Assert.AreEqual(3, origins.Count);
     }
 
     [TestMethod]

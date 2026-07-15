@@ -148,7 +148,12 @@ public class InventoryAcquisitionStackTests
     {
         var clone = (CloneBaseObject)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseObject));
         clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.Item, CloneBaseId = cbid };
-        clone.SimpleObjectSpecific = new SimpleObjectSpecific { StackSize = stackSize };
+        clone.SimpleObjectSpecific = new SimpleObjectSpecific
+        {
+            StackSize = stackSize,
+            InvSizeX = 1,
+            InvSizeY = 1
+        };
         return clone;
     }
 

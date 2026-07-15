@@ -77,7 +77,7 @@ public class InventoryManagerTests
     }
 
     [TestMethod]
-    public void CreateItemObjectPackets_SkipsUnknownCatalogEntriesAndFailedCreates()
+    public void CreateItemObjectPackets_UsesFallbackWhenTypedCreateFails()
     {
         var inventory = new InventoryManager();
         inventory.TryAdd(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "Known", 1001, 0, 0, 1));
@@ -87,7 +87,8 @@ public class InventoryManagerTests
             new InventoryCatalog(() => new[] { new InventoryCatalogEntry(10, CloneBaseObjectType.Item, "Known") }),
             new CatalogAwareCreator());
 
-        Assert.AreEqual(1, packets.Count);
+        // Known uses creator; unknown falls back to minimal create so login does not drop cargo.
+        Assert.AreEqual(2, packets.Count);
     }
 
     private sealed class CatalogAwareCreator : IInventoryItemCreator

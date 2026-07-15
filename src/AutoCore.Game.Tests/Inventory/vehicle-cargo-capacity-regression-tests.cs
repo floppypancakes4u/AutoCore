@@ -453,12 +453,12 @@ public class VehicleCargoCapacityRegressionTests
     #region LoadItems respects capacity
 
     [TestMethod]
-    public void LoadItems_DropsEntriesOutsideCallistoGrid()
+    public void LoadItems_RepacksEntriesOutsideCallistoGrid()
     {
         var inventory = new InventoryManager();
         VehicleCargoCapacity.ApplyTo(inventory, 1);
 
-        inventory.LoadItems(new[]
+        var changed = inventory.LoadItems(new[]
         {
             new CharacterInventoryItem(1, CloneBaseObjectType.Item, "In", 1, 0, 0, 1),
             new CharacterInventoryItem(1, CloneBaseObjectType.Item, "OutX", 2, 10, 0, 1),
@@ -466,11 +466,17 @@ public class VehicleCargoCapacityRegressionTests
             new CharacterInventoryItem(1, CloneBaseObjectType.Item, "Edge", 4, 5, 12, 1),
         });
 
-        Assert.AreEqual(2, inventory.Items.Count);
+        Assert.IsTrue(changed);
+        Assert.AreEqual(4, inventory.Items.Count);
         Assert.IsNotNull(inventory.FindByCoid(1));
+        Assert.IsNotNull(inventory.FindByCoid(2));
+        Assert.IsNotNull(inventory.FindByCoid(3));
         Assert.IsNotNull(inventory.FindByCoid(4));
-        Assert.IsNull(inventory.FindByCoid(2));
-        Assert.IsNull(inventory.FindByCoid(3));
+        foreach (var item in inventory.Items)
+        {
+            Assert.IsTrue(item.InventoryPositionX < VehicleCargoCapacity.GridWidth);
+            Assert.IsTrue(item.InventoryPositionY < VehicleCargoCapacity.RowsPerPage);
+        }
     }
 
     #endregion
