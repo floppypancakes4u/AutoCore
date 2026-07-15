@@ -107,11 +107,11 @@ public class GraphicsObjectCoverageTests
         prop.SetMurderer(character.CurrentVehicle);
         prop.OnDeath(DeathType.Silent);
 
-        Assert.IsNotNull(map.GetObjectByCoid(77), "corpse stays until delayed despawn");
-        Assert.IsFalse(_sent.OfType<DestroyObjectPacket>().Any(), "no DestroyObject at kill time");
+        Assert.IsNotNull(map.GetObjectByCoid(77), "corpse stays server-side until delayed leave");
+        Assert.IsTrue(_sent.OfType<DestroyObjectPacket>().Any(p => p.ObjectId.Coid == 77),
+            "DestroyObject ships immediately so clients remove scenery (weapon/ram)");
         MapPropCorpseDespawn.FlushAllForTests();
         Assert.IsNull(map.GetObjectByCoid(77));
-        Assert.IsTrue(_sent.OfType<DestroyObjectPacket>().Any(p => p.ObjectId.Coid == 77));
     }
 
     [TestMethod]
@@ -242,9 +242,13 @@ public class GraphicsObjectCoverageTests
         prop.CreateGhost();
         prop.OnDeath(DeathType.Violent);
         Assert.IsTrue(prop.IsCorpse);
-        Assert.IsFalse(_sent.OfType<DestroyObjectPacket>().Any());
+        // Violent → InitCreate doDeath (not DestroyObject); either path tears down client mesh.
+        Assert.IsTrue(
+            _sent.OfType<InitCreateObjectPacket>().Any() || _sent.OfType<DestroyObjectPacket>().Any(),
+            "client teardown packet required at OnDeath");
+        Assert.IsNotNull(map.GetObjectByCoid(92), "server corpse until delayed leave");
         MapPropCorpseDespawn.FlushAllForTests();
-        Assert.IsTrue(_sent.OfType<DestroyObjectPacket>().Any());
+        Assert.IsNull(map.GetObjectByCoid(92));
     }
 
     [TestMethod]

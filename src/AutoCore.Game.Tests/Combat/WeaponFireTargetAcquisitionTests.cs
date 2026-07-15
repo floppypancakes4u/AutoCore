@@ -134,6 +134,105 @@ public class WeaponFireTargetAcquisitionTests
     }
 
     [TestMethod]
+    public void AcquireExplosion_ZeroRadius_Empty()
+    {
+        var hits = WeaponFireTargetAcquisition.AcquireExplosion(
+            new Vector3(0, 0, 0), 0f, 1, 1, null,
+            new[] { Cand(1, 0, 1) }, new HashSet<long>());
+        Assert.AreEqual(0, hits.Count);
+    }
+
+    [TestMethod]
+    public void Acquire_HardTargetAloneFillsCap_SkipsSoft()
+    {
+        var aim = TacArcGeometry.AimFromYaw(0f);
+        var hard = Cand(10, 0, 20);
+        var soft = Cand(11, 0, 5);
+        var hits = WeaponFireTargetAcquisition.Acquire(
+            new Vector3(0, 0, 0), aim, 1, 1, null,
+            NarrowWeapon(flags: 0, spray: 0), // maxTargets = 1
+            new[] { hard, soft },
+            hardTargetCoid: 10,
+            includeHardTarget: true);
+        Assert.AreEqual(1, hits.Count);
+        Assert.AreEqual(10, hits[0].Coid);
+    }
+
+    [TestMethod]
+    public void Acquire_HardTargetMissingFromCandidates_NoHardSeed()
+    {
+        var aim = TacArcGeometry.AimFromYaw(0f);
+        var soft = Cand(11, 0, 5);
+        var hits = WeaponFireTargetAcquisition.Acquire(
+            new Vector3(0, 0, 0), aim, 1, 1, null,
+            NarrowWeapon(),
+            new[] { soft },
+            hardTargetCoid: 999,
+            includeHardTarget: true);
+        Assert.AreEqual(1, hits.Count);
+        Assert.AreEqual(11, hits[0].Coid);
+    }
+
+    [TestMethod]
+    public void IsEligible_OwnerCoidAndExcludeCoid_Rejected()
+    {
+        var owner = Cand(50, 0, 10, faction: 2);
+        Assert.IsFalse(WeaponFireTargetAcquisition.IsEligible(owner, 1, 1, ownerCoid: 50, excludeCoid: null));
+        Assert.IsFalse(WeaponFireTargetAcquisition.IsEligible(owner, 1, 1, ownerCoid: null, excludeCoid: 50));
+    }
+
+    [TestMethod]
+    public void Acquire_BelowRangeMin_Excluded()
+    {
+        var aim = TacArcGeometry.AimFromYaw(0f);
+        var close = Cand(12, 0, 2);
+        var weapon = NarrowWeapon();
+        weapon.RangeMin = 5f;
+        var hits = WeaponFireTargetAcquisition.Acquire(
+            new Vector3(0, 0, 0), aim, 1, 1, null, weapon, new[] { close }, null, false);
+        Assert.AreEqual(0, hits.Count);
+    }
+
+    [TestMethod]
+    public void Candidate_IsCombatantProperty_Exposed()
+    {
+        var c = Cand(1, 0, 1, combatant: true);
+        Assert.IsTrue(c.IsCombatant);
+        Assert.AreEqual(0f, c.Position.Y);
+    }
+
+    [TestMethod]
+    public void AcquireExplosion_IneligibleFaction_Excluded()
+    {
+        var friend = Cand(2, 1, 10, faction: 1); // same faction as shooter
+        var hits = WeaponFireTargetAcquisition.AcquireExplosion(
+            new Vector3(0, 0, 10), 5f, shooterFaction: 1, shooterCoid: 99, ownerCoid: null,
+            new[] { friend }, new HashSet<long>());
+        Assert.AreEqual(0, hits.Count);
+    }
+
+    [TestMethod]
+    public void AcquireExplosion_SortsByDistanceFromImpact()
+    {
+        var far = Cand(2, 6, 10, faction: 2);
+        var near = Cand(3, 1, 10, faction: 2);
+        var hits = WeaponFireTargetAcquisition.AcquireExplosion(
+            new Vector3(0, 0, 10), 10f, 1, 99, null,
+            new[] { far, near }, new HashSet<long>());
+        Assert.AreEqual(2, hits.Count);
+        Assert.AreEqual(3, hits[0].Coid);
+        Assert.IsTrue(hits[0].DistanceFromShooter < hits[1].DistanceFromShooter);
+        Assert.IsFalse(hits[0].IsPrimary);
+    }
+
+    [TestMethod]
+    public void IsEligible_NotDamageable_False()
+    {
+        var c = Cand(1, 0, 10, dmg: false);
+        Assert.IsFalse(WeaponFireTargetAcquisition.IsEligible(c, 1, 99, null, null));
+    }
+
+    [TestMethod]
     public void Acquire_ClosestSoftTargetWins_EvenIfNonCombatant_WhenCapIsOne()
     {
         // Nearest fence under the gun beats a distant vehicle (distance sort, not combatant tier).

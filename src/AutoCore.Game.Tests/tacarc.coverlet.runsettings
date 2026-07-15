@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>cobertura,json</Format>
+          <Include>
+            [AutoCore.Game]AutoCore.Game.Combat.TacArcGeometry|[AutoCore.Game]AutoCore.Game.Combat.WeaponFireTargetLimits|[AutoCore.Game]AutoCore.Game.Combat.WeaponFireTargetAcquisition|[AutoCore.Game]AutoCore.Game.Combat.VehicleMapPropRam|[AutoCore.Game]AutoCore.Game.Combat.MapPropCorpseDespawn|[AutoCore.Game]AutoCore.Game.Entities.Vehicle|[AutoCore.Game]AutoCore.Game.Entities.GraphicsObject|[AutoCore.Game]AutoCore.Game.Entities.SpawnPoint|[AutoCore.Game]AutoCore.Game.TNL.Ghost.GhostVehicle|[AutoCore.Game]AutoCore.Game.CloneBases.Specifics.WeaponSpecific
+          </Include>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

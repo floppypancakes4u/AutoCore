@@ -96,4 +96,60 @@ public class TacArcGeometryTests
         Assert.AreEqual(1.05f, TacArcGeometry.SprayFalloff(true, 0f, 10f), 0.0001f);
         Assert.AreEqual(0f, TacArcGeometry.SprayFalloff(true, 20f, 10f), 0.0001f);
     }
+
+    [TestMethod]
+    public void SprayFalloff_ZeroRangeMax_ReturnsOneForSecondary()
+    {
+        Assert.AreEqual(1f, TacArcGeometry.SprayFalloff(true, distFromPrimary: 50f, rangeMax: 0f));
+    }
+
+    [TestMethod]
+    public void IsInArc_NonUnitAim_IsNormalizedBeforeDot()
+    {
+        // Scaled +Z aim must still hit forward target after internal normalize.
+        var aimScaled = new Vector3(0f, 0f, 5f);
+        var target = new Vector3(0f, 0f, 10f);
+        Assert.IsTrue(TacArcGeometry.IsInArc(Origin, aimScaled, target, 0.987f));
+    }
+
+    [TestMethod]
+    public void IsInArc_ZeroHorizontalAim_ReturnsFalse()
+    {
+        var aim = new Vector3(0f, 1f, 0f); // pure Y — no XZ aim
+        var target = new Vector3(0f, 0f, 10f);
+        Assert.IsFalse(TacArcGeometry.IsInArc(Origin, aim, target, 0.5f));
+    }
+
+    [TestMethod]
+    public void YawFromQuaternion_IdentityFacesPositiveZ()
+    {
+        // Identity quaternion → yaw 0 → AimFromYaw +Z
+        var yaw = TacArcGeometry.YawFromQuaternion(0f, 0f, 0f, 1f);
+        Assert.AreEqual(0f, yaw, 0.001f);
+    }
+
+    [TestMethod]
+    public void YawFromQuaternion_90DegYawAboutY_MatchesAimFromYaw()
+    {
+        // 90° about Y: x=0,y=sin(π/4),z=0,w=cos(π/4) → yaw ≈ π/2 → aim +X
+        var half = MathF.PI / 4f;
+        var yaw = TacArcGeometry.YawFromQuaternion(0f, MathF.Sin(half), 0f, MathF.Cos(half));
+        Assert.AreEqual(MathF.PI / 2f, yaw, 0.01f);
+        var aim = TacArcGeometry.AimFromYaw(yaw);
+        Assert.AreEqual(1f, aim.X, 0.02f);
+        Assert.AreEqual(0f, aim.Z, 0.02f);
+    }
+
+    [TestMethod]
+    public void IsInArc_NearBoundary_StrictGreaterThanValidArc()
+    {
+        var aim = TacArcGeometry.AimFromYaw(0f);
+        // Exactly on cone edge: ValidArc == dot must be OUT (strict <)
+        // For ValidArc 0, targets with Z≈0 and X>0 have dot≈0 → excluded.
+        var edge = new Vector3(10f, 0f, 0f);
+        Assert.IsFalse(TacArcGeometry.IsInArc(Origin, aim, edge, 0f));
+        // Slightly forward of the side axis should pass.
+        var inside = new Vector3(10f, 0f, 1f);
+        Assert.IsTrue(TacArcGeometry.IsInArc(Origin, aim, inside, 0f));
+    }
 }

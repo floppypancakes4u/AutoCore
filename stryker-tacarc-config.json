@@ -1,0 +1,36 @@
+{
+  "stryker-config": {
+    "project": "src/AutoCore.Game/AutoCore.Game.csproj",
+    "test-projects": [
+      "src/AutoCore.Game.Tests/AutoCore.Game.Tests.csproj"
+    ],
+    "mutate": [
+      "**/Combat/TacArcGeometry.cs",
+      "**/Combat/WeaponFireTargetLimits.cs",
+      "**/Combat/WeaponFireTargetAcquisition.cs"
+    ],
+    "ignore-mutations": [
+      "string"
+    ],
+    "ignore-methods": [
+      "ToString",
+      "ConfigureAwait",
+      "WriteLog",
+      "Log*",
+      "WriteIf"
+    ],
+    "test-case-filter": "FullyQualifiedName~TacArcGeometry|FullyQualifiedName~WeaponFireTarget|FullyQualifiedName~VehicleMapPropRam|FullyQualifiedName~VehicleWeaponCombatant",
+    "reporters": [
+      "html",
+      "cleartext",
+      "json"
+    ],
+    "thresholds": {
+      "high": 90,
+      "low": 75,
+      "break": 0
+    },
+    "concurrency": 4,
+    "coverage-analysis": "perTest"
+  }
+}
