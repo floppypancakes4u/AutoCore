@@ -319,7 +319,7 @@ public class Vehicle : SimpleObject
 
     /// <summary>
     /// Seeds heat capacity / cool rate and character power pool from the equipped power plant.
-    /// Client: equip PP → FUN_004fe1b0 sets heat max via FUN_004f7360; power max from PP PowerMaximum.
+    /// Client: equip PP → heat via FUN_004f7360; power via FUN_004f74c0 (Theory + class + plant).
     /// </summary>
     public void ApplyPowerPlantCapacities(bool startPowerAtFull = true, bool clearHeat = true)
     {
@@ -348,17 +348,36 @@ public class Vehicle : SimpleObject
             CurrentHeat = Math.Clamp(CurrentHeat, 0, GetHeatHardCap());
         }
 
-        var owner = Owner as Character;
-        if (owner != null && specific != null && specific.PowerMaximum > 0)
-        {
-            var max = (short)Math.Clamp(specific.PowerMaximum, 0, short.MaxValue);
-            CharacterLevelManager.Instance.SetMaxMana(owner, max, sendPacket: false);
-            if (startPowerAtFull)
-                CharacterLevelManager.Instance.SetCurrentMana(owner, max, sendPacket: false);
-            EnsureGhostMaskDelivery(GhostVehicle.PowerMask);
-        }
-
+        RecalculateMaximumPower(startPowerAtFull: startPowerAtFull, triggerGhostUpdate: true);
         EnsureGhostMaskDelivery(GhostVehicle.HeatMask);
+    }
+
+    /// <summary>
+    /// Recompute max power from owner Theory, class, level, and power plant.
+    /// Retail core of <c>CalculateMaximumMana</c> @ 0x4f74c0.
+    /// </summary>
+    public void RecalculateMaximumPower(bool startPowerAtFull = false, bool triggerGhostUpdate = true)
+    {
+        if (Owner is not Character owner)
+            return;
+
+        var specific = PowerPlant?.CloneBasePowerPlant?.PowerPlantSpecific;
+        var ppPower = specific?.PowerMaximum ?? 0;
+        byte classId = 0;
+        if (owner.CloneBaseObject is CloneBaseCharacter charCb)
+            classId = charCb.CharacterSpecific.Class;
+
+        var max = VehiclePowerCalculator.CalculatePlayerMaxPower(
+            classId,
+            owner.Level,
+            owner.AttributeTheory,
+            ppPower);
+        var maxShort = (short)Math.Clamp(max, 0, short.MaxValue);
+        CharacterLevelManager.Instance.SetMaxMana(owner, maxShort, sendPacket: false);
+        if (startPowerAtFull)
+            CharacterLevelManager.Instance.SetCurrentMana(owner, maxShort, sendPacket: false);
+        if (triggerGhostUpdate)
+            EnsureGhostMaskDelivery(GhostVehicle.PowerMask);
     }
 
     /// <summary>
@@ -1779,60 +1798,81 @@ public class Vehicle : SimpleObject
             return;
         }
 
-        // Hit chance
+        // Attribute-aware hit + damage (client RE: Combat/Perception/Theory/class/crit).
         var attackerLevel = Owner?.GetAsCreature()?.GetLevel() ?? 1;
         var attackerChar = Owner?.GetAsCharacter();
-        var attackRating = weaponSpec.OffenseBonus + (weaponSpec.HitBonusPerLevel * attackerLevel);
-        var targetDefenseBonus = 0;
-        if (Target is Vehicle targetVeh && targetVeh.Armor?.CloneBaseArmor?.ArmorSpecific != null)
-            targetDefenseBonus = targetVeh.Armor.CloneBaseArmor.ArmorSpecific.DefenseBonus;
+        var combat = attackerChar?.AttributeCombat ?? (short)1;
+        var theory = attackerChar?.AttributeTheory ?? (short)1;
+        var atkPerception = attackerChar?.AttributePerception ?? (short)1;
+        var attackerClass = -1;
+        if (attackerChar?.CloneBaseObject is CloneBaseCharacter atkCb)
+            attackerClass = atkCb.CharacterSpecific.Class;
 
-        var hitChance = 0.65f;
-        hitChance += (float)(attackRating - targetDefenseBonus) / 200.0f;
-        if (weaponSpec.AccucaryModifier > 0)
-            hitChance *= weaponSpec.AccucaryModifier;
-        hitChance = Math.Clamp(hitChance, 0.05f, 0.95f);
+        var victimLevel = 1;
+        short victimPerception = 1;
+        var targetDefenseBonus = 0;
+        short[] resists = null;
+
+        if (Target is Vehicle targetVeh)
+        {
+            victimLevel = targetVeh.Owner?.GetAsCreature()?.GetLevel() ?? 1;
+            var vicChar = targetVeh.Owner?.GetAsCharacter();
+            if (vicChar != null)
+                victimPerception = vicChar.AttributePerception;
+            else if (targetVeh.Owner?.GetAsCreature()?.CloneBaseObject is CloneBaseCreature creCb)
+                victimPerception = creCb.CreatureSpecific.AttributePerception;
+
+            if (targetVeh.Armor?.CloneBaseArmor?.ArmorSpecific != null)
+            {
+                var armorSpec = targetVeh.Armor.CloneBaseArmor.ArmorSpecific;
+                targetDefenseBonus = armorSpec.DefenseBonus;
+                resists = armorSpec.Resistances?.Damage;
+            }
+        }
+        else if (Target is Creature cre)
+        {
+            victimLevel = cre.GetLevel();
+            if (cre.CloneBaseObject is CloneBaseCreature cbc)
+            {
+                victimPerception = cbc.CreatureSpecific.AttributePerception;
+                targetDefenseBonus = cbc.CreatureSpecific.DefensiveBonus;
+            }
+            resists = cre.CloneBaseObject?.SimpleObjectSpecific.DamageArmor?.Damage;
+        }
+
+        var hitChance = CombatHitChanceCalculator.Calculate(
+            attackerLevel,
+            combat,
+            weaponSpec.OffenseBonus,
+            weaponSpec.HitBonusPerLevel,
+            weaponSpec.AccucaryModifier,
+            victimLevel,
+            victimPerception,
+            targetDefenseBonus);
 
         var rng = new Random(unchecked((int)(nowMs ^ ObjectId.Coid ^ Target.ObjectId.Coid)));
-        var roll = (float)rng.NextDouble();
-        if (roll > hitChance)
+        if (rng.NextDouble() > hitChance)
         {
             // No floater on miss: client only shows "Miss" via a local-sim flag we cannot set
             // from the Damage packet (event+0x2A is hardcoded 0 in the recv path).
             return;
         }
 
-        // Damage roll per damage-type (6 channels)
-        var dmgByType = new int[6];
-        var totalPreMit = 0;
-        if (weaponSpec.MinMin.Damage != null && weaponSpec.MaxMax.Damage != null)
-        {
-            for (var i = 0; i < 6; i++)
-            {
-                var min = (int)weaponSpec.MinMin.Damage[i];
-                var max = (int)weaponSpec.MaxMax.Damage[i];
-                if (max < min) (min, max) = (max, min);
-                var val = max > min ? rng.Next(min, max + 1) : min;
-                dmgByType[i] = Math.Max(0, val);
-                totalPreMit += dmgByType[i];
-            }
-        }
+        var dmgResult = CombatDamageCalculator.Compute(
+            attackerLevel,
+            attackerClass,
+            theory,
+            atkPerception,
+            weaponSpec.MinMin.Damage,
+            weaponSpec.MaxMax.Damage,
+            weaponSpec.DmgMinMin,
+            weaponSpec.DmgMaxMax,
+            weaponSpec.DamageBonusPerLevel,
+            weaponSpec.DamageScalar,
+            resists,
+            rng);
 
-        // Fallback to simple min/max if damage arrays are empty
-        if (totalPreMit <= 0)
-        {
-            var minDmg = weaponSpec.DmgMinMin;
-            var maxDmg = weaponSpec.DmgMaxMax;
-            if (maxDmg < minDmg) (minDmg, maxDmg) = (maxDmg, minDmg);
-            totalPreMit = maxDmg > minDmg ? rng.Next(minDmg, maxDmg + 1) : Math.Max(1, minDmg);
-        }
-
-        // Apply damage modifiers
-        var scalar = weaponSpec.DamageScalar > 0 ? weaponSpec.DamageScalar : 1.0f;
-        var dmgBonus = 1.0f + (weaponSpec.DamageBonusPerLevel * attackerLevel);
-        var damage = (int)MathF.Round(Math.Max(1, totalPreMit) * scalar * dmgBonus);
-
-
+        var damage = dmgResult.Damage;
         var hpBefore = Target.GetCurrentHP();
         var actualDamage = Target.TakeDamage(damage, this);
 
@@ -1851,7 +1891,8 @@ public class Vehicle : SimpleObject
         else
         {
             // Non-zero amount required for client combat-text / local HP apply (FUN_00812A60).
-            TrySendDamagePacket(attackerChar, Target, ObjectId, actualDamage);
+            var flags = dmgResult.IsCrit ? DamagePacket.DamageEntryFlags.Crit : default;
+            TrySendDamagePacket(attackerChar, Target, ObjectId, actualDamage, flags);
         }
 
         if (Target.GetCurrentHP() <= 0)

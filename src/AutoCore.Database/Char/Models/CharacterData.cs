@@ -53,17 +53,17 @@ public class CharacterData
     /// <summary>Unspent research points granted on level-up.</summary>
     public short ResearchPoints { get; set; }
 
-    /// <summary>Spent Tech attribute (client char+0x13C). Persisted for login restore.</summary>
-    public short AttributeTech { get; set; }
+    /// <summary>Spent Tech attribute (client char+0x13C). Persisted for login restore. Floor 1.</summary>
+    public short AttributeTech { get; set; } = 1;
 
-    /// <summary>Spent Combat attribute (client char+0x13E).</summary>
-    public short AttributeCombat { get; set; }
+    /// <summary>Spent Combat attribute (client char+0x13E). Floor 1.</summary>
+    public short AttributeCombat { get; set; } = 1;
 
-    /// <summary>Spent Theory attribute (client char+0x140).</summary>
-    public short AttributeTheory { get; set; }
+    /// <summary>Spent Theory attribute (client char+0x140). Floor 1.</summary>
+    public short AttributeTheory { get; set; } = 1;
 
-    /// <summary>Spent Perception attribute (client char+0x142).</summary>
-    public short AttributePerception { get; set; }
+    /// <summary>Spent Perception attribute (client char+0x142). Floor 1.</summary>
+    public short AttributePerception { get; set; } = 1;
 
     /// <summary>
     /// Server-authoritative money as a single int64 (Globes/Bars/Scrip/Clink groups of 1000).

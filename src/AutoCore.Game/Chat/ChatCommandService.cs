@@ -123,12 +123,18 @@ public sealed class ChatCommandService
                 return ResetSkills(character);
 
             default:
-                // Case-insensitive account-create aliases (client steals bare /player for //playerrename).
+            {
+                // Case-insensitive aliases.
                 var cmd = parts[0].ToLowerInvariant();
+                if (cmd is "/skillpoints")
+                    return SkillPoints(character, parts);
+
+                // Client steals bare /player for //playerrename — prefer /addplayer.
                 if (cmd is "/addplayer" or "/newaccount" or "/player")
                     return CreatePlayer(parts);
 
                 return new ChatCommandExecutionResult(false, string.Empty);
+            }
         }
     }
 
@@ -179,6 +185,46 @@ public sealed class ChatCommandService
             return new ChatCommandExecutionResult(true, "Usage: /skills or /skills set <0-32767>");
         CharacterSkillService.Instance.SetPoints(character, points);
         return new ChatCommandExecutionResult(true, $"Skill points set to {points}.", new BasePacket[] { CharacterLevelManager.Instance.BuildPacket(character) });
+    }
+
+    /// <summary>
+    /// Debug: grant or set unspent skill points. Usage:
+    /// <c>/skillPoints</c> (query), <c>/skillPoints 50</c> (set), <c>/skillPoints add 10</c> (add).
+    /// </summary>
+    private static ChatCommandExecutionResult SkillPoints(Character character, string[] parts)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        if (parts.Length == 1)
+            return new ChatCommandExecutionResult(true, $"Skill points available: {character.SkillPoints}. Usage: /skillPoints <n> | /skillPoints add <n>");
+
+        short points;
+        if (parts.Length >= 3 && string.Equals(parts[1], "add", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!short.TryParse(parts[2], out var delta))
+                return new ChatCommandExecutionResult(true, "Usage: /skillPoints add <amount>");
+            var sum = character.SkillPoints + delta;
+            if (sum < 0)
+                sum = 0;
+            if (sum > short.MaxValue)
+                sum = short.MaxValue;
+            points = (short)sum;
+        }
+        else if (parts.Length >= 2 && short.TryParse(parts[1], out points) && points >= 0)
+        {
+            // absolute set
+        }
+        else
+        {
+            return new ChatCommandExecutionResult(true, "Usage: /skillPoints <0-32767> | /skillPoints add <amount>");
+        }
+
+        CharacterSkillService.Instance.SetPoints(character, points);
+        return new ChatCommandExecutionResult(
+            true,
+            $"Skill points set to {points}.",
+            new BasePacket[] { CharacterLevelManager.Instance.BuildPacket(character) });
     }
 
     private static ChatCommandExecutionResult ResetSkills(Character character)

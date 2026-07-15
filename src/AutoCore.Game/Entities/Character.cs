@@ -54,30 +54,32 @@ public partial class Character : Creature
     /// <summary>Unspent research points (persisted).</summary>
     public short ResearchPoints => DBData?.ResearchPoints ?? 0;
 
-    // Fallback fields when DBData is not attached (unit tests without CharacterData).
-    private short _attributeTech;
-    private short _attributeCombat;
-    private short _attributeTheory;
-    private short _attributePerception;
+    // Fallback fields when DBData is not attached (unit tests without CharacterData). Default 1 (retail floor).
+    private short _attributeTech = 1;
+    private short _attributeCombat = 1;
+    private short _attributeTheory = 1;
+    private short _attributePerception = 1;
 
     /// <summary>
     /// Spent Tech attribute (client char+0x13C). Used by vehicle max-HP / heat formulas.
     /// Persisted on <see cref="CharacterData.AttributeTech"/>.
     /// </summary>
-    public short AttributeTech => DBData?.AttributeTech ?? _attributeTech;
+    public short AttributeTech => FloorAttr(DBData?.AttributeTech ?? _attributeTech);
 
     /// <summary>Spent Combat attribute (client char+0x13E). Persisted.</summary>
-    public short AttributeCombat => DBData?.AttributeCombat ?? _attributeCombat;
+    public short AttributeCombat => FloorAttr(DBData?.AttributeCombat ?? _attributeCombat);
 
     /// <summary>Spent Theory attribute (client char+0x140). Persisted.</summary>
-    public short AttributeTheory => DBData?.AttributeTheory ?? _attributeTheory;
+    public short AttributeTheory => FloorAttr(DBData?.AttributeTheory ?? _attributeTheory);
 
     /// <summary>Spent Perception attribute (client char+0x142). Persisted.</summary>
-    public short AttributePerception => DBData?.AttributePerception ?? _attributePerception;
+    public short AttributePerception => FloorAttr(DBData?.AttributePerception ?? _attributePerception);
+
+    private static short FloorAttr(short value) => value < 1 ? (short)1 : value;
 
     public void SetAttributeTech(short value)
     {
-        value = Math.Max((short)0, value);
+        value = Math.Max((short)1, value);
         if (DBData != null)
             DBData.AttributeTech = value;
         else
@@ -86,7 +88,7 @@ public partial class Character : Creature
 
     public void SetAttributeCombat(short value)
     {
-        value = Math.Max((short)0, value);
+        value = Math.Max((short)1, value);
         if (DBData != null)
             DBData.AttributeCombat = value;
         else
@@ -95,7 +97,7 @@ public partial class Character : Creature
 
     public void SetAttributeTheory(short value)
     {
-        value = Math.Max((short)0, value);
+        value = Math.Max((short)1, value);
         if (DBData != null)
             DBData.AttributeTheory = value;
         else
@@ -104,7 +106,7 @@ public partial class Character : Creature
 
     public void SetAttributePerception(short value)
     {
-        value = Math.Max((short)0, value);
+        value = Math.Max((short)1, value);
         if (DBData != null)
             DBData.AttributePerception = value;
         else

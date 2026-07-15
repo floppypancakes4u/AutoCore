@@ -180,19 +180,32 @@ public class CharContext : DbContext
             """);
         TryExecute("""
             ALTER TABLE `character`
-            ADD COLUMN `AttributeTech` SMALLINT NOT NULL DEFAULT 0
+            ADD COLUMN `AttributeTech` SMALLINT NOT NULL DEFAULT 1
             """);
         TryExecute("""
             ALTER TABLE `character`
-            ADD COLUMN `AttributeCombat` SMALLINT NOT NULL DEFAULT 0
+            ADD COLUMN `AttributeCombat` SMALLINT NOT NULL DEFAULT 1
             """);
         TryExecute("""
             ALTER TABLE `character`
-            ADD COLUMN `AttributeTheory` SMALLINT NOT NULL DEFAULT 0
+            ADD COLUMN `AttributeTheory` SMALLINT NOT NULL DEFAULT 1
             """);
         TryExecute("""
             ALTER TABLE `character`
-            ADD COLUMN `AttributePerception` SMALLINT NOT NULL DEFAULT 0
+            ADD COLUMN `AttributePerception` SMALLINT NOT NULL DEFAULT 1
+            """);
+        // Existing DBs may have DEFAULT 0 / stored 0 — floor spent attributes to retail minimum 1.
+        TryExecute("""
+            UPDATE `character` SET `AttributeTech` = 1 WHERE `AttributeTech` < 1
+            """);
+        TryExecute("""
+            UPDATE `character` SET `AttributeCombat` = 1 WHERE `AttributeCombat` < 1
+            """);
+        TryExecute("""
+            UPDATE `character` SET `AttributeTheory` = 1 WHERE `AttributeTheory` < 1
+            """);
+        TryExecute("""
+            UPDATE `character` SET `AttributePerception` = 1 WHERE `AttributePerception` < 1
             """);
     }
 
