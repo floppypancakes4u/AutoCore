@@ -396,10 +396,19 @@ public sealed class InventoryManager
                 packets: Array.Empty<BasePacket>());
         }
 
-        var occupied = _items
-            .Select(i => i.InventoryPositionY * Width + i.InventoryPositionX)
-            .ToHashSet();
-        if (!TryGetFirstFreeCargoSlot(occupied, out var x, out var y))
+        // Same client-parity footprint first-fit as AddItemInternal (FUN_005713a0).
+        var cloneBase = _cloneBases.GetCloneBase(item.Cbid);
+        if (!TryResolveFootprintForAcquisition(cloneBase, item.Cbid, out var footprintX, out var footprintY))
+        {
+            return new InventoryCommandResult(
+                $"Cannot restore cargo: inventory footprint is missing or zero (InvSizeX/Y) for cbid={item.Cbid}.",
+                packets: Array.Empty<BasePacket>());
+        }
+
+        var occupiedCells = BuildOccupiedCells(ignoreCoid: null);
+        if (!InventoryGridPlacement.TryFindFirstFree(
+                Width, PageCount, VehicleCargoCapacity.RowsPerPage,
+                occupiedCells, footprintX, footprintY, out var x, out var y))
         {
             return new InventoryCommandResult(
                 "Cannot restore cargo: inventory full.",

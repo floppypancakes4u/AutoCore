@@ -1,10 +1,13 @@
-using Microsoft.VisualStudio.TestTools.UnitTesting;
-
-namespace AutoCore.Game.Tests.Inventory;
-
+using AutoCore.Game.CloneBases;
+using AutoCore.Game.CloneBases.Specifics;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.Tests.Inventory.Fakes;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Runtime.CompilerServices;
+
+namespace AutoCore.Game.Tests.Inventory;
 
 [TestClass]
 public class RestoreCargoWithoutCreateTests
@@ -94,5 +97,85 @@ public class RestoreCargoWithoutCreateTests
             new CharacterInventoryItem(19194, CloneBaseObjectType.Item, "x", 11131, 0, 0, 1));
         Assert.AreEqual(0, result.AcceptedQuantity);
         Assert.IsNull(inv.FindByCoid(11131));
+    }
+
+    /// <summary>
+    /// Buyback placement must use clonebase InvSize first-fit (client FUN_005713a0),
+    /// not origin-only 1×1 linear slot scan.
+    /// </summary>
+    [TestMethod]
+    public void RestoreCargoWithoutCreate_TwoByTwo_UsesFootprintFirstFit()
+    {
+        var (inv, _) = CreateWithSizes((10, 2, 2));
+        Assert.IsTrue(inv.TryAdd(new CharacterInventoryItem(
+            10, CloneBaseObjectType.Item, "blocker", 1, 0, 0, 1)));
+
+        var result = inv.RestoreCargoWithoutCreate(
+            new CharacterInventoryItem(10, CloneBaseObjectType.Item, "buyback", 11131, 0, 0, 1),
+            characterCoid: 1);
+
+        Assert.AreEqual(1, result.AcceptedQuantity);
+        var restored = inv.FindByCoid(11131)!;
+        // Client packs 2×2 after a 2×2 at (0,0) → next origin (2,0), not (1,0).
+        Assert.AreEqual((byte)2, restored.InventoryPositionX);
+        Assert.AreEqual((byte)0, restored.InventoryPositionY);
+        Assert.AreEqual(8, inv.GetOccupiedSlotCount());
+    }
+
+    [TestMethod]
+    public void RestoreCargoWithoutCreate_TwoByTwo_FailsWhenOnlyOneByOneCellsFree()
+    {
+        var (inv, _) = CreateWithSizes((10, 2, 2), (1, 1, 1));
+        // Checkerboard of 1×1 items leaves free cells but no contiguous 2×2.
+        long coid = 100;
+        for (byte y = 0; y < inv.PageCount; y++)
+        {
+            for (byte x = 0; x < inv.Width; x++)
+            {
+                if (((x + y) & 1) == 0)
+                    Assert.IsTrue(inv.TryAdd(new CharacterInventoryItem(
+                        1, CloneBaseObjectType.Item, "cell", coid++, x, y, 1)));
+            }
+        }
+
+        var result = inv.RestoreCargoWithoutCreate(
+            new CharacterInventoryItem(10, CloneBaseObjectType.Item, "big", 11131, 0, 0, 1));
+
+        Assert.AreEqual(0, result.AcceptedQuantity);
+        Assert.IsNull(inv.FindByCoid(11131));
+        StringAssert.Contains(result.Message, "full");
+    }
+
+    [TestMethod]
+    public void RestoreCargoWithoutCreate_RejectsZeroFootprintWhenCloneBasePresent()
+    {
+        var lookup = new FakeCloneBaseLookup();
+        lookup.Register(77, CreateClone(77, 0, 0));
+        var inv = new InventoryManager(cloneBases: lookup);
+
+        var result = inv.RestoreCargoWithoutCreate(
+            new CharacterInventoryItem(77, CloneBaseObjectType.Item, "zero", 11131, 0, 0, 1));
+
+        Assert.AreEqual(0, result.AcceptedQuantity);
+        Assert.IsNull(inv.FindByCoid(11131));
+        StringAssert.Contains(result.Message, "footprint");
+    }
+
+    private static (InventoryManager Inventory, FakeCloneBaseLookup Lookup) CreateWithSizes(
+        params (int Cbid, byte SizeX, byte SizeY)[] sizes)
+    {
+        var lookup = new FakeCloneBaseLookup();
+        foreach (var (cbid, sx, sy) in sizes)
+            lookup.Register(cbid, CreateClone(cbid, sx, sy));
+
+        return (new InventoryManager(cloneBases: lookup), lookup);
+    }
+
+    private static CloneBaseObject CreateClone(int cbid, byte sizeX, byte sizeY)
+    {
+        var clone = (CloneBaseObject)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseObject));
+        clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.Item, CloneBaseId = cbid };
+        clone.SimpleObjectSpecific = new SimpleObjectSpecific { InvSizeX = sizeX, InvSizeY = sizeY };
+        return clone;
     }
 }
