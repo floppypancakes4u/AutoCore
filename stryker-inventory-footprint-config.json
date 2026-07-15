@@ -1,0 +1,35 @@
+{
+  "stryker-config": {
+    "project": "src/AutoCore.Game/AutoCore.Game.csproj",
+    "test-projects": [
+      "src/AutoCore.Game.Tests/AutoCore.Game.Tests.csproj"
+    ],
+    "mutate": [
+      "**/Inventory/InventoryFootprintPolicy.cs",
+      "**/Inventory/InventoryGridPlacement.cs"
+    ],
+    "ignore-mutations": [
+      "string"
+    ],
+    "ignore-methods": [
+      "ToString",
+      "ConfigureAwait",
+      "WriteLog",
+      "Log*"
+    ],
+    "test-case-filter": "FullyQualifiedName~InventoryFootprint|FullyQualifiedName~InventoryGridPlacement|FullyQualifiedName~InventoryManagerFootprint|FullyQualifiedName~InventoryManagerLoadRepack|FullyQualifiedName~InventoryManagerTests|FullyQualifiedName~InventoryAcquisition",
+    "reporters": [
+      "html",
+      "cleartext",
+      "json"
+    ],
+    "thresholds": {
+      "high": 90,
+      "low": 85,
+      "break": 80
+    },
+    "concurrency": 4,
+    "coverage-analysis": "perTest",
+    "disable-bail": false
+  }
+}

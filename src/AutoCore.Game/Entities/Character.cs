@@ -384,7 +384,8 @@ public partial class Character : Creature
         if (!isInCharacterSelection)
         {
             var cargoItems = InventoryPersistence.Instance.LoadCargo(ObjectId.Coid);
-            Inventory.LoadItems(cargoItems);
+            if (Inventory.LoadItems(cargoItems))
+                Inventory.PersistRepackedCargo(ObjectId.Coid);
         }
 
         return true;

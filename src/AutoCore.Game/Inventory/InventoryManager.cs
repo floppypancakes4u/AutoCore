@@ -59,7 +59,8 @@ public sealed class InventoryManager
 
     public IReadOnlyList<CharacterInventoryItem> Items => _items;
 
-    public bool IsFull => _items.Count >= SlotCount || !TryGetFirstFreeCargoSlot(out _, out _);
+    /// <summary>True when no free 1×1 cell remains (not "no free multi-cell footprint").</summary>
+    public bool IsFull => !TryFindFirstFreeCargoSlot(1, 1, out _, out _);
 
     public void SetCapacity(int width, int pageCount)
     {
@@ -77,37 +78,72 @@ public sealed class InventoryManager
         PageCount = pageCount;
     }
 
-    public void LoadItems(IEnumerable<CharacterInventoryItem> items)
+    /// <summary>
+    /// Load cargo rows. Places each item at its stored origin when the footprint fits;
+    /// otherwise first-fit reassigns origin (client-parity). Items that cannot fit or have
+    /// no legal size are skipped. Returns whether any origin was changed or item dropped
+    /// (caller may persist).
+    /// </summary>
+    public bool LoadItems(IEnumerable<CharacterInventoryItem> items)
     {
         _items.Clear();
         if (items == null)
-            return;
+            return false;
 
-        var occupied = new HashSet<int>();
-        foreach (var item in items)
+        // Stable order: stored Y, X, then COID so re-pack is deterministic.
+        var ordered = items
+            .Where(i => i != null)
+            .OrderBy(i => i.InventoryPositionY)
+            .ThenBy(i => i.InventoryPositionX)
+            .ThenBy(i => i.Coid)
+            .ToList();
+
+        var occupied = new HashSet<(byte X, byte Y)>();
+        var changed = false;
+
+        foreach (var item in ordered)
         {
-            if (item == null || !IsValidCargoSlot(item.InventoryPositionX, item.InventoryPositionY))
+            if (_items.Any(i => i.Coid == item.Coid))
+            {
+                changed = true;
                 continue;
+            }
 
-            var slot = item.InventoryPositionY * Width + item.InventoryPositionX;
-            if (!occupied.Add(slot))
-                continue;
+            ResolveFootprintOrDefault(item.Cbid, out var sizeX, out var sizeY);
 
-            _items.Add(item);
+            var placed = item;
+            if (!InventoryGridPlacement.CanPlace(
+                    Width, PageCount, VehicleCargoCapacity.RowsPerPage,
+                    occupied, item.InventoryPositionX, item.InventoryPositionY, sizeX, sizeY))
+            {
+                if (!InventoryGridPlacement.TryFindFirstFree(
+                        Width, PageCount, VehicleCargoCapacity.RowsPerPage,
+                        occupied, sizeX, sizeY, out var fx, out var fy))
+                {
+                    Logger.WriteLog(
+                        LogType.Error,
+                        "LoadItems: dropped coid={0} cbid={1} — no free {2}x{3} footprint",
+                        item.Coid, item.Cbid, sizeX, sizeY);
+                    changed = true;
+                    continue;
+                }
+
+                placed = item with { InventoryPositionX = fx, InventoryPositionY = fy };
+                changed = true;
+            }
+
+            _items.Add(placed);
+            foreach (var cell in InventoryGridPlacement.EnumerateCells(
+                         placed.InventoryPositionX, placed.InventoryPositionY, sizeX, sizeY))
+                occupied.Add((cell.X, cell.Y));
         }
+
+        return changed;
     }
 
     public int GetOccupiedSlotCount()
     {
-        var occupied = new HashSet<int>();
-        foreach (var item in _items)
-        {
-            var slot = item.InventoryPositionY * Width + item.InventoryPositionX;
-            if (slot >= 0 && slot < SlotCount)
-                occupied.Add(slot);
-        }
-
-        return occupied.Count;
+        return BuildOccupiedCells(ignoreCoid: null).Count;
     }
 
     public InventoryCommandResult ClearCargo(long characterCoid)
@@ -178,29 +214,36 @@ public sealed class InventoryManager
         return $"{_items.Count} item(s) loaded, {occupied}/{SlotCount} slots occupied, capacity {Width}x{PageCount}.";
     }
 
-    public bool TryGetFirstFreeCargoSlot(out byte x, out byte y)
+    /// <summary>
+    /// First free 1×1 cell (legacy helpers / IsFull). Prefer
+    /// <see cref="TryFindFirstFreeCargoSlot(byte, byte, out byte, out byte)"/> for multi-cell items.
+    /// </summary>
+    public bool TryGetFirstFreeCargoSlot(out byte x, out byte y) =>
+        TryFindFirstFreeCargoSlot(1, 1, out x, out y);
+
+    /// <summary>
+    /// Client-parity first-fit for a footprint (<c>FUN_005713a0</c>): Y then X.
+    /// </summary>
+    public bool TryFindFirstFreeCargoSlot(byte sizeX, byte sizeY, out byte x, out byte y)
     {
-        var occupied = new bool[SlotCount];
-        foreach (var item in _items)
-        {
-            var slot = item.InventoryPositionY * Width + item.InventoryPositionX;
-            if (slot >= 0 && slot < SlotCount)
-                occupied[slot] = true;
-        }
+        var occupied = BuildOccupiedCells(ignoreCoid: null);
+        return InventoryGridPlacement.TryFindFirstFree(
+            Width, PageCount, VehicleCargoCapacity.RowsPerPage,
+            occupied, sizeX, sizeY, out x, out y);
+    }
 
-        for (var slot = 0; slot < SlotCount; slot++)
-        {
-            if (occupied[slot])
-                continue;
-
-            x = (byte)(slot % Width);
-            y = (byte)(slot / Width);
-            return true;
-        }
-
+    /// <summary>
+    /// First-fit using clonebase footprint for <paramref name="cbid"/>.
+    /// Fails when size cannot be resolved (zero/missing InvSize).
+    /// </summary>
+    public bool TryFindFirstFreeCargoSlotForCbid(int cbid, out byte x, out byte y)
+    {
         x = 0;
         y = 0;
-        return false;
+        if (!InventoryFootprintPolicy.TryResolve(_cloneBases, cbid, out var sizeX, out var sizeY))
+            return false;
+
+        return TryFindFirstFreeCargoSlot(sizeX, sizeY, out x, out y);
     }
 
     public bool TryAdd(CharacterInventoryItem item)
@@ -219,26 +262,21 @@ public sealed class InventoryManager
 
     public bool TryMove(long coid, byte x, byte y, out CharacterInventoryItem movedItem)
     {
-        if (!IsValidCargoSlot(x, y))
-        {
-            movedItem = null;
-            return false;
-        }
-
+        movedItem = null;
         var index = _items.FindLastIndex(i => i.Coid == coid);
         if (index < 0)
-        {
-            movedItem = null;
             return false;
-        }
 
-        if (_items.Any(i => i.Coid != coid && i.InventoryPositionX == x && i.InventoryPositionY == y))
-        {
-            movedItem = null;
+        var item = _items[index];
+        ResolveFootprintOrDefault(item.Cbid, out var sizeX, out var sizeY);
+
+        if (!InventoryGridPlacement.CanPlace(
+                Width, PageCount, VehicleCargoCapacity.RowsPerPage,
+                BuildOccupiedCells(ignoreCoid: coid),
+                x, y, sizeX, sizeY))
             return false;
-        }
 
-        movedItem = _items[index] with
+        movedItem = item with
         {
             InventoryPositionX = x,
             InventoryPositionY = y
@@ -254,15 +292,73 @@ public sealed class InventoryManager
 
     private bool CanAdd(CharacterInventoryItem item)
     {
-        if (!IsValidCargoSlot(item.InventoryPositionX, item.InventoryPositionY))
-            return false;
-
-        if (_items.Any(i => i.InventoryPositionX == item.InventoryPositionX && i.InventoryPositionY == item.InventoryPositionY))
+        if (item == null)
             return false;
 
         if (_items.Any(i => i.Coid == item.Coid))
             return false;
 
+        ResolveFootprintOrDefault(item.Cbid, out var sizeX, out var sizeY);
+
+        return InventoryGridPlacement.CanPlace(
+            Width, PageCount, VehicleCargoCapacity.RowsPerPage,
+            BuildOccupiedCells(ignoreCoid: null),
+            item.InventoryPositionX, item.InventoryPositionY, sizeX, sizeY);
+    }
+
+    /// <summary>
+    /// Occupied cells from item footprints. Unknown/zero size falls back to 1×1 at origin
+    /// so legacy loads and tests without clonebase still behave; acquisition paths must
+    /// reject unresolved sizes explicitly (see AddItem).
+    /// </summary>
+    private HashSet<(byte X, byte Y)> BuildOccupiedCells(long? ignoreCoid)
+    {
+        var occupied = new HashSet<(byte X, byte Y)>();
+        foreach (var item in _items)
+        {
+            if (ignoreCoid.HasValue && item.Coid == ignoreCoid.Value)
+                continue;
+
+            ResolveFootprintOrDefault(item.Cbid, out var sizeX, out var sizeY);
+            foreach (var cell in InventoryGridPlacement.EnumerateCells(
+                         item.InventoryPositionX, item.InventoryPositionY, sizeX, sizeY))
+            {
+                if (cell.X < Width && cell.Y < PageCount)
+                    occupied.Add((cell.X, cell.Y));
+            }
+        }
+
+        return occupied;
+    }
+
+    private void ResolveFootprintOrDefault(int cbid, out byte sizeX, out byte sizeY)
+    {
+        if (InventoryFootprintPolicy.TryResolve(_cloneBases, cbid, out sizeX, out sizeY))
+            return;
+
+        sizeX = 1;
+        sizeY = 1;
+    }
+
+    /// <summary>
+    /// Acquisition footprint: use clonebase InvSize when known and positive.
+    /// Reject when clonebase exists but size is invalid (0×0 / non-object).
+    /// Unknown CBID (no clonebase) falls back to 1×1 for tests/legacy; live AssetManager
+    /// should always provide SimpleObjectSpecific for inventory-capable items.
+    /// </summary>
+    private bool TryResolveFootprintForAcquisition(CloneBase cloneBase, int cbid, out byte sizeX, out byte sizeY)
+    {
+        sizeX = 0;
+        sizeY = 0;
+
+        if (cloneBase != null)
+            return InventoryFootprintPolicy.TryResolve(cloneBase, out sizeX, out sizeY);
+
+        if (InventoryFootprintPolicy.TryResolve(_cloneBases, cbid, out sizeX, out sizeY))
+            return true;
+
+        sizeX = 1;
+        sizeY = 1;
         return true;
     }
 
@@ -319,11 +415,24 @@ public sealed class InventoryManager
             }
         }
 
+        if (!TryResolveFootprintForAcquisition(cloneBase, entry.Cbid, out var footprintX, out var footprintY))
+        {
+            // Clonebase present but InvSizeX/Y is zero or non-object — cannot place.
+            return new InventoryCommandResult(
+                $"Cannot add CBID {entry.Cbid}: inventory footprint is missing or zero (InvSizeX/Y).",
+                remainingQuantity: quantity);
+        }
+
         var plannedAdds = new List<(CharacterInventoryItem Item, InventoryItemCreateResult Create)>();
         var usedCoids = _items.Select(item => item.Coid).ToHashSet();
-        var occupiedSlots = _items.Select(item => item.InventoryPositionY * Width + item.InventoryPositionX).ToHashSet();
+        var occupiedCells = BuildOccupiedCells(ignoreCoid: null);
+        // Account for quantity merges already applied in-memory only after loop — occupancy
+        // of existing stacks is unchanged; new stack origins need free footprints.
         var nextCoid = firstCoid;
-        while (remaining > 0 && TryGetFirstFreeCargoSlot(occupiedSlots, out var x, out var y))
+        while (remaining > 0
+               && InventoryGridPlacement.TryFindFirstFree(
+                   Width, PageCount, VehicleCargoCapacity.RowsPerPage,
+                   occupiedCells, footprintX, footprintY, out var x, out var y))
         {
             if (nextCoid <= 0 || !usedCoids.Add(nextCoid))
                 break;
@@ -342,7 +451,8 @@ public sealed class InventoryManager
             create.Packet.PossibleMissionItem = isMissionItem;
             var item = new CharacterInventoryItem(entry.Cbid, entry.Type, create.DisplayName, nextCoid, x, y, stackQuantity, isMissionItem);
             plannedAdds.Add((item, create));
-            occupiedSlots.Add(y * Width + x);
+            foreach (var cell in InventoryGridPlacement.EnumerateCells(x, y, footprintX, footprintY))
+                occupiedCells.Add((cell.X, cell.Y));
             remaining -= stackQuantity;
             if (remaining > 0)
                 nextCoid = allocateAdditionalCoid?.Invoke() ?? 0;
@@ -400,22 +510,6 @@ public sealed class InventoryManager
             remaining,
             plannedAdds.Select(add => add.Item).ToArray(),
             updates);
-    }
-
-    private bool TryGetFirstFreeCargoSlot(ISet<int> occupiedSlots, out byte x, out byte y)
-    {
-        for (var slot = 0; slot < SlotCount; slot++)
-        {
-            if (occupiedSlots.Contains(slot))
-                continue;
-            x = (byte)(slot % Width);
-            y = (byte)(slot / Width);
-            return true;
-        }
-
-        x = 0;
-        y = 0;
-        return false;
     }
 
     /// <summary>
@@ -880,16 +974,20 @@ public sealed class InventoryManager
 
         PersistCargoMove(character.ObjectId.Coid, movedItem);
 
-        return InventoryOperationResult.SinglePacket(
-            new InventoryDropResponsePacket
+        return new InventoryOperationResult(
+            new BasePacket[]
             {
-                ItemCoid = movedItem.Coid,
-                ItemGlobal = packet.ItemGlobal,
-                InventoryPositionX = movedItem.InventoryPositionX,
-                InventoryPositionY = movedItem.InventoryPositionY,
-                InventoryType = packet.InventoryType,
-                WasSuccessful = true,
-                HasSwappedOrConcatenatedItem = false
+                new InventoryDropResponsePacket
+                {
+                    ItemCoid = movedItem.Coid,
+                    ItemGlobal = packet.ItemGlobal,
+                    InventoryPositionX = movedItem.InventoryPositionX,
+                    InventoryPositionY = movedItem.InventoryPositionY,
+                    InventoryType = packet.InventoryType,
+                    WasSuccessful = true,
+                    HasSwappedOrConcatenatedItem = false
+                },
+                InventoryPacketFactory.CreateCargoSendAll(this)
             },
             $"HandleInventoryDropPacket: Player {character.Name} moved item {movedItem.Coid} (CBID: {movedItem.Cbid}) to slot {movedItem.InventoryPositionX},{movedItem.InventoryPositionY}");
     }
@@ -1481,7 +1579,33 @@ public sealed class InventoryManager
         if (_persistence == null || characterCoid == 0)
             return;
 
-        LoadItems(_persistence.LoadCargo(characterCoid));
+        var changed = LoadItems(_persistence.LoadCargo(characterCoid));
+        if (changed)
+            PersistRepackedCargo(characterCoid);
+    }
+
+    /// <summary>
+    /// After load-time re-pack, rewrite all cargo rows to match runtime origins
+    /// (and drop rows for items that could not fit).
+    /// </summary>
+    public void PersistRepackedCargo(long characterCoid)
+    {
+        if (_persistence == null || characterCoid == 0)
+            return;
+
+        try
+        {
+            _persistence.ClearCargo(characterCoid);
+            foreach (var item in _items)
+                _persistence.UpsertCargo(characterCoid, item);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "PersistRepackedCargo failed char={0}: {1}",
+                characterCoid,
+                ex.Message);
+        }
     }
 
     private void PersistCargoUpsert(long characterCoid, CharacterInventoryItem item)

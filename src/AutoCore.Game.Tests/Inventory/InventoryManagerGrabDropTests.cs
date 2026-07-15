@@ -71,9 +71,11 @@ public class InventoryManagerGrabDropTests
             InventoryTestHarness.CreateDropPacket(1001, x: 3, y: 0),
             harness.Character);
 
+        Assert.AreEqual(2, result.Packets.Count, "Drop response then CargoSendAll resync");
         var response = (InventoryDropResponsePacket)result.Packets[0];
         Assert.IsTrue(response.WasSuccessful);
         Assert.AreEqual((byte)3, response.InventoryPositionX);
+        Assert.IsInstanceOfType(result.Packets[1], typeof(InventoryCargoSendAllPacket));
         Assert.AreEqual(1, harness.Persistence.Moved.Count);
     }
 

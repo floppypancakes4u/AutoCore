@@ -180,6 +180,7 @@ public sealed class InventoryTestHarness
     {
         var clone = (CloneBaseWeapon)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseWeapon));
         clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.Weapon, CloneBaseId = cbid };
+        clone.SimpleObjectSpecific = new SimpleObjectSpecific { InvSizeX = 1, InvSizeY = 1 };
         clone.WeaponSpecific = new WeaponSpecific { Flags = flags, SubType = subType };
         return clone;
     }
@@ -188,6 +189,7 @@ public sealed class InventoryTestHarness
     {
         var clone = (CloneBaseObject)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseObject));
         clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)type, CloneBaseId = cbid };
+        clone.SimpleObjectSpecific = new SimpleObjectSpecific { InvSizeX = 1, InvSizeY = 1 };
         return clone;
     }
 
@@ -195,7 +197,7 @@ public sealed class InventoryTestHarness
     {
         var clone = (CloneBaseObject)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseObject));
         clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.Item, CloneBaseId = cbid };
-        clone.SimpleObjectSpecific = new SimpleObjectSpecific { SubType = subType };
+        clone.SimpleObjectSpecific = new SimpleObjectSpecific { SubType = subType, InvSizeX = 1, InvSizeY = 1 };
         return clone;
     }
 

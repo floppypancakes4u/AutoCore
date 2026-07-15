@@ -49,8 +49,35 @@ Default configs share the same ports and databases across checkouts (e.g. Auth `
 
 1. Stop any existing `AutoCore.Launcher` (user-approved).
 2. `dotnet build src/AutoCore.Launcher/AutoCore.Launcher.csproj` (or full `src/AutoCore.sln`) **in this worktree**.
-3. Run `src/AutoCore.Launcher/bin/Debug/net8.0/AutoCore.Launcher.exe` from this worktree’s output.
+3. Start Launcher **as a background shell task** from this worktree’s output directory (see below).
 4. Point the client at this stack; when finished, stop Launcher before switching back to another checkout’s servers.
+
+### How to start Launcher (background task — required)
+
+When starting the server from an agent session (especially a **worktree**), run `AutoCore.Launcher.exe` as a **background** shell command (`background: true` / equivalent long-running task), not via fire-and-forget `Start-Process` that detaches without an agent-owned task id.
+
+**Why:**
+
+* Background tasks keep **stdout/stderr** available so you can confirm boot (ports, Auth/Global/Sector init, client login) and diagnose crashes.
+* The agent can **poll or wait on** the task output and **stop** the process cleanly later (`kill` / task terminate) without hunting orphan PIDs.
+* Detached `Start-Process` (or a short-lived shell that exits after spawning) often leaves a process that **dies when the agent shell ends**, or leaves no handle to inspect logs — that has already caused “server not running / cannot connect” failures.
+
+**Pattern (after approval + build):**
+
+```powershell
+# cwd = this worktree's Launcher output
+Set-Location src/AutoCore.Launcher/bin/Debug/net8.0
+.\AutoCore.Launcher.exe
+# Run that command with background: true so the task stays attached to the session.
+```
+
+Then verify before telling the user it is up:
+
+* Task still **running**
+* Listening: Auth TCP `2106`/`2107`, Global UDP `26880`, Sector UDP `27001` (and Dev API `27999` if enabled)
+* Log lines such as “Listening for clients” / Communicator authenticated
+
+Do **not** claim the server is ready until those checks pass. If the background task exits, read its log and restart only with approval (or if the user already asked to start/keep servers up).
 
 ## Engineering Standards
 
