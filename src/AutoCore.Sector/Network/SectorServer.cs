@@ -158,6 +158,11 @@ public partial class SectorServer : BaseServer, ILoopable
             // Delayed map-prop corpse despawn (ram wrecks stay ~12.5s then DestroyObject).
             MapPropCorpseDespawn.Tick();
 
+            // Periodic post-respawn combat-HUD resync: the client only applies CharacterLevelPacket
+            // HP once it is back "in-world" after the INC airlift cinematic, so re-send across a
+            // window until one lands (see PostRespawnHudResync).
+            PostRespawnHudResync.Tick();
+
             // Combat pools (heat cool / shield / power) — CVOGHBRegeneration @ 3000 ms. HP does not regen.
             // Accumulate MainLoop delta into discrete 3000 ms pulses per player vehicle.
             var poolDeltaMs = (int)Math.Clamp(delta, 1, 250);

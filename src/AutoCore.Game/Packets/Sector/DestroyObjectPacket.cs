@@ -5,11 +5,21 @@ using AutoCore.Game.Extensions;
 using AutoCore.Game.Structures;
 
 /// <summary>
-/// S2C DestroyObject (0x2020). Retail client: Client_RecvDestroyObject @ 0x008149C0 →
-/// CompletelyDestroyObject @ 0x009440E0. Non-silent <see cref="DeathType"/> plays death VFX
+/// S2C DestroyObject (0x2020). Retail client: Client_RecvDestroyObject @ 0x00814A38 →
+/// CompletelyDestroyObject @ 0x00944271. Non-silent <see cref="DeathType"/> plays death VFX
 /// (creature path maps Violent/Overkill/Fiery/Peaceful to FX ids).
 /// Absolute offsets (opcode at 0): unknown@+4, victim TFID@+8, extra@+18/+1C, guard coid@+20,
 /// deathType@+28, pad@+2C, murderer TFID@+30, force@+40.
+/// <para>
+/// Death/respawn UI trigger: at the top of Client_RecvDestroyObject, if this packet's
+/// <see cref="ObjectId"/> (not GuardCoid) matches the local player's currently-possessed
+/// vehicle, the client shows the death/respawn window (FUN_00802170) and returns without
+/// tearing the object down — the ghost HealthMask/corpse-bit update alone does not pop this
+/// UI. CompletelyDestroyObject has an equivalent owner-character check for the vehicle-type
+/// branch. GuardCoid is only consulted in a secondary "observing another entity" branch
+/// (gated on a separate spectating flag), where it takes over from ObjectId as the local-avatar
+/// comparison and suppresses destroy without showing UI.
+/// </para>
 /// </summary>
 public class DestroyObjectPacket : BasePacket
 {

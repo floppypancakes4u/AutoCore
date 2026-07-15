@@ -624,7 +624,14 @@ public class RespawnManagerTests
         character.CurrentVehicle.OnDeath(AutoCore.Game.Constants.DeathType.Silent);
         character.SetLastRepairStation(1, 94, new Vector3(8f, 9f, 10f), Quaternion.Default);
 
-        Assert.IsNull(sent, "vehicle death initializes the client UI through ghost state, not SpecialEvent");
+        // Ghidra: Client_RecvDestroyObject (0x00814A38) shows the death/respawn UI when the
+        // DestroyObject packet's ObjectId matches the local player's currently-possessed
+        // vehicle, instead of tearing the object down. The ghost HealthMask/corpse-bit update
+        // alone does not pop this UI.
+        var destroyObject = sent as DestroyObjectPacket;
+        Assert.IsNotNull(destroyObject, "vehicle death must send DestroyObject to trigger the client's death/respawn UI");
+        Assert.AreEqual(character.CurrentVehicle.ObjectId.Coid, destroyObject.ObjectId.Coid);
+        Assert.AreEqual(AutoCore.Game.Constants.DeathType.Silent, destroyObject.DeathType);
 
         Assert.IsTrue(RespawnManager.Instance.TryRespawnInSector(
             character, character.CurrentVehicle.ObjectId.Coid, out var reason));
@@ -636,6 +643,48 @@ public class RespawnManagerTests
         Assert.AreEqual(character.ObjectId.Coid, specialEvent.Target.Coid);
         Assert.AreEqual(character.ObjectId.Global, specialEvent.Target.Global);
         Assert.AreEqual(1, specialEvent.Flag);
+    }
+
+    [TestMethod]
+    public void TryRespawnInSector_SchedulesPeriodicOwnerCombatHudResync()
+    {
+        PostRespawnHudResync.ResetForTests();
+        try
+        {
+            var map = CreateMap(95, new Vector4(0, 0, 0, 0));
+            var character = CreateCharacterWithVehicle(240, 241);
+            character.SetMap(map);
+            character.CurrentVehicle.SetMap(map);
+            character.SetLastRepairStation(1, 95, new Vector3(8f, 9f, 10f), Quaternion.Default);
+            character.CurrentVehicle.SetHPForTests(0);
+            character.CurrentVehicle.OnDeath(AutoCore.Game.Constants.DeathType.Silent);
+
+            Assert.IsTrue(RespawnManager.Instance.TryRespawnInSector(
+                character, character.CurrentVehicle.ObjectId.Coid, out _));
+
+            // The client ignores the CharacterLevelPacket HP write until it is back "in-world"
+            // after the airlift cinematic, so respawn arms a periodic resync rather than a single
+            // send (see PostRespawnHudResync).
+            Assert.AreEqual(1, PostRespawnHudResync.PendingCountForTests,
+                "respawn must schedule the periodic combat-HUD resync");
+
+            var sent = new List<BasePacket>();
+            TNLConnection.TestPacketSink = (_, packet) => sent.Add(packet);
+
+            // First tick fires a resync; a later tick past the window drops the schedule.
+            Assert.AreEqual(1, PostRespawnHudResync.Tick(Environment.TickCount64));
+            Assert.IsTrue(sent.OfType<CharacterLevelPacket>().Any(),
+                "each resync tick must send a CharacterLevelPacket to the owner");
+
+            Assert.AreEqual(0, PostRespawnHudResync.Tick(
+                Environment.TickCount64 + PostRespawnHudResync.WindowMs + 1_000));
+            Assert.AreEqual(0, PostRespawnHudResync.PendingCountForTests,
+                "the schedule must expire after the resync window");
+        }
+        finally
+        {
+            PostRespawnHudResync.ResetForTests();
+        }
     }
 
     [TestMethod]

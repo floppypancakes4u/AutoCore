@@ -2201,6 +2201,23 @@ public class Vehicle : SimpleObject
                 Ghost != null ? 1 : 0,
                 Ghost?.GetFirstObjectRef() != null ? 1 : 0,
                 ownerConnection?.IsGhosting() == true ? 1 : 0);
+
+            // Ghidra: Client_RecvDestroyObject (0x00814A38) checks the incoming DestroyObject
+            // packet's ObjectId (not GuardCoid) against the local player's currently-possessed
+            // vehicle. On match it calls FUN_00802170 (the death/respawn UI show-function) and
+            // returns without tearing down the object client-side. CompletelyDestroyObject
+            // (0x00944271) has an equivalent owner-character check for the vehicle-type branch.
+            // The ghost HealthMask/corpse-bit update alone does not pop this UI — this packet is
+            // the actual trigger. Sent only to the owner (not broadcast) since other clients would
+            // fully destroy the object client-side and we don't yet resend a create on revive.
+            if (ownerConnection != null)
+            {
+                ownerConnection.SendGamePacket(new DestroyObjectPacket(ObjectId, deathType, Murderer));
+                Logger.WriteLog(LogType.Network,
+                    "PlayerDeathDestroyObject coid={0} deathType={1} murderer={2}",
+                    ObjectId.Coid, deathType, Murderer?.Coid ?? -1);
+            }
+
             return;
         }
 

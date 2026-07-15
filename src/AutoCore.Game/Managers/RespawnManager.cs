@@ -195,6 +195,14 @@ public class RespawnManager : Singleton<RespawnManager>
         vehicle.Revive();
         character.Revive();
         DirtyHealthAndPosition(character, vehicle);
+
+        // Ghidra: repair-pad healing (which only dirties the ghost HealthMask) stays invisible on
+        // the client after respawn until a CharacterLevelPacket (0x2017) resync applies HP and
+        // refreshes the HP bar. But the client ignores that packet's HP write until it is back
+        // "in-world" after the multi-second INC airlift cinematic, and no server-observable signal
+        // marks that moment. So we re-send the resync periodically across a window until one lands
+        // (PostRespawnHudResync) — the same thing /hp does implicitly by being typed post-cinematic.
+        PostRespawnHudResync.Schedule(character);
     }
 
     private static void ApplyPose(Character character, Vehicle vehicle, Vector3 position, Quaternion rotation)
