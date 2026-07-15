@@ -2,7 +2,7 @@
 
 **ID:** SYS-MISSION  
 **Priority:** 7  
-**Status:** partial reconstruction  
+**Status:** complete (static) with residuals  
 **Updated:** 2026-07-15
 
 ## Scope
@@ -47,6 +47,11 @@ Give mission, complete/advance objective, dynamic objective packets, auto-missio
 - Full CompleteObjective reward matrix: **probable**
 - Runtime: **blocked** UF-002
 
-## Open
+## Residuals (not eligible high-pri — see WORK_QUEUE Residual table)
 
-- Full packet layouts for all objective S2C variants beyond 0x2070
+| ID | Residual | Class |
+|----|----------|-------|
+| WQ-MISSION-r1 | Full packet layouts for all objective S2C variants beyond 0x2070 | optional depth |
+| WQ-RT-01 / UF-002 | Runtime dual-run | blocked |
+
+GiveMission / CompleteObjective high-pri path is complete (static).

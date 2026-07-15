@@ -2,7 +2,7 @@
 
 **ID:** SYS-INVENTORY  
 **Priority:** 4  
-**Status:** partial reconstruction  
+**Status:** complete (static) with residuals  
 **Updated:** 2026-07-15
 
 ## Scope
@@ -39,4 +39,13 @@ Grid cargo, grab/drop, equip/unequip, add-item notify, use-item responses.
 
 - Grab send path: **high**
 - AddItem loot UI: **high**
-- Full equip chain: **probable** (queued WQ-011)
+- Full equip chain: **probable** (WQ-011 complete; place-helper leaf depth remains matrix Open on `008151a0`)
+
+## Residuals (not eligible high-pri)
+
+| ID | Residual | Class |
+|----|----------|-------|
+| — | RecvAddItem place helpers / equip type-switch leaf depth | optional depth (matrix Open cells) |
+| WQ-RT-01 / UF-002 | Runtime dual-run | blocked |
+
+High-pri grab/equip/unequip/drop send-recv vertical is complete (static).

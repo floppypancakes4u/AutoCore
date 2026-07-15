@@ -2,7 +2,7 @@
 
 **ID:** SYS-MOVEMENT  
 **Priority:** 2  
-**Status:** partial reconstruction  
+**Status:** complete (static) with residuals  
 **Updated:** 2026-07-15
 
 ## Scope
@@ -54,6 +54,9 @@ setDrivingInputs(this, pos*, rot*, vel*, angVel*, throttle, steering, handbrake,
 - Soft threshold 15.0: **high**
 - Full Havok between packs: **probable**
 
-## Open questions
+## Residuals (not eligible high-pri — see WORK_QUEUE Residual table)
 
-- Ghost +0xBC ms for integrateDt source (MOTION_CLIENT_RE open item)
+| ID | Residual | Class |
+|----|----------|-------|
+| WQ-MOV-r1 | Ghost +0xBC ms / integrateDt source annotation (MOTION_CLIENT_RE open item) | optional depth |
+| WQ-RT-01 / UF-002 | Runtime dual-run of drive/pose | blocked |

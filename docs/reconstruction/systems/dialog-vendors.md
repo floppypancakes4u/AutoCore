@@ -2,9 +2,9 @@
 
 **ID:** SYS-VENDOR  
 **Priority:** 9  
-**Status:** partial reconstruction (static vertical beyond UseObject)  
+**Status:** complete (static) with residuals  
 **Updated:** 2026-07-15  
-**Related UF:** UF-003 (advanced this pass; runtime still UF-002)
+**Related UF:** UF-003 **closed** (dialog+store wire path); runtime still UF-002 / WQ-RT-01
 
 ## Scope
 
@@ -157,12 +157,16 @@ Opcodes 0x2024 StoreOpen / 0x2026 StoreList appear unused for primary open (stoc
 | 0x2027 size 0x40 buy/sell IsBuy | **confirmed** |
 | 0x2028 size 0x30 success/isBuy/credits | **confirmed** |
 | GroupReactionCall decoded field map | **probable** |
-| Full OpenStore reaction type internals | **open** |
-| Runtime differential | **blocked** UF-002 |
+| Full OpenStore reaction type internals | **open** (optional residual WQ-020-r1) |
+| Runtime differential | **blocked** UF-002 / WQ-RT-01 |
 
-## Open / next
+## Residuals (not eligible high-pri — see WORK_QUEUE Residual table)
 
-- Decompile OpenStore reaction Apply body (type-specific).  
-- StoreClose C2S writer.  
-- Bitstream unpacker that produces the 0x28-stride buffer for 0x206C.  
-- Live capture UF-002 for Accepted field and buy slot COID.
+Vertical (UseObject → dialog/store open → 0x2027/0x2028) is **closed** under WQ-020 / UF-003. Items below are optional static depth or blocked runtime only:
+
+| ID | Residual | Class |
+|----|----------|-------|
+| WQ-020-r1 | OpenStore reaction Apply body (type-specific) | optional depth |
+| WQ-020-r2 | StoreClose C2S writer (0x202A) | optional depth |
+| WQ-020-r3 | Bitstream unpacker for 0x206C → 0x28-stride buffer | optional depth |
+| WQ-RT-01 / UF-002 | Live capture for Accepted field and buy slot COID | blocked |

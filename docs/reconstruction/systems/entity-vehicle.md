@@ -2,8 +2,9 @@
 
 **ID:** SYS-ENTITY  
 **Priority:** 8  
-**Status:** partial reconstruction  
-**Updated:** 2026-07-15
+**Status:** complete (static) with residuals  
+**Updated:** 2026-07-15  
+**SYSTEM_INDEX:** complete (static)** — combat dirty + owner forms + drive; non-combat flag names residual only
 
 ## Entry points
 
@@ -35,6 +36,13 @@ BitStream: flag at cursor then optional 32-bit payload; cursor `stream+0x18`, li
 ## Confidence
 
 - Combat dirty apply + clamp: **high**
-- Owner forms: **high**
-- Full non-combat dirty-flag taxonomy: **probable** (optional residual)
-- Runtime: **blocked** UF-002
+- Owner forms: **high** (`Ghost_ReadOwnerBlockAndUnpack` live from `DAT_00d1798c` path; UF-006 closed / WQ-021 complete)
+- Full non-combat dirty-flag taxonomy: **probable** (optional residual WQ-021-r1)
+- Runtime: **blocked** UF-002 / WQ-RT-01
+
+## Residuals (not eligible high-pri — see WORK_QUEUE Residual table)
+
+| ID | Residual | Class |
+|----|----------|-------|
+| WQ-021-r1 | Intermediate non-combat dirty-flag name taxonomy | optional depth |
+| WQ-RT-01 / UF-002 | Runtime dual-run | blocked |

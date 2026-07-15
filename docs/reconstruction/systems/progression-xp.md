@@ -2,7 +2,8 @@
 
 **ID:** SYS-PROGRESSION  
 **Priority:** ~7–8 (economy/progression vertical)  
-**Status:** mapped (static) — advances **UF-005** / **WQ-018**  
+**Status:** complete (static) with residuals  
+**Related:** UF-005 **closed** / WQ-018 **complete** (floater 0x34 / type 3 @ +0x30 wired)  
 **Prior authority doc:** [`docs/XP.md`](../../XP.md) — **do not replace**; this page is the reconstruction-tree index for client handlers.
 
 ---
@@ -140,13 +141,13 @@ Server recommendation: compute award server-side → send `0x205F` with final am
 
 ---
 
-## Open residuals
+## Residuals (not eligible high-pri — UF-005 / WQ-018 closed)
 
-| ID | Residual |
-|----|----------|
-| UF-005 (narrowed) | Client grant path **mapped** for S2C handlers + apply kernel; kill formula detail remains under `docs/XP.md` (not re-derived this pass). Weapon-bonus table index source (`+0xe818`) not fully typed. |
-| UF-002 | Runtime dual-run / live floater amounts need Launcher approval |
-| GLOBAL_KILL_SCALAR | Still BSS 0 at `0x00B037F8` — client-local kill XP dead in this image |
+| ID | Residual | Class |
+|----|----------|-------|
+| — | Kill formula detail under `docs/XP.md` (not re-derived this pass); weapon-bonus table index source (`+0xe818`) not fully typed | optional depth |
+| WQ-RT-01 / UF-002 | Runtime dual-run / live floater amounts need Launcher approval | blocked |
+| GLOBAL_KILL_SCALAR | Still BSS 0 at `0x00B037F8` — client-local kill XP dead in this image | image fact (not open work) |
 
 ---
 

@@ -2,7 +2,7 @@
 
 **ID:** SYS-INPUT  
 **Priority:** 1  
-**Status:** partial reconstruction  
+**Status:** complete (static) with residuals  
 **Updated:** 2026-07-15
 
 ## Scope
@@ -43,17 +43,11 @@ Keyboard/DIK → action-slot table → edge flags → frame poll that fires quic
 - Full meaning of every DAT_* binding: **probable** (need bind table dump)
 - ESC UI cancel graph: **probable**
 
-## Open questions
+## Residuals (not eligible high-pri — see WORK_QUEUE Residual table)
 
-- Complete bind-index → gameplay-action enumeration
-- Relation of DirectInput poll vs WM path
+| ID | Residual | Class |
+|----|----------|-------|
+| WQ-INPUT-r1 | Full bind-index → action enum / bind table dump; DI vs WM relation | optional depth |
+| WQ-RT-01 / UF-002 | Runtime key→edge capture | blocked |
 
-## Verification gaps
-
-- Runtime key→edge not captured this session (UF-002)
-- PollBoundActions is large; not every branch reconstructed as clean source
-
-## Next recommended work
-
-- Dump action table layout into OBJECT_LAYOUTS
-- Finish clean reconstruction of DriveControlTick key axis section
+PollBoundActions branch map and DriveControlTick axis annotation remain optional documentation depth under WQ-INPUT-r1 (key match + poll vertical complete for high-pri static).

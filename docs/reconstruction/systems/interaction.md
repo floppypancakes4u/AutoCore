@@ -2,7 +2,7 @@
 
 **ID:** SYS-INTERACT  
 **Priority:** 3  
-**Status:** partial reconstruction  
+**Status:** complete (static) with residuals  
 **Updated:** 2026-07-15
 
 ## Scope
@@ -37,3 +37,12 @@ Client → server UseObject (0x2072) for NPC/world interactables; objective id a
 
 - Layout and opcode: **confirmed** (strings EMSG_Sector_UseObject; decompile)
 - Interactable predicate internals: **tentative**
+
+## Residuals (not eligible high-pri)
+
+| ID | Residual | Class |
+|----|----------|-------|
+| — | `FUN_00524520` interactable predicate internals | optional depth (matrix Open on `00930d70`) |
+| WQ-RT-01 / UF-002 | Runtime dual-run | blocked |
+
+High-pri UseObject send path is complete (static); no separate WQ residual ID beyond matrix leaf notes.

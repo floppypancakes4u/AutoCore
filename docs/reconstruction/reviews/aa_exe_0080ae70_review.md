@@ -9,7 +9,8 @@
 - Wire offsets `Amount@+4`, `LevelHint@+8` match AutoCore `GiveXPPacket` and `docs/XP.md`.
 - Confirmed `AddExperience(..., PacketOrNonKill)` — packet path does **not** run kill spree.
 - Floater type constant **3** preserved.
-- **Result:** control flow matches decompile; register-based ESI/EDI dispatch documented honestly.
+- Floater layout gate (skeptic close-out): `GiveXpFloaterStack` size **0x34**, type field at **+0x30** (`static_assert(offsetof(..., uStack_8) == 0x30)`); clean form sets `frame.uStack_8 = 3`; experiments assert `len == 0x34` and `buf[0x30] == 3` before `Client_EnqueueCombatFloater_INFERRED`.
+- **Result:** control flow matches decompile; register-based ESI/EDI dispatch documented honestly; floater theater layout pinned.
 
 ## Assembly / machine-backed review
 

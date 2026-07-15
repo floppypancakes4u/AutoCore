@@ -2,12 +2,13 @@
 
 **ID:** SYS-RESPAWN  
 **Priority:** 6  
-**Status:** partial reconstruction (request + S2C + animation SM)  
-**Updated:** 2026-07-15
+**Status:** complete (static) with residuals  
+**Updated:** 2026-07-15  
+**SYSTEM_INDEX:** complete (static)* — countdown path complete; UF-001 residual only
 
 ## Scope
 
-INC airlift request, SpecialEvent presentation, airlift state machine. Death UI entry still open (UF-001).
+INC airlift request, SpecialEvent presentation, airlift state machine. Death UI entry still open (UF-001 residual / WQ-019-open).
 
 ## Entry points
 
@@ -76,6 +77,10 @@ Gates: game+0xe98 and +0x250 non-null; match selected id +0xd28.
 
 **Still open:** exact function that opens INC UI from zero-HP/corpse flag (not yet symbolized); countdown→send is confirmed.
 
-## Open
+## Residuals (mirrored on WORK_QUEUE)
 
-- UF-001 residual: corpse HP → show INC UI open
+| ID | Residual | Class |
+|----|----------|-------|
+| UF-001 / WQ-019-open | Corpse/zero-HP → show INC UI open (symbol not found after search) | residual blocked (unavailable symbol) |
+
+Phase timing constants remain **probable** annotation depth only (not a separate WQ residual).

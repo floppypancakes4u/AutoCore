@@ -2,7 +2,7 @@
 
 **ID:** SYS-ACTIONS  
 **Priority:** 5  
-**Status:** partial reconstruction  
+**Status:** complete (static) with residuals  
 **Updated:** 2026-07-15
 
 ## Entry points
@@ -32,3 +32,12 @@
 
 - Slot type dispatch: **high**
 - Fire packet internals of FUN_004f5110: **tentative**
+
+## Residuals (not eligible high-pri)
+
+| ID | Residual | Class |
+|----|----------|-------|
+| — | `FUN_004f5110` fire packet internals / cast packet leaf | optional depth (matrix Open on `009436c0` / `0091a550`) |
+| WQ-RT-01 / UF-002 | Runtime dual-run | blocked |
+
+High-pri QuickBar activate + secondary fire gate path is complete (static).

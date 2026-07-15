@@ -2,7 +2,8 @@
 
 **ID:** SYS-COMMS  
 **Priority:** 13 (supporting)  
-**Status:** partial  
+**Status:** complete (static) with residuals  
+**Updated:** 2026-07-15
 
 ## Hub
 
@@ -21,5 +22,14 @@
 | 0x2017 | CharacterLevel (absolute XP/money) | Client_RecvCharacterLevel |
 | 0x205E | GiveCredits (additive) | Client_RecvGiveCredits |
 | 0x205F | GiveXP (additive) | Client_AwardKillExperience |
+| 0x2027 / 0x2028 | StoreTransaction | send / `Client_RecvStoreTransactionResponse` |
+| 0x206C / 0x206D | GroupReactionCall / NpcMissionDialog | recv handlers |
 
-Progression vertical: `systems/progression-xp.md`. Full case table is WQ-016.
+Progression vertical: `systems/progression-xp.md`. Case map hub is **WQ-016 complete**.
+
+## Residuals (not eligible high-pri — see WORK_QUEUE Residual table)
+
+| ID | Residual | Class |
+|----|----------|-------|
+| WQ-016-r1 | Remaining FUN_* leaf handlers beyond case map | optional depth |
+| WQ-RT-01 / UF-002 | Runtime dual-run | blocked |

@@ -12,6 +12,7 @@
 3. **Mechanical tests** — `assert_recon_call_site` fails if owner/enqueue only exist as dead definitions; floater asserts `buf[0x30]==3` and `len==0x34`.
 4. **State alignment** — SYSTEM_INDEX / WORK_QUEUE / matrix / UF list match wired code after gates pass.
 5. **Gate re-verify (task-1)** — `test_reconstructed_logic.py` 27/27 OK; `Ghost_ReadOwnerBlockAndUnpack` live under `DAT_00d1798c`; floater type 3 @+0x30 / size 0x34.
+6. **Final-review Important fixes** — matrix store rows (`0088e180`/`00810670`/`00860a50`); `00815070` Open no longer “store buy”; systems/*.md Status = `complete (static) with residuals`; system Open lists mirrored as WQ Residual IDs (WQ-020-r*, WQ-021-r1, etc.).
 
 ## UF status
 

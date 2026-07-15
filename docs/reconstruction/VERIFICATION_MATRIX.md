@@ -32,4 +32,7 @@ Status codes: Y=yes, N=no, P=partial, B=blocked
 | aa_exe_0091ee20 | Client_INC_ContactCountdownTick | respawn | 85 | Y | Y | Y | P | Y | Y | Y | Y | Y | P | Y | Y | N | B | Y | Y | Y | Y | Y | corpse?UI |
 | aa_exe_00815710 | Client_PacketDispatch | comms | 60 | Y | Y | Y | P | Y | Y | Y | Y | Y | N | N | Y | N | B | Y | Y | Y | Y | Y | FUN_* leaves |
 | aa_exe_0080ae70 | Client_AwardKillExperience | xp | 55 | Y | Y | Y | P | Y | Y | Y | Y | Y | P | Y | Y | N | B | Y | Y | Y | Y | Y | — |
-| aa_exe_00815070 | Client_RecvNpcMissionDialog | dialog | 70 | Y | Y | P | P | Y | P | Y | P | Y | P | Y | Y | N | B | N | Y | Y | Y | P | store buy |
+| aa_exe_00815070 | Client_RecvNpcMissionDialog | dialog | 70 | Y | Y | P | P | Y | P | Y | P | Y | P | Y | Y | N | B | N | Y | Y | Y | Y | none critical (WQ-020 complete; UF-003 closed) |
+| aa_exe_0088e180 | Client_SendStoreTransactionBuy | dialog | 70 | Y | Y | Y | P | Y | Y | Y | P | Y | Y | Y | Y | N | B | Y | Y | Y | Y | Y | none critical (WQ-020 / UF-003) |
+| aa_exe_00810670 | Client_RecvStoreTransactionResponse | dialog | 70 | Y | Y | Y | P | Y | Y | Y | P | Y | Y | Y | Y | N | B | Y | Y | Y | Y | Y | buy sub-branch labels probable; live UF-002 |
+| aa_exe_00860a50 | Client_UI_InventoryDropToGrid_store | dialog | 70 | Y | Y | Y | P | Y | Y | Y | P | Y | P | Y | Y | N | B | Y | Y | Y | Y | Y | none critical (sell 0x2027; WQ-020) |

@@ -2,7 +2,7 @@
 
 **ID:** SYS-WORLD  
 **Priority:** 10  
-**Status:** partial  
+**Status:** complete (static) with residuals  
 **Updated:** 2026-07-15
 
 ## Entry points
@@ -14,3 +14,11 @@
 ## Flow
 
 UnlockFlag==0 → RelockContinentObject; else unlock continent and optionally set explored bits 1..32.
+
+## Residuals (not eligible high-pri)
+
+| ID | Residual | Class |
+|----|----------|-------|
+| WQ-RT-01 / UF-002 | Runtime dual-run of unlock path | blocked |
+
+High-pri UnlockRegion handler is complete (static); broader transfer/login lifecycle is SYS-LIFECYCLE deferred (WQ-017).
