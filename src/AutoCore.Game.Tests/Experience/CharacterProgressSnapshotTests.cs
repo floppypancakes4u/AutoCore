@@ -25,10 +25,10 @@ public class CharacterProgressSnapshotTests
         Assert.AreEqual((short)0, snap.SkillPoints);
         Assert.AreEqual((short)0, snap.AttributePoints);
         Assert.AreEqual((short)0, snap.ResearchPoints);
-        Assert.AreEqual((short)0, snap.AttributeTech);
-        Assert.AreEqual((short)0, snap.AttributeCombat);
-        Assert.AreEqual((short)0, snap.AttributeTheory);
-        Assert.AreEqual((short)0, snap.AttributePerception);
+        Assert.AreEqual((short)1, snap.AttributeTech);
+        Assert.AreEqual((short)1, snap.AttributeCombat);
+        Assert.AreEqual((short)1, snap.AttributeTheory);
+        Assert.AreEqual((short)1, snap.AttributePerception);
     }
 
     [TestMethod]
@@ -47,15 +47,25 @@ public class CharacterProgressSnapshotTests
     }
 
     [TestMethod]
-    public void Constructor_DefaultsOptionalPoolsToZero()
+    public void Constructor_DefaultsSpentAttributesToOne()
     {
         var snap = new CharacterProgressSnapshot(2, 100);
         Assert.AreEqual(0, snap.SkillPoints);
         Assert.AreEqual(0, snap.AttributePoints);
         Assert.AreEqual(0, snap.ResearchPoints);
-        Assert.AreEqual(0, snap.AttributeTech);
-        Assert.AreEqual(0, snap.AttributeCombat);
-        Assert.AreEqual(0, snap.AttributeTheory);
-        Assert.AreEqual(0, snap.AttributePerception);
+        Assert.AreEqual((short)1, snap.AttributeTech);
+        Assert.AreEqual((short)1, snap.AttributeCombat);
+        Assert.AreEqual((short)1, snap.AttributeTheory);
+        Assert.AreEqual((short)1, snap.AttributePerception);
+    }
+
+    [TestMethod]
+    public void Constructor_FloorsZeroSpentAttributesToOne()
+    {
+        var snap = new CharacterProgressSnapshot(5, 10, 0, 0, 0, 0, 0, 0, 0);
+        Assert.AreEqual((short)1, snap.AttributeTech);
+        Assert.AreEqual((short)1, snap.AttributeCombat);
+        Assert.AreEqual((short)1, snap.AttributeTheory);
+        Assert.AreEqual((short)1, snap.AttributePerception);
     }
 }

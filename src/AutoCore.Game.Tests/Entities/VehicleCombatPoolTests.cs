@@ -131,9 +131,11 @@ public class VehicleCombatPoolTests
         Assert.AreEqual(8, vehicle.CoolRate);
         Assert.AreEqual(5, vehicle.PowerRegenRate);
 
+        // Max power = ceil(level*classCoeff + TheoryPool*2 + PP.PowerMaximum).
+        // level 1, default class 0 → 0.6 + 2 + 180 = 182.6 → 183.
         var (cur, max) = CharacterLevelManager.Instance.GetPower(character.ObjectId.Coid);
-        Assert.AreEqual((short)180, max);
-        Assert.AreEqual((short)180, cur);
+        Assert.AreEqual((short)183, max);
+        Assert.AreEqual((short)183, cur);
     }
 
     [TestMethod]

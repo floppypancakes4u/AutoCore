@@ -9,20 +9,21 @@ public readonly struct CharacterProgressSnapshot
         short skillPoints = 0,
         short attributePoints = 0,
         short researchPoints = 0,
-        short attributeTech = 0,
-        short attributeCombat = 0,
-        short attributeTheory = 0,
-        short attributePerception = 0)
+        short attributeTech = 1,
+        short attributeCombat = 1,
+        short attributeTheory = 1,
+        short attributePerception = 1)
     {
         Level = level < 1 ? (byte)1 : level;
         Experience = experience < 0 ? 0 : experience;
         SkillPoints = skillPoints < 0 ? (short)0 : skillPoints;
         AttributePoints = attributePoints < 0 ? (short)0 : attributePoints;
         ResearchPoints = researchPoints < 0 ? (short)0 : researchPoints;
-        AttributeTech = attributeTech < 0 ? (short)0 : attributeTech;
-        AttributeCombat = attributeCombat < 0 ? (short)0 : attributeCombat;
-        AttributeTheory = attributeTheory < 0 ? (short)0 : attributeTheory;
-        AttributePerception = attributePerception < 0 ? (short)0 : attributePerception;
+        // Spent attributes floor at 1 (retail pool minimum).
+        AttributeTech = attributeTech < 1 ? (short)1 : attributeTech;
+        AttributeCombat = attributeCombat < 1 ? (short)1 : attributeCombat;
+        AttributeTheory = attributeTheory < 1 ? (short)1 : attributeTheory;
+        AttributePerception = attributePerception < 1 ? (short)1 : attributePerception;
     }
 
     public byte Level { get; }

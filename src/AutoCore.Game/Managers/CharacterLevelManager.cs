@@ -128,12 +128,30 @@ public class CharacterLevelManager : Singleton<CharacterLevelManager>
     /// <summary>Test helper: drop all cached mana state between tests.</summary>
     internal void ClearAllForTests() => _cache.Clear();
 
-    /// <summary>Initialize the placeholder 10/10 pool from the equipped power plant.</summary>
+    /// <summary>
+    /// Initialize the placeholder 10/10 pool from Theory + class + power plant (retail core formula).
+    /// </summary>
     public void EnsurePowerPlantCapacity(Character character)
     {
-        var maximum = character?.CurrentVehicle?.PowerPlant?.CloneBasePowerPlant?.PowerPlantSpecific?.PowerMaximum ?? 0;
+        if (character?.CurrentVehicle == null)
+            return;
+        var specific = character.CurrentVehicle.PowerPlant?.CloneBasePowerPlant?.PowerPlantSpecific;
+        var plantMax = specific?.PowerMaximum ?? 0;
+        if (plantMax <= 0)
+            return;
+
+        byte classId = 0;
+        if (character.CloneBaseObject is CloneBases.CloneBaseCharacter charCb)
+            classId = charCb.CharacterSpecific.Class;
+
+        var maximum = Combat.VehiclePowerCalculator.CalculatePlayerMaxPower(
+            classId,
+            character.Level,
+            character.AttributeTheory,
+            plantMax);
         if (maximum <= 0)
             return;
+
         var state = GetOrCreate(character.ObjectId.Coid);
         lock (state)
         {

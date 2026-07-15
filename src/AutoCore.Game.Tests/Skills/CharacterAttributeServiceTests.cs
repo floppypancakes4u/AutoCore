@@ -118,7 +118,7 @@ public class CharacterAttributeServiceTests
         var heatBefore = vehicle.MaxHeat;
 
         Assert.IsTrue(CharacterAttributeService.Instance.TryIncrement(character, CharacterAttributeKind.Combat.ToMask(), out _));
-        Assert.AreEqual(1, character.AttributeCombat);
+        Assert.AreEqual(2, character.AttributeCombat); // default floor 1 + spend
         Assert.AreEqual(0, character.AttributePoints);
         Assert.AreEqual(5, character.AttributeTech);
         Assert.AreEqual(hpBefore, vehicle.GetMaximumHP());
@@ -143,14 +143,40 @@ public class CharacterAttributeServiceTests
     }
 
     [TestMethod]
-    public void TryIncrement_TheoryAndPerception_StoreOnly()
+    public void TryIncrement_Perception_StoresOnly_NoHpHeatOrPowerChange()
     {
-        var character = MakeCharacter(6, attributePoints: 2);
-        Assert.IsTrue(CharacterAttributeService.Instance.TryIncrement(character, CharacterAttributeKind.Theory.ToMask(), out _));
-        Assert.AreEqual(1, character.AttributeTheory);
+        var (character, vehicle) = MakeCharacterWithVehicle(6, tech: 5, attributePoints: 1);
+        vehicle.ApplyPowerPlantCapacities(startPowerAtFull: true, clearHeat: true);
+        var powerBefore = CharacterLevelManager.Instance.GetPower(character.ObjectId.Coid).Maximum;
+
         Assert.IsTrue(CharacterAttributeService.Instance.TryIncrement(character, CharacterAttributeKind.Perception.ToMask(), out _));
-        Assert.AreEqual(1, character.AttributePerception);
-        Assert.AreEqual(0, character.AttributePoints);
+        Assert.AreEqual(2, character.AttributePerception); // default floor 1 + spend
+        Assert.AreEqual(powerBefore, CharacterLevelManager.Instance.GetPower(character.ObjectId.Coid).Maximum);
+    }
+
+    [TestMethod]
+    public void TryIncrement_Theory_RaisesMaxPower()
+    {
+        var (character, vehicle) = MakeCharacterWithVehicle(7, tech: 5, attributePoints: 1);
+        character.SetAttributeTheory(1);
+        vehicle.ApplyPowerPlantCapacities(startPowerAtFull: true, clearHeat: true);
+        var powerBefore = CharacterLevelManager.Instance.GetPower(character.ObjectId.Coid).Maximum;
+
+        Assert.IsTrue(CharacterAttributeService.Instance.TryIncrement(character, CharacterAttributeKind.Theory.ToMask(), out _));
+        Assert.AreEqual(2, character.AttributeTheory);
+        var powerAfter = CharacterLevelManager.Instance.GetPower(character.ObjectId.Coid).Maximum;
+        Assert.IsTrue(powerAfter > powerBefore, "Theory spend must raise max power (+2 per point)");
+        Assert.AreEqual(powerBefore + 2, powerAfter);
+    }
+
+    [TestMethod]
+    public void TryIncrement_Theory_WithoutVehicle_StillStores()
+    {
+        var character = MakeCharacter(8, attributePoints: 1);
+        character.SetAttributeTheory(1);
+        Assert.IsTrue(CharacterAttributeService.Instance.TryIncrement(character, CharacterAttributeKind.Theory.ToMask(), out _));
+        Assert.AreEqual(2, character.AttributeTheory);
+        Assert.AreEqual(1, _persistCalls);
     }
 
     private static Character MakeCharacter(long coid, short attributePoints = 0)

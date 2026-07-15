@@ -761,35 +761,7 @@ public class ChatManager : Singleton<ChatManager>
                 }
                 break;
 
-            case "/skillpoints":
-                if (parts.Length < 2)
-                {
-                    respPacket.Message = "Invalid skill points command! Usage: /skillpoints <value>";
-                    break;
-                }
-
-                if (!short.TryParse(parts[1], out var skillPoints))
-                {
-                    respPacket.Message = $"Invalid skill points value: {parts[1]}. Must be a number.";
-                    break;
-                }
-
-                try
-                {
-                    connection.SendGamePacket(new CharacterLevelPacket
-                    {
-                        CharacterId = character.ObjectId,
-                        Level = character.Level,
-                        SkillPoints = skillPoints
-                    });
-                    respPacket.Message = $"Set Skill Points to {skillPoints}!";
-                }
-                catch (System.Exception ex)
-                {
-                    Logger.WriteLog(LogType.Error, $"Failed to send skill points packet: {ex.Message}");
-                    respPacket.Message = $"Failed to set skill points: {ex.Message}";
-                }
-                break;
+            // /skillpoints is handled by ChatCommandService (sets server state + CharacterLevel packet).
 
             case "/research":
             case "/researchpoints":

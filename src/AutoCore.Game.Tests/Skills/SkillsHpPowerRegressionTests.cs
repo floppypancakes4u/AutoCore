@@ -102,9 +102,10 @@ public class SkillsHpPowerRegressionTests
         Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.PowerPlant, plant, out _));
 
         CharacterLevelManager.Instance.EnsurePowerPlantCapacity(character);
+        // ceil(level*classCoeff + Theory*2 + plant) — level 1 class 0 Theory 1 plant 120 → 122.6 → 123
         var (cur, max) = CharacterLevelManager.Instance.GetPower(502);
-        Assert.AreEqual((short)120, max);
-        Assert.AreEqual((short)120, cur);
+        Assert.AreEqual((short)123, max);
+        Assert.AreEqual((short)123, cur);
     }
 
     [TestMethod]

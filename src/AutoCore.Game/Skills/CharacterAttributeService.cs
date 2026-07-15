@@ -6,7 +6,7 @@ using AutoCore.Game.Experience;
 
 /// <summary>
 /// Handles C2S <c>AttributeIncrement</c> (0x205A): spend one unspent attribute point.
-/// Tech raises vehicle max HP and heat cap; other attributes are stored only for now.
+/// Tech raises vehicle max HP and heat; Theory raises max power; Combat/Perception are live at hit time.
 /// </summary>
 public sealed class CharacterAttributeService
 {
@@ -58,6 +58,8 @@ public sealed class CharacterAttributeService
 
         if (kind == CharacterAttributeKind.Tech)
             ApplyTechCombatSideEffects(character);
+        else if (kind == CharacterAttributeKind.Theory)
+            ApplyTheoryCombatSideEffects(character);
 
         return true;
     }
@@ -70,6 +72,15 @@ public sealed class CharacterAttributeService
 
         vehicle.RecalculateMaximumHitPoints(refillCurrent: false, triggerGhostUpdate: true);
         vehicle.RecalculateMaximumHeat(triggerGhostUpdate: true);
+    }
+
+    private static void ApplyTheoryCombatSideEffects(Character character)
+    {
+        var vehicle = character.CurrentVehicle;
+        if (vehicle == null)
+            return;
+
+        vehicle.RecalculateMaximumPower(startPowerAtFull: false, triggerGhostUpdate: true);
     }
 
     private static void Persist(Character character)

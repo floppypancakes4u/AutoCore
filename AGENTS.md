@@ -79,6 +79,14 @@ Then verify before telling the user it is up:
 
 Do **not** claim the server is ready until those checks pass. If the background task exits, read its log and restart only with approval (or if the user already asked to start/keep servers up).
 
+## Ghidra MCP (reverse engineering)
+
+Prefer **decompile** (`decompile_function`, `batch_decompile`) and **`read_memory`** for constants and formulas.
+
+* **Avoid `disassemble_bytes`.** It frequently hangs, times out, or returns incomplete output and is a poor default for RE work.
+* Do **not** rely on it for primary analysis. Reconstruct math from decompiler pseudocode + known `DAT_*` / float constants via `read_memory`.
+* If disassembly is truly unavoidable (e.g. decompiler is clearly wrong on a tight FPU sequence), keep the request small and treat it as best-effort. The MCP `use_tool` path has **no** documented per-call timeout parameter; there is no reliable way to enforce a 2s cap from the agent tool layer today — so prefer not calling it at all.
+
 ## Engineering Standards
 
 All code changes must follow TDD.
