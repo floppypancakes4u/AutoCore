@@ -663,7 +663,9 @@ public class Vehicle : SimpleObject
             var prevYaw = YawFromQuaternion(Rotation);
             var nextYaw = YawFromQuaternion(rotation);
             var dYaw = NormalizeRadians(nextYaw - prevYaw);
-            AngularVelocity = new Vector3(0f, dYaw / dt, 0f);
+            // Full angular velocity (pitch/roll too) so client soft-buffer integrate keeps slope tilt
+            // between packs (FUN_0053eb90 uses angVel × dt on the rotation buffer).
+            AngularVelocity = EstimateAngularVelocity(Rotation, rotation, dt);
 
             if (driveSteering.HasValue)
                 Steering = Math.Clamp(driveSteering.Value, -1f, 1f);
@@ -698,6 +700,41 @@ public class Vehicle : SimpleObject
 
         if (!ShouldSuppressPatrolPoseGhost())
             Ghost?.SetMaskBits(GhostObject.PositionMask);
+    }
+
+    /// <summary>
+    /// Approximate world angular velocity from two chassis orientations (rad/s).
+    /// Used so pitch/roll tilt is carried in the ghost soft-buffer path between pose packs.
+    /// </summary>
+    internal static Vector3 EstimateAngularVelocity(Quaternion from, Quaternion to, float dt)
+    {
+        dt = Math.Max(dt, 1e-4f);
+        // qDelta = to * conjugate(from)
+        var conjX = -from.X;
+        var conjY = -from.Y;
+        var conjZ = -from.Z;
+        var conjW = from.W;
+        var dx = (to.W * conjX) + (to.X * conjW) + (to.Y * conjZ) - (to.Z * conjY);
+        var dy = (to.W * conjY) - (to.X * conjZ) + (to.Y * conjW) + (to.Z * conjX);
+        var dz = (to.W * conjZ) + (to.X * conjY) - (to.Y * conjX) + (to.Z * conjW);
+        var dw = (to.W * conjW) - (to.X * conjX) - (to.Y * conjY) - (to.Z * conjZ);
+
+        // Prefer shortest path
+        if (dw < 0f)
+        {
+            dx = -dx;
+            dy = -dy;
+            dz = -dz;
+            dw = -dw;
+        }
+
+        var sinHalf = MathF.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
+        if (sinHalf < 1e-6f)
+            return default;
+
+        var angle = 2f * MathF.Atan2(sinHalf, dw);
+        var inv = angle / (sinHalf * dt);
+        return new Vector3(dx * inv, dy * inv, dz * inv);
     }
 
     /// <summary>

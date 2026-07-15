@@ -1,0 +1,16 @@
+{
+  "stryker-config": {
+    "project": "src/AutoCore.Game/AutoCore.Game.csproj",
+    "test-projects": ["src/AutoCore.Game.Tests/AutoCore.Game.Tests.csproj"],
+    "mutate": [
+      "**/Npc/PathCurvature.cs",
+      "**/Npc/TerrainContactPlane.cs",
+      "**/Npc/NpcVehicleDriveController.cs",
+      "**/Npc/VehicleGroundMetricsCache.cs"
+    ],
+    "reporters": ["progress", "cleartext", "json"],
+    "thresholds": { "high": 90, "low": 80, "break": null },
+    "concurrency": 4,
+    "verbosity": "info"
+  }
+}
