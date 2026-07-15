@@ -76,7 +76,25 @@ public static class NpcTicker
             // every scoped client for no reason. Ticks that actually arrive (and snap onto the
             // waypoint) are never "holding" per the check above, so arrival snapping still applies
             // even when the NPC happened to already be sitting on the waypoint.
-            if (SoftNpcPathMotion.Enabled)
+            //
+            // Drive controller (opt-in) wins for vehicles only; otherwise legacy soft path.
+            // Foot creatures never use the vehicle drive controller.
+            if (NpcVehicleDriveController.Enabled && entity is Vehicle driveVehicle)
+            {
+                result = NpcVehicleDriveController.Apply(
+                    result,
+                    entity.Position,
+                    GetRotation(entity),
+                    ResolveSpeed(entity),
+                    dt,
+                    path,
+                    nowMs,
+                    GetVelocity(entity),
+                    npcAi.PathLaneOffset,
+                    map.MapData?.Heightfield,
+                    driveVehicle);
+            }
+            else if (SoftNpcPathMotion.Enabled)
             {
                 result = SoftNpcPathMotion.Apply(
                     result,
@@ -160,15 +178,19 @@ public static class NpcTicker
 
     private static void ApplyMove(ClonedObjectBase entity, PathStepResult result, float dt)
     {
-        var pos = SnapToTerrain(entity.Map, result.NewPosition);
+        // Drive controller already multi-samples the heightfield + clearance into NewPosition.
+        // Re-snapping to a single TGA sample would flatten pitch stance and strip ride height.
+        var pos = (NpcVehicleDriveController.Enabled && entity is Vehicle && result.HasDriveInputs)
+            ? result.NewPosition
+            : SnapToTerrain(entity.Map, result.NewPosition);
         // Keep target position grounded for foot creatures (client pose target).
         var targetPos = pos;
 
         switch (entity)
         {
             case Vehicle vehicle:
-                // Pack MoveToTarget3DPoint-style thr/steer when soft path computed them so the
-                // client VehicleAction spins wheels and steers (ghost +0x614/+0x618).
+                // Pack MoveToTarget3DPoint-style thr/steer when soft path / drive controller set them
+                // so the client VehicleAction spins wheels and steers (ghost +0x614/+0x618).
                 if (result.HasDriveInputs)
                 {
                     vehicle.ApplyServerMove(

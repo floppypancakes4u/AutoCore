@@ -75,6 +75,8 @@ public class AssetManager : Singleton<AssetManager>
                     Logger.WriteLog(LogType.Initialize, $"WAD loaded successfully. Total CloneBases: {WADLoader.CloneBases.Count}");
                     var characterCount = WADLoader.CloneBases.Values.Count(cb => cb is CloneBaseCharacter);
                     Logger.WriteLog(LogType.Initialize, $"Character CloneBases found: {characterCount}");
+                    // Per-template wheel radius / hardpoint ride heights for NPC ground seating.
+                    AutoCore.Game.Npc.VehicleGroundMetricsCache.BuildFromCloneBases(WADLoader.CloneBases);
                 }
                 else
                 {

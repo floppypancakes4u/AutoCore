@@ -48,6 +48,8 @@ public class WireIsolationLeversTests
         Assert.IsFalse(GhostVehicle.EnableForeignReghostOwner);
         Assert.IsTrue(GhostVehicle.EnableForeignVehiclePosePriorityBoost);
         Assert.IsFalse(SoftNpcPathMotion.Enabled, "soft path motion is opt-in (lever / env)");
+        Assert.IsFalse(NpcVehicleDriveController.Enabled,
+            "vehicle drive controller is opt-in — default preserves legacy path motion");
         Assert.IsFalse(GhostVehicle.EnableClientSidePathVisual,
             "client-side path visual freezes server pose authority when misused");
         Assert.IsFalse(GhostVehicle.EnableMinimalForeignHealthBlock,
@@ -123,6 +125,22 @@ public class WireIsolationLeversTests
         WireIsolationLevers.ResetToDefaults();
         Assert.IsFalse(SoftNpcPathMotion.Enabled);
         Assert.IsFalse(GhostVehicle.EnableClientSidePathVisual);
+    }
+
+    [TestMethod]
+    public void TrySet_NpcVehicleDriveController_ByNameAndEnvSuffix()
+    {
+        Assert.IsTrue(WireIsolationLevers.TrySet("EnableNpcVehicleDriveController", true, out _));
+        Assert.IsTrue(NpcVehicleDriveController.Enabled);
+
+        WireIsolationLevers.ResetToDefaults();
+        Assert.IsFalse(NpcVehicleDriveController.Enabled);
+
+        Assert.IsTrue(WireIsolationLevers.TrySet("NPC_VEHICLE_DRIVE", true, out _));
+        Assert.IsTrue(NpcVehicleDriveController.Enabled);
+
+        WireIsolationLevers.ResetToDefaults();
+        Assert.IsFalse(NpcVehicleDriveController.Enabled);
     }
 
     [TestMethod]

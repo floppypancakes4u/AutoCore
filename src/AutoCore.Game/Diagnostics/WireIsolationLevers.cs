@@ -59,6 +59,9 @@ public static class WireIsolationLevers
             () => GhostVehicle.EnableForeignVehiclePosePriorityBoost, v => GhostVehicle.EnableForeignVehiclePosePriorityBoost = v, envSuffix: "VEHICLE_POSE_PRIORITY"),
         new("EnableSoftNpcPathMotion", "Limit turn rate, blend Y, carry velocity through zero-wait path arrivals",
             () => SoftNpcPathMotion.Enabled, v => SoftNpcPathMotion.Enabled = v, envSuffix: "SOFT_NPC_PATH"),
+        new("EnableNpcVehicleDriveController",
+            "Vehicle path drive controller (facing-aligned motion + look-ahead thr/steer + terrain pitch/roll). When on, replaces soft path for vehicles only; default off = legacy",
+            () => NpcVehicleDriveController.Enabled, v => NpcVehicleDriveController.Enabled = v, envSuffix: "NPC_VEHICLE_DRIVE"),
         new("EnableClientSidePathVisual", "Skip idle-patrol pose deltas so client HBAI path AI drives (needs owner+path)",
             () => GhostVehicle.EnableClientSidePathVisual, v => GhostVehicle.EnableClientSidePathVisual = v, envSuffix: "CLIENT_PATH_VISUAL"),
     };
@@ -150,6 +153,7 @@ public static class WireIsolationLevers
         GhostVehicle.EnableForeignReghostOwner = false;
         GhostVehicle.EnableForeignVehiclePosePriorityBoost = true;
         SoftNpcPathMotion.Enabled = false;
+        NpcVehicleDriveController.Enabled = false;
         GhostVehicle.EnableClientSidePathVisual = false;
     }
 
