@@ -107,6 +107,7 @@ Commit chain on the branch after the base `56f2619`:
 | `1282915b` | C3 | **Anti-sink** rewritten to retail form in `VehicleActionSim.ApplyAntiSink`: scan min wheel `CurrentLength`; if `< 0`, lift chassis `PosY -= min` (position-only, **preserves LinVelY**). Old contact-vs-hardpoint penetration heuristic was provably dead code for upright bodies; deleted. Implemented from **static** decompile evidence with a "B2 debugger-confirm pending" caveat in the code comment. |
 | `a41c2eb7` | **B4 + C1** | **Inertia axis pairing RESOLVED by live CE capture** and fixed. Live rb `0x3b0c3940`: body-frame principal inv-inertia at `rb+0xe0` = `(1/4500,1/4500,1/1500,1/1500)`, mass `1500`; chassis basis (live `vehicleData=*(fw+0x10)`) front=+Z, up=+Y, side=−X; DB def (`0x2c97e6e0`) `RVInertiaRoll=1/Pitch=3/Yaw=3`. → `mass*RVInertia` maps **X←Pitch, Y←Yaw, Z←Roll** (forward/Z = low roll inertia). `CreateBody` had **Roll↔Pitch swapped**; fixed. Also proves asset tensor = `mass*RVInertia`, and `rb+0x2c=1/1500` corroborates B2 mass-normalization. Evidence → `0.2-mass-inertia.md §2.1`. |
 | `a65849ab` | **C6** | **ReGround** primitive `VehiclePhysicsInstance.ReGround(query)`: cast down from `PosY+10`, snap to hit, zero lin/ang vel + force/torque, `SetDriveAxes(0)`, reset wheel state (mirrors `airStabilization 0x598320` §3.2/§3.3). Wires the formerly-unused `ComputeReGroundCastStartY`/`ResolveReGroundPositionY`. New const `ReGroundCastMaxDistance`. The D-phase spawn/teleport/out-of-world primitive. |
+| `6308e4fb` | **B2** | **Suspension** — confirmed `gScale=1/(RB+0x2c)=mass` (fresh `0x64de50` decompile + B4 live `RB+0x2c=invMass`); hardpoint impulse via `postTick` `applyPointImpulse` at `wheel+0x20` (not COM) → C2; anti-sink `0x598650` step 3 = position-only Y lift, no velocity write → confirms C3 (caveat removed). Decompile-derived `suspension_goldens.json` (8 vectors) + `SuspensionOracleTests.cs` (3 pass; 7 bit-exact vs port, 1 pins the `MaxSuspensionForce=80` clamp deviation C2 removes). Doc `0.4-suspension.md`. |
 | `f89826a5` | **B1** | **Friction solver goldens** — live CE, 5 driving scenarios (rest/launch/cruise/turn/slide) captured at the solver-call return `0x64c9b2` (setup `fw+0x1fc`, cb, out `fw+0x2cc` off ESP). `frictionSolver_goldens.json` + `FrictionSolverOracleTests.cs` (3 active pass + 1 `[Ignore]` C4 target). RESOLVED: long/lat binding (`out[0]`/`out[2]` zero under grip, active only saturated); setup block is static per-vehicle (16-entry friction LUT + softness); `circleProjection 0x6c3f90` decompiled (iterative ellipse projection). Doc `0.3-friction-solver.md` "Live capture". |
 | `e15897d9` | **B3** | **`wheel+0x88` = per-wheel drive-torque CONTACT GATE** (live CE, fresh spawn): `1.0` grounded (bit-exact, all wheels, ~135k samples), `0.0` airborne (preUpdate no-contact branch). Rewritten each `preUpdate` (store `0x64D2F7`); framework vtbl `+0x24`=`0x51e900` is an empty `ret 0xC` no-op. `postTick`: `drivePack += wheels+0x28[i] * wheel+0x88 / axleCount`. Torque ratio is separate (retail `calcWheelTorque`→`wheels+0x28[i]`); port folds `tRatio` into `DriveScale` as interim until `calcWheelTorque` ported (C5). Corrected wheel walk: `wheel[i]=*(container+0x80)+i*0xC0`. Pow half already static (`fn_00598040_uprightPow.md`). Doc `fn_wheel_driveScale_0x88.md`. |
 
@@ -241,12 +242,10 @@ and loads on the next start; ToolSearch `open_process`/`ping` confirms it.)
 3. **B3 ✓, B4 ✓, C1 ✓, C6 ✓ are DONE** (see §5). Resume the remaining captures — all now **unblocked**
    (CE live). Note the wheel-array walk is `wheel[i]=*(container+0x80)+i*0xC0`, `container=*(fw+0xc)`,
    `fw`=ECX at `postTick 0x64bc70` / `applyAction 0x598650`:
-   - **B2** — suspension: `gScale=1/RB[+0x2c]` corroborated (`rb+0x2c=1/mass`); still capture the
-     component arrays + hardpoint-impulse confirm live (mostly idle-capturable).
-   - **B5** — airStab recovery: needs a **flip/crash** (user drives into it).
-   Then C2 → C4 (un-`[Ignore]` the B1 `PortSolve` + E1 at-speed tests as it lands) → C5 → C8(after C4),
-   D1→D2→D3, C7(last), F.
-   Full graph: **A ✓ → B1✓,B2,B3✓,B4✓,B5 → C1✓→C2→C3✓→C4→C5→C6✓→C8 → E1 ✓ → D1→D2→D3 → C7 → F.**
+   - **B5** — airStab recovery: needs a **flip/crash** (user drives into it). The only remaining B-task.
+   Then C2 (hardpoint impulse + remove `MaxSuspensionForce` clamp, per B2) → C4 (un-`[Ignore]` the B1
+   `PortSolve` + E1 at-speed tests as it lands) → C5 → C8(after C4), D1→D2→D3, C7(last), F.
+   Full graph: **A ✓ → B1✓,B2✓,B3✓,B4✓,B5 → C1✓→C2→C3✓→C4→C5→C6✓→C8 → E1 ✓ → D1→D2→D3 → C7 → F.**
    B1 capture harness (reusable): Lua peak-latch handler installed via `evaluate_lua` — see
    `tmp/re/b1c.py` and `CE_API_NOTES.md`; snapshots solver structs synchronously at a BP.
 
