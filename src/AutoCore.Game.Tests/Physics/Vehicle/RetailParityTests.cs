@@ -11,13 +11,22 @@ using AutoCore.Game.Structures;
 /// (rest height, no vertical-velocity accumulation, grounded turns, ballistic ramp exits,
 /// grounded downhill) for <see cref="VehiclePhysicsInstance"/> BEFORE the Phase C hardening
 /// work (C1 inertia pairing, C2 suspension hardpoint impulses, C3 retail anti-sink, C4 friction
-/// solver rewrite, C8 brake port). Any test that fails against today's sim must be
-/// <see cref="IgnoreAttribute"/>d with the observed values and the unblocking C-task recorded in
-/// a comment — NOT loosened. As of this writing all five pass against the current sim (see
-/// task-E1-report.md for observed values and the scenario-construction notes that got each test
-/// there without contaminating the contract under test — e.g. the ramp-exit test compares
-/// against a parallel reference instance rather than a hand-written formula, because this sim's
-/// airborne integration includes a real aerodynamic downforce term).
+/// solver rewrite, C8 brake port). Any test that cannot exercise its target behavior until a
+/// C-task lands is <see cref="IgnoreAttribute"/>d with the observed values and the unblocking
+/// C-task recorded right on the attribute/comment — NOT passed by weakness.
+/// <para>
+/// Known sim defects this suite characterizes around (not fixed here — test-only task):
+/// the friction solver's longitudinal term unconditionally cancels the chassis's ABSOLUTE
+/// speed every tick (not relative-to-wheel-spin slip — see <c>HkVehicleFrictionSolver.Solve</c>),
+/// so any seeded speed decays to a ~0.03 m/s drive-bias equilibrium within roughly a second
+/// regardless of throttle (fixed by C4); and the suspension damper's closing-speed term is
+/// <c>dot(chassisLinVel, contactNormal)</c>, so a tilted contact normal at approach speed reads
+/// as a large false compression rate and saturates <see cref="HkPhysicsConstants.MaxSuspensionForce"/>
+/// (fixed by C2/C3). Both defects mean several of the "real" scenarios below (cornering at speed,
+/// climbing an actual ramp to a genuine lip) cannot be exercised honestly yet; those variants are
+/// <see cref="IgnoreAttribute"/>d rather than measuring a near-stationary stand-in and calling it
+/// cornering/climbing.
+/// </para>
 /// </summary>
 [TestClass]
 public class RetailParityTests
@@ -215,8 +224,17 @@ public class RetailParityTests
 
     // ── 3. Constant-radius turn stays grounded ───────────────────────────────
 
+    /// <summary>
+    /// Full throttle + fixed steer on flat ground — but the friction solver's slip-cancel defect
+    /// (see class remarks) keeps this fixture's engine from ever reaching cornering speed, so the
+    /// car is essentially stationary for the whole measured window. Observed:
+    /// <c>contactRatio=1.0</c>, <c>maxAbsHeight=0.890</c> (chassis rest height, not turn-induced),
+    /// <c>meanVy=2.6e-6</c>. This test genuinely verifies "steer input alone does not destabilize
+    /// a parked car" — it does NOT verify grounded behavior under an actual turn at speed; see
+    /// <see cref="ConstantRadiusTurn_AtSpeed_StaysGrounded_NoUpwardDrift"/> for that contract.
+    /// </summary>
     [TestMethod]
-    public void ConstantRadiusTurn_StaysGrounded_NoUpwardDrift()
+    public void StationarySteerInput_StaysGrounded_NoUpwardDrift()
     {
         var inst = CreateInstance();
         inst.SetPose(0f, 0.9f, 0f, 0f, 0f, 0f, 1f);
@@ -260,37 +278,200 @@ public class RetailParityTests
             $"mean Vy should be ~0 (no net climb/sink) during a grounded turn; observed {meanVy}");
     }
 
+    /// <summary>
+    /// The real cornering contract: sustained speed AND a turn, staying grounded. Not reachable
+    /// via engine/throttle alone until C4 lands (see class remarks), so a running-start speed is
+    /// seeded directly (same technique as the ramp-exit tests below) purely to describe the
+    /// contract the fixed sim must satisfy — this test is not expected to run meaningfully before
+    /// C4, hence <see cref="IgnoreAttribute"/>.
+    /// </summary>
+    [TestMethod]
+    [Ignore("unblocked by C4 — friction slip-cancel kills chassis speed; observed meanVy=2.6e-6, maxAbsHeight=0.890 near-stationary (see StationarySteerInput_StaysGrounded_NoUpwardDrift)")]
+    public void ConstantRadiusTurn_AtSpeed_StaysGrounded_NoUpwardDrift()
+    {
+        var inst = CreateInstance();
+        inst.SetPose(0f, 0.9f, 0f, 0f, 0f, 0f, 1f);
+        var ground = FlatGround(GroundY);
+
+        // Warm up torque lag / steer ramp, then seed a sustained forward speed — full-throttle
+        // alone cannot reach or hold cornering speed until C4 fixes the slip-cancel defect.
+        const int warmupFrames = 60;
+        for (var i = 0; i < warmupFrames; i++)
+            inst.Step(-1f, 0.5f, false, Frame60, ground);
+        inst.Body.LinVelZ = 8f;
+
+        const float minSustainedSpeed = 3f; // demands genuine at-speed cornering once un-ignored
+        const int frames = 600; // 10 s @ 60 Hz
+        int contactFrames = 0;
+        float sumVy = 0f;
+        float sumSpeed = 0f;
+        float maxAbsHeight = 0f;
+        for (var i = 0; i < frames; i++)
+        {
+            inst.Step(-1f, 0.5f, false, Frame60, ground);
+
+            bool anyContact = false;
+            for (var w = 0; w < inst.Wheels.Length; w++)
+                anyContact |= inst.Wheels[w].InContact;
+            if (anyContact) contactFrames++;
+
+            sumVy += inst.Body.LinVelY;
+            sumSpeed += MathF.Sqrt(
+                inst.Body.LinVelX * inst.Body.LinVelX + inst.Body.LinVelZ * inst.Body.LinVelZ);
+
+            float height = MathF.Abs(inst.Body.PosY - GroundY);
+            if (height > maxAbsHeight) maxAbsHeight = height;
+        }
+
+        float contactRatio = contactFrames / (float)frames;
+        float meanVy = sumVy / frames;
+        float meanSpeed = sumSpeed / frames;
+
+        Assert.IsTrue(contactRatio >= 0.95f,
+            $"expected >=95% ticks with >=1 wheel contact during turn; observed {contactRatio:P1}");
+        Assert.IsTrue(maxAbsHeight < 2.0f,
+            $"PosY-terrainY should stay bounded during turn; observed max {maxAbsHeight}");
+        Assert.IsTrue(MathF.Abs(meanVy) < 0.1f,
+            $"mean Vy should be ~0 (no net climb/sink) during a grounded turn; observed {meanVy}");
+        Assert.IsTrue(meanSpeed >= minSustainedSpeed,
+            $"expected sustained cornering speed >= {minSustainedSpeed} m/s once the slip-cancel "
+            + $"defect is fixed (this is the genuine 'at speed' demand); observed mean {meanSpeed}");
+    }
+
     // ── 4. Ramp exit follows a ballistic arc ─────────────────────────────────
 
+    /// <summary>
+    /// Independent analytic ballistic-arc oracle for the airborne tests below. Deliberately does
+    /// NOT call <see cref="HkVehicleAerodynamics"/> or any other Physics/Vehicle sim code — it is
+    /// a from-scratch re-derivation of the documented force law
+    /// (<c>docs/reconstruction/physics/0.6-aerodynamics.md</c>, cross-checked against the
+    /// oracle-verified <c>aero_goldens.json</c> semantics) plus a from-scratch mirror of
+    /// <see cref="HkRigidBody.Integrate"/>'s semi-implicit/symplectic Euler order (gravity folded
+    /// into the Y force accumulator, THEN velocity updates from force·invMass·dt, THEN position
+    /// from the UPDATED velocity). This is what lets the test catch a mis-scaled gravity or a
+    /// mis-scaled aero coefficient: a parallel <c>VehiclePhysicsInstance</c> reference (the
+    /// original design) shares the exact same gravity/aero code as the instance under test, so a
+    /// bug in that shared code would pass both sides silently. This oracle shares nothing with the
+    /// sim except <see cref="HkVehicleData"/>'s plain numeric fields (rho, A, Cd, Cl, extraGravity,
+    /// gravityY, mass) and the real instance's per-tick chassis orientation (an input to the force
+    /// law, not part of what's under test — while airborne only AVD/upright-restore touch angular
+    /// velocity, never linear velocity, so reading orientation here cannot mask a gravity/aero bug).
+    /// <para>
+    /// <b>Sanity-checked during development</b>: temporarily scaling the analytic <c>gravityY</c>
+    /// by 0.1× locally (not committed) made the assertion below fail immediately (first-frame
+    /// mismatch far outside epsilon), confirming this oracle actually detects a mis-scaled gravity
+    /// rather than passing vacuously. See task-E1-report.md "Fix round 1" for the captured
+    /// failure message.
+    /// </para>
+    /// </summary>
+    private static void AssertMatchesAnalyticBallisticArc(
+        VehiclePhysicsInstance inst,
+        TerrainHeightfieldCollisionQuery ground,
+        float landingY,
+        int launchFrame,
+        int maxCheckFrames = 40,
+        float epsilon = 0.01f)
+    {
+        var data = inst.Data;
+        const float mass = 1f; // HkVehicleData.FromVehicleSpecific: unit-mass model (Mass=InvMass=1)
+
+        // Analytic state seeded from the real instance's launch condition — the "given", not the
+        // thing under test. Independent from here on.
+        float ax = inst.Body.LinVelX, ay = inst.Body.LinVelY, az = inst.Body.LinVelZ;
+        float analyticY = inst.Body.PosY;
+
+        int checkFrames = 0;
+        for (var i = 0; i < maxCheckFrames; i++)
+        {
+            // World front/up axes from the REAL instance's current orientation (input, not the
+            // force law under test) via a from-scratch quaternion rotate (not a call into
+            // VehicleActionSim/any production rotate helper).
+            var (fwdX, fwdY, fwdZ) = IndependentRotateByQuat(
+                inst.Body.QuatX, inst.Body.QuatY, inst.Body.QuatZ, inst.Body.QuatW, 0f, 0f, 1f);
+            var (upX, upY, upZ) = IndependentRotateByQuat(
+                inst.Body.QuatX, inst.Body.QuatY, inst.Body.QuatZ, inst.Body.QuatW, 0f, 1f, 0f);
+
+            // v = dot(velocity, worldFront) — signed forward speed (drag/lift couple all 3 axes
+            // through this scalar, so vx/vz must be tracked even though only Y is asserted).
+            float v = ax * fwdX + ay * fwdY + az * fwdZ;
+
+            // dragMag = -0.5 * rho * A * Cd * |v| * v   (along worldFront)
+            float dragMag = -0.5f * data.AirDensity * data.FrontalArea * data.DragCoefficient
+                             * MathF.Abs(v) * v;
+            // liftMag = +0.5 * rho * A * Cl * v^2       (along worldUp; Cl=-0.1 here → downforce)
+            float liftMag = 0.5f * data.AirDensity * data.FrontalArea * data.LiftCoefficient * v * v;
+
+            float fx = dragMag * fwdX + liftMag * upX + data.ExtraGravityX * mass;
+            float fy = dragMag * fwdY + liftMag * upY + data.ExtraGravityY * mass;
+            float fz = dragMag * fwdZ + liftMag * upZ + data.ExtraGravityZ * mass;
+
+            // Mirror HkRigidBody.Integrate: gravity is folded into the Y force accumulator FIRST
+            // (ForceY += Mass*gravityY), THEN velocity updates from (force*invMass*dt), THEN
+            // position from the UPDATED velocity (semi-implicit/symplectic Euler — not classic
+            // explicit Euler).
+            float gy = fy + mass * data.GravityY;
+            ax += fx / mass * Frame60;
+            ay += gy / mass * Frame60;
+            az += fz / mass * Frame60;
+            analyticY += ay * Frame60;
+
+            inst.Step(-1f, 0f, false, Frame60, ground);
+            checkFrames++;
+
+            // Stop checking once the analytic free-flight has reached the landing plane.
+            if (analyticY <= landingY)
+                break;
+
+            Assert.IsTrue(inst.AllWheelsAirborne,
+                $"no re-stick expected before geometric intersect (frame {i}, analyticY={analyticY}, landingY={landingY})");
+            Assert.AreEqual(analyticY, inst.Body.PosY, epsilon,
+                $"ballistic arc mismatch at frame {launchFrame}+{i} (checkFrames={checkFrames})");
+        }
+    }
+
+    /// <summary>From-scratch quaternion vector rotation (x,y,z,w convention) — not a call into
+    /// any Physics/Vehicle production code; used only so the analytic oracle can evaluate the
+    /// documented aero force law against the real instance's actual per-tick orientation.</summary>
+    private static (float X, float Y, float Z) IndependentRotateByQuat(
+        float qx, float qy, float qz, float qw, float vx, float vy, float vz)
+    {
+        float tx = 2f * (qy * vz - qz * vy);
+        float ty = 2f * (qz * vx - qx * vz);
+        float tz = 2f * (qx * vy - qy * vx);
+        float ox = vx + qw * tx + (qy * tz - qz * ty);
+        float oy = vy + qw * ty + (qz * tx - qx * tz);
+        float oz = vz + qw * tz + (qx * ty - qy * tx);
+        return (ox, oy, oz);
+    }
+
+    /// <summary>
+    /// A manufactured mid-air start (seeded velocity next to a flat cliff lip), NOT a genuine ramp
+    /// liftoff — the seeded speed is required because the friction slip-cancel defect (class
+    /// remarks) decays any speed reached by engine alone back to ~0.03 m/s within about a second,
+    /// and a sloped ramp face was rejected during construction (damper false-compression on a
+    /// tilted contact normal saturates <see cref="HkPhysicsConstants.MaxSuspensionForce"/> and
+    /// launches the chassis from the incline-entry transient, contaminating the free-flight
+    /// contract this test targets). This test characterizes the wheel-cast airborne transition and
+    /// free-flight integration in isolation; see
+    /// <see cref="RampExit_GenuineLiftoffAtLip_FollowsBallisticArc"/> for an actual ramp climb to a
+    /// genuine lip.
+    /// <para>
+    /// Observed: <c>launchFrame=0</c>, seeded speed decays 6 → ~0.09 m/s within ~40 frames at
+    /// 60 Hz regardless of magnitude (the slip-cancel defect), so the lip is placed within the
+    /// wheelbase of the seeded pose to capture the transition before that decay.
+    /// </para>
+    /// </summary>
     [TestMethod]
-    public void RampExit_FollowsBallisticArc()
+    public void AirbornePhase_MatchesAnalyticBallisticArc()
     {
         var inst = CreateInstance();
         var flat = FlatGround(GroundY);
         inst.SetPose(0f, 0.9f, 0f, 0f, 0f, 0f, 1f);
 
-        // Settle on flat ground first, then seed a running-start forward speed directly.
-        // The synthetic car's engine factors are OOR-clamped to MinTorqueFactor (see
-        // HkVehicleEngine/TorqueCurve2D), and the reduced friction solver's longitudinal term
-        // is an unconditional slip-cancel of the chassis's absolute forward speed (not
-        // relative-to-wheel-spin slip — see HkVehicleFrictionSolver.Solve), so any speed above
-        // the tiny drive-bias equilibrium (~0.03 m/s) decays back down within roughly a second
-        // regardless of throttle. Reaching real approach speed by engine alone, or holding it
-        // for a multi-second ramp approach, is not achievable with this fixture — this test
-        // characterizes the wheel-cast airborne transition and free-flight integration (not the
-        // engine/friction speed contract, covered elsewhere), so a directly-seeded approach
-        // speed right next to a close-by lip is a legitimate initial condition (same technique
-        // as VehiclePhysicsStabilityTests seeding AngVel directly to isolate AVD behavior).
         for (var i = 0; i < 60; i++)
             inst.Step(0f, 0f, false, Frame60, flat);
         inst.Body.LinVelZ = 6f;
 
-        // The friction slip-cancel decays ANY seeded speed back to the ~0.03 m/s drive-bias
-        // equilibrium within ~0.6 s regardless of magnitude (exponential decay toward that
-        // equilibrium — confirmed by measurement: 6 -> 0.09 m/s in ~40 frames at 60 Hz here),
-        // so the lip must be within the wheelbase of the seeded pose to capture the transition
-        // before the seeded speed decays away. edgeZ sits just behind the rear hardpoint
-        // (bodyZ=0, rear hardpoint Z=-1.2) so both axles are already past the lip on frame 0.
         const float edgeZ = -2f;
         const float landingY = -4f;
         const float landingStartZ = 20f;
@@ -313,50 +494,96 @@ public class RetailParityTests
 
         Assert.IsTrue(wasAirborne, $"vehicle should leave the lip fully airborne within 2 s; final PosZ={inst.Body.PosZ}");
 
-        // Reference: a second instance built from the SAME HkVehicleData, seeded with the exact
-        // launch pose/velocity and stepped under NullVehicleCollisionQuery (always airborne, so
-        // only gravity + aerodynamics ever apply — no suspension/friction/anti-sink can touch
-        // it). This is the actual "ballistic arc" contract — not a hand-written formula — because
-        // plain y0+vy0*t+0.5*g*t^2 ignores the aerodynamic downforce (Cl=-0.1) that is a genuine,
-        // documented part of this sim's airborne integration (liftMag ∝ v_forward^2, non-trivial
-        // at a few m/s — "account aero lift" per the task brief). Any divergence between this
-        // reference and the real instance while both are airborne means something OTHER than
-        // gravity+aero is touching the chassis during flight (the actual bug this test pins).
-        var reference = new VehiclePhysicsInstance(inst.Data);
-        reference.SetPose(
-            inst.Body.PosX, inst.Body.PosY, inst.Body.PosZ,
-            inst.Body.QuatX, inst.Body.QuatY, inst.Body.QuatZ, inst.Body.QuatW);
-        reference.Body.LinVelX = inst.Body.LinVelX;
-        reference.Body.LinVelY = inst.Body.LinVelY;
-        reference.Body.LinVelZ = inst.Body.LinVelZ;
-        reference.Body.AngVelX = inst.Body.AngVelX;
-        reference.Body.AngVelY = inst.Body.AngVelY;
-        reference.Body.AngVelZ = inst.Body.AngVelZ;
+        AssertMatchesAnalyticBallisticArc(inst, ground, landingY, launchFrame);
+    }
 
-        const float epsilon = 0.01f; // pure float-accumulation slack between two independent instances
+    /// <summary>
+    /// The real ramp-exit contract: climb an actual inclined ramp under the vehicle's own
+    /// engine/friction to a genuine lip, with the airborne transition occurring mid-run (not a
+    /// seeded mid-air start). Unreachable until C4 (friction slip-cancel prevents sustained climb
+    /// speed) and C2/C3 (the suspension damper's false-compression on the sloped ramp face — see
+    /// <see cref="AirbornePhase_MatchesAnalyticBallisticArc"/> remarks — saturates
+    /// <see cref="HkPhysicsConstants.MaxSuspensionForce"/> and launches the chassis from the
+    /// incline-entry transient rather than a genuine lip liftoff) land together.
+    /// </summary>
+    [TestMethod]
+    [Ignore("unblocked by C2/C3/C4 — genuine ramp liftoff needs working suspension+friction; damper false-compression on sloped normals saturates MaxSuspensionForce")]
+    public void RampExit_GenuineLiftoffAtLip_FollowsBallisticArc()
+    {
+        var inst = CreateInstance();
 
-        int checkFrames = 0;
-        for (var i = 0; i < 40; i++) // ~0.67 s of airborne flight to characterize
+        // A real inclined ramp face from z=0 to the lip at z=rampLength, then no ground (free
+        // flight) until a lower landing plane further out.
+        const float rampLength = 10f;
+        const float rampRise = 2f;
+        const float slope = rampRise / rampLength;
+        const float landingY = rampRise - 4f;
+        const float freeFlightSpan = 20f;
+        var ground = new TerrainHeightfieldCollisionQuery((float x, float z, out float h) =>
+        {
+            if (z < 0f)
+            {
+                h = 0f;
+                return true;
+            }
+            if (z < rampLength)
+            {
+                h = slope * z;
+                return true;
+            }
+            if (z < rampLength + freeFlightSpan)
+            {
+                h = 0f;
+                return false; // beyond the lip: free flight
+            }
+            h = landingY;
+            return true;
+        });
+
+        inst.SetPose(0f, 0.9f, -2f, 0f, 0f, 0f, 1f);
+
+        // Genuine climb at speed, not a seeded start: drive up the ramp under full throttle until
+        // the first fully-airborne tick past the lip.
+        const int maxFrames = 600; // 10 s safety cap
+        bool wasAirborne = false;
+        int launchFrame = -1;
+        int groundedFramesBeforeLaunch = 0;
+        for (var i = 0; i < maxFrames; i++)
         {
             inst.Step(-1f, 0f, false, Frame60, ground);
-            reference.Step(0f, 0f, false, Frame60, NullVehicleCollisionQuery.Instance);
-            checkFrames++;
-
-            // Stop checking once the reference free-flight has reached the landing plane.
-            if (reference.Body.PosY <= landingY)
+            if (!inst.AllWheelsAirborne)
+                groundedFramesBeforeLaunch++;
+            if (inst.AllWheelsAirborne && inst.Body.PosZ > rampLength)
+            {
+                wasAirborne = true;
+                launchFrame = i;
                 break;
-
-            Assert.IsTrue(inst.AllWheelsAirborne,
-                $"no re-stick expected before geometric intersect (frame {i}, referenceY={reference.Body.PosY}, landingY={landingY})");
-            Assert.AreEqual(reference.Body.PosY, inst.Body.PosY, epsilon,
-                $"ballistic arc mismatch at frame {launchFrame}+{i} (checkFrames={checkFrames})");
+            }
         }
+
+        Assert.IsTrue(wasAirborne,
+            $"vehicle should climb the ramp under its own power and leave the lip airborne; final PosZ={inst.Body.PosZ}");
+        Assert.IsTrue(launchFrame > 0,
+            "liftoff must occur mid-run (a genuine lip transition), not a frame-0 seeded start");
+        Assert.IsTrue(groundedFramesBeforeLaunch > 0,
+            "expected grounded frames climbing the ramp before liftoff");
+
+        AssertMatchesAnalyticBallisticArc(inst, ground, landingY, launchFrame);
     }
 
     // ── 5. Continuous downhill grade stays grounded ──────────────────────────
 
+    /// <summary>
+    /// Full throttle down a moderate continuous grade — but (class remarks) the friction
+    /// slip-cancel defect never lets the chassis build real speed, so this only verifies grounded
+    /// stability at a crawl. Observed: <c>contactRatio=1.0</c>, <c>maxAbsHeightAboveGrade=1.074</c>,
+    /// <c>signFlips=15/300</c>, and (this fix) <c>meanSpeed</c> is recorded and bounded below to
+    /// make the crawl explicit rather than silently unmeasured. See
+    /// <see cref="Downhill_ContinuousGrade_AtSpeed_StaysGrounded_NoBounce"/> for the real
+    /// sustained-speed contract.
+    /// </summary>
     [TestMethod]
-    public void Downhill_ContinuousGrade_StaysGrounded()
+    public void Downhill_ContinuousGrade_CrawlSpeed_StaysGrounded()
     {
         var inst = CreateInstance();
         const float slope = 0.15f; // ≈8.5°, moderate grade
@@ -376,6 +603,7 @@ public class RetailParityTests
         float prevHeight = float.NaN;
         int signFlips = 0;
         float prevDelta = 0f;
+        float sumSpeed = 0f;
 
         for (var i = 0; i < frames; i++)
         {
@@ -385,6 +613,11 @@ public class RetailParityTests
             for (var w = 0; w < inst.Wheels.Length; w++)
                 anyContact |= inst.Wheels[w].InContact;
             if (anyContact) contactFrames++;
+
+            sumSpeed += MathF.Sqrt(
+                inst.Body.LinVelX * inst.Body.LinVelX
+                + inst.Body.LinVelY * inst.Body.LinVelY
+                + inst.Body.LinVelZ * inst.Body.LinVelZ);
 
             float terrainYUnderCar = -slope * inst.Body.PosZ;
             float heightAboveGrade = inst.Body.PosY - terrainYUnderCar;
@@ -403,6 +636,7 @@ public class RetailParityTests
         }
 
         float contactRatio = contactFrames / (float)frames;
+        float meanSpeed = sumSpeed / frames;
 
         Assert.IsTrue(contactRatio >= 0.95f,
             $"expected contact on (almost) every tick on a moderate continuous grade; observed {contactRatio:P1}");
@@ -413,5 +647,84 @@ public class RetailParityTests
         // a sustained bounce (which would show as a flip roughly every frame).
         Assert.IsTrue(signFlips < frames / 10,
             $"expected no sustained bounce oscillation on continuous grade; observed {signFlips} sign flips over {frames} frames");
+        // Records the crawl explicitly (this is what Important-2 asked us to stop leaving
+        // unmeasured) — the friction slip-cancel defect keeps this well under 1 m/s even
+        // downhill at full throttle. Observed: meanSpeed=0.121 m/s over the 5 s window.
+        Assert.IsTrue(meanSpeed < 1f,
+            $"expected crawl-only speed pre-C4 (slip-cancel defect); observed mean speed {meanSpeed} m/s");
+    }
+
+    /// <summary>
+    /// The real downhill contract: a sustained speed, contact every tick, and no bounce
+    /// oscillation. Not reachable via engine/throttle alone until C4 lands (class remarks), so a
+    /// running-start speed is seeded directly purely to describe the contract the fixed sim must
+    /// satisfy.
+    /// </summary>
+    [TestMethod]
+    [Ignore("unblocked by C4 — friction slip-cancel kills chassis speed; observed crawl mean speed 0.121 m/s over 5s at full throttle (see Downhill_ContinuousGrade_CrawlSpeed_StaysGrounded)")]
+    public void Downhill_ContinuousGrade_AtSpeed_StaysGrounded_NoBounce()
+    {
+        var inst = CreateInstance();
+        const float slope = 0.15f;
+        var ground = DownhillGrade(slope);
+        inst.SetPose(0f, 0.9f, 0f, 0f, 0f, 0f, 1f);
+
+        const int settleFrames = 60;
+        for (var i = 0; i < settleFrames; i++)
+            inst.Step(0f, 0f, false, Frame60, ground);
+        inst.Body.LinVelZ = 10f; // seeded sustained downhill speed — unreachable via engine pre-C4
+
+        const float minSustainedSpeed = 5f;
+        const int frames = 300; // 5 s @ 60 Hz
+        int contactFrames = 0;
+        float maxAbsHeightAboveGrade = 0f;
+        float prevHeight = float.NaN;
+        int signFlips = 0;
+        float prevDelta = 0f;
+        float sumSpeed = 0f;
+
+        for (var i = 0; i < frames; i++)
+        {
+            inst.Step(-1f, 0f, false, Frame60, ground);
+
+            bool anyContact = false;
+            for (var w = 0; w < inst.Wheels.Length; w++)
+                anyContact |= inst.Wheels[w].InContact;
+            if (anyContact) contactFrames++;
+
+            sumSpeed += MathF.Sqrt(
+                inst.Body.LinVelX * inst.Body.LinVelX
+                + inst.Body.LinVelY * inst.Body.LinVelY
+                + inst.Body.LinVelZ * inst.Body.LinVelZ);
+
+            float terrainYUnderCar = -slope * inst.Body.PosZ;
+            float heightAboveGrade = inst.Body.PosY - terrainYUnderCar;
+            if (heightAboveGrade > maxAbsHeightAboveGrade) maxAbsHeightAboveGrade = heightAboveGrade;
+
+            if (!float.IsNaN(prevHeight))
+            {
+                float delta = heightAboveGrade - prevHeight;
+                if (i > 30 && MathF.Sign(delta) != 0 && MathF.Sign(prevDelta) != 0
+                    && MathF.Sign(delta) != MathF.Sign(prevDelta))
+                    signFlips++;
+                prevDelta = delta;
+            }
+            prevHeight = heightAboveGrade;
+        }
+
+        float contactRatio = contactFrames / (float)frames;
+        float meanSpeed = sumSpeed / frames;
+
+        // Tighter than the crawl-speed 0.95 bound: at genuine sustained speed we demand contact
+        // essentially every tick, not just "almost every" one.
+        Assert.IsTrue(contactRatio >= 0.99f,
+            $"expected contact essentially every tick at sustained downhill speed; observed {contactRatio:P1}");
+        Assert.IsTrue(maxAbsHeightAboveGrade < 2.0f,
+            $"height above grade should stay bounded; observed max {maxAbsHeightAboveGrade}");
+        Assert.IsTrue(signFlips < frames / 10,
+            $"expected no sustained bounce oscillation on continuous grade; observed {signFlips} sign flips over {frames} frames");
+        Assert.IsTrue(meanSpeed >= minSustainedSpeed,
+            $"expected sustained downhill speed >= {minSustainedSpeed} m/s once the slip-cancel "
+            + $"defect is fixed; observed mean {meanSpeed}");
     }
 }
