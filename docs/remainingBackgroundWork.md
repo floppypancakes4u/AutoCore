@@ -67,6 +67,7 @@ config-selectable `Kinematic` fallback tier.
 | `.superpowers/sdd/progress.md` (in worktree) | **THE LEDGER.** One line per completed task with commit SHAs + findings. **Trust the ledger + `git log` over any recollection.** gitignored local scratch. |
 | `.superpowers/sdd/task-*-brief.md` and `task-*-report.md` | Per-task briefs (extracted plan text) and implementer/review reports. gitignored local scratch, same machine. |
 | `docs/reconstruction/physics/README.md` | Index of the 14 Phase-0 RE evidence files + the "Open ambiguities" list the B-tasks resolve. |
+| `docs/reconstruction/physics/IMPLEMENTATION-GAPS.md` | Living residual list (CW proxy collision, B5, COM, friction); keep updated as C/CW/D land. |
 | `docs/reconstruction/physics/verified/fn_*.md` | Per-function decompile evidence (addresses, struct offsets). |
 | `docs/NPCDriving.md` | Original client-RE reference for the whole vehicle stack. |
 

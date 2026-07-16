@@ -24,6 +24,7 @@ vehicle physics port, plus Phase 2–4 port status.
 
 **Gate doc:** [`PHASE_2_4_COMPLETION.md`](PHASE_2_4_COMPLETION.md)  
 **Port rules:** [`PORTING_RULES.md`](PORTING_RULES.md)  
+**Known holes:** [`IMPLEMENTATION-GAPS.md`](IMPLEMENTATION-GAPS.md) (CW proxy collision, B5, COM, friction residuals)
 
 **Resume at:** Phase 7 live A/B (after approval), or friction/geometry fidelity if handling looks wrong.
 

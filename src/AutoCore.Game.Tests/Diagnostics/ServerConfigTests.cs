@@ -33,6 +33,7 @@ public class ServerConfigTests
         Assert.AreEqual(-9.81f, ServerConfig.Gravity, 1e-6f);
         Assert.IsNull(ServerConfig.AirDensityOverride);
         Assert.IsFalse(ServerConfig.DebugLogging);
+        Assert.IsFalse(ServerConfig.CompositeWheelCollisionEnabled);
     }
 
     [TestMethod]
@@ -46,6 +47,7 @@ public class ServerConfigTests
               gravity: -12.5
               airDensityOverride: 1.2
               debugLogging: true
+              compositeWheelCollisionEnabled: true
             """;
 
         Assert.IsTrue(ServerConfig.ApplyFromYaml(yaml, out var error), error);
@@ -56,6 +58,7 @@ public class ServerConfigTests
         Assert.AreEqual(-12.5f, ServerConfig.Gravity, 1e-6f);
         Assert.AreEqual(1.2f, ServerConfig.AirDensityOverride!.Value, 1e-6f);
         Assert.IsTrue(ServerConfig.DebugLogging);
+        Assert.IsTrue(ServerConfig.CompositeWheelCollisionEnabled);
     }
 
     [TestMethod]
@@ -145,11 +148,13 @@ public class ServerConfigTests
         ServerConfig.ControllerTier = NpcVehicleControllerTier.Physics;
         ServerConfig.SubstepHz = 33;
         ServerConfig.AirDensityOverride = 9f;
+        ServerConfig.CompositeWheelCollisionEnabled = true;
         ServerConfig.ResetToDefaults();
         Assert.IsFalse(ServerConfig.NpcVehiclePhysicsEnabled);
         Assert.AreEqual(NpcVehicleControllerTier.Hard, ServerConfig.ControllerTier);
         Assert.AreEqual(60, ServerConfig.SubstepHz);
         Assert.IsNull(ServerConfig.AirDensityOverride);
+        Assert.IsFalse(ServerConfig.CompositeWheelCollisionEnabled);
     }
 
     [TestMethod]

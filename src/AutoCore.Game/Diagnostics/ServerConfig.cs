@@ -49,6 +49,8 @@ public static class ServerConfig
     public const bool DefaultDebugLogging = false;
     /// <summary>Retail hkDefaultSuspension is unclamped (C2) — the safety clamp defaults OFF.</summary>
     public const bool DefaultSuspensionForceClampEnabled = false;
+    /// <summary>CW composite object/vehicle wheel casts — defaults OFF (terrain-only until opted in).</summary>
+    public const bool DefaultCompositeWheelCollisionEnabled = false;
 
     private static int _substepHz = DefaultSubstepHz;
 
@@ -85,6 +87,14 @@ public static class ServerConfig
     /// </summary>
     public static bool SuspensionForceClampEnabled { get; set; } = DefaultSuspensionForceClampEnabled;
 
+    /// <summary>
+    /// When true, <c>NpcVehiclePhysicsController.BuildCollisionQuery</c> wraps the terrain
+    /// heightfield in <c>CompositeVehicleCollisionQuery</c> so wheel casts also hit map-prop /
+    /// vehicle proxy volumes. Defaults <b>OFF</b> — terrain-only until an operator opts in.
+    /// Does not change the master physics opt-in (<see cref="NpcVehiclePhysicsEnabled"/>).
+    /// </summary>
+    public static bool CompositeWheelCollisionEnabled { get; set; } = DefaultCompositeWheelCollisionEnabled;
+
     /// <summary>Reset every setting to retail-safe defaults (tests + startup before load).</summary>
     public static void ResetToDefaults()
     {
@@ -95,6 +105,7 @@ public static class ServerConfig
         AirDensityOverride = null;
         DebugLogging = DefaultDebugLogging;
         SuspensionForceClampEnabled = DefaultSuspensionForceClampEnabled;
+        CompositeWheelCollisionEnabled = DefaultCompositeWheelCollisionEnabled;
     }
 
     /// <summary>
@@ -210,6 +221,9 @@ public static class ServerConfig
         if (p.SuspensionForceClampEnabled.HasValue)
             SuspensionForceClampEnabled = p.SuspensionForceClampEnabled.Value;
 
+        if (p.CompositeWheelCollisionEnabled.HasValue)
+            CompositeWheelCollisionEnabled = p.CompositeWheelCollisionEnabled.Value;
+
         return true;
     }
 
@@ -253,5 +267,6 @@ public static class ServerConfig
         public float? AirDensityOverride { get; set; }
         public bool? DebugLogging { get; set; }
         public bool? SuspensionForceClampEnabled { get; set; }
+        public bool? CompositeWheelCollisionEnabled { get; set; }
     }
 }

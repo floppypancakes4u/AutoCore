@@ -209,7 +209,7 @@ public static class NpcVehiclePhysicsController
         body.LinVelZ = velocity.Z;
         body.AngVelX = body.AngVelY = body.AngVelZ = 0f;
 
-        IVehicleCollisionQuery query = BuildCollisionQuery(map, supportY);
+        IVehicleCollisionQuery query = BuildCollisionQuery(map, supportY, excludeSelf: vehicle);
         inst.Step(thr, steer, handbrake: sharp != 0, dt, query);
 
         // Force body back to authored pose (physics must not hop us off the path).
@@ -440,20 +440,38 @@ public static class NpcVehiclePhysicsController
         return 12f;
     }
 
-    internal static IVehicleCollisionQuery BuildCollisionQuery(SectorMap map, float fallbackGroundY)
+    /// <summary>
+    /// Terrain heightfield query, optionally wrapped in <see cref="CompositeVehicleCollisionQuery"/>
+    /// when <see cref="ServerConfig.CompositeWheelCollisionEnabled"/> is on (CW; default off).
+    /// </summary>
+    /// <param name="excludeSelf">Casting vehicle — skipped by the object pass so wheels miss own skirt.</param>
+    internal static IVehicleCollisionQuery BuildCollisionQuery(
+        SectorMap map,
+        float fallbackGroundY,
+        ClonedObjectBase excludeSelf = null)
     {
         var field = map?.MapData?.Heightfield;
+        IVehicleCollisionQuery terrain;
         if (field != null)
-            return new TerrainHeightfieldCollisionQuery(field);
+        {
+            terrain = new TerrainHeightfieldCollisionQuery(field);
+        }
+        else
+        {
+            // No map heightfield: flat plane at chassis Y (ride is ~0 by default).
+            float groundY = fallbackGroundY;
+            terrain = new TerrainHeightfieldCollisionQuery(
+                (float x, float z, out float y) =>
+                {
+                    y = groundY;
+                    return true;
+                });
+        }
 
-        // No map heightfield: flat plane at chassis Y (ride is ~0 by default).
-        float groundY = fallbackGroundY;
-        return new TerrainHeightfieldCollisionQuery(
-            (float x, float z, out float y) =>
-            {
-                y = groundY;
-                return true;
-            });
+        if (ServerConfig.CompositeWheelCollisionEnabled && map != null)
+            return new CompositeVehicleCollisionQuery(terrain, map, excludeSelf);
+
+        return terrain;
     }
 
     /// <summary>
