@@ -401,6 +401,36 @@ public class NpcVehiclePhysicsControllerTests
         // On rising slope, nose should pitch up (forward.Y > 0).
         Assert.IsTrue(forward.Y > 0.05f,
             $"expected nose-up pitch on rising slope, forward.Y={forward.Y}");
+        Assert.IsTrue(NpcVehiclePhysicsController.BodyUpDotWorldUp(body) > 0.7f,
+            "stance must not invert the chassis");
+    }
+
+    [TestMethod]
+    public void ForceUprightPreserveYaw_UninvertsWhileKeepingHeading()
+    {
+        // Build an inverted orientation about Z (roll π) while facing +Z.
+        var inverted = TerrainContactPlane.FromYawPitchRoll(yaw: 0f, pitch: 0f, roll: MathF.PI);
+        var body = new HkRigidBody
+        {
+            Mass = 1f, InvMass = 1f,
+            PosX = 0f, PosY = 1f, PosZ = 0f,
+            QuatX = inverted.X, QuatY = inverted.Y, QuatZ = inverted.Z, QuatW = inverted.W,
+            AngVelX = 2f, AngVelZ = 2f,
+        };
+        Assert.IsTrue(NpcVehiclePhysicsController.BodyUpDotWorldUp(body) < 0f,
+            "fixture should start inverted");
+
+        NpcVehiclePhysicsController.ForceUprightPreserveYaw(body);
+
+        Assert.IsTrue(NpcVehiclePhysicsController.BodyUpDotWorldUp(body) > 0.9f,
+            $"expected upright, upDot={NpcVehiclePhysicsController.BodyUpDotWorldUp(body)}");
+        Assert.AreEqual(0f, body.AngVelX, 1e-5f);
+        Assert.AreEqual(0f, body.AngVelZ, 1e-5f);
+        NpcVehiclePhysicsController.ExtractBasis(
+            new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
+            out _, out var forward);
+        // Still roughly face +Z after uninvert.
+        Assert.IsTrue(forward.Z > 0.7f, $"expected preserve +Z heading, forward.Z={forward.Z}");
     }
 
     [TestMethod]

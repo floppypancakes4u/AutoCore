@@ -165,23 +165,28 @@ public static class NpcVehiclePhysicsController
         float supportY = ResolveSupportY(map, body.PosX, body.PosZ, hard.NewPosition.Y);
         IVehicleCollisionQuery query = BuildCollisionQuery(map, supportY, excludeSelf: vehicle);
 
-        // Recovery: first-create seats; non-finite / freefall / path-divergence teleport + ReGround.
-        // ReGround snaps the chassis origin onto the terrain hit; raise so wheel hardpoints sit
-        // near suspension rest (origin-on-terrain fully compresses and launches / starves drive).
+        // Recovery: first-create seats; non-finite / freefall / flip / path-divergence.
+        // Always re-upright on recovery — keeping inverted orientation was leaving NPCs
+        // driving on their roofs after a flip recovery.
         if (firstCreate)
         {
-            // GetOrCreate already seeded pose from the entity; seat wheels on terrain.
+            ForceUprightPreserveYaw(body);
             inst.ReGround(query);
             RaiseChassisToWheelRest(inst);
         }
         else if (NeedsRecovery(body, hard, supportY))
         {
             SetPoseFromHard(inst, hard);
-            // Re-resolve support / query under the hard XZ after teleport.
+            ForceUprightPreserveYaw(body);
             supportY = ResolveSupportY(map, body.PosX, body.PosZ, hard.NewPosition.Y);
             query = BuildCollisionQuery(map, supportY, excludeSelf: vehicle);
             inst.ReGround(query);
             RaiseChassisToWheelRest(inst);
+        }
+        else if (BodyUpDotWorldUp(body) < 0.55f)
+        {
+            // Continuous safety net: never keep driving inverted.
+            ForceUprightPreserveYaw(body);
         }
 
         var lane = npcAi?.PathLaneOffset ?? 0f;
@@ -223,6 +228,10 @@ public static class NpcVehiclePhysicsController
         AlignPlanarVelocityToHeading(body, dt);
         ApplyTerrainStanceAssist(body, query, dt);
         ApplyPathSpeedMatch(body, hard, aim, dt);
+
+        // Post-assist upright guard (stance/heading must never leave the car inverted).
+        if (BodyUpDotWorldUp(body) < 0.55f)
+            ForceUprightPreserveYaw(body);
 
         // Publish inst.Body pose/rot/vel/angVel (post-assist).
         return new PathStepResult
@@ -407,8 +416,9 @@ public static class NpcVehiclePhysicsController
     }
 
     /// <summary>
-    /// Soft pitch/roll chassis to terrain slope from four height samples. Preserves yaw.
-    /// Without this (COM susp + world-down casts) NPCs sit level with half the wheels airborne.
+    /// Soft pitch/roll to terrain slope from four height samples, built as
+    /// <c>Yaw * Pitch * Roll</c> (never axis-multiply an already inverted body).
+    /// Clamped so stance cannot invert the chassis.
     /// </summary>
     internal static void ApplyTerrainStanceAssist(
         HkRigidBody body,
@@ -418,23 +428,20 @@ public static class NpcVehiclePhysicsController
         if (body == null || query == null || !(dt > 0f) || !float.IsFinite(dt))
             return;
 
-        ExtractBasis(
-            new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
-            out var right, out var forward);
-
-        // Yaw-only forward/right in XZ so stance doesn't fight heading assist.
-        float fx = forward.X, fz = forward.Z;
-        float fLen = MathF.Sqrt(fx * fx + fz * fz);
-        if (fLen < 1e-4f)
+        // Never apply stance while inverted — straighten first (caller safety net).
+        if (BodyUpDotWorldUp(body) < 0.55f)
             return;
-        float invF = 1f / fLen;
-        fx *= invF;
-        fz *= invF;
-        float rx = fz, rz = -fx; // planar right from yaw-forward
+
+        float yaw = ExtractYawRadians(body);
+        float cy = MathF.Cos(yaw);
+        float sy = MathF.Sin(yaw);
+        // Planar forward/right from yaw only (+Z forward, +X right).
+        float fx = sy, fz = cy;
+        float rx = cy, rz = -sy;
 
         float halfL = TerrainStanceSampleHalfLength;
         float halfW = TerrainStanceSampleHalfWidth;
-        float ox = body.PosX, oy = body.PosY + 2f, oz = body.PosZ;
+        float ox = body.PosX, oy = body.PosY + 3f, oz = body.PosZ;
 
         if (!SampleTerrainY(query, ox + fx * halfL + rx * halfW, oy, oz + fz * halfL + rz * halfW, out float yFL))
             return;
@@ -450,28 +457,39 @@ public static class NpcVehiclePhysicsController
         float yLeft = 0.5f * (yFL + yRL);
         float yRight = 0.5f * (yFR + yRR);
 
-        // Desired pitch: positive nose-up when front higher... vehicle pitch about +right:
-        // nose down when front is lower: pitch ≈ atan2(yRear - yFront, 2*halfL) in our convention.
-        float desiredPitch = MathF.Atan2(yRear - yFront, 2f * halfL);
-        float desiredRoll = MathF.Atan2(yLeft - yRight, 2f * halfW);
+        // Geometric tilt (positive = nose up / left side up). FromYawPitchRoll uses opposite
+        // pitch sign (+pitch ⇒ nose down), so we convert at the end.
+        const float maxTilt = 0.45f; // ~26° — never stance into a flip
+        float desiredNoseUp = Math.Clamp(MathF.Atan2(yFront - yRear, 2f * halfL), -maxTilt, maxTilt);
+        float desiredLeftUp = Math.Clamp(MathF.Atan2(yLeft - yRight, 2f * halfW), -maxTilt, maxTilt);
 
-        // Current pitch/roll from body basis vs world.
-        // forward.Y ≈ sin(pitch) for small roll; right.Y ≈ -sin(roll) for small pitch.
-        float curPitch = MathF.Asin(Math.Clamp(forward.Y, -1f, 1f));
-        float curRoll = MathF.Asin(Math.Clamp(-right.Y, -1f, 1f));
+        ExtractBasis(
+            new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
+            out var right, out var forward);
+        float curNoseUp = MathF.Asin(Math.Clamp(forward.Y, -1f, 1f));
+        float curLeftUp = MathF.Asin(Math.Clamp(-right.Y, -1f, 1f));
 
         float alpha = 1f - MathF.Exp(-TerrainStanceRate * dt);
-        float dPitch = Math.Clamp((desiredPitch - curPitch) * alpha, -TerrainStanceMaxStep, TerrainStanceMaxStep);
-        float dRoll = Math.Clamp((desiredRoll - curRoll) * alpha, -TerrainStanceMaxStep, TerrainStanceMaxStep);
+        float newNoseUp = curNoseUp + Math.Clamp((desiredNoseUp - curNoseUp) * alpha, -TerrainStanceMaxStep, TerrainStanceMaxStep);
+        float newLeftUp = curLeftUp + Math.Clamp((desiredLeftUp - curLeftUp) * alpha, -TerrainStanceMaxStep, TerrainStanceMaxStep);
+        newNoseUp = Math.Clamp(newNoseUp, -maxTilt, maxTilt);
+        newLeftUp = Math.Clamp(newLeftUp, -maxTilt, maxTilt);
 
-        if (MathF.Abs(dPitch) > 1e-5f)
-            ApplyBodyAxisRotation(body, right.X, right.Y, right.Z, dPitch);
-        if (MathF.Abs(dRoll) > 1e-5f)
-            ApplyBodyAxisRotation(body, forward.X, forward.Y, forward.Z, dRoll);
+        // FromYawPitchRoll: pitch about +X / roll about +Z (client composition).
+        float yprPitch = -newNoseUp;
+        float yprRoll = -newLeftUp;
+        var q = TerrainContactPlane.FromYawPitchRoll(yaw, yprPitch, yprRoll);
+        body.QuatX = q.X;
+        body.QuatY = q.Y;
+        body.QuatZ = q.Z;
+        body.QuatW = q.W;
 
-        // Keep chassis height so average sample sits near ride height (reduce airborne wheels).
+        // Final guard: never leave this helper inverted.
+        if (BodyUpDotWorldUp(body) < 0.5f)
+            ForceUprightPreserveYaw(body);
+
         float groundAvg = 0.25f * (yFL + yFR + yRL + yRR);
-        float targetY = groundAvg + 0.85f; // ~rest hardpoint clearance ballpark
+        float targetY = groundAvg + 0.75f;
         float yErr = targetY - body.PosY;
         if (MathF.Abs(yErr) > 0.02f)
             body.PosY += Math.Clamp(yErr * alpha, -0.08f, 0.08f);
@@ -490,38 +508,42 @@ public static class NpcVehiclePhysicsController
         return float.IsFinite(hitY);
     }
 
-    /// <summary>Rotate body orientation by <paramref name="angle"/> about a world axis (unit-ish).</summary>
-    internal static void ApplyBodyAxisRotation(
-        HkRigidBody body,
-        float axisX, float axisY, float axisZ,
-        float angle)
+    /// <summary>
+    /// Flatten pitch/roll to world-up while preserving planar yaw. Used after flips and as a
+    /// continuous safety net so path NPCs never cruise inverted.
+    /// </summary>
+    internal static void ForceUprightPreserveYaw(HkRigidBody body)
     {
-        float alen = MathF.Sqrt(axisX * axisX + axisY * axisY + axisZ * axisZ);
-        if (alen < 1e-6f || MathF.Abs(angle) < 1e-8f)
+        if (body == null)
             return;
-        float inv = 1f / alen;
-        axisX *= inv;
-        axisY *= inv;
-        axisZ *= inv;
-        float half = angle * 0.5f;
-        float s = MathF.Sin(half);
-        float c = MathF.Cos(half);
-        float qx = axisX * s, qy = axisY * s, qz = axisZ * s, qw = c;
-        // q * body
-        float bx = body.QuatX, by = body.QuatY, bz = body.QuatZ, bw = body.QuatW;
-        float x = qw * bx + qx * bw + qy * bz - qz * by;
-        float y = qw * by - qx * bz + qy * bw + qz * bx;
-        float z = qw * bz + qx * by - qy * bx + qz * bw;
-        float w = qw * bw - qx * bx - qy * by - qz * bz;
-        float len = MathF.Sqrt(x * x + y * y + z * z + w * w);
-        if (len > 1e-8f)
+        float yaw = ExtractYawRadians(body);
+        var q = TerrainContactPlane.YawOnly(yaw);
+        body.QuatX = q.X;
+        body.QuatY = q.Y;
+        body.QuatZ = q.Z;
+        body.QuatW = q.W;
+        body.AngVelX = 0f;
+        body.AngVelZ = 0f;
+    }
+
+    /// <summary>Planar yaw from body forward (+Z). Does not add π when inverted (roll-flip keeps nose).</summary>
+    internal static float ExtractYawRadians(HkRigidBody body)
+    {
+        ExtractBasis(
+            new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
+            out _, out var forward);
+        float fx = forward.X;
+        float fz = forward.Z;
+        float len = MathF.Sqrt(fx * fx + fz * fz);
+        // Nearly pure pitch flip: planar forward collapses — use body +X as fallback.
+        if (len < 0.15f)
         {
-            inv = 1f / len;
-            body.QuatX = x * inv;
-            body.QuatY = y * inv;
-            body.QuatZ = z * inv;
-            body.QuatW = w * inv;
+            ExtractBasis(
+                new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
+                out var right, out _);
+            return MathF.Atan2(right.X, right.Z) - MathF.PI * 0.5f;
         }
+        return MathF.Atan2(fx, fz);
     }
 
     /// <summary>
@@ -687,33 +709,24 @@ public static class NpcVehiclePhysicsController
 
     internal static void SetPoseFromHard(VehiclePhysicsInstance inst, PathStepResult hard)
     {
-        // Position from hard navigator, but keep current body orientation (or a valid
-        // fallback). Snapping to hard.Rotation was a visible "teleport turn" when recovery
-        // fired — hard path facing can jump at segment boundaries.
+        // Position from hard navigator; yaw from current body (or hard) but always upright.
+        // Never preserve a flipped orientation — that left NPCs roof-driving after recovery.
         var body = inst.Body;
-        float qw = body.QuatW;
-        float qx = body.QuatX;
-        float qy = body.QuatY;
-        float qz = body.QuatZ;
-        if (!float.IsFinite(qw) || !float.IsFinite(qx) || !float.IsFinite(qy) || !float.IsFinite(qz)
-            || (qx * qx + qy * qy + qz * qz + qw * qw) < 1e-8f)
+        ForceUprightPreserveYaw(body);
+        float yaw = ExtractYawRadians(body);
+        // Prefer hard yaw when body was garbage/inverted and hard has a valid facing.
+        var hr = hard.Rotation;
+        if (float.IsFinite(hr.W) && (hr.X * hr.X + hr.Y * hr.Y + hr.Z * hr.Z + hr.W * hr.W) > 1e-6f)
         {
-            var r = hard.Rotation;
-            qw = r.W;
-            qx = r.X;
-            qy = r.Y;
-            qz = r.Z;
-            if (!float.IsFinite(qw) || !float.IsFinite(qx) || !float.IsFinite(qy) || !float.IsFinite(qz)
-                || (qx * qx + qy * qy + qz * qz + qw * qw) < 1e-8f)
-            {
-                qx = qy = qz = 0f;
-                qw = 1f;
-            }
+            ExtractBasis(hr, out _, out var hardFwd);
+            if (MathF.Abs(hardFwd.X) + MathF.Abs(hardFwd.Z) > 1e-3f)
+                yaw = MathF.Atan2(hardFwd.X, hardFwd.Z);
         }
 
+        var upright = TerrainContactPlane.YawOnly(yaw);
         inst.SetPose(
             hard.NewPosition.X, hard.NewPosition.Y, hard.NewPosition.Z,
-            qx, qy, qz, qw);
+            upright.X, upright.Y, upright.Z, upright.W);
     }
 
     /// <summary>
