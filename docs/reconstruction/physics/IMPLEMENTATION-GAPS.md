@@ -60,3 +60,40 @@ cross-axle blob `PortSolve` against live `cb` still residual (see task-C4-report
 ## Transmission / gear + full engine LUT
 
 Present but vestigial; RPM/gear→torque coupling not fully wired if later goldens demand it.
+C5 confirmed upright pow order and contact gate; engine torque LUT still degenerates to
+`MinTorqueFactor` OOR (retail also effectively constant-factor).
+
+---
+
+## C7 — server-stability clamps (deferred)
+
+`MaxLinearSpeed` / `MaxAngularSpeed` in `HkRigidBody.Integrate` / `ClampVelocity` remain on.
+Retire only after more Phase E parity is green (downhill at-speed + ramp lip still `[Ignore]`).
+Optional `MaxSuspensionForce` is already gated off by default (C2).
+
+---
+
+## Phase E residual parity contracts
+
+| Contract | Status |
+|----------|--------|
+| `ConstantRadiusTurn_AtSpeed_…` | **Green** (post C-mass m=1500) |
+| `Downhill_ContinuousGrade_AtSpeed_…` | **`[Ignore]`** — contact ~96–97% micro-hop from r×F |
+| `RampExit_GenuineLiftoffAtLip_…` | **`[Ignore]`** — unit/real mass + trivial LUT cannot climb fixture ramp |
+| `PortSolve_ReproducesRetailImpulses_BitExact` | **`[Ignore]`** — full dual-body cb blob Solve residual (C4) |
+
+---
+
+## D2 steer / reorientation residual
+
+Axes request steer off-path, but under some fixtures lateral friction impulses stay near zero so
+the body does not reorient from steer alone (VelocityAlign no longer asserts hard reorient).
+Investigate after live A/B if NPCs fail to turn toward look-ahead aims.
+
+---
+
+## D3 raw `Position =` bypass
+
+Lifecycle hooks clear physics on `ApplyServerMove` (discontinuous), `SetPosition`, `OnDeath`,
+respawn, map transfer. Raw `Position =` property assignment still bypasses clear — prefer
+`SetPosition` / explicit `ClearPhysicsInstance` in new discontinuous scripts.

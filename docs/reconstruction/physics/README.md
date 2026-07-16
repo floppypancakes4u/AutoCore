@@ -13,20 +13,22 @@ vehicle physics port, plus Phase 2–4 port status.
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| **0** RE evidence | **DONE** | All 14 evidence files below + large `verified/` re-gate set |
-| **1** ServerConfig scaffold | **DONE** | Config/substep knobs; physics OFF by default |
-| **2** `HkVehicleData` | **DONE** | Setup + CBID cache + unit mass/RVInertia |
-| **3** Subsystems | **DONE** | Reduced friction residuals documented; see `PHASE_2_4_COMPLETION.md` |
+| **0** RE evidence | **DONE** | All 14 evidence files below + large `verified/` re-gate set; B1–B4/B6–B8 live; **B5 open** |
+| **1** ServerConfig scaffold | **DONE** | Config/substep knobs; physics OFF by default (code + shipped YAML) |
+| **2** `HkVehicleData` | **DONE** | Setup + CBID cache; **C-mass** threads `SimpleObjectSpecific.Mass` |
+| **3** Subsystems | **DONE** | C2 hardpoint susp, C4 friction, C5 drive gate, C8 brake; residuals in gaps |
 | **4** Integrator + orchestrator | **DONE** | `VehicleActionSim` / `VehiclePhysicsInstance` + characterization tests |
-| **5** NPC controller + ticker | **DONE** | `NpcVehiclePhysicsController` + tier resolve; opt-in only |
+| **5** NPC controller + ticker | **DONE** | **D2** sim-authoritative publish; **D3** clear on teleport/death |
 | **6** Ghost streaming | **DONE** | sharp→Handbreak, sim angVel, thr/steer pack, wheelset on foreign create |
-| **7** Live verify | **NOT STARTED** | Needs approved Launcher A/B |
+| **C/CW/D fidelity rework** | **DONE** (2026-07-16) | C2→C4→C5→C8→C-mass→CW→D1–D3; **C7 deferred** (clamps until more Phase E green) |
+| **7** Live verify | **NOT STARTED** | Needs approved Launcher A/B — checklist in `docs/agents/task-F-report.md` |
 
 **Gate doc:** [`PHASE_2_4_COMPLETION.md`](PHASE_2_4_COMPLETION.md)  
 **Port rules:** [`PORTING_RULES.md`](PORTING_RULES.md)  
-**Known holes:** [`IMPLEMENTATION-GAPS.md`](IMPLEMENTATION-GAPS.md) (CW proxy collision, B5, COM, friction residuals)
+**Known holes:** [`IMPLEMENTATION-GAPS.md`](IMPLEMENTATION-GAPS.md)  
+**Handoff / per-task reports:** `docs/agents/physicsHandoff.md`, `docs/agents/task-*-report.md`
 
-**Resume at:** Phase 7 live A/B (after approval), or friction/geometry fidelity if handling looks wrong.
+**Resume at:** Phase 7 live A/B (after explicit user approval), or C7 / residual parity (downhill micro-hop, ramp climb, PortSolve bit-exact).
 
 ---
 

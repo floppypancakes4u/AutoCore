@@ -9,10 +9,13 @@ npcVehiclePhysics:
   #   soft      - SoftNpcPathMotion pure-pursuit look-ahead
   #   kinematic - NpcVehicleDriveController (curvature/terrain-aligned kinematic)
   #   physics   - retail Havok single-rigid-body simulation (requires enabled: true)
-  controllerTier: physics
+  # Opt-in rollout: ship hard/off. For live physics A/B flip both:
+  #   controllerTier: physics
+  #   enabled: true
+  controllerTier: hard
 
   # Master switch for the Havok physics simulation. Must be true for controllerTier: physics.
-  enabled: true
+  enabled: false
 
   # Placeholder fixed substep rate in Hz (accumulator fed variable server dt). Clamped [1, 480].
   # Client retail uses frameDt/N via StepTo 0x4d6c80 (N=floor(frameDt·~30)+1, max ~1/30 s), not fixed Hz.
