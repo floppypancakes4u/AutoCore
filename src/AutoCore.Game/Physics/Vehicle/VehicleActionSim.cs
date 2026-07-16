@@ -301,8 +301,10 @@ public static class VehicleActionSim
     /// position write only (<c>rb+0xB4</c> / pose Y) — no velocity modification — so this must
     /// NOT touch <c>LinVelY</c>.
     /// <para>
-    /// CAVEAT: the debugger confirmation planned for task B2 has not run yet. This implements
-    /// exactly what the static decompile evidence says; if B2 later contradicts it, revisit.
+    /// CONFIRMED by task B2 (2026-07-16): the fresh <c>applyAction</c>/<c>postTick</c> decompiles
+    /// corroborate a position-only Y lift with no velocity write; the suspension force path
+    /// (<c>0x64de50</c> → <c>0x64bc70</c> hardpoint impulse) is separate. See 0.4-suspension.md
+    /// "Task B2 — anti-sink". No change needed.
     /// </para>
     /// </summary>
     private static void ApplyAntiSink(VehiclePhysicsInstance inst, int wheelCount)
