@@ -105,6 +105,8 @@ Commit chain on the branch after the base `56f2619`:
 | `54ad0ea5` | B8 | **Brake** — see §6, this is a plan-changing finding. |
 | `ab25d78c` + `78d9280b` | E1 | **Retail-parity characterization suite** `RetailParityTests.cs` — see §6/§8. 5 active pass + 3 `[Ignore]`d contracts that become the real gates after C-phase. |
 | `1282915b` | C3 | **Anti-sink** rewritten to retail form in `VehicleActionSim.ApplyAntiSink`: scan min wheel `CurrentLength`; if `< 0`, lift chassis `PosY -= min` (position-only, **preserves LinVelY**). Old contact-vs-hardpoint penetration heuristic was provably dead code for upright bodies; deleted. Implemented from **static** decompile evidence with a "B2 debugger-confirm pending" caveat in the code comment. |
+| `a41c2eb7` | **B4 + C1** | **Inertia axis pairing RESOLVED by live CE capture** and fixed. Live rb `0x3b0c3940`: body-frame principal inv-inertia at `rb+0xe0` = `(1/4500,1/4500,1/1500,1/1500)`, mass `1500`; chassis basis (live `vehicleData=*(fw+0x10)`) front=+Z, up=+Y, side=−X; DB def (`0x2c97e6e0`) `RVInertiaRoll=1/Pitch=3/Yaw=3`. → `mass*RVInertia` maps **X←Pitch, Y←Yaw, Z←Roll** (forward/Z = low roll inertia). `CreateBody` had **Roll↔Pitch swapped**; fixed. Also proves asset tensor = `mass*RVInertia`, and `rb+0x2c=1/1500` corroborates B2 mass-normalization. Evidence → `0.2-mass-inertia.md §2.1`. |
+| `a65849ab` | **C6** | **ReGround** primitive `VehiclePhysicsInstance.ReGround(query)`: cast down from `PosY+10`, snap to hit, zero lin/ang vel + force/torque, `SetDriveAxes(0)`, reset wheel state (mirrors `airStabilization 0x598320` §3.2/§3.3). Wires the formerly-unused `ComputeReGroundCastStartY`/`ResolveReGroundPositionY`. New const `ReGroundCastMaxDistance`. The D-phase spawn/teleport/out-of-world primitive. |
 
 Existing oracle fixtures in `src/AutoCore.Game.Tests/Physics/oracles/`: `aero_goldens.json`, `steering_goldens.json`,
 `torqueCurve2D_goldens.json`, `driveController_goldens.json` (+ their `*OracleTests.cs`).
@@ -226,14 +228,27 @@ open MCP settings in a background session." **This is why the work is being hand
 
 ## 9. Immediate next action (start here)
 
-1. Confirm `cheatengine` MCP tools are available (§7). If not, get the server approved/connected first.
-2. `get_process_list` → find `autoassault.exe` PID; `open_process` it; `ping`.
-3. Verify the 1:1 map with the two sanity constants in §8.
-4. **Resume the task queue at B1** (friction solver) — the highest-value capture. Then B4 (inertia pairing,
-   unblocks the C1→C2 chain), B2, B3, B5. Then the C-phase, E-phase already done as tests, D-phase, F.
-   Full ordered dependency graph: **A ✓ → B1,B2,B3,B4,B5 → C1→C2→C3✓→C4→C5→C6→C8(after C4) → E1 ✓ → D1→D2→D3 → C7(last) → F.**
+**Fastest path to CE (no session restart needed):** use the direct named-pipe client
+`tmp/re/ce_client.py` (gitignored) — see `tmp/re/CE_API_NOTES.md`. It speaks the CE Lua bridge's
+framed JSON-RPC directly, so you can drive breakpoints/reads even if the `cheatengine` MCP tools
+aren't loaded this session. (The MCP server is now registered at **user scope** in `~/.claude.json`
+and loads on the next start; ToolSearch `open_process`/`ping` confirms it.)
 
-Nothing from the stopped B1 run was committed (branch is clean at C3). B1 starts fresh.
+1. Attach: `open_process {"process_id_or_name": "autoassault.exe"}` (PID was 48600), then `ping`.
+2. Verify the 1:1 map (`0x9cc798`→`41EFFFFF`, `0xaf3388`→`41A00000`) — both re-confirmed 2026-07-16.
+3. **B4 ✓, C1 ✓, C6 ✓ are DONE** (see §5). Resume the remaining captures — all now **unblocked**
+   (CE live; one vehicle ticks at `applyAction this=0x3626B580`):
+   - **B3** — `calcWheelTorque 0x598040` pow operands + `wheel+0x88` writer: **breakpoint-capturable
+     while the car idles** (no special maneuver). Good next pick.
+   - **B2** — suspension: `gScale=1/RB[+0x2c]` already corroborated (`rb+0x2c=1/1500`); still capture the
+     component arrays + hardpoint-impulse confirm live.
+   - **B1** — friction solver: needs **driving maneuvers** (rest→launch, mid-speed straight, steady turn,
+     handbrake slide, FWD vs RWD). **Requires the user to drive** each scenario at the breakpoint.
+   - **B5** — airStab recovery: needs a **flip/crash** (user drives into it).
+   Then C2 → C4 → C5 → C8(after C4), E1 ✓ (un-`[Ignore]` as C-tasks land), D1→D2→D3, C7(last), F.
+   Full graph: **A ✓ → B1,B2,B3,B4✓,B5 → C1✓→C2→C3✓→C4→C5→C6✓→C8 → E1 ✓ → D1→D2→D3 → C7 → F.**
+
+Branch HEAD is now `a65849b`.
 
 ---
 
@@ -290,7 +305,10 @@ Per-wheel torque writes `wheels+0x28[i]`. Use a **data breakpoint on `WHEEL0+0x8
 the provisional `TorqueRatio` mapping. Deliver `calcWheelTorque_goldens.json` + update `engine-torque-spec.md`
 and `setup-field-mapping.md`. Feeds C5.
 
-**B4 — RVInertia axis pairing + COM (turn-drift; root cause of the flip-explosion that made r×F be disabled).**
+**B4 — DONE (commit `a41c2eb7`, live CE).** Result: front=+Z/up=+Y/side=−X; body-frame tensor
+`(Ix=4500,Iy=4500,Iz=1500)` = `mass(1500)*(Pitch=3,Yaw=3,Roll=1)` → **X←Pitch, Y←Yaw, Z←Roll**;
+`CreateBody` had Roll↔Pitch swapped, now fixed (C1 also done). COM stays modifier-only. Original spec
+(retained for reference — *turn-drift; root cause of the flip-explosion that made r×F be disabled*):
 After construction (`vehicleDataInit 0x5fc620` / `buildFramework 0x5fd390` tail), read the constructed chassis RB
 **inverse-inertia tensor + COM** from live memory and compare per-axis to the vehicle's DB `RVInertia{Roll,Pitch,Yaw}`
 to prove the pairing currently guessed in `VehiclePhysicsInstance.CreateBody` (guess: X=Roll, Y=Yaw, Z=Pitch) and
