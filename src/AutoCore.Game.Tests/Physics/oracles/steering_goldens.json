@@ -1,0 +1,194 @@
+{
+  "source": "docs/reconstruction/physics/steering-spec.md ; docs/reconstruction/physics/verified/fn_0064f840_steering.md",
+  "symbol": "hkDefaultSteering_update",
+  "address": "0x0064f840",
+  "port": "AutoCore.Game.Physics.Vehicle.HkVehicleSteering.ComputeWheelAngles",
+  "derivation": "Fresh decompile_function + disassemble_function of 0x64f840 and its callee FUN_005d6ae0 (0x5d6ae0, world-axis rotation helper) this task (2026-07). All 8 core vectors below are bit-exact emulate_function results, not hand-derived: a fully-linked fake struct graph was seeded (component -> framework -> {maxAngleHolder, axisHolder, holder -> chassis body}) with an identity chassis rotation and local steer axis (1,0,0), so worldFront=(1,0,0) and forwardSpeed=dot(linVel,worldFront)=linVel.x exactly. wheelCount was seeded as 0 to take the JLE branch directly to RET (confirmed by disassembly: the per-wheel loop is skipped entirely when wheelCount<=0, and XMM0 -- which holds computedAngle from the immediately-preceding MOVSS [ESI+0x10],XMM0 -- is not touched again before RET), so the computedAngle register readback is bit-exact for the full formula (angle = maxAngle*steer, then *= (fullSpeedLimit/forwardSpeed)^2 when fullSpeedLimit<=forwardSpeed), not just a pointer-chase probe. All 8 emulate_function calls returned success/hit_return=true/final_pc=deadbeef. A 9th vector (knownDeviation below) demonstrates the retail binary reaches its 0/0 division path (fullSpeedLimit=0, forwardSpeed=0 both satisfy the <= gate) and returns NaN there, while the current HkVehicleSteering.cs port has an added 'forwardSpeed > 0' guard (see file comment) that skips the branch and returns a non-NaN identity value instead -- a genuine, intentional-looking deviation from bit-exact retail behavior for this degenerate input, not a bug in this task's emulation.",
+  "vectors": [
+    {
+      "id": 1,
+      "name": "below-fsl-identity-positive-steer",
+      "inputs": {
+        "steerInput": 0.5,
+        "steerInputHex": "0000003f",
+        "maxAngle": 0.6,
+        "maxAngleHex": "9a99193f",
+        "fullSpeedLimit": 15.0,
+        "fullSpeedLimitHex": "00007041",
+        "forwardSpeed": 10.0,
+        "forwardSpeedHex": "00002041",
+        "doesSteer": [true, false]
+      },
+      "expected": {
+        "angle": 0.30000001192092896,
+        "angleHex": "9a99993e"
+      },
+      "notes": "forwardSpeed (10) < fullSpeedLimit (15): binary gate false, no falloff. angle = maxAngle*steer exactly. Emulated XMM0=0x3e99999a."
+    },
+    {
+      "id": 2,
+      "name": "above-fsl-quadratic-falloff-positive-steer",
+      "inputs": {
+        "steerInput": 0.8,
+        "steerInputHex": "cdcc4c3f",
+        "maxAngle": 0.6,
+        "maxAngleHex": "9a99193f",
+        "fullSpeedLimit": 15.0,
+        "fullSpeedLimitHex": "00007041",
+        "forwardSpeed": 30.0,
+        "forwardSpeedHex": "0000f041",
+        "doesSteer": [true, false]
+      },
+      "expected": {
+        "angle": 0.12000000476837158,
+        "angleHex": "90c2f53d"
+      },
+      "notes": "forwardSpeed (30) > fullSpeedLimit (15): r=15/30=0.5, r^2=0.25 (QUADRATIC, confirmed by disassembly MULSS XMM0,XMM0 before the second MULSS). angle = 0.6*0.8*0.25. Emulated XMM0=0x3df5c290."
+    },
+    {
+      "id": 3,
+      "name": "exact-boundary-speed-eq-fsl",
+      "inputs": {
+        "steerInput": 0.7,
+        "steerInputHex": "3333333f",
+        "maxAngle": 0.6,
+        "maxAngleHex": "9a99193f",
+        "fullSpeedLimit": 15.0,
+        "fullSpeedLimitHex": "00007041",
+        "forwardSpeed": 15.0,
+        "forwardSpeedHex": "00007041",
+        "doesSteer": [true, false]
+      },
+      "expected": {
+        "angle": 0.42000001668930054,
+        "angleHex": "3e0ad73e"
+      },
+      "notes": "forwardSpeed == fullSpeedLimit exactly: binary gate is <= (inclusive), so the branch IS taken, but r=15/15=1.0 exactly and r^2=1.0 exactly -> identity, same result as the below-FSL branch would give. Confirms the boundary is inclusive without changing the value. Emulated XMM0=0x3ed70a3e."
+    },
+    {
+      "id": 4,
+      "name": "zero-steer-above-fsl",
+      "inputs": {
+        "steerInput": 0.0,
+        "steerInputHex": "00000000",
+        "maxAngle": 0.6,
+        "maxAngleHex": "9a99193f",
+        "fullSpeedLimit": 15.0,
+        "fullSpeedLimitHex": "00007041",
+        "forwardSpeed": 30.0,
+        "forwardSpeedHex": "0000f041",
+        "doesSteer": [true, false]
+      },
+      "expected": {
+        "angle": 0.0,
+        "angleHex": "00000000"
+      },
+      "notes": "steerInput=0 zeroes the result regardless of the falloff branch being active. Emulated XMM0=0x0."
+    },
+    {
+      "id": 5,
+      "name": "negative-steer-above-fsl-falloff-sign-preserved",
+      "inputs": {
+        "steerInput": -0.8,
+        "steerInputHex": "cdcc4cbf",
+        "maxAngle": 0.6,
+        "maxAngleHex": "9a99193f",
+        "fullSpeedLimit": 15.0,
+        "fullSpeedLimitHex": "00007041",
+        "forwardSpeed": 30.0,
+        "forwardSpeedHex": "0000f041",
+        "doesSteer": [true, false]
+      },
+      "expected": {
+        "angle": -0.12000000476837158,
+        "angleHex": "90c2f5bd"
+      },
+      "notes": "Same magnitude as vector 2 but negative steer: r^2 is always positive (squared), so the falloff scales magnitude without flipping sign -- sign follows steerInput*maxAngle only. Emulated XMM0=0xbdf5c290."
+    },
+    {
+      "id": 6,
+      "name": "negative-forward-speed-reversing-identity",
+      "inputs": {
+        "steerInput": 0.5,
+        "steerInputHex": "0000003f",
+        "maxAngle": 0.6,
+        "maxAngleHex": "9a99193f",
+        "fullSpeedLimit": 15.0,
+        "fullSpeedLimitHex": "00007041",
+        "forwardSpeed": -10.0,
+        "forwardSpeedHex": "000020c1",
+        "doesSteer": [true, false]
+      },
+      "expected": {
+        "angle": 0.30000001192092896,
+        "angleHex": "9a99993e"
+      },
+      "notes": "Negative (reversing) forwardSpeed: binary gate 'fullSpeedLimit <= forwardSpeed' (15 <= -10) is false with ordinary signed float comparison, so no falloff -- same identity result as vector 1. Confirms the retail COMISS-based gate handles negative speed without special-casing, and the C# port's plain '<=' matches it. Emulated XMM0=0x3e99999a, XMM1 (forwardSpeed readback)=0xc1200000 (-10.0)."
+    },
+    {
+      "id": 7,
+      "name": "extreme-high-speed-tiny-quadratic-ratio",
+      "inputs": {
+        "steerInput": 1.0,
+        "steerInputHex": "0000803f",
+        "maxAngle": 0.6,
+        "maxAngleHex": "9a99193f",
+        "fullSpeedLimit": 15.0,
+        "fullSpeedLimitHex": "00007041",
+        "forwardSpeed": 1000.0,
+        "forwardSpeedHex": "00007a44",
+        "doesSteer": [false, true, true]
+      },
+      "expected": {
+        "angle": 0.00013500000932253897,
+        "angleHex": "ca8e0d39"
+      },
+      "notes": "Stress test for the squared falloff at a large speed/FSL ratio: r=15/1000=0.015, r^2=0.000225, angle=0.6*1*0.000225. Also uses a 3-wheel doesSteer mask ([false,true,true]) to exercise per-wheel indexing beyond the 2-wheel front-steer pattern used elsewhere. Emulated XMM0=0x390d8eca."
+    },
+    {
+      "id": 8,
+      "name": "just-past-boundary-epsilon-above-fsl",
+      "inputs": {
+        "steerInput": 0.7,
+        "steerInputHex": "3333333f",
+        "maxAngle": 0.6,
+        "maxAngleHex": "9a99193f",
+        "fullSpeedLimit": 15.0,
+        "fullSpeedLimitHex": "00007041",
+        "forwardSpeed": 15.000000953674316,
+        "forwardSpeedHex": "01007041",
+        "doesSteer": [true, false]
+      },
+      "expected": {
+        "angle": 0.41999995708465576,
+        "angleHex": "3c0ad73e"
+      },
+      "notes": "forwardSpeed is the smallest float32 increment above fullSpeedLimit (15.0 -> nextafter). Complements vector 3 (exact boundary, r=1 identity): here r is one ULP below 1.0, giving a result one ULP below vector 3's, confirming the transition is continuous and the '<=' gate does not introduce a discontinuity at the boundary. Emulated XMM0=0x3ed70a3c (vs vector 3's 0x3ed70a3e -- exactly one ULP apart)."
+    }
+  ],
+  "knownDeviation": {
+    "id": 9,
+    "name": "degenerate-zero-fsl-zero-speed-div0",
+    "inputs": {
+      "steerInput": 0.5,
+      "steerInputHex": "0000003f",
+      "maxAngle": 0.6,
+      "maxAngleHex": "9a99193f",
+      "fullSpeedLimit": 0.0,
+      "fullSpeedLimitHex": "00000000",
+      "forwardSpeed": 0.0,
+      "forwardSpeedHex": "00000000",
+      "doesSteer": [true, false]
+    },
+    "retailExpected": {
+      "angleHex": "0000c07f",
+      "notes": "Retail binary: fullSpeedLimit <= forwardSpeed (0.0 <= 0.0) is TRUE, so the branch IS taken: r = 0.0/0.0 = NaN (hardware DIVSS default QNaN, bit pattern 0x7fc00000 -- confirmed by emulate_function register readback, NOT hand-derived: an independent Python/NumPy computation of the same 0.0/0.0 produced a different QNaN payload (0xffc00000, sign bit set), so the emulator's value is the one that reflects real x86 hardware semantics and is authoritative here), r^2*angle = NaN. computedAngle = NaN in the retail binary for this input."
+    },
+    "portActual": {
+      "angle": 0.30000001192092896,
+      "angleHex": "9a99993e",
+      "notes": "HkVehicleSteering.ComputeWheelAngles has an added 'forwardSpeed > 0f' guard (see HkVehicleSteering.cs XML doc: 'Extra guard forwardSpeed > 0 avoids div-by-zero on degenerate inputs') not present in the retail binary. For this input forwardSpeed>0f is false, so the port skips the falloff branch entirely and returns the plain maxAngle*steerInput identity value (0.3) instead of NaN."
+    },
+    "verdict": "DEVIATION: confirmed by emulation, not fixed here per task scope. See SteeringOracleTests.KnownDeviation_ZeroFullSpeedLimitZeroForwardSpeed_PortDiffersFromRetail (marked [Ignore(\"unblocked by C-phase steering fix\")])."
+  }
+}

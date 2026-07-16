@@ -159,3 +159,28 @@ flags byte at `VehicleSpecific+0x5f0`. Standard cars: front only (bit2 set, bit3
 | `DAT_00aaa668` | `0x00aaa668` | -1.0 | steer clamp min |
 
 Falloff is **quadratic** above `FullSpeedLimit`; below it, full authority.
+
+---
+
+## Task B7 update (2026-07): emulation goldens + a found port deviation
+
+`hkDefaultSteering_update` (0x64f840) was fully re-verified by emulation this
+task (not just decompile reading) — see `verified/fn_0064f840_steering.md`
+§"Task B7 update" for the full setup and register-readback table. Summary:
+
+- 8 golden vectors are **bit-exact register readbacks** (`XMM0` at `RET`) of
+  the real formula, covering both sides of the `FullSpeedLimit` boundary, the
+  boundary itself (inclusive `<=`, `r=1` identity), one ULP past the boundary,
+  zero steer, negative steer, and negative (reversing) forward speed. All 8
+  match the current C# port (`HkVehicleSteering.ComputeWheelAngles`)
+  bit-exact — see `src/AutoCore.Game.Tests/Physics/oracles/steering_goldens.json`
+  + `SteeringOracleTests.cs`.
+- A 9th, degenerate vector (`FullSpeedLimit = 0`, `forwardSpeed = 0`) found a
+  **real deviation**: the retail binary's gate is inclusive (`0.0 <= 0.0` is
+  true) so it takes the falloff branch and computes `0.0/0.0 = NaN`
+  (`0x7fc00000`, confirmed by emulation register readback). The C# port has
+  an added `forwardSpeed > 0f` guard (not in the retail binary) that skips
+  the branch for this input and returns a non-NaN identity value instead.
+  Not fixed here (out of scope for this task) — documented and covered by an
+  `[Ignore("unblocked by C-phase steering fix")]` test so it doesn't silently
+  regress or silently pass.
