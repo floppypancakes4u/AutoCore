@@ -201,7 +201,9 @@ public class RespawnManager : Singleton<RespawnManager>
     {
         character.Position = position;
         character.Rotation = rotation;
-        vehicle.Position = position;
+        // Respawn is always a discontinuous lifecycle reposition — drop stale NPC/player sim.
+        vehicle.ClearPhysicsInstance();
+        vehicle.SetPosition(position);
         vehicle.Rotation = rotation;
         DirtyHealthAndPosition(character, vehicle);
     }

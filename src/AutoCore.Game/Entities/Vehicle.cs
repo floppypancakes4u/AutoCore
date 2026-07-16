@@ -722,6 +722,11 @@ public class Vehicle : SimpleObject
         if (sharpTurn.HasValue)
             ApplySharpTurnToVehicleFlags(sharpTurn.Value);
 
+        // Discontinuous external teleport: drop stale sim so next physics Apply recreates + ReGrounds.
+        // Continuous streaming (path ticks) keeps the instance. Controller recovery publish keeps it
+        // when the body is already at the new pose (dual-check inside MaybeClear...).
+        MaybeClearPhysicsOnDiscontinuousMove(position);
+
         Position = position;
         Rotation = rotation;
         Velocity = velocity;
@@ -773,8 +778,60 @@ public class Vehicle : SimpleObject
         return PhysicsInstance;
     }
 
+    /// <summary>
+    /// Squared-distance threshold (world units) beyond which a pose write is treated as a
+    /// discontinuous teleport and drops <see cref="PhysicsInstance"/>. Matches path-divergence
+    /// scale (<c>NpcVehiclePhysicsController.ResyncDriftThreshold</c> default 8).
+    /// Continuous streaming ApplyServerMove deltas stay well under this.
+    /// </summary>
+    public const float PhysicsDiscontinuityDistance = 8f;
+
     /// <summary>Drop sim state (despawn / teleport / death). Next physics step recreates.</summary>
     public void ClearPhysicsInstance() => PhysicsInstance = null;
+
+    /// <summary>
+    /// Direct discontinuous reposition (respawn / map transfer / script teleport). Clears
+    /// stale physics when the jump exceeds <see cref="PhysicsDiscontinuityDistance"/>, then
+    /// writes <see cref="ClonedObjectBase.Position"/>. Prefer this over assigning Position
+    /// when the vehicle may own a <see cref="PhysicsInstance"/>.
+    /// </summary>
+    public void SetPosition(Vector3 position)
+    {
+        MaybeClearPhysicsOnDiscontinuousMove(position);
+        Position = position;
+    }
+
+    /// <summary>
+    /// Clears <see cref="PhysicsInstance"/> when both the entity pose and the sim body are
+    /// discontinuous from <paramref name="newPosition"/> (true external teleport). Keeps the
+    /// instance when the body is already at the new pose (controller recovery publish) or when
+    /// the entity move is continuous streaming.
+    /// </summary>
+    internal void MaybeClearPhysicsOnDiscontinuousMove(Vector3 newPosition)
+    {
+        if (PhysicsInstance == null)
+            return;
+
+        if (!IsPhysicsDiscontinuous(Position, newPosition))
+            return;
+
+        var body = PhysicsInstance.Body;
+        var bodyPos = new Vector3(body.PosX, body.PosY, body.PosZ);
+        if (!IsPhysicsDiscontinuous(bodyPos, newPosition))
+            return;
+
+        ClearPhysicsInstance();
+    }
+
+    /// <summary>True when |from − to| exceeds <see cref="PhysicsDiscontinuityDistance"/>.</summary>
+    internal static bool IsPhysicsDiscontinuous(Vector3 from, Vector3 to)
+    {
+        float dx = from.X - to.X;
+        float dy = from.Y - to.Y;
+        float dz = from.Z - to.Z;
+        float thr = PhysicsDiscontinuityDistance;
+        return (dx * dx) + (dy * dy) + (dz * dz) > thr * thr;
+    }
 
     /// <summary>Copy entity pose/velocity into the physics body (spawn / resync).</summary>
     public void SyncPhysicsInstanceFromEntity()
@@ -2257,6 +2314,9 @@ public class Vehicle : SimpleObject
     /// </summary>
     public override void OnDeath(DeathType deathType)
     {
+        // Drop stale sim immediately — corpse / leave-map must not keep a free-running body.
+        ClearPhysicsInstance();
+
         Logger.WriteLog(LogType.Debug,
             "Vehicle.OnDeath coid={0} cbid={1} templateId={2} npcAi={3} murderer={4} inv={5} hp={6}/{7}",
             ObjectId.Coid,

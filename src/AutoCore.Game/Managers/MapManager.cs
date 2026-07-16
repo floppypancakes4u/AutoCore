@@ -246,7 +246,9 @@ public class MapManager : Singleton<MapManager>
             character.Rotation = spawnRot;
 
             character.CurrentVehicle.SetMap(map);
-            character.CurrentVehicle.Position = spawnPos;
+            // Map transfer teleport is discontinuous — drop stale physics so next Apply recreates.
+            character.CurrentVehicle.ClearPhysicsInstance();
+            character.CurrentVehicle.SetPosition(spawnPos);
             character.CurrentVehicle.Rotation = spawnRot;
 
             // Keep LastTownId + pose DBData current so logout/relogin resumes on this map.

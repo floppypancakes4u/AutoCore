@@ -5,6 +5,7 @@ namespace AutoCore.Game.Tests.NpcAi;
 
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.CloneBases.Specifics;
+using AutoCore.Game.Constants;
 using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.EntityTemplates;
@@ -531,5 +532,172 @@ public class NpcVehiclePhysicsControllerTests
             $"expected path-divergence teleport near hard, planar err={planar} thr={thr} body=({body.PosX},{body.PosZ})");
         Assert.AreEqual(result.NewPosition.X, body.PosX, 1e-3f);
         Assert.AreEqual(result.NewPosition.Z, body.PosZ, 1e-3f);
+
+        // D3: controller recovery publish must NOT drop the physics instance (body already at new pose).
+        vehicle.ApplyServerMove(
+            result.NewPosition, result.Rotation, result.Velocity, dt,
+            result.Throttle, result.Steering, result.SharpTurn, result.AngularVelocity);
+        Assert.IsNotNull(vehicle.PhysicsInstance,
+            "path-divergence recovery publish must keep the instance (body already at hard pose)");
+    }
+
+    /// <summary>
+    /// D3: continuous streaming ApplyServerMove (small delta) must keep the physics instance.
+    /// </summary>
+    [TestMethod]
+    public void ApplyServerMove_ContinuousMove_KeepsPhysicsInstance()
+    {
+        var vehicle = CreateNpcVehicle();
+        var path = StraightPath();
+        const float dt = 1f / 60f;
+
+        var hard = new PathStepResult
+        {
+            NewPosition = new Vector3(0f, 1f, 2f),
+            Velocity = new Vector3(0f, 0f, 8f),
+            Rotation = Quaternion.Default,
+            NewIndex = 1,
+            NewDirection = 1,
+        };
+        var result = NpcVehiclePhysicsController.Apply(
+            hard, vehicle, path, nowMs: 0, dt: dt, map: null, npcAi: vehicle.NpcAi);
+        vehicle.ApplyServerMove(
+            result.NewPosition, result.Rotation, result.Velocity, dt,
+            result.Throttle, result.Steering, result.SharpTurn, result.AngularVelocity);
+
+        var before = vehicle.PhysicsInstance;
+        Assert.IsNotNull(before);
+
+        // Continuous stream: ~1 unit forward (well under discontinuity threshold).
+        var continuous = new Vector3(
+            result.NewPosition.X,
+            result.NewPosition.Y,
+            result.NewPosition.Z + 1f);
+        vehicle.ApplyServerMove(
+            continuous, result.Rotation, result.Velocity, dt,
+            result.Throttle, result.Steering, result.SharpTurn, result.AngularVelocity);
+
+        Assert.AreSame(before, vehicle.PhysicsInstance,
+            "continuous ApplyServerMove must not drop the physics instance");
+    }
+
+    /// <summary>
+    /// D3: discontinuous teleport via ApplyServerMove drops stale sim state so the next
+    /// controller Apply recreates + ReGrounds (first-create seat path).
+    /// </summary>
+    [TestMethod]
+    public void Apply_AfterDiscontinuousTeleport_RecreatesAndReGrounds()
+    {
+        var vehicle = CreateNpcVehicle();
+        var path = StraightPath();
+        const float dt = 1f / 60f;
+
+        var hard = new PathStepResult
+        {
+            NewPosition = new Vector3(0f, 1f, 2f),
+            Velocity = new Vector3(0f, 0f, 10f),
+            Rotation = Quaternion.Default,
+            NewIndex = 1,
+            NewDirection = 1,
+        };
+        var result = NpcVehiclePhysicsController.Apply(
+            hard, vehicle, path, nowMs: 0, dt: dt, map: null, npcAi: vehicle.NpcAi);
+        vehicle.ApplyServerMove(
+            result.NewPosition, result.Rotation, result.Velocity, dt,
+            result.Throttle, result.Steering, result.SharpTurn, result.AngularVelocity);
+
+        var stale = vehicle.PhysicsInstance;
+        Assert.IsNotNull(stale);
+        // Pollute stale body so a kept instance would be wrong after teleport.
+        stale.Body.PosX = 999f;
+        stale.Body.PosY = 50f;
+        stale.Body.LinVelY = -40f;
+
+        // Discontinuous external teleport (beyond PhysicsDiscontinuityDistance).
+        float jump = Vehicle.PhysicsDiscontinuityDistance * 3f;
+        var teleportPos = new Vector3(jump, 25f, jump);
+        vehicle.ApplyServerMove(teleportPos, Quaternion.Default, default, 0f);
+
+        Assert.IsNull(vehicle.PhysicsInstance,
+            "discontinuous ApplyServerMove must ClearPhysicsInstance");
+        Assert.AreEqual(teleportPos.X, vehicle.Position.X, 1e-4f);
+        Assert.AreEqual(teleportPos.Z, vehicle.Position.Z, 1e-4f);
+
+        hard = new PathStepResult
+        {
+            NewPosition = teleportPos,
+            Velocity = new Vector3(0f, 0f, 8f),
+            Rotation = Quaternion.Default,
+            NewIndex = 1,
+            NewDirection = 1,
+        };
+        result = NpcVehiclePhysicsController.Apply(
+            hard, vehicle, path, nowMs: 16, dt: dt, map: null, npcAi: vehicle.NpcAi);
+
+        Assert.IsNotNull(vehicle.PhysicsInstance, "next Apply must recreate the physics instance");
+        Assert.AreNotSame(stale, vehicle.PhysicsInstance, "must be a fresh instance, not the stale one");
+        var body = vehicle.PhysicsInstance.Body;
+        Assert.AreEqual(result.NewPosition.Y, body.PosY, 1e-3f,
+            "recreated instance must be seated (first-create ReGround path)");
+        Assert.IsTrue(MathF.Abs(body.LinVelY) < 1f,
+            $"seated body should not keep freefall vy, got {body.LinVelY}");
+        // Fresh seed from entity pose at teleport XZ, not the polluted 999.
+        Assert.IsTrue(MathF.Abs(body.PosX - jump) < 5f,
+            $"expected body near teleport X, got {body.PosX}");
+    }
+
+    /// <summary>
+    /// D3: SetPosition (direct discontinuous reposition) clears sim state.
+    /// </summary>
+    [TestMethod]
+    public void SetPosition_Discontinuous_ClearsPhysicsInstance()
+    {
+        var vehicle = CreateNpcVehicle();
+        var path = StraightPath();
+        var hard = new PathStepResult
+        {
+            NewPosition = new Vector3(0f, 1f, 2f),
+            Velocity = new Vector3(0f, 0f, 5f),
+            Rotation = Quaternion.Default,
+            NewIndex = 1,
+            NewDirection = 1,
+        };
+        NpcVehiclePhysicsController.Apply(
+            hard, vehicle, path, nowMs: 0, dt: 1f / 60f, map: null, npcAi: vehicle.NpcAi);
+        Assert.IsNotNull(vehicle.PhysicsInstance);
+
+        float jump = Vehicle.PhysicsDiscontinuityDistance * 3f;
+        vehicle.SetPosition(new Vector3(jump, 1f, jump));
+
+        Assert.IsNull(vehicle.PhysicsInstance);
+        Assert.AreEqual(jump, vehicle.Position.X, 1e-4f);
+        Assert.AreEqual(jump, vehicle.Position.Z, 1e-4f);
+    }
+
+    /// <summary>
+    /// D3: death drops physics instance (player and NPC vehicle paths both call Clear).
+    /// </summary>
+    [TestMethod]
+    public void OnDeath_ClearsPhysicsInstance()
+    {
+        var vehicle = CreateNpcVehicle();
+        var hard = new PathStepResult
+        {
+            NewPosition = new Vector3(0f, 1f, 2f),
+            Velocity = new Vector3(0f, 0f, 5f),
+            Rotation = Quaternion.Default,
+            NewIndex = 1,
+            NewDirection = 1,
+        };
+        NpcVehiclePhysicsController.Apply(
+            hard, vehicle, StraightPath(), nowMs: 0, dt: 1f / 60f, map: null, npcAi: vehicle.NpcAi);
+        Assert.IsNotNull(vehicle.PhysicsInstance);
+
+        // Player-vehicle death path (NpcAi null): still clears.
+        vehicle.NpcAi = null;
+        vehicle.OnDeath(DeathType.Silent);
+
+        Assert.IsNull(vehicle.PhysicsInstance, "OnDeath must ClearPhysicsInstance");
+        Assert.IsTrue(vehicle.IsCorpse);
     }
 }
