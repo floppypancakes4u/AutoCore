@@ -97,9 +97,16 @@ public sealed class VehiclePhysicsInstance
         var body = new HkRigidBody();
         body.SetMass(data.Mass);
         // Diagonal inv-inertia from unit-inertia components (mass=1 → I = RVInertia*).
-        body.InvInertiaX = InvOrZero(data.InertiaRoll);
+        // Chassis basis is front=+Z, up=+Y, lateral=±X (VehicleActionSim + live B4 read),
+        // so the principal inertia pairs by rotation axis:
+        //   Roll  (about forward Z) → InvInertiaZ
+        //   Pitch (about lateral X) → InvInertiaX
+        //   Yaw   (about up Y)      → InvInertiaY
+        // Live-verified (0.2-mass-inertia.md §2.1): rb+0xe0 = (1/4500,1/4500,1/1500) on (X,Y,Z)
+        // for a car with DB Roll=1,Pitch=3,Yaw=3 → forward/Z carries the low roll inertia.
+        body.InvInertiaX = InvOrZero(data.InertiaPitch);
         body.InvInertiaY = InvOrZero(data.InertiaYaw);
-        body.InvInertiaZ = InvOrZero(data.InertiaPitch);
+        body.InvInertiaZ = InvOrZero(data.InertiaRoll);
         body.QuatW = 1f;
         return body;
     }

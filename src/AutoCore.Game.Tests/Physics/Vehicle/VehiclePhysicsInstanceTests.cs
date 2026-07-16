@@ -82,6 +82,30 @@ public class VehiclePhysicsInstanceTests
     }
 
     [TestMethod]
+    public void Construct_MapsRVInertiaToRetailChassisAxes()
+    {
+        // Chassis basis (live-confirmed, B4): front = +Z, up = +Y, lateral = ±X.
+        // Body-frame principal inertia therefore pairs geometrically:
+        //   Roll  (about forward/Z) → InvInertiaZ
+        //   Pitch (about lateral/X) → InvInertiaX
+        //   Yaw   (about up/Y)      → InvInertiaY
+        // Live proof (docs/reconstruction/physics/0.2-mass-inertia.md §2.1):
+        //   rb+0xe0 invInertia = (1/4500, 1/4500, 1/1500) on axes (X,Y,Z) for a car whose
+        //   DB def+0x5dc/5e0/5e4 = Roll=1, Pitch=3, Yaw=3 → forward/Z carries Roll (lowest).
+        var vs = SyntheticCar();
+        vs.RVInertiaRoll = 1.1f;   // distinct so axis swaps are observable
+        vs.RVInertiaPitch = 1.2f;
+        vs.RVInertiaYaw = 1.3f;
+
+        var data = HkVehicleData.FromVehicleSpecific(vs, cbid: 7);
+        var inst = new VehiclePhysicsInstance(data);
+
+        Assert.AreEqual(1f / data.InertiaRoll, inst.Body.InvInertiaZ, 1e-6f, "forward axis Z ← Roll");
+        Assert.AreEqual(1f / data.InertiaPitch, inst.Body.InvInertiaX, 1e-6f, "lateral axis X ← Pitch");
+        Assert.AreEqual(1f / data.InertiaYaw, inst.Body.InvInertiaY, 1e-6f, "up axis Y ← Yaw");
+    }
+
+    [TestMethod]
     public void Step_NullCollisionQuery_RunsWithoutThrow_AndAppliesGravity()
     {
         var data = HkVehicleData.FromVehicleSpecific(SyntheticCar(), cbid: 42);
