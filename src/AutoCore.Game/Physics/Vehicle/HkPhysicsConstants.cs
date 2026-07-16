@@ -35,6 +35,13 @@ public static class HkPhysicsConstants
     public const float TorqueClampMax = 1000f;         // DAT_00a0f520
     public const float HandbrakeRearTorqueScale = 0.5f; // DAT_00a0f298
     public const float RearDriverModScale = 2f;        // DAT_00a10e74 (calcWheelTorque rear path)
+    /// <summary>
+    /// Fixed wheels-builder payload at <c>wheel+0x84</c> (<c>DAT_00aaa7a4</c> = 15.0).
+    /// Used by <c>hkDefaultBrake_update</c> as the wheelsMass-style kill-spin scale
+    /// (<c>raw = −spin · r² · wheelsMass · invDt</c>). Same plate value as
+    /// <see cref="LowSpeedTractionCutoff"/> / sharp speed gate.
+    /// </summary>
+    public const float WheelsMassScale = 15f; // DAT_00aaa7a4
 
     // --- drive controller MoveToTarget3DPoint 0x4fc650 ---
     public const float SteerDeadband = 0.01f;          // DAT_00a0f718

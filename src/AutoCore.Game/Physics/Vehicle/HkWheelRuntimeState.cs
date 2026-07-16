@@ -48,6 +48,19 @@ public sealed class HkWheelRuntimeState
     /// </summary>
     public float DriveTorque;
 
+    /// <summary>
+    /// Per-wheel service-brake torque from <c>hkDefaultBrake_update</c> (brake+0x10[i]).
+    /// Signed opposing-spin torque; folded into the friction-solver input path as
+    /// <c>brakeTorque / radius</c> (postTick <c>local_3ec</c>).
+    /// </summary>
+    public float BrakeTorque;
+
+    /// <summary>
+    /// Per-wheel lock flag from <c>hkDefaultBrake_update</c> (brake+0x1c[i]).
+    /// When true, preUpdate forces wheel spin (wheel+0x8c) to zero.
+    /// </summary>
+    public bool IsBlocked;
+
     /// <summary>wheel+0x8C — spin angular velocity (rad/s).</summary>
     public float Spin;
 

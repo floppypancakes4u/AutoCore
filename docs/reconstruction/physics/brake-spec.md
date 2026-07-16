@@ -222,26 +222,45 @@ So the handbrake byte simultaneously (a) halves rear drive torque here, and (b) 
    alone and is **incomplete**: retail deceleration = friction-solver coast/reverse-drive **plus**
    this Havok brake torque/lock layer, running in parallel every substep.
 
-   **Implications for the C# port (flagged, not applied — no C# changed in this task):**
-   - `HkVehicleBrake.cs` (see `docs/reconstruction/RESUME.md` production layout) needs to be a
-     live per-substep subsystem, not just a config holder: it must (1) receive a pedal value
-     derived the same way (`max(reverseComponentOfThrottleAxis, 0)`, gear-flip caveat above) and
-     the raw handbrake bit, (2) compute `peak = pedal * maxBrakingTorque[i]` opposing-spin torque
-     per wheel, (3) apply instant-lock semantics (`minTimeToBlock` from DB is always **0** per the
-     builder — §2/`fn_005fcb00_brakeBuilder.md` §4c — so block is immediate once
-     `pedal >= minPedalInputToBlock` on an armed wheel or handbrake-connected wheel gets handbrake asserted).
-   - The port's friction solver / wheel-spin integrator must **consume** this brake output the
-     same way retail does: fold brake torque into the per-wheel torque/inertia term feeding the
-     friction solver, and force wheel angular velocity to zero when locked — currently these two
-     read sites (`postTickApplyForces`, `preUpdate`) are exactly where the port's equivalent
-     integration step must add the same terms if not already doing so.
-   - The transmission-reverse-gear flip condition (`transmission+0x14` && `driverInput+0x3c`) was
-     **not** independently re-verified in this task (out of scope for B8); treat the "reverse
-     axis → brake pedal, unless confirmed-in-reverse-gear → drive" rule as **high confidence but
-     the exact gear-flag semantics as a follow-up if bit-exact reverse/brake blending is required.**
+   **Implications for the C# port — APPLIED in Task C8 (2026-07-16):**
+   - `HkVehicleBrake` is a live per-substep subsystem: pedal =
+     `DeriveBrakePedal(throttle)` = `max(0, thr)` under Accel=−1/Reverse=+1; handbrake bit
+     from entity `+0x61c`; per-wheel `UpdateWheel` writes `BrakeTorque` + `IsBlocked`.
+   - Opposing-spin formula (decompile `0x64e6f0`):
+     `raw = −spin · radius · wheelsMass · invDt · radius` with
+     `wheelsMass = wheel+0x84 = 15.0` (`DAT_00aaa7a4` / `HkPhysicsConstants.WheelsMassScale`),
+     then `out = clamp(raw, ±peak)` where `peak = pedal · maxBreakingTorque`.
+   - Instant lock: AA builder forces `minTimeToBlock = 0`, so
+     `isBlocked = (handbrakeConnected && handbrake) || (minPedal <= pedal)`.
+   - `VehicleActionSim`: brake update after preUpdate spin / before friction; friction folds
+     axle-averaged `BrakeTorque` into `DrivePack` (reduced model of retail
+     `local_3ec = brakeTorque/radius` extra slot); preUpdate zeros spin when `IsBlocked`.
+   - **No double-decel in the sim path:** reverse thr (`thr > 0`) is **only** the service-brake
+     pedal — the engine drive pack uses `throttleSign = thr < 0 ? −1 : 0` (forward only). D-phase
+     drivers (D2) must not also apply kinematic reverse-throttle deceleration on top of physics.
+   - Gear-flip condition (`transmission+0x14` && `driverInput+0x3c`) remains residual — not
+     ported; reverse-as-drive while in reverse gear is not modeled.
+   - Goldens: `src/AutoCore.Game.Tests/Physics/oracles/brake_goldens.json` +
+     `BrakeOracleTests.cs`.
+
 2. **VehicleSpecific absolute base for `+0xbc…+0xd0`.** Relative contiguous layout is solid; the
    `EBP → VehicleSpecific*` identity should be confirmed against the struct used by the physics
-   build before wiring the port.
+   build before wiring the port. *(Port uses `VehicleSpecific.BrakesMaxTorque` /
+   `BrakesPedalInput` via `HkVehicleData.FromVehicleSpecific` — relative mapping is live.)*
 3. **Front/Rear split of `m_wheelsMinTimeToBlock`.** Stock Havok has a single
    `m_wheelsMinTimeToBlock`; AA exposes Front/Rear separately (per-wheel-group), implying a custom
-   or per-wheel application — confirm at the setup site.
+   or per-wheel application — confirm at the setup site. **C8:** AA builder forces both to **0**
+   (instant lock); port does not implement a dwell timer.
+
+---
+
+## 6. C8 port summary (server)
+
+| Piece | Location |
+|---|---|
+| Pedal / peak / opposing-spin / lock | `HkVehicleBrake.cs` |
+| Per-wheel runtime | `HkWheelRuntimeState.BrakeTorque`, `.IsBlocked` |
+| Tick order | `VehicleActionSim.ApplyBrakeUpdate` after collide/spin, before friction |
+| Friction fold-in | `TryApplyFriction`: axle-averaged brake torque added to `DrivePack` |
+| Spin lock | `IntegrateSpin(..., integrate: contact && !IsBlocked)` |
+| Oracle | `brake_goldens.json` / `BrakeOracleTests` |

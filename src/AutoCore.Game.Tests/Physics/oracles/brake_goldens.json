@@ -1,0 +1,232 @@
+{
+  "source": "docs/reconstruction/physics/brake-spec.md ; docs/reconstruction/physics/verified/fn_0064ed40_brakeCtor.md ; hkDefaultBrake_update 0x64e6f0 decompile (C8)",
+  "symbol": "hkDefaultBrake_update",
+  "address": "0x0064e6f0",
+  "port": "AutoCore.Game.Physics.Vehicle.HkVehicleBrake",
+  "derivation": "Hand-derived float32 goldens from the retail formula peak=pedal*maxT; raw=-spin*r*wheelsMass*invDt*r; out=clamp(raw,-peak,+peak); isBlocked=(hbConn&&hb)||(minPedal<=pedal). wheelsMass=DAT_00aaa7a4=15.0 (wheel+0x84). Pedal from reverse thr component (Accel=-1/Reverse=+1): pedal=max(0,thr). invDt used as the kill-spin stiffness (classic Havok; AA packs step secondary float — see brake-spec.md C8). Expected values computed with IEEE-754 float32 product order matching the decompile grouping.",
+  "vectors": [
+    {
+      "id": 1,
+      "name": "zero-pedal-coast",
+      "inputs": {
+        "spin": 10.0,
+        "spinHex": "00002041",
+        "radius": 0.5,
+        "radiusHex": "0000003f",
+        "wheelsMass": 15.0,
+        "wheelsMassHex": "00007041",
+        "invDt": 60.0,
+        "invDtHex": "00007042",
+        "pedal": 0.0,
+        "pedalHex": "00000000",
+        "maxBreakingTorque": 100.0,
+        "maxBreakingTorqueHex": "0000c842",
+        "minPedalInputToBlock": 0.1,
+        "handbrakeConnected": false,
+        "handbrakeActive": false
+      },
+      "expected": {
+        "brakeTorque": 0.0,
+        "brakeTorqueHex": "00000000",
+        "isBlocked": false
+      },
+      "notes": "Coast: peak=0 → torque forced 0; minPedal>pedal → not locked"
+    },
+    {
+      "id": 2,
+      "name": "full-pedal-spin-zero",
+      "inputs": {
+        "spin": 0.0,
+        "spinHex": "00000000",
+        "radius": 0.5,
+        "radiusHex": "0000003f",
+        "wheelsMass": 15.0,
+        "wheelsMassHex": "00007041",
+        "invDt": 60.0,
+        "invDtHex": "00007042",
+        "pedal": 1.0,
+        "pedalHex": "0000803f",
+        "maxBreakingTorque": 100.0,
+        "maxBreakingTorqueHex": "0000c842",
+        "minPedalInputToBlock": 0.1,
+        "handbrakeConnected": false,
+        "handbrakeActive": false
+      },
+      "expected": {
+        "brakeTorque": 0.0,
+        "brakeTorqueHex": "00000000",
+        "isBlocked": true
+      },
+      "notes": "No spin to oppose → torque 0; pedal>=minPedal → locked"
+    },
+    {
+      "id": 3,
+      "name": "full-pedal-clamp-to-peak",
+      "inputs": {
+        "spin": 10.0,
+        "spinHex": "00002041",
+        "radius": 0.5,
+        "radiusHex": "0000003f",
+        "wheelsMass": 15.0,
+        "wheelsMassHex": "00007041",
+        "invDt": 60.0,
+        "invDtHex": "00007042",
+        "pedal": 1.0,
+        "pedalHex": "0000803f",
+        "maxBreakingTorque": 100.0,
+        "maxBreakingTorqueHex": "0000c842",
+        "minPedalInputToBlock": 0.1,
+        "handbrakeConnected": false,
+        "handbrakeActive": false
+      },
+      "expected": {
+        "brakeTorque": -100.0,
+        "brakeTorqueHex": "0000c8c2",
+        "isBlocked": true
+      },
+      "notes": "raw=-2250 clamps to -peak=-100; locked by pedal"
+    },
+    {
+      "id": 4,
+      "name": "half-pedal-uncamped-raw",
+      "inputs": {
+        "spin": 2.0,
+        "spinHex": "00000040",
+        "radius": 0.5,
+        "radiusHex": "0000003f",
+        "wheelsMass": 15.0,
+        "wheelsMassHex": "00007041",
+        "invDt": 60.0,
+        "invDtHex": "00007042",
+        "pedal": 0.5,
+        "pedalHex": "0000003f",
+        "maxBreakingTorque": 1000.0,
+        "maxBreakingTorqueHex": "00007a44",
+        "minPedalInputToBlock": 0.1,
+        "handbrakeConnected": false,
+        "handbrakeActive": false
+      },
+      "expected": {
+        "brakeTorque": -450.0,
+        "brakeTorqueHex": "0000e1c3",
+        "isBlocked": true
+      },
+      "notes": "raw=-450 within ±peak=500 → passes through; locked"
+    },
+    {
+      "id": 5,
+      "name": "reverse-spin-positive-torque",
+      "inputs": {
+        "spin": -5.0,
+        "spinHex": "0000a0c0",
+        "radius": 0.4,
+        "radiusHex": "cdcccc3e",
+        "wheelsMass": 15.0,
+        "wheelsMassHex": "00007041",
+        "invDt": 30.0,
+        "invDtHex": "0000f041",
+        "pedal": 0.5,
+        "pedalHex": "0000003f",
+        "maxBreakingTorque": 200.0,
+        "maxBreakingTorqueHex": "00004843",
+        "minPedalInputToBlock": 0.1,
+        "handbrakeConnected": false,
+        "handbrakeActive": false
+      },
+      "expected": {
+        "brakeTorque": 100.0,
+        "brakeTorqueHex": "0000c842",
+        "isBlocked": true
+      },
+      "notes": "Negative spin → positive opposing torque clamps to +peak=100"
+    },
+    {
+      "id": 6,
+      "name": "handbrake-connected-locks",
+      "inputs": {
+        "spin": 8.0,
+        "spinHex": "00000041",
+        "radius": 0.5,
+        "radiusHex": "0000003f",
+        "wheelsMass": 15.0,
+        "wheelsMassHex": "00007041",
+        "invDt": 60.0,
+        "invDtHex": "00007042",
+        "pedal": 0.0,
+        "pedalHex": "00000000",
+        "maxBreakingTorque": 100.0,
+        "maxBreakingTorqueHex": "0000c842",
+        "minPedalInputToBlock": 0.1,
+        "handbrakeConnected": true,
+        "handbrakeActive": true
+      },
+      "expected": {
+        "brakeTorque": 0.0,
+        "brakeTorqueHex": "00000000",
+        "isBlocked": true
+      },
+      "notes": "Handbrake lock with zero pedal (no service torque); connected wheel locks"
+    },
+    {
+      "id": 7,
+      "name": "pedal-below-min-no-lock",
+      "inputs": {
+        "spin": 5.0,
+        "spinHex": "0000a040",
+        "radius": 0.5,
+        "radiusHex": "0000003f",
+        "wheelsMass": 15.0,
+        "wheelsMassHex": "00007041",
+        "invDt": 60.0,
+        "invDtHex": "00007042",
+        "pedal": 0.05,
+        "pedalHex": "cdcc4c3d",
+        "maxBreakingTorque": 100.0,
+        "maxBreakingTorqueHex": "0000c842",
+        "minPedalInputToBlock": 0.1,
+        "handbrakeConnected": false,
+        "handbrakeActive": false
+      },
+      "expected": {
+        "brakeTorque": -5.0,
+        "brakeTorqueHex": "0000a0c0",
+        "isBlocked": false
+      },
+      "notes": "Service torque at peak=5; pedal < minPedal → rolling under brake (not locked)"
+    },
+    {
+      "id": 8,
+      "name": "pedal-at-min-locks",
+      "inputs": {
+        "spin": 5.0,
+        "spinHex": "0000a040",
+        "radius": 0.5,
+        "radiusHex": "0000003f",
+        "wheelsMass": 15.0,
+        "wheelsMassHex": "00007041",
+        "invDt": 60.0,
+        "invDtHex": "00007042",
+        "pedal": 0.1,
+        "pedalHex": "cdcccc3d",
+        "maxBreakingTorque": 100.0,
+        "maxBreakingTorqueHex": "0000c842",
+        "minPedalInputToBlock": 0.1,
+        "handbrakeConnected": false,
+        "handbrakeActive": false
+      },
+      "expected": {
+        "brakeTorque": -10.0,
+        "brakeTorqueHex": "000020c1",
+        "isBlocked": true
+      },
+      "notes": "pedal == minPedal → immediate lock (AA minTimeToBlock=0)"
+    }
+  ],
+  "pedalDerivation": [
+    { "throttle": -1.0, "throttleHex": "000080bf", "pedal": 0.0, "pedalHex": "00000000" },
+    { "throttle": -0.5, "throttleHex": "000000bf", "pedal": 0.0, "pedalHex": "00000000" },
+    { "throttle": 0.0, "throttleHex": "00000000", "pedal": 0.0, "pedalHex": "00000000" },
+    { "throttle": 0.3, "throttleHex": "9a99993e", "pedal": 0.3, "pedalHex": "9a99993e" },
+    { "throttle": 1.0, "throttleHex": "0000803f", "pedal": 1.0, "pedalHex": "0000803f" }
+  ]
+}

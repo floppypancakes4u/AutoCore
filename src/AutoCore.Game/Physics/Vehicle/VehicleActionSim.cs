@@ -14,11 +14,11 @@ namespace AutoCore.Game.Physics.Vehicle;
 /// accept axes (PushDrive / caller)
 /// early-outs
 /// tickSubsystems (fw):
-///   preUpdate / wheel collide
+///   preUpdate / wheel collide (+ spin; isBlocked→ω=0)
 ///   driverInput, steering angles, engine-slot, xmit, brake
 ///   suspension forces
 ///   aerodynamics
-///   postTick: susp impulse (F*dt), friction solve, AVD action-list
+///   postTick: susp impulse (F*dt), friction solve (drive + brake torque), AVD
 /// anti-sink lift
 /// stage-1 steer ramp (VA+0x24 toward entity+0x618, rate VA+0x20 * dt * {1|2})
 /// stage-2 final steer (VA+0x28, speedFactor min(|v|/20,1), ±0.05/tick)
@@ -99,12 +99,18 @@ public static class VehicleActionSim
 
         // preUpdate / wheel collide + physical wheel angles from prior SteerFinal
         // (retail: steering child update uses previous stage-1 sample via driverInput).
+        // Spin integrate respects PRIOR-tick IsBlocked (brake+0x1c) — lock zeros ω.
         ApplySteeringWheelAngles(inst, forwardSpeed);
         bool anyContact = ApplyWheelCollideAndSuspension(
             inst, query, downX, downY, downZ, forwardSpeed, dt);
         inst.AllWheelsAirborne = !anyContact;
 
-        // postTick: friction uses PRIOR-tick DriveTorque (retail one-substep lag on torque path)
+        // brake child (fw+0x24 / hkDefaultBrake_update 0x64e6f0): pedal from reverse thr,
+        // writes BrakeTorque + IsBlocked for this tick's postTick / next preUpdate.
+        ApplyBrakeUpdate(inst, dt);
+
+        // postTick: friction uses PRIOR-tick DriveTorque + THIS-tick BrakeTorque
+        // (retail one-substep lag on engine torque path only).
         TryApplyFriction(inst, fwdX, fwdY, fwdZ, upX, upY, upZ, dt);
 
         // aerodynamics (child before postTick in retail; after susp either way for force sum)
@@ -228,9 +234,11 @@ public static class VehicleActionSim
             wheel.ContactPointZ = originZ + downZ * maxDist * contact.Fraction;
 
             // preUpdate Loop 3: ω = (LongContactVel + chassisLongVel) / radius; angle += dt·ω
-            // Server gate: integrate only when in contact (client uses unlockChar[]).
+            // Retail gate is unlockChar[i] = brake+0x1c isBlocked (0 = integrate, nonzero = ω=0).
+            // Server also requires contact (client integrates airborne unless blocked).
             float spin = wheel.Spin;
             float spinAngle = wheel.SpinAngle;
+            bool integrateSpin = contact.InContact && !wheel.IsBlocked;
             HkVehicleWheelKinematics.IntegrateSpin(
                 ref spin,
                 ref spinAngle,
@@ -238,7 +246,7 @@ public static class VehicleActionSim
                 chassisLongVel: chassisLongVel,
                 radius: setup.Radius,
                 dt: dt,
-                integrate: contact.InContact);
+                integrate: integrateSpin);
             wheel.Spin = spin;
             wheel.SpinAngle = spinAngle;
 
@@ -320,6 +328,39 @@ public static class VehicleActionSim
             inst.Body.PosY -= minLength;
     }
 
+    /// <summary>
+    /// Port of <c>hkDefaultBrake_update</c> @ <c>0x64e6f0</c> for every wheel.
+    /// Pedal = reverse component of the throttle axis (Accel=−1 / Reverse=+1).
+    /// Writes <see cref="HkWheelRuntimeState.BrakeTorque"/> and
+    /// <see cref="HkWheelRuntimeState.IsBlocked"/> for postTick friction and next preUpdate spin.
+    /// </summary>
+    private static void ApplyBrakeUpdate(VehiclePhysicsInstance inst, float dt)
+    {
+        var data = inst.Data;
+        float pedal = HkVehicleBrake.DeriveBrakePedal(inst.Throttle);
+        float invDt = dt > 1e-8f ? 1f / dt : 0f;
+
+        for (var i = 0; i < data.WheelCount; i++)
+        {
+            var setup = data.Wheels[i];
+            var wheel = inst.Wheels[i];
+            HkVehicleBrake.UpdateWheel(
+                pedalInput: pedal,
+                handbrakeActive: inst.Handbrake,
+                maxBreakingTorque: setup.MaxBrakingTorque,
+                minPedalInputToBlock: setup.MinPedalInputToBlock,
+                handbrakeConnected: setup.HandbrakeConnected,
+                spin: wheel.Spin,
+                radius: setup.Radius,
+                wheelsMass: HkPhysicsConstants.WheelsMassScale,
+                invDt: invDt,
+                out var brakeTorque,
+                out var isBlocked);
+            wheel.BrakeTorque = brakeTorque;
+            wheel.IsBlocked = isBlocked;
+        }
+    }
+
     private static void ApplyEngineTorque(
         VehiclePhysicsInstance inst,
         float upX, float upY, float upZ,
@@ -387,9 +428,9 @@ public static class VehicleActionSim
 
     /// <summary>
     /// 2-axle friction: build <see cref="AxleFrictionInput"/> from wheel contact,
-    /// prior-tick drive packs, suspension normal load, and <b>wheel-relative</b> slip; call
-    /// <see cref="HkVehicleFrictionSolver.Solve"/>; apply long/lat impulses at
-    /// axle-averaged contact points (r×F); write wheel+0x94 / +0xa0.
+    /// prior-tick drive packs, this-tick brake torque, suspension normal load, and
+    /// <b>wheel-relative</b> slip; call <see cref="HkVehicleFrictionSolver.Solve"/>;
+    /// apply long/lat impulses at axle-averaged contact points (r×F); write wheel+0x94 / +0xa0.
     /// </summary>
     /// <remarks>
     /// SlipLong = (v_contact · forward) − spin·radius (not absolute chassis speed — that
@@ -399,7 +440,10 @@ public static class VehicleActionSim
     /// wheels friction table (viscosity slope + μmax = μ0×1.5). Drive pack is
     /// axle-averaged torque×scale from prior-tick <see cref="HkWheelRuntimeState.DriveTorque"/>,
     /// signed with throttle so <c>impLong -= driveBias</c> yields chassis push along +forward
-    /// for retail thr base <c>−1</c>.
+    /// for retail thr base <c>−1</c>. Service-brake torque (C8) is added as a separate
+    /// axle-averaged pack (retail postTick <c>local_3ec = brakeTorque/radius</c> summed into
+    /// the axle friction row; reduced model folds the signed brake torque into DrivePack so
+    /// the existing drive-bias path produces retarding impulse without a second decel stage).
     /// </remarks>
     private static void TryApplyFriction(
         VehiclePhysicsInstance inst,
@@ -426,12 +470,16 @@ public static class VehicleActionSim
         }
 
         // Map throttle axis → drive direction along +forward without mutating Throttle.
-        float throttleSign = inst.Throttle > 0f ? 1f : (inst.Throttle < 0f ? -1f : 0f);
+        // Only the forward component (thr &lt; 0) drives the engine pack; reverse (thr &gt; 0)
+        // is the service-brake pedal and must NOT also inject reverse drive (double-decel).
+        float throttleSign = inst.Throttle < 0f ? -1f : 0f;
 
         Span<float> frontT = stackalloc float[HkVehicleData.MaxWheels];
         Span<float> frontS = stackalloc float[HkVehicleData.MaxWheels];
         Span<float> rearT = stackalloc float[HkVehicleData.MaxWheels];
         Span<float> rearS = stackalloc float[HkVehicleData.MaxWheels];
+        Span<float> frontBrake = stackalloc float[HkVehicleData.MaxWheels];
+        Span<float> rearBrake = stackalloc float[HkVehicleData.MaxWheels];
         int nFront = 0, nRear = 0;
 
         // Chassis planar velocity in the ground-plane basis (COM). Wheel-relative
@@ -464,12 +512,14 @@ public static class VehicleActionSim
             {
                 rearT[nRear] = wheel.DriveTorque;
                 rearS[nRear] = contactGate;
+                rearBrake[nRear] = wheel.BrakeTorque * contactGate;
                 nRear++;
             }
             else
             {
                 frontT[nFront] = wheel.DriveTorque;
                 frontS[nFront] = contactGate;
+                frontBrake[nFront] = wheel.BrakeTorque * contactGate;
                 nFront++;
             }
 
@@ -528,11 +578,20 @@ public static class VehicleActionSim
             ? HkVehicleFrictionSolver.AggregateDrivePack(rearT[..nRear], rearS[..nRear])
             : 0f;
 
-        // Retail thr base −1 = forward. driveBias = f(DrivePack); impLong -= driveBias;
+        // Engine pack: thr base −1 = forward. driveBias = f(DrivePack); impLong -= driveBias;
         // Need DrivePack < 0 when thr < 0 so driveBias < 0 → +long impulse along +fwd.
-        // Torque curve magnitudes are unsigned; sign comes only from throttle axis.
+        // Torque curve magnitudes are unsigned; sign comes only from the forward thr component.
+        // Reverse thr (pedal) does not inject reverse drive — that would double-decel with brake.
         float frontPack = throttleSign * MathF.Abs(frontPackMag);
         float rearPack = throttleSign * MathF.Abs(rearPackMag);
+
+        // C8: fold axle-averaged service-brake torque into DrivePack (signed, already
+        // opposes spin). Retail keeps a separate local_3ec = T/r slot; reduced model
+        // reuses the drive-bias path so there is a single friction-path decel term.
+        float frontBrakePack = nFront > 0 ? AverageSpan(frontBrake[..nFront]) : 0f;
+        float rearBrakePack = nRear > 0 ? AverageSpan(rearBrake[..nRear]) : 0f;
+        frontPack += frontBrakePack;
+        rearPack += rearBrakePack;
 
         Span<AxleFrictionInput> inputs = stackalloc AxleFrictionInput[HkVehicleFrictionSolver.AxleCount];
         inputs[0] = BuildAxleInput(
@@ -677,6 +736,16 @@ public static class VehicleActionSim
         // point (r×F), not COM-only. Suspension already uses the same point-impulse path (C2).
         float invN = 1f / n;
         body.ApplyPointImpulse(jx, jy, jz, sumX * invN, sumY * invN, sumZ * invN);
+    }
+
+    private static float AverageSpan(ReadOnlySpan<float> values)
+    {
+        if (values.Length == 0)
+            return 0f;
+        float sum = 0f;
+        for (var i = 0; i < values.Length; i++)
+            sum += values[i];
+        return sum / values.Length;
     }
 
     /// <summary>Rotate body-space vector by chassis quaternion (x,y,z,w).</summary>
