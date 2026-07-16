@@ -1,6 +1,5 @@
 namespace AutoCore.Game.Npc;
 
-using AutoCore.Game.CloneBases;
 using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.EntityTemplates;
@@ -10,25 +9,32 @@ using AutoCore.Game.Structures;
 using AutoCore.Utils;
 
 /// <summary>
-/// Phase 5 physics mover for path-following NPC vehicles.
+/// Physics-tier mover for path-following NPC vehicles (sim-authoritative).
 /// <para>
-/// Planar navigation is <b>facing-aligned path motion</b> (yaw toward look-ahead, integrate
-/// along the nose at cruise/hard speed). Vertical motion is center-heightfield stick vs
-/// ballistic free-fall: plant on continuous terrain; when the center sample drops off a
-/// lip/cliff, integrate full gravity from contact climb velocity only (no invented hops).
+/// Steers toward the hard navigator's look-ahead aim via the retail
+/// <see cref="VehicleDriveController"/> axes, steps the Havok vehicle sim, and
+/// publishes <c>inst.Body</c> pose/velocity/angular velocity verbatim. No
+/// kinematic force-restore of pose; recovery teleports + <see cref="VehiclePhysicsInstance.ReGround"/>
+/// only on first-create, non-finite state, out-of-world fall, or path divergence.
 /// </para>
 /// <para>
-/// Havok still runs for thr/steer/sharp (client wire) and optional suspension bookkeeping.
 /// Opt-in only via <see cref="ServerConfig"/> (enabled + controllerTier=physics).
+/// Reverse throttle is a service-brake pedal only (C8) — this controller must not
+/// also apply kinematic reverse-throttle deceleration.
 /// </para>
 /// </summary>
 public static class NpcVehiclePhysicsController
 {
-    /// <summary>Planar drift (u) between entity pose and sim before force-resync.</summary>
+    /// <summary>
+    /// Max |body.Pos − hard.NewPosition| before path-divergence recovery (world units).
+    /// </summary>
     public static float ResyncDriftThreshold { get; set; } = 8f;
 
+    /// <summary>Y drop below terrain support that triggers out-of-world recovery.</summary>
+    public const float OutOfWorldSupportMargin = 50f;
+
     /// <summary>
-    /// Advance one vehicle with path-facing navigation + ballistic / grounded Y.
+    /// Advance one vehicle via sim-authoritative path-following.
     /// On failure (no data / bad dt) returns <paramref name="hard"/> unchanged (fail closed).
     /// </summary>
     public static PathStepResult Apply(
@@ -43,6 +49,7 @@ public static class NpcVehiclePhysicsController
         if (vehicle == null || path == null || path.Points.Count == 0 || dt <= 0f || !float.IsFinite(dt))
             return hard;
 
+        bool firstCreate = vehicle.PhysicsInstance == null;
         var inst = vehicle.GetOrCreatePhysicsInstance();
         if (inst == null)
         {
@@ -75,111 +82,41 @@ public static class NpcVehiclePhysicsController
             };
         }
 
-        MaybeResyncSim(vehicle, inst);
+        var body = inst.Body;
+        float supportY = ResolveSupportY(map, body.PosX, body.PosZ, hard.NewPosition.Y);
+        IVehicleCollisionQuery query = BuildCollisionQuery(map, supportY, excludeSelf: vehicle);
+
+        // Recovery: first-create seats; non-finite / freefall / path-divergence teleport + ReGround.
+        // ReGround snaps the chassis origin onto the terrain hit; raise so wheel hardpoints sit
+        // near suspension rest (origin-on-terrain fully compresses and launches / starves drive).
+        if (firstCreate)
+        {
+            // GetOrCreate already seeded pose from the entity; seat wheels on terrain.
+            inst.ReGround(query);
+            RaiseChassisToWheelRest(inst);
+        }
+        else if (NeedsRecovery(body, hard, supportY))
+        {
+            SetPoseFromHard(inst, hard);
+            // Re-resolve support / query under the hard XZ after teleport.
+            supportY = ResolveSupportY(map, body.PosX, body.PosZ, hard.NewPosition.Y);
+            query = BuildCollisionQuery(map, supportY, excludeSelf: vehicle);
+            inst.ReGround(query);
+            RaiseChassisToWheelRest(inst);
+        }
 
         var lane = npcAi?.PathLaneOffset ?? 0f;
-        var aim = NpcVehicleDriveController.ResolveLookAheadAim(
-            vehicle.Position, hard, path, lane);
+        var bodyPos = new Vector3(body.PosX, body.PosY, body.PosZ);
+        var aim = NpcVehicleDriveController.ResolveLookAheadAim(bodyPos, hard, path, lane);
 
-        // --- Planar path-facing navigation ---
-        var prevYaw = VehicleDriveInputs.YawFromQuaternion(vehicle.Rotation);
-        var desiredYaw = NpcVehicleDriveController.ResolveDesiredYaw(
-            vehicle.Position, aim, hard, prevYaw);
-        var newYaw = NpcVehicleDriveController.LimitYaw(prevYaw, desiredYaw, dt);
-
-        var prevSpeed = NpcVehicleDriveController.XzSpeed(vehicle.Velocity);
-        var hardSpeed = NpcVehicleDriveController.XzSpeed(hard.Velocity);
-        var cornerScale = ResolveCruiseScale(hard, path);
-        float cruise = hardSpeed > 0.05f
-            ? hardSpeed
-            : ResolveFallbackCruise(vehicle, inst.Data);
-        var desiredSpeed = cruise * cornerScale;
-        var rollingThrough = hard.Arrived && hard.WaitUntilMs <= nowMs;
-        if (rollingThrough && prevSpeed < desiredSpeed * 0.85f)
-            prevSpeed = desiredSpeed;
-        var newSpeed = NpcVehicleDriveController.ApproachSpeed(prevSpeed, desiredSpeed, dt);
-
-        // XZ integrate along facing (planar); Y handled separately.
-        var pos = NpcVehicleDriveController.IntegrateFacingPosition(
-            vehicle.Position, hard.NewPosition, newYaw, newSpeed, dt);
-
-        // Server ghost Y is center heightfield only (same as SnapToTerrain / soft path).
-        // Do NOT add wheel-radius ride clearance — that floats the chassis ~0.5–1u in-world.
-        // Do NOT force-airborne from front/rear probes — turn samples create false "lips"
-        // that re-injected upward velocity and made vehicles float.
-        const float ride = 0f;
-        var field = map?.MapData?.Heightfield;
-        float supportY = ResolveTerrainSupportY(field, pos.X, pos.Z, hard.NewPosition.Y);
-        float prevSupportY = ResolveTerrainSupportY(
-            field, vehicle.Position.X, vehicle.Position.Z, vehicle.Position.Y);
-
-        float gravityY = inst.Data?.GravityY ?? HkPhysicsConstants.DefaultGravityY;
-        // Cap contact climb rate so a single bad terrain sample cannot launch us.
-        float maxContactVy = Math.Max(3f, newSpeed * MathF.Tan(0.45f)); // ~24° climb cap
-        float maxStickDrop = Math.Max(
-            HkPhysicsConstants.PathMaxStickSurfaceDrop,
-            maxContactVy * dt + HkPhysicsConstants.PathAirborneClearance);
-
-        // prevVy is contact climb / free-fall only — never invent hop energy.
-        IntegrateVertical(
-            prevY: vehicle.Position.Y,
-            prevVy: vehicle.Velocity.Y,
-            supportY: supportY,
-            prevSupportY: prevSupportY,
-            landSupportY: supportY,
-            rideHeight: ride,
-            dt: dt,
-            gravityY: gravityY,
-            maxContactVy: maxContactVy,
-            maxStickDrop: maxStickDrop,
-            out var y,
-            out var vy,
-            out var grounded);
-
-        pos = new Vector3(pos.X, y, pos.Z);
-
-        // Pitch: short front/rear baseline when grounded on continuous grade only.
-        // Airborne → velocity pitch. Never bridge a lip with a long multi-sample plane.
-        var rotation = TerrainContactPlane.YawOnly(newYaw);
-        const float probe = HkPhysicsConstants.PathProbeHalfLength;
-        bool haveFoot = TrySampleFrontRear(
-            field, pos, newYaw, probe, wheelHardPoints: null,
-            out var yFront, out var yRear, out _);
-        float frontDrop = haveFoot ? (yRear - yFront) : 0f;
-
-        if (grounded && haveFoot
-            && MathF.Abs(frontDrop) < HkPhysicsConstants.PathRampLipFrontDrop)
-        {
-            float span = Math.Max(probe * 2f, 0.5f);
-            float pitch = MathF.Atan2(yRear - yFront, span);
-            pitch = Math.Clamp(pitch, -0.55f, 0.55f);
-            rotation = TerrainContactPlane.FromYawPitchRoll(newYaw, pitch, roll: 0f);
-        }
-        else if (!grounded)
-        {
-            float flightPitch = MathF.Atan2(vy, Math.Max(newSpeed, 0.5f));
-            flightPitch = Math.Clamp(flightPitch, -0.65f, 0.65f);
-            rotation = TerrainContactPlane.FromYawPitchRoll(newYaw, flightPitch, roll: 0f);
-        }
-
-        // Velocity: planar path speed on XZ; Y from vertical integrator only.
-        Vector3 velocity;
-        if (newSpeed > 1e-4f)
-        {
-            var fx = MathF.Sin(newYaw);
-            var fz = MathF.Cos(newYaw);
-            velocity = new Vector3(fx * newSpeed, vy, fz * newSpeed);
-        }
-        else
-        {
-            velocity = new Vector3(0f, vy, 0f);
-        }
-
-        // --- Drive axes (retail thr base −1) ---
-        ExtractBasis(rotation, out var right, out var forward);
+        // Drive axes from current sim body basis/velocity (retail 0x4fc650).
+        var bodyRot = new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW);
+        ExtractBasis(bodyRot, out var right, out var forward);
+        var velocity = new Vector3(body.LinVelX, body.LinVelY, body.LinVelZ);
         var acceptDist = ResolveAcceptDistance(hard, path);
+        var cornerScale = ResolveCruiseScale(hard, path);
         var (thr, steer, sharp) = VehicleDriveController.ComputeAxes(
-            pos,
+            bodyPos,
             right,
             forward,
             velocity,
@@ -189,50 +126,16 @@ public static class NpcVehiclePhysicsController
             allowReverse: true,
             alwaysDrive: false);
 
-        if (newSpeed > 0.5f && thr > -0.5f && thr <= 0f)
-            thr = -1f;
-        // Airborne: no handbrake assist from sharp (keeps rear torque alive for client spin).
-        if (!grounded)
-            sharp = 0;
-
-        // Havok bookkeeping: pose + thr only; do not let sim rewrite authored Y/XZ.
-        var body = inst.Body;
-        body.PosX = pos.X;
-        body.PosY = pos.Y;
-        body.PosZ = pos.Z;
-        body.QuatX = rotation.X;
-        body.QuatY = rotation.Y;
-        body.QuatZ = rotation.Z;
-        body.QuatW = rotation.W;
-        body.LinVelX = velocity.X;
-        body.LinVelY = velocity.Y;
-        body.LinVelZ = velocity.Z;
-        body.AngVelX = body.AngVelY = body.AngVelZ = 0f;
-
-        IVehicleCollisionQuery query = BuildCollisionQuery(map, supportY, excludeSelf: vehicle);
+        // Step free-running; do not force-restore pose after. C8 brake owns reverse thr as pedal —
+        // no kinematic reverse-throttle deceleration here.
         inst.Step(thr, steer, handbrake: sharp != 0, dt, query);
 
-        // Force body back to authored pose (physics must not hop us off the path).
-        body.PosX = pos.X;
-        body.PosY = pos.Y;
-        body.PosZ = pos.Z;
-        body.QuatX = rotation.X;
-        body.QuatY = rotation.Y;
-        body.QuatZ = rotation.Z;
-        body.QuatW = rotation.W;
-        body.LinVelX = velocity.X;
-        body.LinVelY = velocity.Y;
-        body.LinVelZ = velocity.Z;
-        body.AngVelX = body.AngVelY = body.AngVelZ = 0f;
-
-        float dYaw = NpcVehicleDriveController.NormalizeRadians(newYaw - prevYaw);
-        float yawRate = dYaw / Math.Max(dt, 1e-4f);
-
+        // Publish inst.Body pose/rot/vel/angVel verbatim.
         return new PathStepResult
         {
-            NewPosition = pos,
-            Velocity = velocity,
-            Rotation = rotation,
+            NewPosition = new Vector3(body.PosX, body.PosY, body.PosZ),
+            Velocity = new Vector3(body.LinVelX, body.LinVelY, body.LinVelZ),
+            Rotation = new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
             NewIndex = hard.NewIndex,
             NewDirection = hard.NewDirection,
             Arrived = hard.Arrived,
@@ -243,201 +146,88 @@ public static class NpcVehiclePhysicsController
             Steering = steer,
             SharpTurn = sharp,
             HasDriveInputs = true,
-            AngularVelocity = new Vector3(0f, yawRate, 0f),
+            AngularVelocity = new Vector3(body.AngVelX, body.AngVelY, body.AngVelZ),
         };
     }
 
     /// <summary>
-    /// Vertical contact vs ballistic free-flight (center support only).
-    /// Continuous ground: plant at terrain. Surface dropped past stick threshold, or body
-    /// already above clearance: free-fall under full gravity using caller <paramref name="prevVy"/>
-    /// (contact climb carried off a crest — never invent hop energy here).
+    /// True when the free-running body is non-finite, fell out of world, or drifted past the
+    /// path-divergence threshold from the hard navigator.
     /// </summary>
-    internal static void IntegrateVertical(
-        float prevY,
-        float prevVy,
-        float supportY,
-        float prevSupportY,
-        float landSupportY,
-        float rideHeight,
-        float dt,
-        float gravityY,
-        float maxContactVy,
-        float maxStickDrop,
-        out float y,
-        out float vy,
-        out bool grounded)
+    internal static bool NeedsRecovery(HkRigidBody body, PathStepResult hard, float supportY)
     {
-        if (!float.IsFinite(dt) || dt <= 0f)
-        {
-            y = prevY;
-            vy = prevVy;
-            grounded = true;
-            return;
-        }
-
-        float ride = Math.Max(0f, rideHeight);
-        float groundY = supportY + ride;
-        float prevGroundY = prevSupportY + ride;
-        float landY = landSupportY + ride;
-        float stickDrop = maxStickDrop > 0f
-            ? maxStickDrop
-            : HkPhysicsConstants.PathMaxStickSurfaceDrop;
-
-        bool wasAirborne = prevY > prevGroundY + HkPhysicsConstants.PathAirborneClearance;
-        // Center heightfield only — front/rear probes must not decide contact (false lips on turns).
-        bool surfaceFellAway = groundY < prevGroundY - stickDrop;
-
-        if (wasAirborne || surfaceFellAway)
-        {
-            float freeY = prevY + prevVy * dt + 0.5f * gravityY * dt * dt;
-            float freeVy = prevVy + gravityY * dt;
-
-            if (freeY <= landY && freeVy <= 0f)
-            {
-                y = landY;
-                vy = 0f;
-                grounded = true;
-            }
-            else
-            {
-                y = freeY;
-                vy = freeVy;
-                grounded = false;
-            }
-            return;
-        }
-
-        // Continuous contact: plant on center terrain. Geometric contact vy only (capped).
-        y = groundY;
-        float contactVy = dt > 1e-6f ? (groundY - prevY) / dt : 0f;
-        float cap = maxContactVy > 0f ? maxContactVy : 15f;
-        if (contactVy > cap)
-            contactVy = cap;
-        else if (contactVy < -cap)
-            contactVy = -cap;
-        vy = contactVy;
-        grounded = true;
-    }
-
-    /// <summary>
-    /// Sample terrain under front / rear of the chassis (hardpoints or half-length footprint).
-    /// </summary>
-    internal static bool TrySampleFrontRear(
-        MapTerrainHeightfield field,
-        Vector3 position,
-        float yawRadians,
-        float halfLength,
-        Vector3[] wheelHardPoints,
-        out float yFront,
-        out float yRear,
-        out float yCenter)
-    {
-        yFront = yRear = yCenter = 0f;
-        if (field == null)
-            return false;
-
-        if (!field.TrySample(position.X, position.Z, out yCenter))
-            return false;
-
-        float fwdX = MathF.Sin(yawRadians);
-        float fwdZ = MathF.Cos(yawRadians);
-        float rightX = MathF.Cos(yawRadians);
-        float rightZ = -MathF.Sin(yawRadians);
-
-        if (TerrainContactPlane.TryCollectWheelSamples(
-                position, fwdX, fwdZ, rightX, rightZ, wheelHardPoints,
-                (float x, float z, out float y) => field.TrySample(x, z, out y),
-                out _, out yFront, out yRear, out _, out _, out var hl, out _))
-        {
-            halfLength = hl;
+        if (body == null)
             return true;
+
+        if (!IsBodyFinite(body))
+            return true;
+
+        if (body.PosY < supportY - OutOfWorldSupportMargin)
+            return true;
+
+        float thr = ResyncDriftThreshold;
+        if (thr > 0f)
+        {
+            float dx = body.PosX - hard.NewPosition.X;
+            float dy = body.PosY - hard.NewPosition.Y;
+            float dz = body.PosZ - hard.NewPosition.Z;
+            if ((dx * dx) + (dy * dy) + (dz * dz) > thr * thr)
+                return true;
         }
 
-        // Short probe — never use the 4u align box (that samples past the ramp lip too early).
-        float hl2 = halfLength > 0.25f ? halfLength : HkPhysicsConstants.PathProbeHalfLength;
-        if (hl2 > 2.5f)
-            hl2 = 2.5f;
-        if (!field.TrySample(position.X + fwdX * hl2, position.Z + fwdZ * hl2, out yFront))
-            yFront = yCenter;
-        if (!field.TrySample(position.X - fwdX * hl2, position.Z - fwdZ * hl2, out yRear))
-            yRear = yCenter;
-        return true;
+        return false;
+    }
+
+    internal static bool IsBodyFinite(HkRigidBody body)
+    {
+        return float.IsFinite(body.PosX) && float.IsFinite(body.PosY) && float.IsFinite(body.PosZ)
+            && float.IsFinite(body.QuatX) && float.IsFinite(body.QuatY)
+            && float.IsFinite(body.QuatZ) && float.IsFinite(body.QuatW)
+            && float.IsFinite(body.LinVelX) && float.IsFinite(body.LinVelY) && float.IsFinite(body.LinVelZ)
+            && float.IsFinite(body.AngVelX) && float.IsFinite(body.AngVelY) && float.IsFinite(body.AngVelZ);
+    }
+
+    internal static void SetPoseFromHard(VehiclePhysicsInstance inst, PathStepResult hard)
+    {
+        var r = hard.Rotation;
+        // Quaternion default is all-zero on some paths; keep a valid identity if unset.
+        float qw = r.W;
+        float qx = r.X;
+        float qy = r.Y;
+        float qz = r.Z;
+        if (!float.IsFinite(qw) || !float.IsFinite(qx) || !float.IsFinite(qy) || !float.IsFinite(qz)
+            || (qx * qx + qy * qy + qz * qz + qw * qw) < 1e-8f)
+        {
+            qx = qy = qz = 0f;
+            qw = 1f;
+        }
+
+        inst.SetPose(
+            hard.NewPosition.X, hard.NewPosition.Y, hard.NewPosition.Z,
+            qx, qy, qz, qw);
     }
 
     /// <summary>
-    /// Per-template ride height + footprint. Default ride is 0 (chassis origin ≈ terrain);
-    /// never invent a large constant that floats every NPC.
+    /// After <see cref="VehiclePhysicsInstance.ReGround"/> (origin on terrain), lift the chassis
+    /// so each wheel hardpoint is approximately <c>radius + restLength</c> above the ground plane.
+    /// Without this the suspension is fully compressed on the recovery frame (launch / no grip).
     /// </summary>
-    internal static void ResolveFootprint(
-        Vehicle vehicle,
-        out float rideHeight,
-        out float halfLength,
-        out float halfWidth,
-        out Vector3[] wheelHardPoints)
+    internal static void RaiseChassisToWheelRest(VehiclePhysicsInstance inst)
     {
-        rideHeight = HkPhysicsConstants.PathFallbackRideHeight;
-        halfLength = HkPhysicsConstants.PathProbeHalfLength;
-        halfWidth = 1.2f;
-        wheelHardPoints = null;
+        if (inst?.Data?.Wheels == null || inst.Data.Wheels.Count == 0)
+            return;
 
-        if (vehicle?.CloneBaseObject is CloneBaseVehicle cbv)
+        float raise = 0f;
+        foreach (var w in inst.Data.Wheels)
         {
-            wheelHardPoints = cbv.VehicleSpecific.WheelHardPoints;
-            var cbid = vehicle.CBID > 0 ? vehicle.CBID : cbv.CloneBaseSpecific.CloneBaseId;
-            if (cbid > 0 && VehicleGroundMetricsCache.TryGet(cbid, out var cached))
-            {
-                rideHeight = cached.ChassisHeightAboveTerrain;
-                if (cached.HalfLength > 0.25f)
-                    halfLength = Math.Min(cached.HalfLength, 2.5f);
-                if (cached.HalfWidth > 0.25f)
-                    halfWidth = cached.HalfWidth;
-                return;
-            }
-
-            var metrics = VehicleGroundMetricsCache.Compute(cbv.VehicleSpecific);
-            rideHeight = metrics.ChassisHeightAboveTerrain;
-            if (metrics.HalfLength > 0.25f)
-                halfLength = Math.Min(metrics.HalfLength, 2.5f);
-            if (metrics.HalfWidth > 0.25f)
-                halfWidth = metrics.HalfWidth;
-        }
-    }
-
-    /// <summary>Chassis height above terrain sample (per-template when cached).</summary>
-    internal static float ResolveRideHeight(Vehicle vehicle, HkVehicleData data)
-    {
-        ResolveFootprint(vehicle, out var ride, out _, out _, out _);
-        return ride;
-    }
-
-    /// <summary>Approx pitch from body quaternion (for free-flight pitch continuity).</summary>
-    internal static float PitchFromQuaternion(Quaternion q)
-    {
-        // forward.Y = sin(pitch) for yaw-pitch-roll without roll dominance
-        var fwd = TerrainContactPlane.ForwardFromQuaternion(q);
-        return MathF.Asin(Math.Clamp(fwd.Y, -1f, 1f));
-    }
-
-    internal static float ResolveTerrainSupportY(
-        MapTerrainHeightfield field, float x, float z, float fallbackY)
-    {
-        if (field != null && field.TrySample(x, z, out var hy))
-            return hy;
-        return fallbackY;
-    }
-
-    private static float ResolveFallbackCruise(Vehicle vehicle, HkVehicleData data)
-    {
-        if (data != null)
-        {
-            if (data.SpeedLimiter > 1f)
-                return data.SpeedLimiter;
-            if (data.AbsoluteTopSpeed > 1f)
-                return data.AbsoluteTopSpeed * 0.5f;
+            // bodyY = ground − hardpointY + radius + rest  (ground already applied by ReGround)
+            float r = -w.HardpointY + w.Radius + w.SuspensionRestLength;
+            if (r > raise)
+                raise = r;
         }
 
-        return 12f;
+        if (raise > 0f && float.IsFinite(raise))
+            inst.Body.PosY += raise;
     }
 
     /// <summary>
@@ -458,7 +248,7 @@ public static class NpcVehiclePhysicsController
         }
         else
         {
-            // No map heightfield: flat plane at chassis Y (ride is ~0 by default).
+            // No map heightfield: flat plane at support / hard Y.
             float groundY = fallbackGroundY;
             terrain = new TerrainHeightfieldCollisionQuery(
                 (float x, float z, out float y) =>
@@ -485,67 +275,12 @@ public static class NpcVehiclePhysicsController
         return hardY;
     }
 
-    internal static void SoftPullPlanarToward(float targetX, float targetZ, ref float posX, ref float posZ)
+    internal static float ResolveTerrainSupportY(
+        MapTerrainHeightfield field, float x, float z, float fallbackY)
     {
-        float dx = posX - targetX;
-        float dz = posZ - targetZ;
-        float d2 = dx * dx + dz * dz;
-        float max = HkPhysicsConstants.PathSoftPullMaxDrift;
-        if (d2 <= max * max || max <= 0f)
-            return;
-        float d = MathF.Sqrt(d2);
-        float s = max / d;
-        posX = targetX + dx * s;
-        posZ = targetZ + dz * s;
-    }
-
-    internal static void SoftPullVerticalToward(float supportY, ref float posY, ref float velY)
-    {
-        float max = HkPhysicsConstants.PathSoftPullMaxVerticalDrift;
-        if (max <= 0f)
-            return;
-
-        float hi = supportY + max;
-        float lo = supportY - max;
-        if (posY > hi)
-        {
-            posY = hi;
-            if (velY > 0f)
-                velY = 0f;
-        }
-        else if (posY < lo)
-        {
-            posY = lo;
-            if (velY < 0f)
-                velY = 0f;
-        }
-    }
-
-    internal static void SoftPullPlanarVelocityToward(
-        float targetVx, float targetVz, ref float vx, ref float vz)
-    {
-        float dx = vx - targetVx;
-        float dz = vz - targetVz;
-        float d2 = dx * dx + dz * dz;
-        float max = HkPhysicsConstants.PathSoftPullMaxPlanarVelDrift;
-        if (d2 <= max * max || max <= 0f)
-            return;
-        float d = MathF.Sqrt(d2);
-        float s = max / d;
-        vx = targetVx + dx * s;
-        vz = targetVz + dz * s;
-    }
-
-    private static void MaybeResyncSim(Vehicle vehicle, VehiclePhysicsInstance inst)
-    {
-        var body = inst.Body;
-        var dx = body.PosX - vehicle.Position.X;
-        var dy = body.PosY - vehicle.Position.Y;
-        var dz = body.PosZ - vehicle.Position.Z;
-        var distSq = (dx * dx) + (dy * dy) + (dz * dz);
-        var thr = ResyncDriftThreshold;
-        if (distSq > thr * thr)
-            vehicle.SyncPhysicsInstanceFromEntity();
+        if (field != null && field.TrySample(x, z, out var hy))
+            return hy;
+        return fallbackY;
     }
 
     private static float ResolveAcceptDistance(PathStepResult hard, MapPathTemplate path)

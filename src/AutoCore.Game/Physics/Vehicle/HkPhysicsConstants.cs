@@ -102,33 +102,6 @@ public static class HkPhysicsConstants
     public const float MaxLinearSpeed = 80f;
     /// <summary>Max |angular velocity| after each substep (rad/s).</summary>
     public const float MaxAngularSpeed = 8f;
-    /// <summary>Path soft-pull: max planar drift from hard navigator before clamp (world units).</summary>
-    public const float PathSoftPullMaxDrift = 6f;
-    /// <summary>Path soft-pull: max |Y − supportY| before vertical clamp (world units).</summary>
-    public const float PathSoftPullMaxVerticalDrift = 2.5f;
-    /// <summary>Path soft-pull: max planar |v − hard.v| excess before clamp (world units/s).</summary>
-    public const float PathSoftPullMaxPlanarVelDrift = 10f;
-    /// <summary>
-    /// Default chassis height above terrain when no per-template metrics exist.
-    /// Must stay near 0 — ghost pose is chassis origin; large values float NPCs.
-    /// </summary>
-    public const float PathFallbackRideHeight = 0f;
-    /// <summary>
-    /// Clearance above terrain sample used for airborne hysteresis (world units).
-    /// </summary>
-    public const float PathAirborneClearance = 0.12f;
-    /// <summary>
-    /// Max surface drop per tick while still treated as continuous contact (world units).
-    /// Larger drops (cliff / ramp lip) force ballistic free-flight.
-    /// </summary>
-    public const float PathMaxStickSurfaceDrop = 0.45f;
-    /// <summary>
-    /// Front-vs-rear terrain delta (world units) beyond which grounded pitch is disabled
-    /// (avoids bridging a crest with a false plane). Contact/airborne is center-sample only.
-    /// </summary>
-    public const float PathRampLipFrontDrop = 0.22f;
-    /// <summary>Half-length for front/rear terrain probes (short — full chassis span bridges lips).</summary>
-    public const float PathProbeHalfLength = 1.0f;
     /// <summary>When bodyUp·worldUp is above this, cast wheels with world-down (not body-down).</summary>
     public const float TerrainCastWorldDownDot = 0.35f;
 }
