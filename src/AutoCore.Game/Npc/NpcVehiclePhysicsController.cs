@@ -121,6 +121,9 @@ public static class NpcVehiclePhysicsController
         var velocity = new Vector3(body.LinVelX, body.LinVelY, body.LinVelZ);
         var acceptDist = ResolveAcceptDistance(hard, path);
         var cornerScale = ResolveCruiseScale(hard, path);
+        // allowReverse=false: path NPCs must not thrash thr sign when yaw lags the aim
+        // (live symptom: reverse/forward oscillation while wheels turn). alwaysDrive keeps
+        // forward thr engaged so they do not idle-stop when slightly off-aim.
         var (thr, steer, sharp) = VehicleDriveController.ComputeAxes(
             bodyPos,
             right,
@@ -129,8 +132,8 @@ public static class NpcVehiclePhysicsController
             aim,
             acceptDist,
             cruiseScale: cornerScale > 0f ? cornerScale : 1f,
-            allowReverse: true,
-            alwaysDrive: false);
+            allowReverse: false,
+            alwaysDrive: true);
 
         // Step free-running; do not force-restore pose after. C8 brake owns reverse thr as pedal —
         // no kinematic reverse-throttle deceleration here.

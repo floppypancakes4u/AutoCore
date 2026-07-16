@@ -145,6 +145,39 @@ public class HkRigidBodyTests
     }
 
     /// <summary>
+    /// Live stability path: yaw-only point impulse keeps linear response and world-Y torque
+    /// but drops pitch/roll (the tumble components from ground-plane tire forces).
+    /// Lateral force at +Z contact → yaw (ty = rz·jx); pitch/roll stay zero.
+    /// </summary>
+    [TestMethod]
+    public void ApplyPointImpulseYawOnly_KeepsYawDropsPitchRoll()
+    {
+        var body = new HkRigidBody
+        {
+            Mass = 1f,
+            InvMass = 1f,
+            InvInertiaX = 1f,
+            InvInertiaY = 1f,
+            InvInertiaZ = 1f,
+            PosX = 0f,
+            PosY = 1f,
+            PosZ = 0f,
+            QuatW = 1f,
+        };
+
+        // Lateral +X impulse at ground contact in front (+Z) and below (−Y from COM):
+        // r = (0, -1, 1), J = (1, 0, 0) → full r×J has ty=1 and tz=1; yaw-only keeps ty only.
+        body.ApplyPointImpulseYawOnly(1f, 0f, 0f, pointX: 0f, pointY: 0f, pointZ: 1f);
+
+        Assert.AreEqual(1f, body.LinVelX, 1e-5f);
+        Assert.AreEqual(0f, body.LinVelY, 1e-5f);
+        Assert.AreEqual(0f, body.LinVelZ, 1e-5f);
+        Assert.AreEqual(0f, body.AngVelX, 1e-5f, "pitch must be dropped");
+        Assert.AreEqual(1f, body.AngVelY, 1e-5f, "yaw from front lateral must remain");
+        Assert.AreEqual(0f, body.AngVelZ, 1e-5f, "roll must be dropped");
+    }
+
+    /// <summary>
     /// postTick suspImpulse: I = F · dt · n̂. ApplyPointImpulse(I) and ApplyForce(F)+Integrate(dt)
     /// must agree on Δv for a COM-aligned force (no lever arm).
     /// </summary>

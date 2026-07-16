@@ -490,19 +490,17 @@ public static class VehicleActionSim
         Span<float> rearBrake = stackalloc float[HkVehicleData.MaxWheels];
         int nFront = 0, nRear = 0;
 
-        // Chassis planar velocity in the ground-plane basis (COM). Wheel-relative
-        // long slip subtracts spin·radius so pure rolling does not cancel speed (crawl fix).
-        // Using COM (not ω×r contact vel) avoids pitch-from-suspension creating false long
-        // slip that fights the drive pack under unit mass; full dual-body J·v is residual.
-        float chassisLong = body.LinVelX * fwdX + body.LinVelY * fwdY + body.LinVelZ * fwdZ;
-        float chassisLat = body.LinVelX * rightX + body.LinVelY * rightY + body.LinVelZ * rightZ;
-
+        // Wheel-frame slip: long/lat in the *steered* tire basis (front uses SteerAngle).
+        // Without this, F/R both cancel along chassis-right and yaw moments cancel — cars
+        // cannot turn (live: straight OK, corners crawl/stop). COM vel (not ω×r) keeps the
+        // crawl fix; full dual-body J·v is residual.
         float frontLoadSum = 0f, rearLoadSum = 0f;
         float frontMuSum = 0f, rearMuSum = 0f;
         float frontSlipLongSum = 0f, rearSlipLongSum = 0f;
         float frontSlipLatSum = 0f, rearSlipLatSum = 0f;
         float frontContactX = 0f, frontContactY = 0f, frontContactZ = 0f;
         float rearContactX = 0f, rearContactY = 0f, rearContactZ = 0f;
+        float frontSteerSum = 0f, rearSteerSum = 0f;
         int nFrontContact = 0, nRearContact = 0;
 
         for (var i = 0; i < data.WheelCount; i++)
@@ -548,9 +546,15 @@ public static class VehicleActionSim
             float load = MathF.Abs(suspForce);
             float mu = setup.Friction;
 
-            // Wheel-relative long slip: chassis long − spin·radius (not absolute chassis speed).
-            float slipLong = chassisLong - wheel.Spin * setup.Radius;
-            float slipLat = chassisLat;
+            // Steered tire basis: long = cosθ·fwd + sinθ·right, lat = −sinθ·fwd + cosθ·right.
+            SteeredTireBasis(
+                fwdX, fwdY, fwdZ, rightX, rightY, rightZ, wheel.SteerAngle,
+                out var longX, out var longY, out var longZ,
+                out var latX, out var latY, out var latZ);
+            float vLong = body.LinVelX * longX + body.LinVelY * longY + body.LinVelZ * longZ;
+            float vLat = body.LinVelX * latX + body.LinVelY * latY + body.LinVelZ * latZ;
+            float slipLong = vLong - wheel.Spin * setup.Radius;
+            float slipLat = vLat;
 
             if (setup.IsRear)
             {
@@ -561,6 +565,7 @@ public static class VehicleActionSim
                 rearContactX += wheel.ContactPointX;
                 rearContactY += wheel.ContactPointY;
                 rearContactZ += wheel.ContactPointZ;
+                rearSteerSum += wheel.SteerAngle;
                 nRearContact++;
             }
             else
@@ -572,6 +577,7 @@ public static class VehicleActionSim
                 frontContactX += wheel.ContactPointX;
                 frontContactY += wheel.ContactPointY;
                 frontContactZ += wheel.ContactPointZ;
+                frontSteerSum += wheel.SteerAngle;
                 nFrontContact++;
             }
         }
@@ -630,10 +636,32 @@ public static class VehicleActionSim
         Span<AxleFrictionImpulse> impulses = stackalloc AxleFrictionImpulse[HkVehicleFrictionSolver.AxleCount];
         HkVehicleFrictionSolver.Solve(dt, inputs, body.InvMass, impulses);
 
+        float frontSteer = nFrontContact > 0 ? frontSteerSum / nFrontContact : 0f;
+        float rearSteer = nRearContact > 0 ? rearSteerSum / nRearContact : 0f;
         ApplyAxleImpulses(inst, axleIndex: 0, impulses[0], nFrontContact,
-            fwdX, fwdY, fwdZ, rightX, rightY, rightZ);
+            fwdX, fwdY, fwdZ, rightX, rightY, rightZ, frontSteer);
         ApplyAxleImpulses(inst, axleIndex: 1, impulses[1], nRearContact,
-            fwdX, fwdY, fwdZ, rightX, rightY, rightZ);
+            fwdX, fwdY, fwdZ, rightX, rightY, rightZ, rearSteer);
+    }
+
+    /// <summary>
+    /// Rotate chassis long/lat by tire steer about body up (in the fwd/right plane).
+    /// </summary>
+    private static void SteeredTireBasis(
+        float fwdX, float fwdY, float fwdZ,
+        float rightX, float rightY, float rightZ,
+        float steerAngle,
+        out float longX, out float longY, out float longZ,
+        out float latX, out float latY, out float latZ)
+    {
+        float c = MathF.Cos(steerAngle);
+        float s = MathF.Sin(steerAngle);
+        longX = c * fwdX + s * rightX;
+        longY = c * fwdY + s * rightY;
+        longZ = c * fwdZ + s * rightZ;
+        latX = -s * fwdX + c * rightX;
+        latY = -s * fwdY + c * rightY;
+        latZ = -s * fwdZ + c * rightZ;
     }
 
     private static AxleFrictionInput BuildAxleInput(
@@ -702,7 +730,8 @@ public static class VehicleActionSim
         in AxleFrictionImpulse axleImpulse,
         int nContact,
         float fwdX, float fwdY, float fwdZ,
-        float rightX, float rightY, float rightZ)
+        float rightX, float rightY, float rightZ,
+        float axleSteerAngle = 0f)
     {
         if (nContact <= 0)
             return;
@@ -710,9 +739,14 @@ public static class VehicleActionSim
         var data = inst.Data;
         var body = inst.Body;
 
-        float jx = axleImpulse.Longitudinal * fwdX + axleImpulse.Lateral * rightX;
-        float jy = axleImpulse.Longitudinal * fwdY + axleImpulse.Lateral * rightY;
-        float jz = axleImpulse.Longitudinal * fwdZ + axleImpulse.Lateral * rightZ;
+        // World impulse in the *steered* tire frame (matches slip basis above).
+        SteeredTireBasis(
+            fwdX, fwdY, fwdZ, rightX, rightY, rightZ, axleSteerAngle,
+            out var longX, out var longY, out var longZ,
+            out var latX, out var latY, out var latZ);
+        float jx = axleImpulse.Longitudinal * longX + axleImpulse.Lateral * latX;
+        float jy = axleImpulse.Longitudinal * longY + axleImpulse.Lateral * latY;
+        float jz = axleImpulse.Longitudinal * longZ + axleImpulse.Lateral * latZ;
 
         float sumX = 0f, sumY = 0f, sumZ = 0f;
         int n = 0;
@@ -740,18 +774,16 @@ public static class VehicleActionSim
         if (n <= 0)
             return;
 
-        // Retail applies at averaged contact (r×F). Default COM linear only — contact
-        // point impulses were the dominant live tumble source with real mass (horizontal
-        // tire forces at ground with large |ry| → continuous pitch/roll).
+        // Friction at averaged wheel contact. Full r×F (pitch+roll+yaw) only when
+        // ChassisPointImpulsesEnabled (retail / C2 tests). Live default uses yaw-only
+        // torque: keep steering moment (front lateral × longitudinal arm) without the
+        // pitch/roll tumble from horizontal forces at ground (|ry| large).
+        float invN = 1f / n;
+        float px = sumX * invN, py = sumY * invN, pz = sumZ * invN;
         if (AutoCore.Game.Diagnostics.ServerConfig.ChassisPointImpulsesEnabled)
-        {
-            float invN = 1f / n;
-            body.ApplyPointImpulse(jx, jy, jz, sumX * invN, sumY * invN, sumZ * invN);
-        }
+            body.ApplyPointImpulse(jx, jy, jz, px, py, pz);
         else
-        {
-            body.ApplyPointImpulse(jx, jy, jz, body.PosX, body.PosY, body.PosZ);
-        }
+            body.ApplyPointImpulseYawOnly(jx, jy, jz, px, py, pz);
     }
 
     private static float AverageSpan(ReadOnlySpan<float> values)

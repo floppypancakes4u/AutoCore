@@ -84,6 +84,25 @@ public sealed class HkRigidBody
     /// </summary>
     public void ApplyPointImpulse(float jx, float jy, float jz, float pointX, float pointY, float pointZ)
     {
+        ApplyPointImpulseCore(jx, jy, jz, pointX, pointY, pointZ, yawTorqueOnly: false);
+    }
+
+    /// <summary>
+    /// Like <see cref="ApplyPointImpulse"/> but only the <b>world-Y (yaw)</b> component of
+    /// <c>r×J</c> is applied. Pitch/roll torques from ground-plane tire forces are dropped —
+    /// those were the live NPC tumble path under the reduced friction model. Yaw is kept so
+    /// front-axle lateral impulses can steer the chassis.
+    /// </summary>
+    public void ApplyPointImpulseYawOnly(float jx, float jy, float jz, float pointX, float pointY, float pointZ)
+    {
+        ApplyPointImpulseCore(jx, jy, jz, pointX, pointY, pointZ, yawTorqueOnly: true);
+    }
+
+    private void ApplyPointImpulseCore(
+        float jx, float jy, float jz,
+        float pointX, float pointY, float pointZ,
+        bool yawTorqueOnly)
+    {
         LinVelX += jx * InvMass;
         LinVelY += jy * InvMass;
         LinVelZ += jz * InvMass;
@@ -96,6 +115,12 @@ public sealed class HkRigidBody
         float tx = ry * jz - rz * jy;
         float ty = rz * jx - rx * jz;
         float tz = rx * jy - ry * jx;
+
+        if (yawTorqueOnly)
+        {
+            AngVelY += ty * InvInertiaY;
+            return;
+        }
 
         AngVelX += tx * InvInertiaX;
         AngVelY += ty * InvInertiaY;

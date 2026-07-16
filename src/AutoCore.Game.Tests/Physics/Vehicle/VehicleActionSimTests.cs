@@ -789,8 +789,8 @@ public class VehicleActionSimTests
     }
 
     /// <summary>
-    /// Live default: COM-only susp/friction must not inject pitch from spring asymmetry
-    /// (the tumble path seen in client recordings when point impulses were always on).
+    /// Live default: COM-only susp must not inject pitch from spring asymmetry
+    /// (the tumble path seen in client recordings when full point impulses were always on).
     /// </summary>
     [TestMethod]
     public void ApplyAction_DefaultComForces_AsymmetricSuspension_NoPitchFromRxF()
@@ -811,9 +811,45 @@ public class VehicleActionSimTests
             inst, throttleInput: 0f, steerInput: 0f, handbrake: false,
             dt: dt, query: query);
 
-        Assert.AreEqual(0f, inst.Body.AngVelX, 1e-4f, "COM path must not create r×J pitch");
-        Assert.AreEqual(0f, inst.Body.AngVelY, 1e-4f);
-        Assert.AreEqual(0f, inst.Body.AngVelZ, 1e-4f);
+        Assert.AreEqual(0f, inst.Body.AngVelX, 1e-4f, "COM susp path must not create r×J pitch");
+        Assert.AreEqual(0f, inst.Body.AngVelZ, 1e-4f, "COM susp path must not create r×J roll");
+    }
+
+    /// <summary>
+    /// Steered tire frames + yaw-only contact friction: constant steer at speed must build
+    /// yaw rate (turn-in). Pre-fix used chassis-right for both axles so F/R yaw cancelled.
+    /// </summary>
+    [TestMethod]
+    public void ApplyAction_SteeredFriction_AtSpeed_BuildsYawWithoutPitchTumble()
+    {
+        Assert.IsFalse(ServerConfig.ChassisPointImpulsesEnabled);
+        var inst = CreateInstance();
+        inst.SetPose(0f, 0.9f, 0f, 0f, 0f, 0f, 1f);
+        const float dt = 1f / 60f;
+        var query = new TerrainHeightfieldCollisionQuery(
+            (float x, float z, out float y) => { y = 0f; return true; });
+
+        // Settle then drive with steer held.
+        for (var i = 0; i < 30; i++)
+            VehicleActionSim.ApplyAction(inst, throttleInput: -1f, steerInput: 0f, handbrake: false, dt: dt, query: query);
+        inst.Body.LinVelZ = 8f; // face +Z with speed
+        inst.Body.LinVelX = 0f;
+
+        float maxAbsPitch = 0f;
+        float maxAbsYaw = 0f;
+        for (var i = 0; i < 90; i++)
+        {
+            VehicleActionSim.ApplyAction(inst, throttleInput: -1f, steerInput: 1f, handbrake: false, dt: dt, query: query);
+            maxAbsPitch = MathF.Max(maxAbsPitch, MathF.Abs(inst.Body.AngVelX));
+            maxAbsYaw = MathF.Max(maxAbsYaw, MathF.Abs(inst.Body.AngVelY));
+        }
+
+        Assert.IsTrue(maxAbsYaw > 0.05f,
+            $"expected yaw from steered front friction, max |ωy|={maxAbsYaw}");
+        Assert.IsTrue(maxAbsPitch < 1.5f,
+            $"pitch should stay bounded without full r×F tumble, max |ωx|={maxAbsPitch}");
+        Assert.IsTrue(MathF.Abs(inst.Body.LinVelX) + MathF.Abs(inst.Body.LinVelZ) > 1f,
+            "should still be moving after steered run");
     }
 
     // --- Anti-sink (retail 0x598650 step 3 / applyAction §5) ---
