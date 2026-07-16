@@ -40,10 +40,10 @@ public static class NpcVehiclePhysicsController
     public const float MinUprightDot = 0.35f;
 
     /// <summary>P-gain on planar heading error → desired yaw rate (1/s).</summary>
-    public const float PathHeadingGain = 6.5f;
+    public const float PathHeadingGain = 5.0f;
 
     /// <summary>Max |yaw rate| from path assist at full speed (rad/s).</summary>
-    public const float PathHeadingMaxYawRate = 3.0f;
+    public const float PathHeadingMaxYawRate = 2.0f;
 
     /// <summary>
     /// Planar speed (m/s) at which path-heading assist reaches full max yaw rate.
@@ -81,12 +81,36 @@ public static class NpcVehiclePhysicsController
 
     /// <summary>
     /// |heading error| (rad) above which throttle is scaled down so NPCs turn before
-    /// accelerating off the path.
+    /// accelerating off the path. Kept fairly large so mild cornering does not starve speed.
     /// </summary>
-    public const float PathThrottleCutErrorRad = 0.55f;
+    public const float PathThrottleCutErrorRad = 0.95f; // ~54°
 
     /// <summary>Minimum thr scale when fully misaligned (still some drive to build speed for yaw).</summary>
-    public const float PathThrottleCutMinScale = 0.25f;
+    public const float PathThrottleCutMinScale = 0.55f;
+
+    /// <summary>
+    /// Soft-match planar speed toward the hard navigator when roughly aligned (1/s).
+    /// Closes the gap between reduced-sim crawl and programmed path speed.
+    /// </summary>
+    public const float PathSpeedMatchRate = 2.2f;
+
+    /// <summary>Only speed-match when |heading error| is below this (rad).</summary>
+    public const float PathSpeedMatchMaxErrorRad = 0.65f;
+
+    /// <summary>Max same-frame yaw delta from path assist (rad) — prevents snap turns.</summary>
+    public const float PathHeadingMaxYawStep = 0.028f; // ~1.6°/tick @ 60 Hz
+
+    /// <summary>Max same-frame pitch/roll delta from terrain stance (rad).</summary>
+    public const float TerrainStanceMaxStep = 0.02f;
+
+    /// <summary>Terrain stance blend rate (1/s) toward slope pitch/roll.</summary>
+    public const float TerrainStanceRate = 4f;
+
+    /// <summary>Half-length (m) along body forward for terrain pitch samples.</summary>
+    public const float TerrainStanceSampleHalfLength = 1.4f;
+
+    /// <summary>Half-width (m) along body right for terrain roll samples.</summary>
+    public const float TerrainStanceSampleHalfWidth = 0.85f;
 
     /// <summary>
     /// Advance one vehicle via sim-authoritative path-following.
@@ -192,10 +216,13 @@ public static class NpcVehiclePhysicsController
         inst.Step(thr, steer, handbrake: sharp != 0, dt, query);
 
         // Path assists (reduced tire model is not enough for reliable NPC pathing):
-        // 1) yaw toward look-ahead  2) lateral soft-pull to hard track  3) align planar vel to nose
+        // 1) smooth yaw toward look-ahead  2) lateral soft-pull  3) vel→nose
+        // 4) terrain pitch/roll stance  5) speed match to hard path when aligned
         ApplyPathHeadingAssist(body, aim, dt);
         ApplyPathTrackLateralPull(body, hard, dt);
         AlignPlanarVelocityToHeading(body, dt);
+        ApplyTerrainStanceAssist(body, query, dt);
+        ApplyPathSpeedMatch(body, hard, aim, dt);
 
         // Publish inst.Body pose/rot/vel/angVel (post-assist).
         return new PathStepResult
@@ -311,18 +338,190 @@ public static class NpcVehiclePhysicsController
             body.AngVelY = body.AngVelY * 0.2f + desiredYawRate * 0.8f;
         }
 
-        // Upright: damp residual pitch/roll rates from the reduced model.
+        // Only damp extreme pitch/roll spin (do not kill terrain stance rates every tick).
         if (BodyUpDotWorldUp(body) >= MinUprightDot)
         {
-            body.AngVelX *= 0.35f;
-            body.AngVelZ *= 0.35f;
+            if (MathF.Abs(body.AngVelX) > 4f) body.AngVelX *= 0.5f;
+            if (MathF.Abs(body.AngVelZ) > 4f) body.AngVelZ *= 0.5f;
         }
 
-        // Same-frame heading nudge so published pose yaws with the command (ghosts + wheel
-        // visual alignment). Magnitude capped by maxRate·dt.
-        float yawStep = Math.Clamp(body.AngVelY * dt, -maxRate * dt - 1e-4f, maxRate * dt + 1e-4f);
+        // Same-frame heading nudge — hard-capped per tick so corners ease in (no snap).
+        float yawStep = Math.Clamp(body.AngVelY * dt, -maxRate * dt, maxRate * dt);
+        yawStep = Math.Clamp(yawStep, -PathHeadingMaxYawStep, PathHeadingMaxYawStep);
+        // Also never jump more than a fraction of the remaining error in one tick.
+        float maxErrStep = MathF.Abs(err) * 0.35f;
+        if (maxErrStep > 1e-5f)
+            yawStep = Math.Clamp(yawStep, -maxErrStep, maxErrStep);
         if (speedScale > 0f && MathF.Abs(yawStep) > 1e-6f)
             ApplyWorldYawDelta(body, yawStep);
+    }
+
+    /// <summary>
+    /// Soft-match planar speed to the hard navigator when heading is roughly aligned.
+    /// </summary>
+    internal static void ApplyPathSpeedMatch(HkRigidBody body, PathStepResult hard, Vector3 aim, float dt)
+    {
+        if (body == null || !(dt > 0f) || !float.IsFinite(dt))
+            return;
+
+        float hardSpd = MathF.Sqrt(
+            hard.Velocity.X * hard.Velocity.X + hard.Velocity.Z * hard.Velocity.Z);
+        if (hardSpd < 0.5f)
+            return;
+
+        ExtractBasis(
+            new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
+            out _, out var forward);
+        float dx = aim.X - body.PosX;
+        float dz = aim.Z - body.PosZ;
+        float len = MathF.Sqrt(dx * dx + dz * dz);
+        if (len < 0.5f)
+            return;
+        float inv = 1f / len;
+        float aimX = dx * inv, aimZ = dz * inv;
+        float cross = aimX * forward.Z - aimZ * forward.X;
+        float dot = forward.X * aimX + forward.Z * aimZ;
+        float err = MathF.Abs(MathF.Atan2(cross, dot));
+        if (err > PathSpeedMatchMaxErrorRad)
+            return;
+
+        float fx = forward.X, fz = forward.Z;
+        float fLen = MathF.Sqrt(fx * fx + fz * fz);
+        if (fLen < 1e-4f)
+            return;
+        inv = 1f / fLen;
+        fx *= inv;
+        fz *= inv;
+
+        float planar = body.LinVelX * fx + body.LinVelZ * fz; // along nose
+        if (planar >= hardSpd * 0.98f)
+            return;
+
+        float alpha = 1f - MathF.Exp(-PathSpeedMatchRate * dt);
+        float target = planar + (hardSpd - planar) * alpha;
+        // Rewrite planar along-nose component; keep lateral residual.
+        float latX = -fz, latZ = fx;
+        float lat = body.LinVelX * latX + body.LinVelZ * latZ;
+        body.LinVelX = fx * target + latX * lat;
+        body.LinVelZ = fz * target + latZ * lat;
+    }
+
+    /// <summary>
+    /// Soft pitch/roll chassis to terrain slope from four height samples. Preserves yaw.
+    /// Without this (COM susp + world-down casts) NPCs sit level with half the wheels airborne.
+    /// </summary>
+    internal static void ApplyTerrainStanceAssist(
+        HkRigidBody body,
+        IVehicleCollisionQuery query,
+        float dt)
+    {
+        if (body == null || query == null || !(dt > 0f) || !float.IsFinite(dt))
+            return;
+
+        ExtractBasis(
+            new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
+            out var right, out var forward);
+
+        // Yaw-only forward/right in XZ so stance doesn't fight heading assist.
+        float fx = forward.X, fz = forward.Z;
+        float fLen = MathF.Sqrt(fx * fx + fz * fz);
+        if (fLen < 1e-4f)
+            return;
+        float invF = 1f / fLen;
+        fx *= invF;
+        fz *= invF;
+        float rx = fz, rz = -fx; // planar right from yaw-forward
+
+        float halfL = TerrainStanceSampleHalfLength;
+        float halfW = TerrainStanceSampleHalfWidth;
+        float ox = body.PosX, oy = body.PosY + 2f, oz = body.PosZ;
+
+        if (!SampleTerrainY(query, ox + fx * halfL + rx * halfW, oy, oz + fz * halfL + rz * halfW, out float yFL))
+            return;
+        if (!SampleTerrainY(query, ox + fx * halfL - rx * halfW, oy, oz + fz * halfL - rz * halfW, out float yFR))
+            return;
+        if (!SampleTerrainY(query, ox - fx * halfL + rx * halfW, oy, oz - fz * halfL + rz * halfW, out float yRL))
+            return;
+        if (!SampleTerrainY(query, ox - fx * halfL - rx * halfW, oy, oz - fz * halfL - rz * halfW, out float yRR))
+            return;
+
+        float yFront = 0.5f * (yFL + yFR);
+        float yRear = 0.5f * (yRL + yRR);
+        float yLeft = 0.5f * (yFL + yRL);
+        float yRight = 0.5f * (yFR + yRR);
+
+        // Desired pitch: positive nose-up when front higher... vehicle pitch about +right:
+        // nose down when front is lower: pitch ≈ atan2(yRear - yFront, 2*halfL) in our convention.
+        float desiredPitch = MathF.Atan2(yRear - yFront, 2f * halfL);
+        float desiredRoll = MathF.Atan2(yLeft - yRight, 2f * halfW);
+
+        // Current pitch/roll from body basis vs world.
+        // forward.Y ≈ sin(pitch) for small roll; right.Y ≈ -sin(roll) for small pitch.
+        float curPitch = MathF.Asin(Math.Clamp(forward.Y, -1f, 1f));
+        float curRoll = MathF.Asin(Math.Clamp(-right.Y, -1f, 1f));
+
+        float alpha = 1f - MathF.Exp(-TerrainStanceRate * dt);
+        float dPitch = Math.Clamp((desiredPitch - curPitch) * alpha, -TerrainStanceMaxStep, TerrainStanceMaxStep);
+        float dRoll = Math.Clamp((desiredRoll - curRoll) * alpha, -TerrainStanceMaxStep, TerrainStanceMaxStep);
+
+        if (MathF.Abs(dPitch) > 1e-5f)
+            ApplyBodyAxisRotation(body, right.X, right.Y, right.Z, dPitch);
+        if (MathF.Abs(dRoll) > 1e-5f)
+            ApplyBodyAxisRotation(body, forward.X, forward.Y, forward.Z, dRoll);
+
+        // Keep chassis height so average sample sits near ride height (reduce airborne wheels).
+        float groundAvg = 0.25f * (yFL + yFR + yRL + yRR);
+        float targetY = groundAvg + 0.85f; // ~rest hardpoint clearance ballpark
+        float yErr = targetY - body.PosY;
+        if (MathF.Abs(yErr) > 0.02f)
+            body.PosY += Math.Clamp(yErr * alpha, -0.08f, 0.08f);
+    }
+
+    private static bool SampleTerrainY(
+        IVehicleCollisionQuery query,
+        float x, float yStart, float z,
+        out float hitY)
+    {
+        hitY = 0f;
+        const float maxDist = 20f;
+        if (!query.CastRay(x, yStart, z, 0f, -1f, 0f, maxDist, out var hit))
+            return false;
+        hitY = hit.PointY;
+        return float.IsFinite(hitY);
+    }
+
+    /// <summary>Rotate body orientation by <paramref name="angle"/> about a world axis (unit-ish).</summary>
+    internal static void ApplyBodyAxisRotation(
+        HkRigidBody body,
+        float axisX, float axisY, float axisZ,
+        float angle)
+    {
+        float alen = MathF.Sqrt(axisX * axisX + axisY * axisY + axisZ * axisZ);
+        if (alen < 1e-6f || MathF.Abs(angle) < 1e-8f)
+            return;
+        float inv = 1f / alen;
+        axisX *= inv;
+        axisY *= inv;
+        axisZ *= inv;
+        float half = angle * 0.5f;
+        float s = MathF.Sin(half);
+        float c = MathF.Cos(half);
+        float qx = axisX * s, qy = axisY * s, qz = axisZ * s, qw = c;
+        // q * body
+        float bx = body.QuatX, by = body.QuatY, bz = body.QuatZ, bw = body.QuatW;
+        float x = qw * bx + qx * bw + qy * bz - qz * by;
+        float y = qw * by - qx * bz + qy * bw + qz * bx;
+        float z = qw * bz + qx * by - qy * bx + qz * bw;
+        float w = qw * bw - qx * bx - qy * by - qz * bz;
+        float len = MathF.Sqrt(x * x + y * y + z * z + w * w);
+        if (len > 1e-8f)
+        {
+            inv = 1f / len;
+            body.QuatX = x * inv;
+            body.QuatY = y * inv;
+            body.QuatZ = z * inv;
+            body.QuatW = w * inv;
+        }
     }
 
     /// <summary>
@@ -488,17 +687,28 @@ public static class NpcVehiclePhysicsController
 
     internal static void SetPoseFromHard(VehiclePhysicsInstance inst, PathStepResult hard)
     {
-        var r = hard.Rotation;
-        // Quaternion default is all-zero on some paths; keep a valid identity if unset.
-        float qw = r.W;
-        float qx = r.X;
-        float qy = r.Y;
-        float qz = r.Z;
+        // Position from hard navigator, but keep current body orientation (or a valid
+        // fallback). Snapping to hard.Rotation was a visible "teleport turn" when recovery
+        // fired — hard path facing can jump at segment boundaries.
+        var body = inst.Body;
+        float qw = body.QuatW;
+        float qx = body.QuatX;
+        float qy = body.QuatY;
+        float qz = body.QuatZ;
         if (!float.IsFinite(qw) || !float.IsFinite(qx) || !float.IsFinite(qy) || !float.IsFinite(qz)
             || (qx * qx + qy * qy + qz * qz + qw * qw) < 1e-8f)
         {
-            qx = qy = qz = 0f;
-            qw = 1f;
+            var r = hard.Rotation;
+            qw = r.W;
+            qx = r.X;
+            qy = r.Y;
+            qz = r.Z;
+            if (!float.IsFinite(qw) || !float.IsFinite(qx) || !float.IsFinite(qy) || !float.IsFinite(qz)
+                || (qx * qx + qy * qy + qz * qz + qw * qw) < 1e-8f)
+            {
+                qx = qy = qz = 0f;
+                qw = 1f;
+            }
         }
 
         inst.SetPose(
@@ -508,25 +718,34 @@ public static class NpcVehiclePhysicsController
 
     /// <summary>
     /// After <see cref="VehiclePhysicsInstance.ReGround"/> (origin on terrain), lift the chassis
-    /// so each wheel hardpoint is approximately <c>radius + restLength</c> above the ground plane.
-    /// Without this the suspension is fully compressed on the recovery frame (launch / no grip).
+    /// so wheel hardpoints sit near rest length above the ground plane.
+    /// Uses the <b>average</b> rest clearance (not max) so one long spring does not float
+    /// the whole car and leave opposite wheels airborne.
     /// </summary>
     internal static void RaiseChassisToWheelRest(VehiclePhysicsInstance inst)
     {
         if (inst?.Data?.Wheels == null || inst.Data.Wheels.Count == 0)
             return;
 
-        float raise = 0f;
+        float sum = 0f;
+        int n = 0;
         foreach (var w in inst.Data.Wheels)
         {
             // bodyY = ground − hardpointY + radius + rest  (ground already applied by ReGround)
             float r = -w.HardpointY + w.Radius + w.SuspensionRestLength;
-            if (r > raise)
-                raise = r;
+            if (r > 0f && float.IsFinite(r))
+            {
+                sum += r;
+                n++;
+            }
         }
 
-        if (raise > 0f && float.IsFinite(raise))
-            inst.Body.PosY += raise;
+        if (n > 0)
+        {
+            float raise = sum / n;
+            if (raise > 0f && float.IsFinite(raise))
+                inst.Body.PosY += raise;
+        }
     }
 
     /// <summary>

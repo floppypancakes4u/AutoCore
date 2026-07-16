@@ -317,12 +317,90 @@ public class NpcVehiclePhysicsControllerTests
         var aim = new Vector3(0f, 0f, 20f); // path +Z
         var pos = new Vector3(0f, 0f, 0f);
         float scale = NpcVehiclePhysicsController.ScaleThrottleForHeadingError(forward, aim, pos);
-        Assert.IsTrue(scale < 0.85f,
+        Assert.IsTrue(scale < 0.95f && scale >= NpcVehiclePhysicsController.PathThrottleCutMinScale - 1e-4f,
             $"expected thr cut when ~90° misaligned, scale={scale}");
 
         var alignedFwd = new Vector3(0f, 0f, 1f);
         float scaleOk = NpcVehiclePhysicsController.ScaleThrottleForHeadingError(alignedFwd, aim, pos);
         Assert.AreEqual(1f, scaleOk, 1e-4f);
+    }
+
+    [TestMethod]
+    public void ApplyPathSpeedMatch_BoostsTowardHardSpeedWhenAligned()
+    {
+        var body = new HkRigidBody
+        {
+            Mass = 1f, InvMass = 1f,
+            PosX = 0f, PosY = 1f, PosZ = 0f,
+            LinVelZ = 3f, // slow
+            QuatW = 1f, // face +Z
+        };
+        var hard = new PathStepResult
+        {
+            NewPosition = new Vector3(0f, 1f, 5f),
+            Velocity = new Vector3(0f, 0f, 12f),
+        };
+        var aim = new Vector3(0f, 1f, 20f);
+        const float dt = 1f / 60f;
+        for (var i = 0; i < 90; i++)
+            NpcVehiclePhysicsController.ApplyPathSpeedMatch(body, hard, aim, dt);
+
+        Assert.IsTrue(body.LinVelZ > 6f,
+            $"expected speed match toward hard 12 m/s, got LinVelZ={body.LinVelZ}");
+    }
+
+    [TestMethod]
+    public void ApplyPathHeadingAssist_MaxYawStep_IsBounded()
+    {
+        var body = new HkRigidBody
+        {
+            Mass = 1f, InvMass = 1f,
+            InvInertiaY = 1f,
+            PosX = 0f, PosY = 1f, PosZ = 0f,
+            LinVelX = 10f,
+            QuatW = 1f,
+        };
+        // Face +Z, aim far left (+X) → ~90° error
+        var aim = new Vector3(50f, 1f, 0f);
+        const float dt = 1f / 60f;
+        float yaw0 = VehicleDriveInputs.YawFromQuaternion(
+            new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW));
+        NpcVehiclePhysicsController.ApplyPathHeadingAssist(body, aim, dt);
+        float yaw1 = VehicleDriveInputs.YawFromQuaternion(
+            new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW));
+        float step = MathF.Abs(yaw1 - yaw0);
+        // unwrap
+        if (step > MathF.PI) step = 2f * MathF.PI - step;
+        Assert.IsTrue(step <= NpcVehiclePhysicsController.PathHeadingMaxYawStep + 0.002f,
+            $"yaw step {step} exceeded max {NpcVehiclePhysicsController.PathHeadingMaxYawStep}");
+    }
+
+    [TestMethod]
+    public void ApplyTerrainStanceAssist_PitchesTowardSlope()
+    {
+        // Rising terrain in +Z: y = 0.2 * z
+        var query = new TerrainHeightfieldCollisionQuery(
+            (float x, float z, out float y) =>
+            {
+                y = 0.2f * z;
+                return true;
+            });
+        var body = new HkRigidBody
+        {
+            Mass = 1f, InvMass = 1f,
+            PosX = 0f, PosY = 2f, PosZ = 10f,
+            QuatW = 1f, // level, face +Z
+        };
+        const float dt = 1f / 60f;
+        for (var i = 0; i < 60; i++)
+            NpcVehiclePhysicsController.ApplyTerrainStanceAssist(body, query, dt);
+
+        NpcVehiclePhysicsController.ExtractBasis(
+            new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
+            out _, out var forward);
+        // On rising slope, nose should pitch up (forward.Y > 0).
+        Assert.IsTrue(forward.Y > 0.05f,
+            $"expected nose-up pitch on rising slope, forward.Y={forward.Y}");
     }
 
     [TestMethod]
