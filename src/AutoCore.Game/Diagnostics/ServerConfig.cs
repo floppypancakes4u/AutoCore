@@ -51,6 +51,13 @@ public static class ServerConfig
     public const bool DefaultSuspensionForceClampEnabled = false;
     /// <summary>CW composite object/vehicle wheel casts — defaults OFF (terrain-only until opted in).</summary>
     public const bool DefaultCompositeWheelCollisionEnabled = false;
+    /// <summary>
+    /// Retail applies susp/friction as point impulses at wheel contacts (r×F weight transfer).
+    /// That path still tumbles NPCs under the reduced friction model + real mass — defaults
+    /// <b>OFF</b> (COM linear only) until the dual-body solver is mass-faithful. Unit tests that
+    /// assert r×J enable this flag.
+    /// </summary>
+    public const bool DefaultChassisPointImpulsesEnabled = false;
 
     private static int _substepHz = DefaultSubstepHz;
 
@@ -95,6 +102,12 @@ public static class ServerConfig
     /// </summary>
     public static bool CompositeWheelCollisionEnabled { get; set; } = DefaultCompositeWheelCollisionEnabled;
 
+    /// <summary>
+    /// When true, suspension and axle friction use <c>ApplyPointImpulse</c> at wheel contacts
+    /// (retail r×F). Default false = COM-only linear application (live stability).
+    /// </summary>
+    public static bool ChassisPointImpulsesEnabled { get; set; } = DefaultChassisPointImpulsesEnabled;
+
     /// <summary>Reset every setting to retail-safe defaults (tests + startup before load).</summary>
     public static void ResetToDefaults()
     {
@@ -106,6 +119,7 @@ public static class ServerConfig
         DebugLogging = DefaultDebugLogging;
         SuspensionForceClampEnabled = DefaultSuspensionForceClampEnabled;
         CompositeWheelCollisionEnabled = DefaultCompositeWheelCollisionEnabled;
+        ChassisPointImpulsesEnabled = DefaultChassisPointImpulsesEnabled;
     }
 
     /// <summary>
@@ -224,6 +238,9 @@ public static class ServerConfig
         if (p.CompositeWheelCollisionEnabled.HasValue)
             CompositeWheelCollisionEnabled = p.CompositeWheelCollisionEnabled.Value;
 
+        if (p.ChassisPointImpulsesEnabled.HasValue)
+            ChassisPointImpulsesEnabled = p.ChassisPointImpulsesEnabled.Value;
+
         return true;
     }
 
@@ -268,5 +285,6 @@ public static class ServerConfig
         public bool? DebugLogging { get; set; }
         public bool? SuspensionForceClampEnabled { get; set; }
         public bool? CompositeWheelCollisionEnabled { get; set; }
+        public bool? ChassisPointImpulsesEnabled { get; set; }
     }
 }

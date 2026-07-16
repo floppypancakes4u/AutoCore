@@ -276,18 +276,26 @@ public static class VehicleActionSim
             }
         }
 
-        // Pass 2 (C2, retail postTickApplyForces 0x64bc70): per grounded wheel,
-        // impulse = suspForce · dt · contactNormal (wheel+0x30), applied via the chassis
-        // rigid body's applyPointImpulse at the wheel CONTACT POINT (wheel+0x20) — not the
-        // COM. r×J at the contact point produces the retail weight-transfer torque.
+        // Pass 2: suspension support. Retail (0x64bc70) applies I=F·dt·n̂ at the wheel
+        // contact (r×J weight transfer). Live reduced model + real mass still tumbles with
+        // that path — default COM linear only; opt-in via ChassisPointImpulsesEnabled.
+        bool pointImpulses = AutoCore.Game.Diagnostics.ServerConfig.ChassisPointImpulsesEnabled;
         for (var i = 0; i < data.WheelCount; i++)
         {
             if (!grounded[i])
                 continue;
-            var wheel = inst.Wheels[i];
-            body.ApplyPointImpulse(
-                forceX[i] * dt, forceY[i] * dt, forceZ[i] * dt,
-                wheel.ContactPointX, wheel.ContactPointY, wheel.ContactPointZ);
+            if (pointImpulses)
+            {
+                var wheel = inst.Wheels[i];
+                body.ApplyPointImpulse(
+                    forceX[i] * dt, forceY[i] * dt, forceZ[i] * dt,
+                    wheel.ContactPointX, wheel.ContactPointY, wheel.ContactPointZ);
+            }
+            else
+            {
+                // COM force — Integrate applies Δv = F·invMass·dt (same linear as impulse).
+                body.ApplyForce(forceX[i], forceY[i], forceZ[i]);
+            }
         }
 
         // Anti-sink (applyAction step 3): position-only chassis lift from suspension penetration.
@@ -732,10 +740,18 @@ public static class VehicleActionSim
         if (n <= 0)
             return;
 
-        // C4: retail postTick applies axle friction impulse at the averaged contact
-        // point (r×F), not COM-only. Suspension already uses the same point-impulse path (C2).
-        float invN = 1f / n;
-        body.ApplyPointImpulse(jx, jy, jz, sumX * invN, sumY * invN, sumZ * invN);
+        // Retail applies at averaged contact (r×F). Default COM linear only — contact
+        // point impulses were the dominant live tumble source with real mass (horizontal
+        // tire forces at ground with large |ry| → continuous pitch/roll).
+        if (AutoCore.Game.Diagnostics.ServerConfig.ChassisPointImpulsesEnabled)
+        {
+            float invN = 1f / n;
+            body.ApplyPointImpulse(jx, jy, jz, sumX * invN, sumY * invN, sumZ * invN);
+        }
+        else
+        {
+            body.ApplyPointImpulse(jx, jy, jz, body.PosX, body.PosY, body.PosZ);
+        }
     }
 
     private static float AverageSpan(ReadOnlySpan<float> values)

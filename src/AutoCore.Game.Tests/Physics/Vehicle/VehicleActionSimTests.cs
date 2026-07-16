@@ -3,6 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace AutoCore.Game.Tests.Physics.Vehicle;
 
 using AutoCore.Game.CloneBases.Specifics;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Physics.Vehicle;
 using AutoCore.Game.Structures;
 
@@ -615,6 +616,10 @@ public class VehicleActionSimTests
     [TestMethod]
     public void ApplyAction_KnownSuspensionForceAndDt_ProducesExpectedDeltaV()
     {
+        // r×J path is opt-in (live default is COM-only for stability).
+        ServerConfig.ChassisPointImpulsesEnabled = true;
+        try
+        {
         var inst = CreateInstance();
         var body = inst.Body;
         var data = inst.Data;
@@ -698,6 +703,11 @@ public class VehicleActionSimTests
         // Left/right hardpoint symmetry cancels yaw and roll exactly.
         Assert.AreEqual(0f, body.AngVelY, 1e-3f);
         Assert.AreEqual(0f, body.AngVelZ, 1e-3f);
+        }
+        finally
+        {
+            ServerConfig.ChassisPointImpulsesEnabled = ServerConfig.DefaultChassisPointImpulsesEnabled;
+        }
     }
 
     /// <summary>
@@ -707,6 +717,9 @@ public class VehicleActionSimTests
     [TestMethod]
     public void ApplyAction_SymmetricEqualSuspension_LiftsWithoutAngularVelocity()
     {
+        ServerConfig.ChassisPointImpulsesEnabled = true;
+        try
+        {
         var spec = SyntheticCar();
         spec.SuspensionLength = new FrontRear { Front = 0.3f, Rear = 0.3f };
         spec.SuspensionStrength = new FrontRear { Front = 40f, Rear = 40f };
@@ -729,6 +742,11 @@ public class VehicleActionSimTests
         Assert.AreEqual(0f, inst.Body.AngVelX, 1e-5f, "pitch must cancel (equal front/rear)");
         Assert.AreEqual(0f, inst.Body.AngVelY, 1e-5f, "yaw must cancel");
         Assert.AreEqual(0f, inst.Body.AngVelZ, 1e-5f, "roll must cancel (equal left/right)");
+        }
+        finally
+        {
+            ServerConfig.ChassisPointImpulsesEnabled = ServerConfig.DefaultChassisPointImpulsesEnabled;
+        }
     }
 
     /// <summary>
@@ -739,6 +757,9 @@ public class VehicleActionSimTests
     [TestMethod]
     public void ApplyAction_AsymmetricSuspension_ProducesPitchAngularVelocity()
     {
+        ServerConfig.ChassisPointImpulsesEnabled = true;
+        try
+        {
         var spec = SyntheticCar();
         spec.SuspensionLength = new FrontRear { Front = 0.3f, Rear = 0.3f };
         spec.SuspensionStrength = new FrontRear { Front = 80f, Rear = 20f };
@@ -758,6 +779,39 @@ public class VehicleActionSimTests
         Assert.IsTrue(inst.Body.AngVelX < -0.1f,
             $"expected strong nose-back pitch (ωx < -0.1) from front-heavy suspension, got {inst.Body.AngVelX}");
         // Left/right symmetry still cancels yaw and roll.
+        Assert.AreEqual(0f, inst.Body.AngVelY, 1e-4f);
+        Assert.AreEqual(0f, inst.Body.AngVelZ, 1e-4f);
+        }
+        finally
+        {
+            ServerConfig.ChassisPointImpulsesEnabled = ServerConfig.DefaultChassisPointImpulsesEnabled;
+        }
+    }
+
+    /// <summary>
+    /// Live default: COM-only susp/friction must not inject pitch from spring asymmetry
+    /// (the tumble path seen in client recordings when point impulses were always on).
+    /// </summary>
+    [TestMethod]
+    public void ApplyAction_DefaultComForces_AsymmetricSuspension_NoPitchFromRxF()
+    {
+        Assert.IsFalse(ServerConfig.ChassisPointImpulsesEnabled,
+            "test assumes live default COM-only path");
+        var spec = SyntheticCar();
+        spec.SuspensionLength = new FrontRear { Front = 0.3f, Rear = 0.3f };
+        spec.SuspensionStrength = new FrontRear { Front = 80f, Rear = 20f };
+        var inst = new VehiclePhysicsInstance(HkVehicleData.FromVehicleSpecific(spec, cbid: 9004));
+        inst.SetPose(0f, 0.75f, 0f, 0f, 0f, 0f, 1f);
+
+        const float dt = 1f / 60f;
+        var query = new TerrainHeightfieldCollisionQuery(
+            (float x, float z, out float y) => { y = 0f; return true; });
+
+        VehicleActionSim.ApplyAction(
+            inst, throttleInput: 0f, steerInput: 0f, handbrake: false,
+            dt: dt, query: query);
+
+        Assert.AreEqual(0f, inst.Body.AngVelX, 1e-4f, "COM path must not create r×J pitch");
         Assert.AreEqual(0f, inst.Body.AngVelY, 1e-4f);
         Assert.AreEqual(0f, inst.Body.AngVelZ, 1e-4f);
     }
