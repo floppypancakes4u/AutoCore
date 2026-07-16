@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Physics.Vehicle;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -18,9 +19,10 @@ namespace AutoCore.Game.Tests.Physics.Oracles;
 /// B4 live-confirmed <c>RB+0x2c = invMass</c>, so <c>gScale = 1/invMass = mass</c>.</para>
 ///
 /// <para>Each vector carries both <c>expectedRetail</c> (exact unclamped retail value) and
-/// <c>expectedPortClamped</c> (the current port, which adds a non-retail
-/// <see cref="HkPhysicsConstants.MaxSuspensionForce"/> clamp flagged for C2/C7 removal). Grounded
-/// unit-mass vectors match retail bit-exact; the realistic-mass vector shows the clamp deviation.</para>
+/// <c>expectedPortClamped</c> (the pre-C2 port output with the non-retail
+/// <see cref="HkPhysicsConstants.MaxSuspensionForce"/> clamp). Since C2, retail (unclamped) is the
+/// default; the clamp survives only behind <see cref="ServerConfig.SuspensionForceClampEnabled"/>
+/// as an opt-in stability lever, pinned by the flag-enabled test below.</para>
 /// </summary>
 [TestClass]
 public class SuspensionOracleTests
@@ -93,13 +95,16 @@ public class SuspensionOracleTests
     }
 
     /// <summary>
-    /// The realistic-mass vector: retail produces a large force (gScale = mass), but the current port
-    /// clamps it to <see cref="HkPhysicsConstants.MaxSuspensionForce"/>. This asserts the current
-    /// (clamped) behaviour and pins the retail value the C2 clamp-removal must restore.
+    /// The realistic-mass vector: retail produces a large force (gScale = mass). With the C2
+    /// clamp removal, the default port path (safety flag OFF) must reproduce the retail value
+    /// bit-exact — no <see cref="HkPhysicsConstants.MaxSuspensionForce"/> saturation.
     /// </summary>
     [TestMethod]
-    public void PortComputeForce_ClampedVector_MatchesClamp_AndRetailIsC2Target()
+    public void PortComputeForce_ClampActiveVector_MatchesRetailUnclamped_ByDefault()
     {
+        Assert.IsFalse(ServerConfig.SuspensionForceClampEnabled,
+            "retail behaviour requires the suspension clamp flag to default OFF");
+
         using var doc = LoadGoldens();
         var vectors = doc.RootElement.GetProperty("vectors");
 
@@ -110,27 +115,97 @@ public class SuspensionOracleTests
                 continue;
             found = true;
 
-            var inp = v.GetProperty("inputs");
-            var actual = HkVehicleSuspension.ComputeForce(
-                inContact: inp.GetProperty("inContact").GetBoolean(),
-                restLength: Hex(inp, "restLengthHex"),
-                strength: Hex(inp, "strengthHex"),
-                dampCompression: Hex(inp, "dampCompressionHex"),
-                dampExtension: Hex(inp, "dampExtensionHex"),
-                currentLength: Hex(inp, "currentLengthHex"),
-                scalingFactor: Hex(inp, "scalingFactorHex"),
-                closingSpeed: Hex(inp, "closingSpeedHex"),
-                invMass: Hex(inp, "invMassHex"));
+            var actual = ComputeForceFromVector(v);
 
-            // Current port clamps to MaxSuspensionForce.
-            AssertBitExact(Hex(v, "expectedPortClampedHex"), actual, $"{v.GetProperty("id").GetString()} (clamped)");
-            Assert.AreEqual(HkPhysicsConstants.MaxSuspensionForce, actual, "clamp ceiling");
-            // Retail (unclamped) is materially larger — the value C2 must restore once the clamp is removed.
-            Assert.IsTrue(Math.Abs(Hex(v, "expectedRetailHex")) > HkPhysicsConstants.MaxSuspensionForce,
-                "retail force exceeds the clamp (this is the deviation C2 removes)");
+            // Default path is retail: bit-exact, materially above the old clamp ceiling.
+            AssertBitExact(Hex(v, "expectedRetailHex"), actual, $"{v.GetProperty("id").GetString()} (retail)");
+            Assert.IsTrue(Math.Abs(actual) > HkPhysicsConstants.MaxSuspensionForce,
+                "retail force exceeds the old clamp ceiling (the C2-removed deviation)");
         }
 
         Assert.IsTrue(found, "expected a clamp-active vector");
+    }
+
+    /// <summary>
+    /// Opt-in safety lever: with <see cref="ServerConfig.SuspensionForceClampEnabled"/> ON the old
+    /// clamp behaviour is preserved (output saturates at <see cref="HkPhysicsConstants.MaxSuspensionForce"/>).
+    /// </summary>
+    [TestMethod]
+    public void PortComputeForce_ClampFlagEnabled_ClampsToMaxSuspensionForce()
+    {
+        using var doc = LoadGoldens();
+        var vectors = doc.RootElement.GetProperty("vectors");
+
+        try
+        {
+            ServerConfig.SuspensionForceClampEnabled = true;
+
+            var found = false;
+            foreach (var v in vectors.EnumerateArray())
+            {
+                if (!v.GetProperty("clampActive").GetBoolean())
+                    continue;
+                found = true;
+
+                var actual = ComputeForceFromVector(v);
+
+                AssertBitExact(Hex(v, "expectedPortClampedHex"), actual, $"{v.GetProperty("id").GetString()} (clamped)");
+                Assert.AreEqual(HkPhysicsConstants.MaxSuspensionForce, actual, "clamp ceiling");
+            }
+
+            Assert.IsTrue(found, "expected a clamp-active vector");
+        }
+        finally
+        {
+            ServerConfig.SuspensionForceClampEnabled = ServerConfig.DefaultSuspensionForceClampEnabled;
+        }
+    }
+
+    /// <summary>
+    /// Flag ON must not disturb non-clamping vectors (|force| under the ceiling passes through).
+    /// </summary>
+    [TestMethod]
+    public void PortComputeForce_ClampFlagEnabled_NonClampVectors_StillMatchRetail()
+    {
+        using var doc = LoadGoldens();
+        var vectors = doc.RootElement.GetProperty("vectors");
+
+        try
+        {
+            ServerConfig.SuspensionForceClampEnabled = true;
+
+            var checkedNonClamp = 0;
+            foreach (var v in vectors.EnumerateArray())
+            {
+                if (v.GetProperty("clampActive").GetBoolean())
+                    continue;
+
+                var actual = ComputeForceFromVector(v);
+                AssertBitExact(Hex(v, "expectedRetailHex"), actual, $"{v.GetProperty("id").GetString()} (retail, flag on)");
+                checkedNonClamp++;
+            }
+
+            Assert.AreEqual(7, checkedNonClamp, "expected 7 clamp-inactive vectors");
+        }
+        finally
+        {
+            ServerConfig.SuspensionForceClampEnabled = ServerConfig.DefaultSuspensionForceClampEnabled;
+        }
+    }
+
+    private static float ComputeForceFromVector(JsonElement v)
+    {
+        var inp = v.GetProperty("inputs");
+        return HkVehicleSuspension.ComputeForce(
+            inContact: inp.GetProperty("inContact").GetBoolean(),
+            restLength: Hex(inp, "restLengthHex"),
+            strength: Hex(inp, "strengthHex"),
+            dampCompression: Hex(inp, "dampCompressionHex"),
+            dampExtension: Hex(inp, "dampExtensionHex"),
+            currentLength: Hex(inp, "currentLengthHex"),
+            scalingFactor: Hex(inp, "scalingFactorHex"),
+            closingSpeed: Hex(inp, "closingSpeedHex"),
+            invMass: Hex(inp, "invMassHex"));
     }
 
     private static string ResolveGoldensPath()

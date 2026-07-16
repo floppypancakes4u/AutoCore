@@ -71,10 +71,11 @@ public class VehiclePhysicsStabilityTests
         });
 
     [TestMethod]
-    public void SuspensionForce_IsClamped()
+    public void SuspensionForce_ClampsOnlyWhenSafetyFlagEnabled()
     {
-        // Huge compression would otherwise produce enormous force * mass scale.
-        float f = HkVehicleSuspension.ComputeForce(
+        // Huge compression produces an enormous force * mass scale. Retail (C2 default,
+        // ServerConfig.SuspensionForceClampEnabled = false) is UNclamped.
+        static float HugeCompressionForce() => HkVehicleSuspension.ComputeForce(
             inContact: true,
             restLength: 0.3f,
             strength: 4000f,
@@ -84,7 +85,26 @@ public class VehiclePhysicsStabilityTests
             scalingFactor: 10f,
             closingSpeed: -50f,
             invMass: 1f);
-        Assert.IsTrue(MathF.Abs(f) <= HkPhysicsConstants.MaxSuspensionForce + 1e-3f);
+
+        Assert.IsFalse(AutoCore.Game.Diagnostics.ServerConfig.SuspensionForceClampEnabled,
+            "suspension clamp flag must default OFF (retail behaviour)");
+        float unclamped = HugeCompressionForce();
+        Assert.IsTrue(MathF.Abs(unclamped) > HkPhysicsConstants.MaxSuspensionForce,
+            $"default path must be unclamped retail; got {unclamped}");
+
+        // Opt-in stability lever preserves the old clamp behaviour.
+        try
+        {
+            AutoCore.Game.Diagnostics.ServerConfig.SuspensionForceClampEnabled = true;
+            float clamped = HugeCompressionForce();
+            Assert.IsTrue(MathF.Abs(clamped) <= HkPhysicsConstants.MaxSuspensionForce + 1e-3f,
+                $"flag-enabled path must clamp; got {clamped}");
+        }
+        finally
+        {
+            AutoCore.Game.Diagnostics.ServerConfig.SuspensionForceClampEnabled =
+                AutoCore.Game.Diagnostics.ServerConfig.DefaultSuspensionForceClampEnabled;
+        }
     }
 
     [TestMethod]

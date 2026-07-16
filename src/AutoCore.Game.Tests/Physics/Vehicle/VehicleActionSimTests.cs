@@ -560,9 +560,12 @@ public class VehicleActionSimTests
     }
 
     /// <summary>
-    /// postTickApplyForces @ 0x64bc70 / suspImpulse: I = F · dt · n̂ via
-    /// <see cref="HkRigidBody.ApplyPointImpulse"/> (force+integrate is Δv-equivalent at COM).
-    /// Known spring force + dt must produce Δv = I · invMass (+ gravity from integrate).
+    /// postTickApplyForces @ 0x64bc70 / suspImpulse (C2): per grounded wheel,
+    /// I = F · dt · n̂ applied via <see cref="HkRigidBody.ApplyPointImpulse"/> at the wheel
+    /// <b>contact point</b> (wheel+0x20) — NOT the COM. Known spring force + dt must produce
+    /// Δv = ΣI · invMass (+ gravity from integrate) AND the r×J angular response: this fixture's
+    /// front/rear spring mismatch leaves a small but exactly predictable pitch (ωx) while the
+    /// left/right symmetry cancels yaw/roll.
     /// </summary>
     [TestMethod]
     public void ApplyAction_KnownSuspensionForceAndDt_ProducesExpectedDeltaV()
@@ -586,7 +589,9 @@ public class VehicleActionSimTests
             (float x, float z, out float y) => { y = terrainY; return true; });
 
         // Expected spring force per wheel (v=0 → closingSpeed=0 → damper out).
+        const float dt = 1f / 60f;
         float expectedForceSum = 0f;
+        float expectedAngVelX = 0f; // pitch from r×J at contact points (r rel. COM; Jz=0 → tx=−rz·Jy)
         for (var i = 0; i < data.WheelCount; i++)
         {
             var setup = data.Wheels[i];
@@ -610,9 +615,16 @@ public class VehicleActionSimTests
                 invMass: body.InvMass);
             Assert.IsTrue(force > 0f, $"wheel {i} expected positive spring force");
             expectedForceSum += force;
+
+            // Contact point = hardpoint XZ projected onto the ground plane (vertical cast),
+            // so r = contact − COM has rz = hardpointLocalZ (identity quat, PosZ=0);
+            // J = (0, F·dt, 0) → Δωx = (−rz · Jy) · invIxx per wheel.
+            expectedAngVelX += -setup.HardpointZ * (force * dt) * body.InvInertiaX;
         }
 
-        const float dt = 1f / 60f;
+        // AVD (normal branch, |ω| under threshold) scales the suspension pitch once per substep.
+        expectedAngVelX *= MathF.Max(0f, 1f - data.AvdNormalSpinDamping * dt);
+
         // I = F * dt * n̂  with n̂ = (0,1,0) → I_y = sum(F) * dt
         float expectedImpulseY = expectedForceSum * dt;
 
@@ -631,9 +643,78 @@ public class VehicleActionSimTests
         Assert.AreEqual(0f, body.LinVelX, 1e-3f);
         Assert.AreEqual(0f, body.LinVelZ, 1e-3f);
 
-        // Left/right hardpoints cancel yaw; front/rear spring mismatch can leave a small pitch residual.
+        // C2 hardpoint impulse: the front/rear spring mismatch MUST show up as pitch (r×J);
+        // a COM-only application would leave ωx = 0.
+        Assert.IsTrue(MathF.Abs(expectedAngVelX) > 1e-3f,
+            "fixture must predict a non-zero pitch response (front/rear force mismatch)");
+        Assert.AreEqual(expectedAngVelX, body.AngVelX, 2e-4f,
+            "suspension point impulses must produce the r×J pitch response at the contact points");
+
+        // Left/right hardpoint symmetry cancels yaw and roll exactly.
         Assert.AreEqual(0f, body.AngVelY, 1e-3f);
         Assert.AreEqual(0f, body.AngVelZ, 1e-3f);
+    }
+
+    /// <summary>
+    /// C2 focused contract: equal springs at mirrored hardpoints → the four contact-point
+    /// impulses sum to pure lift; every r×J torque cancels (no pitch/roll/yaw).
+    /// </summary>
+    [TestMethod]
+    public void ApplyAction_SymmetricEqualSuspension_LiftsWithoutAngularVelocity()
+    {
+        var spec = SyntheticCar();
+        spec.SuspensionLength = new FrontRear { Front = 0.3f, Rear = 0.3f };
+        spec.SuspensionStrength = new FrontRear { Front = 40f, Rear = 40f };
+        var inst = new VehiclePhysicsInstance(HkVehicleData.FromVehicleSpecific(spec, cbid: 9002));
+        inst.SetPose(0f, 0.75f, 0f, 0f, 0f, 0f, 1f);
+
+        const float dt = 1f / 60f;
+        var query = new TerrainHeightfieldCollisionQuery(
+            (float x, float z, out float y) => { y = 0f; return true; });
+
+        VehicleActionSim.ApplyAction(
+            inst, throttleInput: 0f, steerInput: 0f, handbrake: false,
+            dt: dt, query: query);
+
+        Assert.IsFalse(inst.AllWheelsAirborne);
+        // Net Δv up: 4 equal compressed springs outweigh one frame of gravity here.
+        Assert.IsTrue(inst.Body.LinVelY > 0f,
+            $"expected net upward Δv from symmetric suspension, got Vy={inst.Body.LinVelY}");
+        // Mirrored contact points with equal impulses — torques cancel to ~zero.
+        Assert.AreEqual(0f, inst.Body.AngVelX, 1e-5f, "pitch must cancel (equal front/rear)");
+        Assert.AreEqual(0f, inst.Body.AngVelY, 1e-5f, "yaw must cancel");
+        Assert.AreEqual(0f, inst.Body.AngVelZ, 1e-5f, "roll must cancel (equal left/right)");
+    }
+
+    /// <summary>
+    /// C2 focused contract: one axle pushing harder (front springs stiffer) must produce a
+    /// weight-transfer pitch — non-zero ωx about the lateral axis — impossible under the old
+    /// COM-force application.
+    /// </summary>
+    [TestMethod]
+    public void ApplyAction_AsymmetricSuspension_ProducesPitchAngularVelocity()
+    {
+        var spec = SyntheticCar();
+        spec.SuspensionLength = new FrontRear { Front = 0.3f, Rear = 0.3f };
+        spec.SuspensionStrength = new FrontRear { Front = 80f, Rear = 20f };
+        var inst = new VehiclePhysicsInstance(HkVehicleData.FromVehicleSpecific(spec, cbid: 9003));
+        inst.SetPose(0f, 0.75f, 0f, 0f, 0f, 0f, 1f);
+
+        const float dt = 1f / 60f;
+        var query = new TerrainHeightfieldCollisionQuery(
+            (float x, float z, out float y) => { y = 0f; return true; });
+
+        VehicleActionSim.ApplyAction(
+            inst, throttleInput: 0f, steerInput: 0f, handbrake: false,
+            dt: dt, query: query);
+
+        Assert.IsFalse(inst.AllWheelsAirborne);
+        // Stronger front springs at +Z contact points → net torque about −X (r×J pitch).
+        Assert.IsTrue(inst.Body.AngVelX < -0.1f,
+            $"expected strong nose-back pitch (ωx < -0.1) from front-heavy suspension, got {inst.Body.AngVelX}");
+        // Left/right symmetry still cancels yaw and roll.
+        Assert.AreEqual(0f, inst.Body.AngVelY, 1e-4f);
+        Assert.AreEqual(0f, inst.Body.AngVelZ, 1e-4f);
     }
 
     // --- Anti-sink (retail 0x598650 step 3 / applyAction §5) ---

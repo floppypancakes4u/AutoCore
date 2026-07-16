@@ -1,5 +1,7 @@
 namespace AutoCore.Game.Physics.Vehicle;
 
+using AutoCore.Game.Diagnostics;
+
 /// <summary>
 /// Stock Havok 2.3 <c>hkDefaultSuspension::update</c> spring+damper scalar force
 /// (<c>autoassault.exe</c> @ 0x64de50). Output is the per-wheel force written to susp+0x34[i]
@@ -45,11 +47,15 @@ public static class HkVehicleSuspension
         float force = ((restLength - currentLength) * strength * scalingFactor - damp * closingSpeed)
                       * invMassNormalizer;
 
-        // Server stability: unbounded spring when deeply penetrating flips / launches chassis.
-        if (force > HkPhysicsConstants.MaxSuspensionForce)
-            force = HkPhysicsConstants.MaxSuspensionForce;
-        else if (force < -HkPhysicsConstants.MaxSuspensionForce)
-            force = -HkPhysicsConstants.MaxSuspensionForce;
+        // Retail is UNclamped (C2). Optional non-retail server-stability lever: clamp only when
+        // ServerConfig.SuspensionForceClampEnabled is set (defaults OFF).
+        if (ServerConfig.SuspensionForceClampEnabled)
+        {
+            if (force > HkPhysicsConstants.MaxSuspensionForce)
+                force = HkPhysicsConstants.MaxSuspensionForce;
+            else if (force < -HkPhysicsConstants.MaxSuspensionForce)
+                force = -HkPhysicsConstants.MaxSuspensionForce;
+        }
 
         return force;
     }

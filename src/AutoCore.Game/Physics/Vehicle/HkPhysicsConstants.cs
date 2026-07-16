@@ -77,7 +77,10 @@ public static class HkPhysicsConstants
     public const float LateralAngWeight = 0.25f;        // DAT_00a0f704
 
     // --- server stability (not retail constants; prevent explode from reduced model) ---
-    /// <summary>Max |suspension force| magnitude after mass scale (per wheel).</summary>
+    /// <summary>
+    /// Max |suspension force| magnitude after mass scale (per wheel). Retail is unclamped —
+    /// used only when <c>ServerConfig.SuspensionForceClampEnabled</c> is set (default OFF, C2).
+    /// </summary>
     public const float MaxSuspensionForce = 80f;
     /// <summary>Max |linear velocity| after each substep (world units/s).</summary>
     public const float MaxLinearSpeed = 80f;

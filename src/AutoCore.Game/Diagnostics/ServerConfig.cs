@@ -47,6 +47,8 @@ public static class ServerConfig
     public const int DefaultSubstepHz = 60;
     public const float DefaultGravity = -9.81f;  // Y-up world gravity; refined in Phase 0
     public const bool DefaultDebugLogging = false;
+    /// <summary>Retail hkDefaultSuspension is unclamped (C2) — the safety clamp defaults OFF.</summary>
+    public const bool DefaultSuspensionForceClampEnabled = false;
 
     private static int _substepHz = DefaultSubstepHz;
 
@@ -75,6 +77,14 @@ public static class ServerConfig
     /// <summary>Verbose per-vehicle physics logging.</summary>
     public static bool DebugLogging { get; set; } = DefaultDebugLogging;
 
+    /// <summary>
+    /// Opt-in stability lever: clamp per-wheel suspension force magnitude to
+    /// <c>HkPhysicsConstants.MaxSuspensionForce</c> in <c>HkVehicleSuspension.ComputeForce</c>.
+    /// Retail (<c>hkDefaultSuspension::update</c> @ 0x64de50) is unclamped, so this defaults OFF;
+    /// enable only as an emergency server-stability override (non-retail behaviour).
+    /// </summary>
+    public static bool SuspensionForceClampEnabled { get; set; } = DefaultSuspensionForceClampEnabled;
+
     /// <summary>Reset every setting to retail-safe defaults (tests + startup before load).</summary>
     public static void ResetToDefaults()
     {
@@ -84,6 +94,7 @@ public static class ServerConfig
         Gravity = DefaultGravity;
         AirDensityOverride = null;
         DebugLogging = DefaultDebugLogging;
+        SuspensionForceClampEnabled = DefaultSuspensionForceClampEnabled;
     }
 
     /// <summary>
@@ -196,6 +207,9 @@ public static class ServerConfig
         if (p.DebugLogging.HasValue)
             DebugLogging = p.DebugLogging.Value;
 
+        if (p.SuspensionForceClampEnabled.HasValue)
+            SuspensionForceClampEnabled = p.SuspensionForceClampEnabled.Value;
+
         return true;
     }
 
@@ -238,5 +252,6 @@ public static class ServerConfig
         public float? Gravity { get; set; }
         public float? AirDensityOverride { get; set; }
         public bool? DebugLogging { get; set; }
+        public bool? SuspensionForceClampEnabled { get; set; }
     }
 }

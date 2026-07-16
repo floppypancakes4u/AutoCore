@@ -28,10 +28,11 @@ namespace AutoCore.Game.Physics.Vehicle;
 /// </code>
 /// <para>
 /// This port maps that spine to available modules (see <see cref="ApplyAction"/> body).
-/// Suspension uses retail postTick suspImpulse: <c>I = suspForce · dt · n̂</c> via
-/// <see cref="HkRigidBody.ApplyPointImpulse"/> at the wheel hardpoint (see
-/// <c>fn_0064bc70_suspImpulse.md</c>). Equivalent Δv to ApplyForce(F)+Integrate(dt),
-/// but impulse is applied immediately before friction (retail order).
+/// Suspension uses retail postTick suspImpulse (C2): per grounded wheel
+/// <c>I = suspForce · dt · n̂</c> via <see cref="HkRigidBody.ApplyPointImpulse"/> at the wheel
+/// contact point (wheel+0x20, see <c>0.4-suspension.md</c> §2 / <c>0x64bc70</c> decompile) —
+/// linear Δv equals ApplyForce(F)+Integrate(dt) but r×J adds the retail weight-transfer
+/// torque, and the impulse lands immediately before friction (retail order).
 /// Throttle sign is preserved (retail keeps AI/player thr sign; no flip).
 /// </para>
 /// </remarks>
@@ -173,7 +174,7 @@ public static class VehicleActionSim
 
     /// <summary>
     /// Wheel casts + preUpdate spin integrate, then suspension spring/damper applied as
-    /// postTick point impulses: <c>I = F · dt · n̂</c> at the hardpoint.
+    /// postTick point impulses: <c>I = F · dt · n̂</c> at the wheel contact point (wheel+0x20).
     /// Cast/force use pre-impulse chassis velocity (retail: preUpdate then postTick).
     /// </summary>
     private static bool ApplyWheelCollideAndSuspension(
@@ -194,9 +195,6 @@ public static class VehicleActionSim
         Span<float> forceX = stackalloc float[HkVehicleData.MaxWheels];
         Span<float> forceY = stackalloc float[HkVehicleData.MaxWheels];
         Span<float> forceZ = stackalloc float[HkVehicleData.MaxWheels];
-        Span<float> hardX = stackalloc float[HkVehicleData.MaxWheels];
-        Span<float> hardY = stackalloc float[HkVehicleData.MaxWheels];
-        Span<float> hardZ = stackalloc float[HkVehicleData.MaxWheels];
         Span<bool> grounded = stackalloc bool[HkVehicleData.MaxWheels];
 
         for (var i = 0; i < data.WheelCount; i++)
@@ -209,9 +207,6 @@ public static class VehicleActionSim
             float originX = body.PosX + hx;
             float originY = body.PosY + hy;
             float originZ = body.PosZ + hz;
-            hardX[i] = originX;
-            hardY[i] = originY;
-            hardZ[i] = originZ;
 
             // ClosingSpeed (wheel+0xB4) = dot(linVel, contactNormal) for suspension damper.
             var contact = HkVehicleWheelCollide.CastWheel(
@@ -273,14 +268,18 @@ public static class VehicleActionSim
             }
         }
 
-        // Pass 2: apply suspension as COM force (vertical/normal support) — avoids r×F flip
-        // explosions from hardpoint impulses under unit-mass reduced model. Retail uses
-        // applyPointImpulse; full mass/inertia + geometry will restore weight transfer later.
+        // Pass 2 (C2, retail postTickApplyForces 0x64bc70): per grounded wheel,
+        // impulse = suspForce · dt · contactNormal (wheel+0x30), applied via the chassis
+        // rigid body's applyPointImpulse at the wheel CONTACT POINT (wheel+0x20) — not the
+        // COM. r×J at the contact point produces the retail weight-transfer torque.
         for (var i = 0; i < data.WheelCount; i++)
         {
             if (!grounded[i])
                 continue;
-            body.ApplyForce(forceX[i], forceY[i], forceZ[i]);
+            var wheel = inst.Wheels[i];
+            body.ApplyPointImpulse(
+                forceX[i] * dt, forceY[i] * dt, forceZ[i] * dt,
+                wheel.ContactPointX, wheel.ContactPointY, wheel.ContactPointZ);
         }
 
         // Anti-sink (applyAction step 3): position-only chassis lift from suspension penetration.
