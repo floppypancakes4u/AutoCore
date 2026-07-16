@@ -195,10 +195,10 @@ public class HkVehicleDataTests
     }
 
     [TestMethod]
-    public void FromVehicleSpecific_DriveScale_MapsFromTorqueRatio_RearIncludesScalar()
+    public void FromVehicleSpecific_TorqueRatio_CarriesFrontRearSplit_NotContactGate()
     {
-        // wheel+0x88 analogue: setup-time drive scale for friction AggregateDrivePack
-        // (fn_wheel_driveScale_0x88.md — map from TorqueRatio; rear already × RearWheelFrictionScalar).
+        // C5: tRatio stays on setup for calcWheelTorque; wheel+0x88 is runtime contact gate
+        // (not stored on HkWheelSetup). Rear tRatio still includes RearWheelFrictionScalar fold.
         var vs = SyntheticCar();
         vs.WheelTorqueRatios = new FrontRear { Front = 0.25f, Rear = 0.75f };
         vs.RearWheelFrictionScalar = 1.1f;
@@ -207,17 +207,15 @@ public class HkVehicleDataTests
 
         Assert.IsFalse(d.Wheels[0].IsRear);
         Assert.AreEqual(0.25f, d.Wheels[0].TorqueRatio, 1e-5f);
-        Assert.AreEqual(0.25f, d.Wheels[0].DriveScale, 1e-5f);
-        Assert.AreEqual(d.Wheels[0].DriveScale, d.Wheels[1].DriveScale, 1e-5f);
+        Assert.AreEqual(d.Wheels[0].TorqueRatio, d.Wheels[1].TorqueRatio, 1e-5f);
 
         Assert.IsTrue(d.Wheels[2].IsRear);
         Assert.AreEqual(0.75f * 1.1f, d.Wheels[2].TorqueRatio, 1e-5f);
-        Assert.AreEqual(0.75f * 1.1f, d.Wheels[2].DriveScale, 1e-5f);
-        Assert.AreEqual(d.Wheels[2].DriveScale, d.Wheels[3].DriveScale, 1e-5f);
+        Assert.AreEqual(d.Wheels[2].TorqueRatio, d.Wheels[3].TorqueRatio, 1e-5f);
     }
 
     [TestMethod]
-    public void FromVehicleSpecific_DriveScale_UndrivenFrontIsZero()
+    public void FromVehicleSpecific_TorqueRatio_UndrivenFrontIsZero()
     {
         var vs = SyntheticCar();
         vs.WheelTorqueRatios = new FrontRear { Front = 0f, Rear = 1f };
@@ -225,10 +223,10 @@ public class HkVehicleDataTests
 
         var d = HkVehicleData.FromVehicleSpecific(vs);
 
-        Assert.AreEqual(0f, d.Wheels[0].DriveScale, 1e-5f);
-        Assert.AreEqual(0f, d.Wheels[1].DriveScale, 1e-5f);
-        Assert.AreEqual(1.05f, d.Wheels[2].DriveScale, 1e-5f);
-        Assert.AreEqual(1.05f, d.Wheels[3].DriveScale, 1e-5f);
+        Assert.AreEqual(0f, d.Wheels[0].TorqueRatio, 1e-5f);
+        Assert.AreEqual(0f, d.Wheels[1].TorqueRatio, 1e-5f);
+        Assert.AreEqual(1.05f, d.Wheels[2].TorqueRatio, 1e-5f);
+        Assert.AreEqual(1.05f, d.Wheels[3].TorqueRatio, 1e-5f);
     }
 
     [TestMethod]

@@ -288,17 +288,13 @@ public sealed class HkVehicleData
             var brake = (isRear ? vs.BrakesMaxTorque.Rear : vs.BrakesMaxTorque.Front)
                         * (isRear ? brakeRearMult : brakeFrontMult);
             var pedal = isRear ? vs.BrakesPedalInput.Rear : vs.BrakesPedalInput.Front;
+            // Torque ratio (front/rear drive split) feeds calcWheelTorque → wheels+0x28[i].
+            // wheel+0x88 is a separate RUNTIME contact gate (1.0/0.0) via
+            // HkVehicleEngine.ComputeContactDriveScale — not stored on setup.
+            // See docs/reconstruction/physics/verified/fn_wheel_driveScale_0x88.md (B3/C5).
             var tRatio = isRear ? vs.WheelTorqueRatios.Rear : vs.WheelTorqueRatios.Front;
             if (isRear)
                 tRatio *= rearMu; // setup applies RearWheelFrictionScalar to rear torque/friction table
-
-            // wheel+0x88 (RESOLVED, B3): retail value is a per-wheel CONTACT GATE — 1.0 grounded,
-            // 0.0 airborne (rewritten each preUpdate; framework vtbl+0x24 override is a no-op). The
-            // torque ratio lives upstream in retail's calcWheelTorque output (wheels+0x28[i]), which
-            // this port does not yet reproduce, so tRatio is folded here as an INTERIM stand-in.
-            // C5 refactor: carry tRatio in the torque path and make DriveScale the pure contact gate.
-            // See docs/reconstruction/physics/verified/fn_wheel_driveScale_0x88.md.
-            var driveScale = tRatio;
 
             // Base friction: use equalizer as neutral μ if no per-wheel table in C# blob.
             var friction = vs.RVFrictionEqualizer > 0f ? vs.RVFrictionEqualizer : 1f;
@@ -320,7 +316,6 @@ public sealed class HkVehicleData
                 maxBrakingTorque: brake,
                 minPedalInputToBlock: pedal,
                 torqueRatio: tRatio,
-                driveScale: driveScale,
                 friction: friction,
                 doesSteer: isRear ? rearSteers : frontSteers,
                 handbrakeConnected: isRear ? rearHb : frontHb,

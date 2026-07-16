@@ -13,7 +13,7 @@ public class HkVehicleEngineTests
 {
     private const float Epsilon = 1e-5f;
 
-    // Baseline: t=1, μ=1, upright=1, speed>=15 → torque = 1
+    // Baseline: t=1, μ=1, upright=1, speed>=15, tRatio=1 → torque = 1
     private static float Baseline(
         float torqueCurveFactor = 1f,
         float frictionMu = 1f,
@@ -21,9 +21,10 @@ public class HkVehicleEngineTests
         float chassisSpeed = 20f,
         bool isRear = false,
         bool handbrake = false,
-        float driverMod = 0f)
+        float driverMod = 0f,
+        float torqueRatio = 1f)
         => HkVehicleEngine.ComputeWheelTorque(
-            torqueCurveFactor, frictionMu, uprightFactor, chassisSpeed, isRear, handbrake, driverMod);
+            torqueCurveFactor, frictionMu, uprightFactor, chassisSpeed, isRear, handbrake, driverMod, torqueRatio);
 
     // --- clamp [0, 1000] ---
 
@@ -176,6 +177,46 @@ public class HkVehicleEngineTests
         Assert.AreEqual(0.0625f, HkVehicleEngine.ComputeUprightFactor(-0.5f), Epsilon);
         var justBelow = 0.799f;
         Assert.AreEqual(MathF.Pow(justBelow, 4f), HkVehicleEngine.ComputeUprightFactor(justBelow), 1e-6f);
+    }
+
+    [TestMethod]
+    public void ComputeUprightFactor_PowOperandOrder_BaseIsAbsDot_ExpIsFour()
+    {
+        // Verified fn_00598040_uprightPow.md: _CIpow ST1=base=|dot|, ST0=exp=4.0
+        // → pow(|dot|, 4), NOT pow(4, |dot|). At |dot|=0.5: 0.5^4=0.0625; 4^0.5=2.
+        const float absDot = 0.5f;
+        float upright = HkVehicleEngine.ComputeUprightFactor(absDot);
+        Assert.AreEqual(MathF.Pow(absDot, HkPhysicsConstants.UprightPowExponent), upright, Epsilon);
+        Assert.AreEqual(0.0625f, upright, Epsilon);
+        Assert.AreNotEqual(MathF.Pow(HkPhysicsConstants.UprightPowExponent, absDot), upright, 0.01f);
+    }
+
+    [TestMethod]
+    public void ComputeContactDriveScale_Grounded_IsOne_Airborne_IsZero()
+    {
+        // wheel+0x88 retail contact gate (B3 / fn_wheel_driveScale_0x88.md)
+        Assert.AreEqual(1f, HkVehicleEngine.ComputeContactDriveScale(inContact: true), Epsilon);
+        Assert.AreEqual(0f, HkVehicleEngine.ComputeContactDriveScale(inContact: false), Epsilon);
+    }
+
+    [TestMethod]
+    public void ComputeWheelTorque_TorqueRatio_MultipliesProduct()
+    {
+        // tRatio lives in calcWheelTorque → wheels+0x28[i], not in wheel+0x88.
+        var full = Baseline(frictionMu: 2f, torqueCurveFactor: 1f, torqueRatio: 1f);
+        var half = Baseline(frictionMu: 2f, torqueCurveFactor: 1f, torqueRatio: 0.5f);
+        var undriven = Baseline(frictionMu: 2f, torqueCurveFactor: 1f, torqueRatio: 0f);
+        Assert.AreEqual(2f, full, Epsilon);
+        Assert.AreEqual(1f, half, Epsilon);
+        Assert.AreEqual(0f, undriven, Epsilon);
+    }
+
+    [TestMethod]
+    public void ComputeWheelTorque_TorqueRatio_ThenHandbrakeThenClamp()
+    {
+        // μ=2, tRatio=0.5 → 1; rear handbrake ×0.5 → 0.5
+        var torque = Baseline(frictionMu: 2f, isRear: true, handbrake: true, torqueRatio: 0.5f);
+        Assert.AreEqual(0.5f, torque, Epsilon);
     }
 
     [TestMethod]

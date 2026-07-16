@@ -148,7 +148,9 @@ public static class HkVehicleFrictionSolver
     /// <c>drivePack = Σ (torque_i · wheelScale_i) / N</c> where N = axle wheel count.
     /// </summary>
     /// <param name="torques">Per-wheel drive torques on this axle (wheels+0x28[i]).</param>
-    /// <param name="wheelScales">Per-wheel scale (WHEEL+0x88).</param>
+    /// <param name="wheelScales">
+    /// Per-wheel <c>wheel+0x88</c> contact gate (1.0 grounded / 0.0 airborne), not torque ratio.
+    /// </param>
     public static float AggregateDrivePack(ReadOnlySpan<float> torques, ReadOnlySpan<float> wheelScales)
     {
         int n = torques.Length;

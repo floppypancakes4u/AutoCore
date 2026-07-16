@@ -18,15 +18,30 @@ public static class HkVehicleEngine
 {
     /// <summary>
     /// Retail upright scalar from chassis up · world up.
-    /// <c>|dot| &lt; 0.8</c> → <c>|dot|^4</c>; else 1.0 (step, not continuous at 0.8).
+    /// <c>|dot| &lt; 0.8</c> → <c>pow(|dot|, 4.0)</c> (base = |dot|, exp = 4.0 @ 0x9d54e8);
+    /// else 1.0 (step, not continuous at 0.8). See <c>fn_00598040_uprightPow.md</c>.
     /// </summary>
     public static float ComputeUprightFactor(float bodyUpDotWorldUp)
     {
         var absDot = MathF.Abs(bodyUpDotWorldUp);
         if (absDot < HkPhysicsConstants.UprightDotThreshold)
+        {
+            // Operand order is critical: base = |dot|, exp = 4.0 (MSVC _CIpow ST1^ST0).
+            // Do NOT swap to pow(4, |dot|).
             return MathF.Pow(absDot, HkPhysicsConstants.UprightPowExponent);
+        }
         return HkPhysicsConstants.One;
     }
+
+    /// <summary>
+    /// Retail <c>wheel+0x88</c> drive-torque contact gate rewritten each preUpdate:
+    /// <c>1.0</c> grounded, <c>0.0</c> airborne. Multiplies calcWheelTorque output in
+    /// <see cref="HkVehicleFrictionSolver.AggregateDrivePack"/>. Not the torque ratio
+    /// (that folds into <see cref="ComputeWheelTorque"/>). See
+    /// <c>fn_wheel_driveScale_0x88.md</c> (B3).
+    /// </summary>
+    public static float ComputeContactDriveScale(bool inContact)
+        => inContact ? HkPhysicsConstants.One : HkPhysicsConstants.Zero;
 
     /// <summary>
     /// Constant torque-curve factor used when the 2D LUT bins are out of range
@@ -77,6 +92,10 @@ public static class HkVehicleEngine
     /// <param name="isRear">True if wheel index &gt; rear-axle boundary (<c>vehicleData+0x4cc</c>).</param>
     /// <param name="handbrake">Entity handbrake / sharp-turn byte (<c>+0x61c</c>) nonzero.</param>
     /// <param name="driverMod">Driver skill/mod float (entity..+0x118); default 0 leaves curve unchanged.</param>
+    /// <param name="torqueRatio">
+    /// Per-wheel drive split (<see cref="HkWheelSetup.TorqueRatio"/>) folded into the
+    /// wheels+0x28 torque array (retail calcWheelTorque path). Default 1 leaves torque unscaled.
+    /// </param>
     /// <returns>Clamped torque in [0, <see cref="HkPhysicsConstants.TorqueClampMax"/>].</returns>
     public static float ComputeWheelTorque(
         float torqueCurveFactor,
@@ -85,11 +104,13 @@ public static class HkVehicleEngine
         float chassisSpeed,
         bool isRear,
         bool handbrake,
-        float driverMod = 0f)
+        float driverMod = 0f,
+        float torqueRatio = 1f)
     {
         var t = ApplyDriverMod(torqueCurveFactor, driverMod, isRear);
         var mu = ApplyLowSpeedTractionBoost(frictionMu, chassisSpeed);
-        var torque = mu * uprightFactor * t;
+        // Product lands in wheels+0x28[i]; contact gate (wheel+0x88) is applied later in AggregateDrivePack.
+        var torque = mu * uprightFactor * t * torqueRatio;
 
         if (isRear && handbrake)
             torque *= HkPhysicsConstants.HandbrakeRearTorqueScale;

@@ -19,7 +19,6 @@ public readonly struct HkWheelSetup
         float maxBrakingTorque,
         float minPedalInputToBlock,
         float torqueRatio,
-        float driveScale,
         float friction,
         bool doesSteer,
         bool handbrakeConnected,
@@ -39,7 +38,6 @@ public readonly struct HkWheelSetup
         MaxBrakingTorque = maxBrakingTorque;
         MinPedalInputToBlock = minPedalInputToBlock;
         TorqueRatio = torqueRatio;
-        DriveScale = driveScale;
         Friction = friction;
         DoesSteer = doesSteer;
         HandbrakeConnected = handbrakeConnected;
@@ -60,14 +58,13 @@ public readonly struct HkWheelSetup
     public float DampingExtension { get; }
     public float MaxBrakingTorque { get; }
     public float MinPedalInputToBlock { get; }
-    public float TorqueRatio { get; }
     /// <summary>
-    /// Per-wheel drive-torque scale into the friction solver axle pack
-    /// (client <c>wheel+0x88</c>). Setup maps from <see cref="TorqueRatio"/>
-    /// (rear already includes <c>RearWheelFrictionScalar</c>); see
-    /// <c>fn_wheel_driveScale_0x88.md</c>.
+    /// Front/rear drive split for <see cref="HkVehicleEngine.ComputeWheelTorque"/>
+    /// (retail folds into wheels+0x28[i]). Rear includes <c>RearWheelFrictionScalar</c>
+    /// at setup. Not the runtime contact gate — that is
+    /// <see cref="HkVehicleEngine.ComputeContactDriveScale"/> (wheel+0x88).
     /// </summary>
-    public float DriveScale { get; }
+    public float TorqueRatio { get; }
     public float Friction { get; }
     public bool DoesSteer { get; }
     public bool HandbrakeConnected { get; }

@@ -354,6 +354,7 @@ public static class VehicleActionSim
                 continue;
             }
 
+            // tRatio folds into wheels+0x28 torque (not wheel+0x88 contact gate).
             wheel.DriveTorque = HkVehicleEngine.ComputeWheelTorque(
                 torqueCurveFactor: curveFactor,
                 frictionMu: setup.Friction,
@@ -361,7 +362,8 @@ public static class VehicleActionSim
                 chassisSpeed: chassisSpeed,
                 isRear: setup.IsRear,
                 handbrake: inst.Handbrake,
-                driverMod: 0f);
+                driverMod: 0f,
+                torqueRatio: setup.TorqueRatio);
         }
     }
 
@@ -456,16 +458,18 @@ public static class VehicleActionSim
             wheel.LongImpulse = 0f;
             wheel.LatImpulse = 0f;
 
+            // wheel+0x88 contact gate (1.0 grounded / 0.0 airborne). tRatio already in DriveTorque.
+            float contactGate = HkVehicleEngine.ComputeContactDriveScale(wheel.InContact);
             if (setup.IsRear)
             {
                 rearT[nRear] = wheel.DriveTorque;
-                rearS[nRear] = setup.TorqueRatio;
+                rearS[nRear] = contactGate;
                 nRear++;
             }
             else
             {
                 frontT[nFront] = wheel.DriveTorque;
-                frontS[nFront] = setup.TorqueRatio;
+                frontS[nFront] = contactGate;
                 nFront++;
             }
 

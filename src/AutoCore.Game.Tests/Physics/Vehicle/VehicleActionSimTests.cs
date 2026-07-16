@@ -269,6 +269,7 @@ public class VehicleActionSimTests
         {
             Assert.IsTrue(inst.Wheels[i].InContact, $"wheel {i} should contact");
             float mu = inst.Data.Wheels[i].Friction;
+            float tRatio = inst.Data.Wheels[i].TorqueRatio;
             float expected = HkVehicleEngine.ComputeWheelTorque(
                 torqueCurveFactor: expectedCurve,
                 frictionMu: mu,
@@ -276,18 +277,28 @@ public class VehicleActionSimTests
                 chassisSpeed: 20f,
                 isRear: inst.Data.Wheels[i].IsRear,
                 handbrake: false,
-                driverMod: 0f);
+                driverMod: 0f,
+                torqueRatio: tRatio);
             Assert.AreEqual(expected, inst.Wheels[i].DriveTorque, 1e-4f,
-                $"wheel {i}: expected constant-factor torque, not |throttle| scale");
-            // Explicitly not the old |throttle| path.
-            float oldWrong = HkVehicleEngine.ComputeWheelTorque(
-                torqueCurveFactor: MathF.Abs(throttle),
-                frictionMu: mu,
-                uprightFactor: 1f,
-                chassisSpeed: 20f,
-                isRear: inst.Data.Wheels[i].IsRear,
-                handbrake: false);
-            Assert.AreNotEqual(oldWrong, inst.Wheels[i].DriveTorque, 1e-4f);
+                $"wheel {i}: expected constant-factor × tRatio torque, not |throttle| scale");
+            // Front undriven (tRatio=0) must be zero; rear carries the drive.
+            if (tRatio == 0f)
+                Assert.AreEqual(0f, inst.Wheels[i].DriveTorque, 1e-4f);
+            else
+                Assert.IsTrue(inst.Wheels[i].DriveTorque > 0f, $"driven wheel {i}");
+            // Explicitly not the old |throttle| path (when tRatio would make them equal by chance).
+            if (tRatio > 0f)
+            {
+                float oldWrong = HkVehicleEngine.ComputeWheelTorque(
+                    torqueCurveFactor: MathF.Abs(throttle),
+                    frictionMu: mu,
+                    uprightFactor: 1f,
+                    chassisSpeed: 20f,
+                    isRear: inst.Data.Wheels[i].IsRear,
+                    handbrake: false,
+                    torqueRatio: tRatio);
+                Assert.AreNotEqual(oldWrong, inst.Wheels[i].DriveTorque, 1e-4f);
+            }
         }
     }
 
@@ -318,9 +329,43 @@ public class VehicleActionSimTests
 
             float expected = HkVehicleEngine.ComputeWheelTorque(
                 curve, inst.Data.Wheels[i].Friction, 1f, 20f,
-                inst.Data.Wheels[i].IsRear, handbrake: false);
+                inst.Data.Wheels[i].IsRear, handbrake: false,
+                torqueRatio: inst.Data.Wheels[i].TorqueRatio);
             Assert.AreEqual(expected, inst.Wheels[i].DriveTorque, 1e-4f);
         }
+    }
+
+    [TestMethod]
+    public void AggregateDrivePack_UsesContactGateNotTorqueRatio()
+    {
+        // Retail postTick: drivePack += wheels+0x28[i] * wheel+0x88 / N
+        // wheel+0x88 = contact gate (1 grounded / 0 airborne); tRatio is already in +0x28.
+        var torques = new[] { 10f, 10f };
+        float grounded = HkVehicleFrictionSolver.AggregateDrivePack(
+            torques,
+            new[]
+            {
+                HkVehicleEngine.ComputeContactDriveScale(true),
+                HkVehicleEngine.ComputeContactDriveScale(true),
+            });
+        float oneAir = HkVehicleFrictionSolver.AggregateDrivePack(
+            torques,
+            new[]
+            {
+                HkVehicleEngine.ComputeContactDriveScale(true),
+                HkVehicleEngine.ComputeContactDriveScale(false),
+            });
+        float allAir = HkVehicleFrictionSolver.AggregateDrivePack(
+            torques,
+            new[]
+            {
+                HkVehicleEngine.ComputeContactDriveScale(false),
+                HkVehicleEngine.ComputeContactDriveScale(false),
+            });
+
+        Assert.AreEqual(10f, grounded, 1e-5f); // (10*1 + 10*1) / 2
+        Assert.AreEqual(5f, oneAir, 1e-5f);    // (10*1 + 10*0) / 2
+        Assert.AreEqual(0f, allAir, 1e-5f);
     }
 
     /// <summary>
