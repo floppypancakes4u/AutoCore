@@ -325,6 +325,21 @@ velocity / resets drive-axes. Deliver `airStab_goldens.json` + update `avd-airst
 (all addresses/offsets/constants, the crash-recovery latch method, the open in-window-impulse item, and the
 deliverables — everything the next agent needs). Requires the user to drive a crash; low priority.
 
+**ASSET-MASS EXTRACTION — load real chassis mass/COM/inertia from `physics.glm` (NEW, high value).**
+Supersedes the "mass=1.0" constraint. The server already has all client files + `GLMLoader`
+(`Managers/Asset/GLMLoader.cs`), and `SimpleObjectSpecific.PhysicsName` (clonebase UTF-16 off 65) names the
+physics asset. GLM format (from GLMLoader): trailing int32 → `CHNK` header (`opts[0]=66`, `opts[1]=76` LE)
+→ `strTableOff/strTableSize/entryCount`; null-separated name table; 18-byte entries
+(`Offset,Size,RealSize,ModifiedTime:int32, Scheme:int16, +4 skip`). **`Size != RealSize` ⇒ compressed**
+(check `Scheme`; GLMLoader.GetStream currently reads raw `Size` bytes — may need a decompressor). **TODO:**
+(1) open `physics.glm`, list entries, confirm a vehicle `PhysicsName` resolves to an entry; (2) parse the
+serialized **Havok 2.3 `hkpRigidBody`** for `chassisMass`/`centerOfMass`/`inertiaTensor` (reflection type
+strings `chassisMass`@0x9e7344, `inertiaTensor`@0x9dc6c8, `centerOfMass`@0x9dc6b8 exist in the client;
+Havok packfiles usually embed type names — search the blob); (3) validate against B4/B1 live reads (mass
+`1500`, inertia `[4500,4500,1500]` / `[90000,4500,6000]`, and `I = mass×RVInertia`); (4) wire into
+`HkVehicleData.FromVehicleSpecific` (replace `UnitMass`), keeping unit-mass as the parse-failure fallback.
+Feeds C1 (real inertia), C2/C4 (real force magnitudes), and F.
+
 ### Sim hardening (Phase C) — TDD: oracle/parity test red → change → green. All in `src/AutoCore.Game/Physics/Vehicle/`.
 
 **C1 — Inertia pairing + COM (from B4).** Fix `VehiclePhysicsInstance.CreateBody` axis mapping + COM offset.
@@ -420,7 +435,15 @@ project memory file `retail-npc-driving-branch.md`.
 - Physics tier stays **opt-in** (`controllerTier` OFF by default; instant rollback = `kinematic`).
 - **TDD** for production physics changes. Zero new test failures vs baseline (§2).
 - **No Launcher start/stop and no game-attach without user approval.** (CE attach was user-directed; keep it that way.)
-- Mass model locked: **mass = 1.0, inertia = RVInertia** (asset scalar mass is unavailable server-side).
+- ~~Mass model locked: mass = 1.0, inertia = RVInertia (asset scalar mass is unavailable server-side).~~
+  **REOPENED 2026-07-16:** the premise is wrong — the server has all client files + a GLM reader, and the
+  real mass/COM/inertia are loadable from `physics.glm`. See the **Asset-mass extraction** task below and
+  the CORRECTION box in `0.2-mass-inertia.md`. Unit mass is now the graceful *fallback*, not the target.
 - Retail has **no soft-pull / ramp-lip / launch-Vy** — never reintroduce heuristic vertical terms.
+- **Controller model (clarified 2026-07-16):** only the **path controller** is in scope. It should
+  **continuously steer toward the next waypoint** (producing driver *inputs* — steer/throttle) and let the
+  hardened physics sim move the car — i.e. **physics-based path-following, NOT snap-to-path**. This is the
+  D-phase intent: the path system is demoted to an input source; `inst.Body` pose is authoritative. The old
+  kinematic hybrid (`NpcVehiclePhysicsController` force-restoring the body to an authored pose) is what D2 replaces.
 - Ghidra is READ-ONLY except bookmarks/comments (no renames/retypes). Do not attach Ghidra's debugger to the game.
 - Keep `CE_MCP_ALLOW_SHELL` unset.
