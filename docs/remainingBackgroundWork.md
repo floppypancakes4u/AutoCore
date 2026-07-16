@@ -321,6 +321,9 @@ doable with CE `dissect_structure` on the RB pointer captured at a tick breakpoi
 0x598320`. Drive a car into a flip/crash; capture recovery gating (6400 ms collision window), the `pos.y + 10`
 (`DAT_00a110d8`) raise, and the `CVOGMap_CastTerrainHeight 0x4cfe60` result write; note whether recovery zeroes
 velocity / resets drive-axes. Deliver `airStab_goldens.json` + update `avd-airstab-spec.md`. Feeds C6.
+→ **FULL SELF-CONTAINED CAPTURE PLAN: [`B5-airstab-capture-plan.md`](reconstruction/physics/B5-airstab-capture-plan.md)**
+(all addresses/offsets/constants, the crash-recovery latch method, the open in-window-impulse item, and the
+deliverables — everything the next agent needs). Requires the user to drive a crash; low priority.
 
 ### Sim hardening (Phase C) — TDD: oracle/parity test red → change → green. All in `src/AutoCore.Game/Physics/Vehicle/`.
 
