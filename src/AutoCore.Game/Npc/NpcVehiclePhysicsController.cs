@@ -34,6 +34,12 @@ public static class NpcVehiclePhysicsController
     public const float OutOfWorldSupportMargin = 50f;
 
     /// <summary>
+    /// When body-up · world-up falls below this, treat as flipped and recover
+    /// (teleport to hard pose + ReGround). Keeps NPCs from thrashing indefinitely.
+    /// </summary>
+    public const float MinUprightDot = 0.35f;
+
+    /// <summary>
     /// Advance one vehicle via sim-authoritative path-following.
     /// On failure (no data / bad dt) returns <paramref name="hard"/> unchanged (fail closed).
     /// </summary>
@@ -151,8 +157,8 @@ public static class NpcVehiclePhysicsController
     }
 
     /// <summary>
-    /// True when the free-running body is non-finite, fell out of world, or drifted past the
-    /// path-divergence threshold from the hard navigator.
+    /// True when the free-running body is non-finite, flipped, fell out of world, or drifted
+    /// past the path-divergence threshold from the hard navigator.
     /// </summary>
     internal static bool NeedsRecovery(HkRigidBody body, PathStepResult hard, float supportY)
     {
@@ -163,6 +169,10 @@ public static class NpcVehiclePhysicsController
             return true;
 
         if (body.PosY < supportY - OutOfWorldSupportMargin)
+            return true;
+
+        // Flipped / on roof — sim alone rarely self-rights under path thrash; re-seat on path.
+        if (BodyUpDotWorldUp(body) < MinUprightDot)
             return true;
 
         float thr = ResyncDriftThreshold;
@@ -176,6 +186,17 @@ public static class NpcVehiclePhysicsController
         }
 
         return false;
+    }
+
+    /// <summary>Body +Y axis · world +Y (1 = upright, −1 = inverted).</summary>
+    internal static float BodyUpDotWorldUp(HkRigidBody body)
+    {
+        // Rotate local (0,1,0) by body quat → world up.
+        float x = body.QuatX, y = body.QuatY, z = body.QuatZ, w = body.QuatW;
+        // up = q * (0,1,0) * q^-1 ; Y component of rotated unit Y:
+        // 1 - 2(x² + z²) for the world-Y of body-up, or expanded:
+        float upY = 1f - 2f * (x * x + z * z);
+        return upY;
     }
 
     internal static bool IsBodyFinite(HkRigidBody body)

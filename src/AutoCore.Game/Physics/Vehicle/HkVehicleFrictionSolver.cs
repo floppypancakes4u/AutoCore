@@ -498,18 +498,24 @@ public static class HkVehicleFrictionSolver
                 out impLong, out impLat);
 
             // --- Drive pack bias (Phase D when drive gate enabled) ---
-            // Retail (decomp 0x6c4450):
-            //   driveTarget = invKeff_reg * invKeff_lat * (driveSlot*0.5 + Jv) * 0.5
-            //   driveMax    = mu0 * invKeff_lat * |N| * dt
-            //   lambdaLong  = -Jv - clamp_signed(driveTarget, ±driveMax)
+            // Reduced mass-correct form (C-mass hotfix):
+            //   driveTarget = invKeff_long_reg * (drivePack * 0.5) * 0.5
+            //   driveMax    = mu0 * |N| * dt
+            // Full decompile multiplies invKeff_long * invKeff_lat on the pack term and
+            // invKeff_lat on driveMax. At unit mass both invKeff=1 so that matches the
+            // reduced oracle tests; with real mass (~1500) the double invKeff product
+            // yields ~mass² drive impulses (Δv ~ tens–hundreds m/s per substep) and
+            // pins MaxAngularSpeed → continuous rolls/flips in live D2. Single invKeff
+            // on the pack keeps Δv mass-independent (impulse ∝ mass); driveMax uses the
+            // mass-scaled |N| alone (same units as the friction-circle Fmax).
             // Reduced deviation: when DrivePack == 0, skip blend so zero-drive slip cancel
             // stays exact (full RE always folds Jv into driveTarget when gate is open).
-            if (input.DriveEnabled && input.DrivePack != 0f && invKeffLongReg != 0f && invKeffLat != 0f)
+            if (input.DriveEnabled && input.DrivePack != 0f && invKeffLongReg != 0f)
             {
                 float half = HkPhysicsConstants.Half;
-                // Pack-only term of the 0.5×0.5 blend (DAT_00a0f298 twice).
-                float driveTarget = invKeffLongReg * invKeffLat * (input.DrivePack * half) * half;
-                float driveMax = input.Mu0 * invKeffLat * MathF.Abs(input.NormalLoad) * dt;
+                // Pack-only term of the 0.5×0.5 blend (DAT_00a0f298 twice), mass via invKeff once.
+                float driveTarget = invKeffLongReg * (input.DrivePack * half) * half;
+                float driveMax = input.Mu0 * MathF.Abs(input.NormalLoad) * dt;
                 if (driveMax < 0f)
                     driveMax = 0f;
                 float driveBias = ClampSigned(driveTarget, driveMax);

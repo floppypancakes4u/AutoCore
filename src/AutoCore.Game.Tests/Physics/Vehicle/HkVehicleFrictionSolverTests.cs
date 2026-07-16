@@ -118,8 +118,8 @@ public class HkVehicleFrictionSolverTests
     public void Solve_DrivePackBias_AddsLongitudinalPushBeyondSlipCancel()
     {
         // invK = 1 (unit mass). Zero slip → pure drive bias.
-        // driveTarget = 1 * 1 * (pack * 0.5) * 0.5 = pack/4
-        // driveMax = mu0 * 1 * |N| * dt = 1 * 100 * 0.05 = 5
+        // driveTarget = invKeff * (pack * 0.5) * 0.5 = pack/4
+        // driveMax = mu0 * |N| * dt = 1 * 100 * 0.05 = 5
         // pack=8 → bias=2 < 5 → impLong = 0 - 2 = -2
         const float dt = 0.05f;
         const float pack = 8f;
@@ -157,6 +157,57 @@ public class HkVehicleFrictionSolverTests
 
         // Still inside circle (Fmax = driveMax here with slope 0), so long = -driveMax
         Assert.AreEqual(-driveMax, outputs[0].Longitudinal, Epsilon);
+    }
+
+    /// <summary>
+    /// C-mass regression: real chassis mass must not explode drive bias via invKeff².
+    /// Impulse scales ∝ mass so Δv = bias·invMass stays O(pack/4); driveMax = μ·|N|·dt
+    /// (no extra invKeff) keeps the clamp in the same units as the friction circle.
+    /// </summary>
+    [TestMethod]
+    public void Solve_DrivePackBias_RealMass_ImpulseScalesWithMass_DeltaVStable()
+    {
+        const float dt = 1f / 60f;
+        const float mass = 1500f;
+        const float invMass = 1f / mass;
+        const float pack = 8f;
+        // Mass-scaled suspension load (gScale = mass); typical small compression.
+        const float normalLoad = mass * 40f * 0.05f; // 3000
+        const float mu = 1f;
+
+        float invKeff = 1f / invMass; // pure-linear unit jacobian
+        float expectedBias = invKeff * (pack * 0.5f * 0.5f); // mass * pack/4
+        float driveMax = mu * normalLoad * dt;
+        float expectedImp = -MathF.Min(expectedBias, driveMax);
+
+        var inputs = new[]
+        {
+            new AxleFrictionInput
+            {
+                InContact = true,
+                DriveEnabled = true,
+                DrivePack = pack,
+                SlipLongitudinal = 0f,
+                SlipLateral = 0f,
+                NormalLoad = normalLoad,
+                Mu0 = mu,
+                MuMax = mu,
+                InvKeffLong = invKeff,
+                InvKeffLat = invKeff,
+            },
+            GroundedAxle(0f, normalLoad: normalLoad, mu0: mu, muMax: mu),
+        };
+        var outputs = new AxleFrictionImpulse[2];
+        HkVehicleFrictionSolver.Solve(dt, inputs, invMass, outputs);
+
+        Assert.AreEqual(expectedImp, outputs[0].Longitudinal, 1e-3f);
+
+        // Δv must stay O(pack/4), not O(mass·pack) (the old invKeff² explosion).
+        float deltaV = MathF.Abs(outputs[0].Longitudinal) * invMass;
+        Assert.IsTrue(deltaV < 1f,
+            $"drive Δv exploded under real mass: {deltaV} m/s (impulse={outputs[0].Longitudinal})");
+        Assert.IsTrue(MathF.Abs(outputs[0].Longitudinal) < mass * 10f,
+            $"drive impulse absurd for mass={mass}: {outputs[0].Longitudinal}");
     }
 
     [TestMethod]
