@@ -110,16 +110,19 @@ public class FrictionSolverOracleTests
     }
 
     [TestMethod]
-    [Ignore("unblocked by C4: current HkVehicleFrictionSolver.Solve uses a simplified 2-axle " +
-            "layout and cannot reproduce retail's cb-based solve. Un-ignore once C4 rebuilds the " +
-            "solver to the retail cb/out layout and feeds these captured inputs.")]
+    [Ignore("C4 residual: Solve is now coupled long/lat + CircleProjection on AxleFrictionInput, "
+            + "but still not a full cb/setup blob port (dual-body Phase A/C/D writeback, cross-axle "
+            + "2×2, 1/mag² pre-scale + ordered dual-axle circleProjection couple feedback, setup "
+            + "mix0/mix1). Cannot reproduce cb+0xc0/0xd0 + out[] bit-exact from frictionSolver_goldens.json "
+            + "without that layout. Discriminating grip/slide out[] signature is already asserted by "
+            + "FrictionCircleWriteback_ZeroUnderGrip_ActiveOnlyWhenSaturated.")]
     public void PortSolve_ReproducesRetailImpulses_BitExact()
     {
         // C4 target: parse each scenario's cb (jacobians, invMass/invInertia at cb+0xe0/+0x100,
-        // per-axle friction params, drive pack) + static setup block, run the ported solver, and
-        // assert the resulting chassis impulse (cb+0xc0 linear, cb+0xd0 angular) and per-axle out
+        // per-axle friction params, drive pack) + static setup block, run a full retail-layout
+        // solver, and assert chassis impulse (cb+0xc0 linear, cb+0xd0 angular) and per-axle out
         // block match these goldens bit-exact via BitConverter.SingleToInt32Bits.
-        Assert.Inconclusive("C4 not yet implemented.");
+        Assert.Inconclusive("Full cb/setup blob Solve not yet implemented (C4 residual).");
     }
 
     private static void AssertVecMatchesBlob(string blobHex, int byteOffset, JsonElement decoded, string ctx)

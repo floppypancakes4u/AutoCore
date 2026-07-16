@@ -279,22 +279,21 @@ public class RetailParityTests
     }
 
     /// <summary>
-    /// The real cornering contract: sustained speed AND a turn, staying grounded. Not reachable
-    /// via engine/throttle alone until C4 lands (see class remarks), so a running-start speed is
-    /// seeded directly (same technique as the ramp-exit tests below) purely to describe the
-    /// contract the fixed sim must satisfy — this test is not expected to run meaningfully before
-    /// C4, hence <see cref="IgnoreAttribute"/>.
+    /// Sustained speed + turn, staying grounded. Post-C4 wheel-relative slip holds ~2 m/s mean
+    /// under this unit-mass fixture (seeded 8 m/s) — still short of the 3 m/s contract.
+    /// Residual: unit mass + reduced long/lat model bleeds cornering speed; C-mass + fuller
+    /// dual-body solve expected to close.
     /// </summary>
     [TestMethod]
-    [Ignore("unblocked by C4 — friction slip-cancel kills chassis speed; observed meanVy=2.6e-6, maxAbsHeight=0.890 near-stationary (see StationarySteerInput_StaysGrounded_NoUpwardDrift)")]
+    [Ignore("C4 residual: unit-mass turn bleeds seeded speed to ~2.0 m/s mean (< 3 m/s contract); "
+            + "wheel-relative slip fixed the crawl but cornering hold needs C-mass / fuller Minv")]
     public void ConstantRadiusTurn_AtSpeed_StaysGrounded_NoUpwardDrift()
     {
         var inst = CreateInstance();
         inst.SetPose(0f, 0.9f, 0f, 0f, 0f, 0f, 1f);
         var ground = FlatGround(GroundY);
 
-        // Warm up torque lag / steer ramp, then seed a sustained forward speed — full-throttle
-        // alone cannot reach or hold cornering speed until C4 fixes the slip-cancel defect.
+        // Warm up torque lag / steer ramp, then seed a sustained forward speed.
         const int warmupFrames = 60;
         for (var i = 0; i < warmupFrames; i++)
             inst.Step(-1f, 0.5f, false, Frame60, ground);
@@ -498,16 +497,13 @@ public class RetailParityTests
     }
 
     /// <summary>
-    /// The real ramp-exit contract: climb an actual inclined ramp under the vehicle's own
-    /// engine/friction to a genuine lip, with the airborne transition occurring mid-run (not a
-    /// seeded mid-air start). Unreachable until C4 (friction slip-cancel prevents sustained climb
-    /// speed) and C2/C3 (the suspension damper's false-compression on the sloped ramp face — see
-    /// <see cref="AirbornePhase_MatchesAnalyticBallisticArc"/> remarks — saturates
-    /// <see cref="HkPhysicsConstants.MaxSuspensionForce"/> and launches the chassis from the
-    /// incline-entry transient rather than a genuine lip liftoff) land together.
+    /// Climb an inclined ramp under the vehicle's own engine/friction to a genuine lip.
+    /// Post-C4 still fails to climb (final PosZ≈0.4 on a 10 m ramp) under unit mass + weak
+    /// torque curve + residual damper false-compression on sloped normals.
     /// </summary>
     [TestMethod]
-    [Ignore("unblocked by C2/C3/C4 — genuine ramp liftoff needs working suspension+friction; damper false-compression on sloped normals saturates MaxSuspensionForce")]
+    [Ignore("C4 residual: unit-mass + MinTorqueFactor path cannot climb the 10 m / 2 m ramp to a "
+            + "genuine lip (final PosZ≈0.4); needs C-mass / C5 torque + residual slope-damper work")]
     public void RampExit_GenuineLiftoffAtLip_FollowsBallisticArc()
     {
         var inst = CreateInstance();
@@ -574,16 +570,11 @@ public class RetailParityTests
     // ── 5. Continuous downhill grade stays grounded ──────────────────────────
 
     /// <summary>
-    /// Full throttle down a moderate continuous grade — but (class remarks) the friction
-    /// slip-cancel defect never lets the chassis build real speed, so this only verifies grounded
-    /// stability at a crawl. Observed post-C2 (contact-point susp impulses, unit mass, COM
-    /// friction still stubbed): <c>contactRatio=1.0</c>, <c>maxAbsHeightAboveGrade≈1.07</c>,
-    /// <c>signFlips≈35/300</c>, <c>meanSpeed≈0.12 m/s</c>. Pre-C2 (COM susp) was ~15 flips;
-    /// residual pitch micro-bounce from r×J under unit mass + COM-only friction is a known
-    /// C2→C4/C-mass ordering residual (not a flip-explosion). Catastrophic bounce would still
-    /// trip the raised threshold (~every-other-frame). See
-    /// <see cref="Downhill_ContinuousGrade_AtSpeed_StaysGrounded_NoBounce"/> for the real
-    /// sustained-speed contract (unblocked by C4).
+    /// Full throttle down a moderate continuous grade (post-C4: wheel-relative slip lets the
+    /// chassis build real speed). Verifies grounded stability while accelerating downhill —
+    /// contact every tick, height above grade bounded, no catastrophic bounce. Pre-C4 this was
+    /// a crawl-only fixture (~0.12 m/s); C4 flipped the speed floor. See also
+    /// <see cref="Downhill_ContinuousGrade_AtSpeed_StaysGrounded_NoBounce"/> (seeded sustained speed).
     /// </summary>
     [TestMethod]
     public void Downhill_ContinuousGrade_CrawlSpeed_StaysGrounded()
@@ -646,26 +637,23 @@ public class RetailParityTests
         // Chassis rides ~0.9 m above the grade at rest; 2.0 m bounds genuine "flying off the slope".
         Assert.IsTrue(maxAbsHeightAboveGrade < 2.0f,
             $"height above grade should stay bounded; observed max {maxAbsHeightAboveGrade}");
-        // No catastrophic bounce: C2 residual r×J pitch under unit mass + COM friction is ~35
-        // flips/300 (~3.5 Hz micro-bounce). Threshold frames/5 still fails if the chassis is
-        // thrashing nearly every frame (true instability). Tighten again after C4 + C-mass.
+        // No catastrophic bounce under unit mass + r×F (C2/C4). Threshold frames/5 fails if the
+        // chassis is thrashing nearly every frame (true instability).
         Assert.IsTrue(signFlips < frames / 5,
             $"expected no catastrophic bounce oscillation on continuous grade; observed {signFlips} sign flips over {frames} frames");
-        // Records the crawl explicitly (this is what Important-2 asked us to stop leaving
-        // unmeasured) — the friction slip-cancel defect keeps this well under 1 m/s even
-        // downhill at full throttle. Observed: meanSpeed=0.121 m/s over the 5 s window.
-        Assert.IsTrue(meanSpeed < 1f,
-            $"expected crawl-only speed pre-C4 (slip-cancel defect); observed mean speed {meanSpeed} m/s");
+        // C4 crawl fix: wheel-relative slip must let throttle build real downhill speed
+        // (pre-C4 mean was ~0.12 m/s under absolute-velocity cancel).
+        Assert.IsTrue(meanSpeed >= 1f,
+            $"expected post-C4 non-crawl speed under full throttle downhill; observed mean speed {meanSpeed} m/s");
     }
 
     /// <summary>
-    /// The real downhill contract: a sustained speed, contact every tick, and no bounce
-    /// oscillation. Not reachable via engine/throttle alone until C4 lands (class remarks), so a
-    /// running-start speed is seeded directly purely to describe the contract the fixed sim must
-    /// satisfy.
+    /// Sustained downhill speed, contact every tick, no bounce. Post-C4 reaches ~97% contact
+    /// at seeded speed (needs ≥99%) — residual micro-hop under unit mass + r×F.
     /// </summary>
     [TestMethod]
-    [Ignore("unblocked by C4 — friction slip-cancel kills chassis speed; observed crawl mean speed 0.121 m/s over 5s at full throttle (see Downhill_ContinuousGrade_CrawlSpeed_StaysGrounded)")]
+    [Ignore("C4 residual: seeded downhill holds speed but contactRatio≈97.3% (< 99% contract) "
+            + "from unit-mass r×F micro-hop; C-mass expected to settle")]
     public void Downhill_ContinuousGrade_AtSpeed_StaysGrounded_NoBounce()
     {
         var inst = CreateInstance();

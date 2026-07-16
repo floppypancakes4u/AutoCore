@@ -385,17 +385,19 @@ public static class VehicleActionSim
 
     /// <summary>
     /// 2-axle friction: build <see cref="AxleFrictionInput"/> from wheel contact,
-    /// prior-tick drive packs, suspension normal load, and chassis slip; call
+    /// prior-tick drive packs, suspension normal load, and <b>wheel-relative</b> slip; call
     /// <see cref="HkVehicleFrictionSolver.Solve"/>; apply long/lat impulses at
-    /// contact points; write wheel+0x94 / +0xa0.
+    /// axle-averaged contact points (r×F); write wheel+0x94 / +0xa0.
     /// </summary>
     /// <remarks>
-    /// SlipLong = v · forward, SlipLat = v · right with right = normalize(cross(up,fwd))
-    /// (body +X fallback). Drive pack magnitude is axle-averaged torque×scale from
-    /// prior-tick <see cref="HkWheelRuntimeState.DriveTorque"/>. Pack is signed with
-    /// throttle sign so <c>impLong -= driveBias</c> yields chassis push along +forward
-    /// for retail thr base <c>−1</c> (negative thr → negative DrivePack → +long force).
-    /// Throttle axis value itself is never flipped or abs'd.
+    /// SlipLong = (v_contact · forward) − spin·radius (not absolute chassis speed — that
+    /// was the crawl root cause). SlipLat = v_contact · right with
+    /// right = normalize(cross(up,fwd)) (body +X fallback). v_contact includes ω×r.
+    /// |N| is |susp force| only (no gravity-share floor). μ0/μslope/μmax from the
+    /// wheels friction table (viscosity slope + μmax = μ0×1.5). Drive pack is
+    /// axle-averaged torque×scale from prior-tick <see cref="HkWheelRuntimeState.DriveTorque"/>,
+    /// signed with throttle so <c>impLong -= driveBias</c> yields chassis push along +forward
+    /// for retail thr base <c>−1</c>.
     /// </remarks>
     private static void TryApplyFriction(
         VehiclePhysicsInstance inst,
@@ -421,9 +423,6 @@ public static class VehicleActionSim
             RotateBodyVector(body, 1f, 0f, 0f, out rightX, out rightY, out rightZ);
         }
 
-        float slipLong = body.LinVelX * fwdX + body.LinVelY * fwdY + body.LinVelZ * fwdZ;
-        float slipLat = body.LinVelX * rightX + body.LinVelY * rightY + body.LinVelZ * rightZ;
-
         // Map throttle axis → drive direction along +forward without mutating Throttle.
         float throttleSign = inst.Throttle > 0f ? 1f : (inst.Throttle < 0f ? -1f : 0f);
 
@@ -433,8 +432,19 @@ public static class VehicleActionSim
         Span<float> rearS = stackalloc float[HkVehicleData.MaxWheels];
         int nFront = 0, nRear = 0;
 
+        // Chassis planar velocity in the ground-plane basis (COM). Wheel-relative
+        // long slip subtracts spin·radius so pure rolling does not cancel speed (crawl fix).
+        // Using COM (not ω×r contact vel) avoids pitch-from-suspension creating false long
+        // slip that fights the drive pack under unit mass; full dual-body J·v is residual.
+        float chassisLong = body.LinVelX * fwdX + body.LinVelY * fwdY + body.LinVelZ * fwdZ;
+        float chassisLat = body.LinVelX * rightX + body.LinVelY * rightY + body.LinVelZ * rightZ;
+
         float frontLoadSum = 0f, rearLoadSum = 0f;
         float frontMuSum = 0f, rearMuSum = 0f;
+        float frontSlipLongSum = 0f, rearSlipLongSum = 0f;
+        float frontSlipLatSum = 0f, rearSlipLatSum = 0f;
+        float frontContactX = 0f, frontContactY = 0f, frontContactZ = 0f;
+        float rearContactX = 0f, rearContactY = 0f, rearContactZ = 0f;
         int nFrontContact = 0, nRearContact = 0;
 
         for (var i = 0; i < data.WheelCount; i++)
@@ -462,10 +472,7 @@ public static class VehicleActionSim
             if (!wheel.InContact)
                 continue;
 
-            // Normal load ≈ |susp force| (postTick axle aggregate source).
-            // At ride equilibrium spring force can be ~0 even though the tire carries
-            // weight — floor each contact with a gravity share so μ·|N|·dt still allows
-            // drive (otherwise drive pack is circle-clamped to zero).
+            // Retail |N| = aggregated suspension force only (no gravity-share floor).
             float suspForce = HkVehicleSuspension.ComputeForce(
                 inContact: true,
                 restLength: setup.SuspensionRestLength,
@@ -476,21 +483,33 @@ public static class VehicleActionSim
                 scalingFactor: wheel.Scaling,
                 closingSpeed: wheel.ClosingSpeed,
                 invMass: body.InvMass);
-            float gravityShare = body.Mass * MathF.Abs(data.GravityY)
-                                 / Math.Max(1, data.WheelCount);
-            float load = MathF.Max(MathF.Abs(suspForce), gravityShare);
+            float load = MathF.Abs(suspForce);
             float mu = setup.Friction;
+
+            // Wheel-relative long slip: chassis long − spin·radius (not absolute chassis speed).
+            float slipLong = chassisLong - wheel.Spin * setup.Radius;
+            float slipLat = chassisLat;
 
             if (setup.IsRear)
             {
                 rearLoadSum += load;
                 rearMuSum += mu;
+                rearSlipLongSum += slipLong;
+                rearSlipLatSum += slipLat;
+                rearContactX += wheel.ContactPointX;
+                rearContactY += wheel.ContactPointY;
+                rearContactZ += wheel.ContactPointZ;
                 nRearContact++;
             }
             else
             {
                 frontLoadSum += load;
                 frontMuSum += mu;
+                frontSlipLongSum += slipLong;
+                frontSlipLatSum += slipLat;
+                frontContactX += wheel.ContactPointX;
+                frontContactY += wheel.ContactPointY;
+                frontContactZ += wheel.ContactPointZ;
                 nFrontContact++;
             }
         }
@@ -513,37 +532,79 @@ public static class VehicleActionSim
 
         Span<AxleFrictionInput> inputs = stackalloc AxleFrictionInput[HkVehicleFrictionSolver.AxleCount];
         inputs[0] = BuildAxleInput(
+            body,
             inContact: nFrontContact > 0,
             drivePack: frontPack,
-            slipLong: slipLong,
-            slipLat: slipLat,
+            slipLong: nFrontContact > 0 ? frontSlipLongSum / nFrontContact : 0f,
+            slipLat: nFrontContact > 0 ? frontSlipLatSum / nFrontContact : 0f,
             normalLoad: nFrontContact > 0 ? frontLoadSum / nFrontContact : 0f,
-            mu0: nFrontContact > 0 ? frontMuSum / nFrontContact : 0f);
+            mu0: nFrontContact > 0 ? frontMuSum / nFrontContact : 0f,
+            avgContactX: nFrontContact > 0 ? frontContactX / nFrontContact : body.PosX,
+            avgContactY: nFrontContact > 0 ? frontContactY / nFrontContact : body.PosY,
+            avgContactZ: nFrontContact > 0 ? frontContactZ / nFrontContact : body.PosZ,
+            fwdX, fwdY, fwdZ, rightX, rightY, rightZ);
         inputs[1] = BuildAxleInput(
+            body,
             inContact: nRearContact > 0,
             drivePack: rearPack,
-            slipLong: slipLong,
-            slipLat: slipLat,
+            slipLong: nRearContact > 0 ? rearSlipLongSum / nRearContact : 0f,
+            slipLat: nRearContact > 0 ? rearSlipLatSum / nRearContact : 0f,
             normalLoad: nRearContact > 0 ? rearLoadSum / nRearContact : 0f,
-            mu0: nRearContact > 0 ? rearMuSum / nRearContact : 0f);
+            mu0: nRearContact > 0 ? rearMuSum / nRearContact : 0f,
+            avgContactX: nRearContact > 0 ? rearContactX / nRearContact : body.PosX,
+            avgContactY: nRearContact > 0 ? rearContactY / nRearContact : body.PosY,
+            avgContactZ: nRearContact > 0 ? rearContactZ / nRearContact : body.PosZ,
+            fwdX, fwdY, fwdZ, rightX, rightY, rightZ);
 
         Span<AxleFrictionImpulse> impulses = stackalloc AxleFrictionImpulse[HkVehicleFrictionSolver.AxleCount];
         HkVehicleFrictionSolver.Solve(dt, inputs, body.InvMass, impulses);
 
         ApplyAxleImpulses(inst, axleIndex: 0, impulses[0], nFrontContact,
-            fwdX, fwdY, fwdZ, rightX, rightY, rightZ, dt);
+            fwdX, fwdY, fwdZ, rightX, rightY, rightZ);
         ApplyAxleImpulses(inst, axleIndex: 1, impulses[1], nRearContact,
-            fwdX, fwdY, fwdZ, rightX, rightY, rightZ, dt);
+            fwdX, fwdY, fwdZ, rightX, rightY, rightZ);
     }
 
     private static AxleFrictionInput BuildAxleInput(
+        HkRigidBody body,
         bool inContact,
         float drivePack,
         float slipLong,
         float slipLat,
         float normalLoad,
-        float mu0)
-        => new()
+        float mu0,
+        float avgContactX,
+        float avgContactY,
+        float avgContactZ,
+        float fwdX, float fwdY, float fwdZ,
+        float rightX, float rightY, float rightZ)
+    {
+        // Retail μ table: μ0 from wheel friction (rear already × RearWheelFrictionScalar
+        // in HkVehicleData), slope = viscosity 0.001, μmax = μ0 × 1.5.
+        float muMax = mu0 > 0f
+            ? mu0 * HkPhysicsConstants.WheelsMuMaxScale
+            : HkPhysicsConstants.WheelsMuMaxScale;
+
+        float invKLong = 0f;
+        float invKLat = 0f;
+        float coupling = 0f;
+        if (inContact)
+        {
+            float rx = avgContactX - body.PosX;
+            float ry = avgContactY - body.PosY;
+            float rz = avgContactZ - body.PosZ;
+            invKLong = HkVehicleFrictionSolver.ComputeInvKeffFromContact(
+                body.InvMass, body.InvInertiaX, body.InvInertiaY, body.InvInertiaZ,
+                rx, ry, rz, fwdX, fwdY, fwdZ);
+            invKLat = HkVehicleFrictionSolver.ComputeInvKeffFromContact(
+                body.InvMass, body.InvInertiaX, body.InvInertiaY, body.InvInertiaZ,
+                rx, ry, rz, rightX, rightY, rightZ);
+            coupling = HkVehicleFrictionSolver.ComputeKeffCoupling(
+                body.InvMass, body.InvInertiaX, body.InvInertiaY, body.InvInertiaZ,
+                rx, ry, rz, fwdX, fwdY, fwdZ, rightX, rightY, rightZ);
+        }
+
+        return new AxleFrictionInput
         {
             InContact = inContact,
             DriveEnabled = inContact && drivePack != 0f,
@@ -552,14 +613,17 @@ public static class VehicleActionSim
             SlipLateral = slipLat,
             NormalLoad = normalLoad,
             Mu0 = mu0,
-            MuSlope = 0f,
-            MuMax = mu0 > 0f ? mu0 : 1f,
+            MuSlope = HkPhysicsConstants.WheelsViscosityFriction,
+            MuMax = muMax,
+            InvKeffLong = invKLong,
+            InvKeffLat = invKLat,
+            Coupling = coupling,
         };
+    }
 
     /// <summary>
     /// Write axle long/lat impulses onto wheels and apply <b>once per axle</b> at the
-    /// average contact point (point impulse). Applying per-wheel force×nContact was stacking
-    /// and r×F at hardpoints caused flip explosions under unit mass.
+    /// average contact point (point impulse with r×F weight transfer).
     /// </summary>
     private static void ApplyAxleImpulses(
         VehiclePhysicsInstance inst,
@@ -567,8 +631,7 @@ public static class VehicleActionSim
         in AxleFrictionImpulse axleImpulse,
         int nContact,
         float fwdX, float fwdY, float fwdZ,
-        float rightX, float rightY, float rightZ,
-        float dt)
+        float rightX, float rightY, float rightZ)
     {
         if (nContact <= 0)
             return;
@@ -606,12 +669,10 @@ public static class VehicleActionSim
         if (n <= 0)
             return;
 
-        // Reduced model: apply full axle impulse at COM only (no r×F). Contact-point
-        // impulses under unit mass flip the chassis on every substep; full mass +
-        // geometry restore retail hardpoint writeback later. Contact positions still
-        // averaged for bookkeeping / future fidelity.
-        _ = sumX; _ = sumY; _ = sumZ; _ = dt;
-        body.ApplyPointImpulse(jx, jy, jz, body.PosX, body.PosY, body.PosZ);
+        // C4: retail postTick applies axle friction impulse at the averaged contact
+        // point (r×F), not COM-only. Suspension already uses the same point-impulse path (C2).
+        float invN = 1f / n;
+        body.ApplyPointImpulse(jx, jy, jz, sumX * invN, sumY * invN, sumZ * invN);
     }
 
     /// <summary>Rotate body-space vector by chassis quaternion (x,y,z,w).</summary>

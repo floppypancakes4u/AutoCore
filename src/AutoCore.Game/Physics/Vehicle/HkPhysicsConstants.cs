@@ -75,6 +75,15 @@ public static class HkPhysicsConstants
     // --- friction solver ---
     public const float InvDenomEpsilon = 1.1920929e-7f; // _DAT_00a0d2f4 ≈ 2^-23
     public const float LateralAngWeight = 0.25f;        // DAT_00a0f704
+    /// <summary>
+    /// Per-wheel μ slope / viscosity friction written by wheels builder
+    /// <c>FUN_005fcce0</c> (<c>desc+0x34[i] = g_flMsToSeconds_Inferred</c> @ <c>0xa0f72c</c>).
+    /// </summary>
+    public const float WheelsViscosityFriction = 0.001f; // DAT_00a0f72c
+    /// <summary>
+    /// μmax = μ0 × this (wheels builder <c>DAT_00aaa68c</c>).
+    /// </summary>
+    public const float WheelsMuMaxScale = 1.5f; // DAT_00aaa68c
 
     // --- server stability (not retail constants; prevent explode from reduced model) ---
     /// <summary>

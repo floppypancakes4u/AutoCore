@@ -475,4 +475,132 @@ public class HkVehicleFrictionSolverTests
         Assert.AreEqual(0f, HkVehicleFrictionSolver.AggregateDrivePack(
             Array.Empty<float>(), Array.Empty<float>()), Epsilon);
     }
+
+    // -------------------------------------------------------------------------
+    // Coupled 2×2 long/lat + contact Keff helpers (C4)
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public void SolveCoupledImpulses_ZeroCoupling_MatchesDiagonal()
+    {
+        HkVehicleFrictionSolver.SolveCoupledImpulses(
+            invKeffLong: 2f, invKeffLat: 0.5f, coupling: 0f,
+            jvLong: 3f, jvLat: -4f,
+            out float lon, out float lat);
+        Assert.AreEqual(-2f * 3f, lon, Epsilon);
+        Assert.AreEqual(-0.5f * -4f, lat, Epsilon);
+    }
+
+    [TestMethod]
+    public void SolveCoupledImpulses_NonzeroCoupling_UsesStandardInverse()
+    {
+        // a=2, d=3, b=1 → det=5; Jv=(1,0)
+        // λ = −(1/det)[d -b; -b a] · Jv = −(1/5)(3, -1) = (−0.6, 0.2)
+        const float a = 2f, d = 3f, b = 1f;
+        float invKLong = 1f / a;
+        float invKLat = 1f / d;
+        HkVehicleFrictionSolver.SolveCoupledImpulses(
+            invKLong, invKLat, b, jvLong: 1f, jvLat: 0f,
+            out float lon, out float lat);
+        Assert.AreEqual(-0.6f, lon, Epsilon);
+        Assert.AreEqual(0.2f, lat, Epsilon);
+    }
+
+    [TestMethod]
+    public void Solve_WithCoupling_DiffersFromDiagonal()
+    {
+        const float dt = 0.05f;
+        var coupled = new[]
+        {
+            new AxleFrictionInput
+            {
+                InContact = true,
+                DriveEnabled = false,
+                SlipLongitudinal = 1f,
+                SlipLateral = 1f,
+                NormalLoad = 1000f,
+                Mu0 = 10f,
+                MuMax = 10f,
+                InvKeffLong = 0.5f, // Keff_long = 2
+                InvKeffLat = 1f / 3f, // Keff_lat = 3
+                Coupling = 1f,
+            },
+            GroundedAxle(0f),
+        };
+        var diagonal = new[]
+        {
+            new AxleFrictionInput
+            {
+                InContact = true,
+                DriveEnabled = false,
+                SlipLongitudinal = 1f,
+                SlipLateral = 1f,
+                NormalLoad = 1000f,
+                Mu0 = 10f,
+                MuMax = 10f,
+                InvKeffLong = 0.5f,
+                InvKeffLat = 1f / 3f,
+                Coupling = 0f,
+            },
+            GroundedAxle(0f),
+        };
+        var outC = new AxleFrictionImpulse[2];
+        var outD = new AxleFrictionImpulse[2];
+        HkVehicleFrictionSolver.Solve(dt, coupled, chassisInvMass: 1f, outC);
+        HkVehicleFrictionSolver.Solve(dt, diagonal, chassisInvMass: 1f, outD);
+
+        Assert.AreNotEqual(outC[0].Longitudinal, outD[0].Longitudinal, 1e-4f);
+        // Coupled: λ = −(1/5)[3 -1; -1 2]·(1,1) = −(1/5)(2,1) = (−0.4, −0.2)
+        Assert.AreEqual(-0.4f, outC[0].Longitudinal, Epsilon);
+        Assert.AreEqual(-0.2f, outC[0].Lateral, Epsilon);
+    }
+
+    [TestMethod]
+    public void ComputeInvKeffFromContact_PureLinear_IsInvMass()
+    {
+        // r=0 → no angular contribution → Keff = invMass + eps
+        float invK = HkVehicleFrictionSolver.ComputeInvKeffFromContact(
+            chassisInvMass: 2f,
+            invInertiaX: 1f, invInertiaY: 1f, invInertiaZ: 1f,
+            rx: 0f, ry: 0f, rz: 0f,
+            dirX: 0f, dirY: 0f, dirZ: 1f);
+        float expected = 1f / (2f + HkPhysicsConstants.InvDenomEpsilon);
+        Assert.AreEqual(expected, invK, Epsilon);
+    }
+
+    [TestMethod]
+    public void ComputeKeffCoupling_OrthogonalDirs_ZeroLinearTerm()
+    {
+        // r=0, long ⊥ lat → coupling = 0
+        float b = HkVehicleFrictionSolver.ComputeKeffCoupling(
+            chassisInvMass: 1f,
+            invInertiaX: 1f, invInertiaY: 1f, invInertiaZ: 1f,
+            rx: 0f, ry: 0f, rz: 0f,
+            longX: 0f, longY: 0f, longZ: 1f,
+            latX: 1f, latY: 0f, latZ: 0f);
+        Assert.AreEqual(0f, b, Epsilon);
+    }
+
+    [TestMethod]
+    public void Solve_UsesCircleProjection_NotOnlyClampHelper()
+    {
+        // Same outside-circle case as Solve_FrictionCircleClamp: isotropic CircleProjection
+        // must land on the unit circle in Fmax-space (same as ClampFrictionCircle for equal Fmax).
+        const float dt = 0.1f;
+        const float mu = 1f;
+        const float n = 10f;
+        float fMax = mu * n * dt;
+        var inputs = new[]
+        {
+            GroundedAxle(slipLong: 3f, slipLat: 4f, drivePack: 0f, normalLoad: n, mu0: mu, muMax: mu),
+            GroundedAxle(0f, normalLoad: n, mu0: mu, muMax: mu),
+        };
+        var outputs = new AxleFrictionImpulse[2];
+        HkVehicleFrictionSolver.Solve(dt, inputs, chassisInvMass: 1f, outputs);
+
+        float mag = MathF.Sqrt(
+            outputs[0].Longitudinal * outputs[0].Longitudinal +
+            outputs[0].Lateral * outputs[0].Lateral);
+        Assert.AreEqual(fMax, mag, Epsilon);
+    }
 }

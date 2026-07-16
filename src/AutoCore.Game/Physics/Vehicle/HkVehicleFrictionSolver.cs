@@ -1,7 +1,7 @@
 namespace AutoCore.Game.Physics.Vehicle;
 
 /// <summary>
-/// Per-axle inputs for the reduced friction solve (aggregated in
+/// Per-axle inputs for the friction solve (aggregated in
 /// <c>hkVehicleFramework_postTickApplyForces</c> @ 0x64bc70 before
 /// <c>hkVehicleFrictionSolver_solve</c> @ 0x6c4450).
 /// </summary>
@@ -26,7 +26,8 @@ public struct AxleFrictionInput
 
     /// <summary>
     /// Longitudinal slip velocity Jv_long at the axle contact.
-    /// Caller builds this from the long jacobian row · relative velocity.
+    /// Caller builds this as <b>wheel-relative</b> slip
+    /// (contact long vel − spin·radius), not absolute chassis speed.
     /// </summary>
     public float SlipLongitudinal;
 
@@ -37,14 +38,14 @@ public struct AxleFrictionInput
     /// relative velocity as <c>Jv_lat = priorResidual * 0.25 + J_side · v</c>
     /// (see <see cref="HkVehicleFrictionSolver.WeightLateralJv"/>).
     /// When the caller already supplies a fully-formed Jv_lat, pass it here unchanged —
-    /// the reduced solver does <b>not</b> re-apply the 0.25 weight.
+    /// the solver does <b>not</b> re-apply the 0.25 weight.
     /// </para>
     /// </summary>
     public float SlipLateral;
 
     /// <summary>
     /// Normal / suspension load magnitude |N| for this axle (aggregated susp force).
-    /// Friction impulse limit is μ · |N| · dt.
+    /// Friction impulse limit is μ · |N| · dt. Retail uses |susp impulse| only — no gravity floor.
     /// </summary>
     public float NormalLoad;
 
@@ -68,6 +69,25 @@ public struct AxleFrictionInput
     /// When ≤ 0, derived as <c>1 / chassisInvMass</c>.
     /// </summary>
     public float InvKeffLat;
+
+    /// <summary>
+    /// Off-diagonal long/lat effective-mass coupling term <c>b</c> in
+    /// <c>Keff = [a b; b d]</c> (from <c>J_long · M⁻¹ · J_lat</c>, lin+ang).
+    /// Zero yields the diagonal (uncoupled) solve.
+    /// </summary>
+    public float Coupling;
+
+    /// <summary>
+    /// Optional CFM / regularization added to longitudinal Keff before forming
+    /// the drive-path <c>invKeff_reg</c> (setup softness, framework+0x1fc+0x54).
+    /// </summary>
+    public float Softness;
+
+    /// <summary>
+    /// Optional product for anisotropic <see cref="HkVehicleFrictionSolver.BuildCircleProjectionScales"/>
+    /// (setup-time axle product). When ≤ 0, isotropic <see cref="HkVehicleFrictionSolver.CircleProjection"/>.
+    /// </summary>
+    public float CircleProduct;
 }
 
 /// <summary>Per-axle longitudinal / lateral friction impulses (solver output).</summary>
@@ -81,32 +101,28 @@ public struct AxleFrictionImpulse
 }
 
 /// <summary>
-/// Best-effort reduced port of Havok 2.3 <c>hkVehicleFrictionSolver_solve</c> (0x6c4450)
-/// as used by AutoAssault over <b>2 axles</b> (not per-wheel).
+/// Port of Havok 2.3 <c>hkVehicleFrictionSolver_solve</c> (0x6c4450) as used by
+/// AutoAssault over <b>2 axles</b> (not per-wheel), plus leaf helpers.
 /// <para>
-/// <b>Ported (Phase 3 reduced model):</b>
+/// <b>Ported (C4):</b>
 /// </para>
 /// <list type="bullet">
 /// <item>DrivePack aggregation (postTick 0x64bc70)</item>
-/// <item>Diagonal long/lat velocity cancel (no full Minv2 coupling)</item>
-/// <item>Drive-pack longitudinal bias with DAT_00a0f298 = 0.5 twice
-/// (<c>invK_long · invK_lat · (pack·0.5) · 0.5</c>) and driveMax = μ0·invK_lat·|N|·dt</item>
+/// <item>Diagonal long/lat cancel and coupled 2×2 when <see cref="AxleFrictionInput.Coupling"/> ≠ 0</item>
+/// <item><see cref="ComputeInvKeffFromContact"/> / <see cref="ComputeKeffCoupling"/> for J·M⁻¹·Jᵀ (lin+ang, chassis)</item>
+/// <item>Drive-pack longitudinal bias with DAT_00a0f298 = 0.5 twice and driveMax = μ0·invK_lat·|N|·dt</item>
 /// <item>Slip-dependent μ (μ0 + slip·slope clamped [0, μMax]) → Fmax = μ·|N|·dt</item>
-/// <item>Friction-circle clamp via <see cref="ClampFrictionCircle"/> (isotropic radial)</item>
-/// <item><see cref="CircleProjection"/> leaf algorithm from 0x6c3f90 (isotropic path +
-/// optional ESI scale-table anisotropic search)</item>
+/// <item>Friction-circle via <see cref="CircleProjection"/> (+ optional scale table from <see cref="BuildCircleProjectionScales"/>)</item>
 /// <item><see cref="WeightLateralJv"/> documents DAT_00a0f704 = 0.25 caller-side Jv_lat build</item>
 /// </list>
 /// <para>
-/// <b>Not yet ported (residual RE gaps):</b>
+/// <b>Residual RE gaps (not bit-exact vs live <c>cb</c>/<c>out</c> goldens):</b>
 /// </para>
 /// <list type="bullet">
-/// <item>Phase A full Jacobian · M⁻¹ · Jᵀ assembly (lin+ang, both bodies, softness/CFM)</item>
-/// <item>Phase B coupled 2×2 off-diagonal long/lat block invert (Minv2 form as decompiled)</item>
-/// <item>Phase C/D body impulse writeback to chassis/contact RB accumulators</item>
-/// <item>Full RE driveTarget includes Jv inside the 0.5×0.5 blend always when gate open;
-/// reduced model only biases when DrivePack ≠ 0 (keeps pure slip cancel exact)</item>
-/// <item>Caller 1/mag² pre-scale + dual-axle ordered <c>circleProjection</c> with couple feedback</item>
+/// <item>Full dual-body (chassis + contact RB) Phase A assembly and Phase C/D body-accumulator writeback</item>
+/// <item>Cross-axle coupled 2×2 (ax0 vs ax1 primary rows) as decompiled — port couples long/lat per axle</item>
+/// <item>Caller 1/mag² pre-scale + dual-axle ordered circleProjection with couple feedback</item>
+/// <item>Full RE driveTarget always folds Jv into the 0.5×0.5 blend when gate open; reduced model only biases when DrivePack ≠ 0</item>
 /// <item><c>FUN_006c4150</c> product closed form for scale-table build (API present; product source residual)</item>
 /// <item>cb+0xa0 max-slip / airborne lateral zeroing</item>
 /// <item>Setup mix0/mix1 drive-pack gains at fw+0x1fc</item>
@@ -154,10 +170,78 @@ public static class HkVehicleFrictionSolver
     /// </summary>
     /// <remarks>
     /// Pass the result as <see cref="AxleFrictionInput.SlipLateral"/>. Do not call this
-    /// again inside <see cref="Solve"/> — the reduced solver treats SlipLateral as final Jv.
+    /// again inside <see cref="Solve"/> — the solver treats SlipLateral as final Jv.
     /// </remarks>
     public static float WeightLateralJv(float priorResidual, float sideRowJv)
         => priorResidual * HkPhysicsConstants.LateralAngWeight + sideRowJv;
+
+    /// <summary>
+    /// Inverse effective mass for one constraint row at a contact point on the chassis
+    /// (unit linear jacobian along <paramref name="dir"/>, angular arm <c>r × dir</c>).
+    /// <c>Keff = invMass + (r×dir)·diag(I⁻¹)·(r×dir) + softness + ε</c>,
+    /// <c>invKeff = 1/Keff</c>. Body-B / dual-body terms are residual.
+    /// </summary>
+    public static float ComputeInvKeffFromContact(
+        float chassisInvMass,
+        float invInertiaX,
+        float invInertiaY,
+        float invInertiaZ,
+        float rx,
+        float ry,
+        float rz,
+        float dirX,
+        float dirY,
+        float dirZ,
+        float softness = 0f)
+    {
+        // jAng = r × dir
+        float jx = ry * dirZ - rz * dirY;
+        float jy = rz * dirX - rx * dirZ;
+        float jz = rx * dirY - ry * dirX;
+
+        float keff = chassisInvMass
+                     + jx * jx * invInertiaX
+                     + jy * jy * invInertiaY
+                     + jz * jz * invInertiaZ
+                     + softness
+                     + HkPhysicsConstants.InvDenomEpsilon;
+        if (keff <= 0f)
+            return 0f;
+        return HkPhysicsConstants.One / keff;
+    }
+
+    /// <summary>
+    /// Off-diagonal effective-mass coupling <c>b = J_long · M⁻¹ · J_lat</c> (chassis lin+ang).
+    /// </summary>
+    public static float ComputeKeffCoupling(
+        float chassisInvMass,
+        float invInertiaX,
+        float invInertiaY,
+        float invInertiaZ,
+        float rx,
+        float ry,
+        float rz,
+        float longX,
+        float longY,
+        float longZ,
+        float latX,
+        float latY,
+        float latZ)
+    {
+        float j0x = ry * longZ - rz * longY;
+        float j0y = rz * longX - rx * longZ;
+        float j0z = rx * longY - ry * longX;
+
+        float j1x = ry * latZ - rz * latY;
+        float j1y = rz * latX - rx * latZ;
+        float j1z = rx * latY - ry * latX;
+
+        float linDot = longX * latX + longY * latY + longZ * latZ;
+        return chassisInvMass * linDot
+               + j0x * j1x * invInertiaX
+               + j0y * j1y * invInertiaY
+               + j0z * j1z * invInertiaZ;
+    }
 
     /// <summary>
     /// Friction impulse limit: μ(slip) · |N| · dt.
@@ -187,8 +271,7 @@ public static class HkVehicleFrictionSolver
     /// <summary>
     /// Project (long, lat) onto the friction disk of radius <paramref name="maxImpulse"/>.
     /// Direction preserved; zero/negative limit zeroes both components.
-    /// Matches the isotropic radial path used by the reduced solve; full anisotropic
-    /// search is <see cref="CircleProjection"/>.
+    /// Kept as a pure radial helper; the solve path uses <see cref="CircleProjection"/>.
     /// </summary>
     public static void ClampFrictionCircle(ref float longitudinal, ref float lateral, float maxImpulse)
     {
@@ -359,7 +442,7 @@ public static class HkVehicleFrictionSolver
     }
 
     /// <summary>
-    /// Reduced 2-axle friction solve.
+    /// 2-axle friction solve (coupled long/lat when <see cref="AxleFrictionInput.Coupling"/> ≠ 0).
     /// </summary>
     /// <param name="dt">Substep timestep (param_1[0]/param_1[1] in retail).</param>
     /// <param name="axleInputs">Exactly 2 axle inputs (front, rear).</param>
@@ -380,6 +463,8 @@ public static class HkVehicleFrictionSolver
         if (axleImpulses.Length < AxleCount)
             throw new ArgumentException($"Expected at least {AxleCount} axle impulse slots.", nameof(axleImpulses));
 
+        Span<float> scaleScratch = stackalloc float[CircleProjectionScaleCount];
+
         for (int ax = 0; ax < AxleCount; ax++)
         {
             ref readonly AxleFrictionInput input = ref axleInputs[ax];
@@ -392,10 +477,23 @@ public static class HkVehicleFrictionSolver
             float invKeffLong = ResolveInvKeff(input.InvKeffLong, chassisInvMass);
             float invKeffLat = ResolveInvKeff(input.InvKeffLat, chassisInvMass);
 
-            // --- Diagonal velocity cancel (reduced Phase B/D without off-diagonal coupling) ---
-            // Full solve: (impLong, impLat) = -Minv2 · (Jv_long, Jv_lat) with coupled 2×2.
-            float impLong = -invKeffLong * input.SlipLongitudinal;
-            float impLat = -invKeffLat * input.SlipLateral;
+            // Softness → regularized longitudinal invK for the drive path (Keff + setup soft).
+            float invKeffLongReg = invKeffLong;
+            if (input.Softness > 0f && invKeffLong > 0f)
+            {
+                float keffLong = HkPhysicsConstants.One / invKeffLong;
+                float keffReg = keffLong + input.Softness + HkPhysicsConstants.InvDenomEpsilon;
+                invKeffLongReg = HkPhysicsConstants.One / keffReg;
+            }
+
+            // --- Phase B/D: (impLong, impLat) = −Minv2 · (Jv_long, Jv_lat) ---
+            // Coupled when |Coupling| is meaningful; else diagonal cancel.
+            float jvLong = input.SlipLongitudinal;
+            float jvLat = input.SlipLateral;
+            float impLong;
+            float impLat;
+            SolveCoupledImpulses(invKeffLong, invKeffLat, input.Coupling, jvLong, jvLat,
+                out impLong, out impLat);
 
             // --- Drive pack bias (Phase D when drive gate enabled) ---
             // Retail (decomp 0x6c4450):
@@ -404,11 +502,11 @@ public static class HkVehicleFrictionSolver
             //   lambdaLong  = -Jv - clamp_signed(driveTarget, ±driveMax)
             // Reduced deviation: when DrivePack == 0, skip blend so zero-drive slip cancel
             // stays exact (full RE always folds Jv into driveTarget when gate is open).
-            if (input.DriveEnabled && input.DrivePack != 0f && invKeffLong != 0f && invKeffLat != 0f)
+            if (input.DriveEnabled && input.DrivePack != 0f && invKeffLongReg != 0f && invKeffLat != 0f)
             {
                 float half = HkPhysicsConstants.Half;
                 // Pack-only term of the 0.5×0.5 blend (DAT_00a0f298 twice).
-                float driveTarget = invKeffLong * invKeffLat * (input.DrivePack * half) * half;
+                float driveTarget = invKeffLongReg * invKeffLat * (input.DrivePack * half) * half;
                 float driveMax = input.Mu0 * invKeffLat * MathF.Abs(input.NormalLoad) * dt;
                 if (driveMax < 0f)
                     driveMax = 0f;
@@ -418,19 +516,30 @@ public static class HkVehicleFrictionSolver
                 impLong -= driveBias;
             }
 
-            // --- Slip-dependent μ and friction-circle clamp ---
+            // --- Slip-dependent μ and friction-circle projection ---
             // Retail μ slip uses sqrt((-Jv0)² + Jv1²) ≈ free slip speeds (local_184 = -Jv).
-            float slipSpeed = MathF.Sqrt(
-                input.SlipLongitudinal * input.SlipLongitudinal +
-                input.SlipLateral * input.SlipLateral);
+            float slipSpeed = MathF.Sqrt(jvLong * jvLong + jvLat * jvLat);
 
             float fMax = ComputeFrictionLimit(
                 input.Mu0, input.MuSlope, input.MuMax,
                 slipSpeed, input.NormalLoad, dt);
 
-            // Reduced path: isotropic radial clamp. Full dual-axle 1/mag² + ordered
-            // CircleProjection with couple feedback remains a residual.
-            ClampFrictionCircle(ref impLong, ref impLat, fMax);
+            if (fMax <= 0f)
+            {
+                impLong = 0f;
+                impLat = 0f;
+            }
+            else if (input.CircleProduct > 0f && float.IsFinite(input.CircleProduct))
+            {
+                BuildCircleProjectionScales(input.CircleProduct, scaleScratch);
+                // Retail leaf 0x6c3f90 with anisotropic scale table.
+                CircleProjection(ref impLong, ref impLat, fMax, fMax, scaleScratch);
+            }
+            else
+            {
+                // Isotropic circleProjection (no setup product table).
+                CircleProjection(ref impLong, ref impLat, fMax, fMax);
+            }
 
             axleImpulses[ax] = new AxleFrictionImpulse
             {
@@ -438,6 +547,54 @@ public static class HkVehicleFrictionSolver
                 Lateral = impLat,
             };
         }
+    }
+
+    /// <summary>
+    /// Solve <c>λ = −Keff⁻¹ · Jv</c> for the long/lat block.
+    /// <paramref name="invKeffLong"/> / Lat are diagonals of Keff⁻¹ when uncoupled;
+    /// <paramref name="coupling"/> is the Keff off-diagonal <c>b</c>.
+    /// </summary>
+    public static void SolveCoupledImpulses(
+        float invKeffLong,
+        float invKeffLat,
+        float coupling,
+        float jvLong,
+        float jvLat,
+        out float impLong,
+        out float impLat)
+    {
+        // Diagonal fast path (orthogonal unit rows, no ang coupling).
+        if (coupling == 0f || !float.IsFinite(coupling))
+        {
+            impLong = -invKeffLong * jvLong;
+            impLat = -invKeffLat * jvLat;
+            return;
+        }
+
+        // a = Keff_long, d = Keff_lat, b = coupling
+        if (invKeffLong <= 0f || invKeffLat <= 0f)
+        {
+            impLong = 0f;
+            impLat = 0f;
+            return;
+        }
+
+        float a = HkPhysicsConstants.One / invKeffLong;
+        float d = HkPhysicsConstants.One / invKeffLat;
+        float b = coupling;
+        float det = a * d - b * b;
+        // Guard mirrors retail det*det check; fall back to diagonal if singular.
+        if (!(det * det > 0f) || !float.IsFinite(det))
+        {
+            impLong = -invKeffLong * jvLong;
+            impLat = -invKeffLat * jvLat;
+            return;
+        }
+
+        // Standard inverse of [a b; b d]: (1/det)[d -b; -b a]
+        float invDet = HkPhysicsConstants.One / det;
+        impLong = -(d * jvLong - b * jvLat) * invDet;
+        impLat = -(-b * jvLong + a * jvLat) * invDet;
     }
 
     /// <summary>
