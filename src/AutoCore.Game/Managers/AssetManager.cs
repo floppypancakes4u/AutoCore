@@ -77,6 +77,13 @@ public class AssetManager : Singleton<AssetManager>
                     Logger.WriteLog(LogType.Initialize, $"Character CloneBases found: {characterCount}");
                     // Per-template wheel radius / hardpoint ride heights for NPC ground seating.
                     AutoCore.Game.Npc.VehicleGroundMetricsCache.BuildFromCloneBases(WADLoader.CloneBases);
+                    // Per-template Havok vehicle physics data (shared by all instances of a CBID).
+                    // Gravity + optional AirDensityOverride bake into immutable HkVehicleData
+                    // so ActionSim aero (data.AirDensity) picks them up without ServerConfig reads per tick.
+                    AutoCore.Game.Physics.Vehicle.HkVehicleDataCache.BuildFromCloneBases(
+                        WADLoader.CloneBases,
+                        AutoCore.Game.Diagnostics.ServerConfig.Gravity,
+                        AutoCore.Game.Diagnostics.ServerConfig.AirDensityOverride);
                 }
                 else
                 {

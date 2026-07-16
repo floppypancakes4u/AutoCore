@@ -45,8 +45,14 @@ public struct PathStepResult
     /// <summary>Client sharp-turn / drift-assist byte (vehicle+0x61c).</summary>
     public byte SharpTurn;
 
-    /// <summary>True when <see cref="Throttle"/>/<see cref="Steering"/> were set by soft path.</summary>
+    /// <summary>True when <see cref="Throttle"/>/<see cref="Steering"/> were set by soft path / physics / kinematic.</summary>
     public bool HasDriveInputs;
+
+    /// <summary>
+    /// Optional chassis angular velocity (rad/s) from the physics sim.
+    /// When set, <see cref="Entities.Vehicle.ApplyServerMove"/> prefers this over quat-delta estimate.
+    /// </summary>
+    public Vector3? AngularVelocity;
 }
 
 /// <summary>

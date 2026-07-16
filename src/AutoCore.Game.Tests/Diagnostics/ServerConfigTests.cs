@@ -3,15 +3,26 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace AutoCore.Game.Tests.Diagnostics;
 
 using AutoCore.Game.Diagnostics;
+using AutoCore.Game.Npc;
 
 [TestClass]
 public class ServerConfigTests
 {
     [TestInitialize]
-    public void SetUp() => ServerConfig.ResetToDefaults();
+    public void SetUp()
+    {
+        ServerConfig.ResetToDefaults();
+        NpcVehicleDriveController.Enabled = false;
+        SoftNpcPathMotion.Enabled = false;
+    }
 
     [TestCleanup]
-    public void TearDown() => ServerConfig.ResetToDefaults();
+    public void TearDown()
+    {
+        ServerConfig.ResetToDefaults();
+        NpcVehicleDriveController.Enabled = false;
+        SoftNpcPathMotion.Enabled = false;
+    }
 
     [TestMethod]
     public void Defaults_AreRetailSafe()
@@ -139,5 +150,37 @@ public class ServerConfigTests
         Assert.AreEqual(NpcVehicleControllerTier.Hard, ServerConfig.ControllerTier);
         Assert.AreEqual(60, ServerConfig.SubstepHz);
         Assert.IsNull(ServerConfig.AirDensityOverride);
+    }
+
+    [TestMethod]
+    public void ResolveVehicleMoverTier_PhysicsRequiresEnabledAndTier()
+    {
+        ServerConfig.ControllerTier = NpcVehicleControllerTier.Physics;
+        ServerConfig.NpcVehiclePhysicsEnabled = false;
+        Assert.AreEqual(NpcVehicleControllerTier.Hard, ServerConfig.ResolveVehicleMoverTier());
+
+        ServerConfig.NpcVehiclePhysicsEnabled = true;
+        Assert.AreEqual(NpcVehicleControllerTier.Physics, ServerConfig.ResolveVehicleMoverTier());
+    }
+
+    [TestMethod]
+    public void ResolveVehicleMoverTier_WireLeverMapsWhenConfigHard()
+    {
+        Assert.AreEqual(NpcVehicleControllerTier.Hard, ServerConfig.ResolveVehicleMoverTier());
+
+        NpcVehicleDriveController.Enabled = true;
+        Assert.AreEqual(NpcVehicleControllerTier.Kinematic, ServerConfig.ResolveVehicleMoverTier());
+
+        NpcVehicleDriveController.Enabled = false;
+        SoftNpcPathMotion.Enabled = true;
+        Assert.AreEqual(NpcVehicleControllerTier.Soft, ServerConfig.ResolveVehicleMoverTier());
+    }
+
+    [TestMethod]
+    public void ResolveVehicleMoverTier_ExplicitKinematicIgnoresSoftLever()
+    {
+        ServerConfig.ControllerTier = NpcVehicleControllerTier.Kinematic;
+        SoftNpcPathMotion.Enabled = true;
+        Assert.AreEqual(NpcVehicleControllerTier.Kinematic, ServerConfig.ResolveVehicleMoverTier());
     }
 }

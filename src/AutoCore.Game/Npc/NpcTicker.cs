@@ -2,6 +2,7 @@ namespace AutoCore.Game.Npc;
 
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.Constants;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
 using AutoCore.Game.Structures;
@@ -77,22 +78,44 @@ public static class NpcTicker
             // waypoint) are never "holding" per the check above, so arrival snapping still applies
             // even when the NPC happened to already be sitting on the waypoint.
             //
-            // Drive controller (opt-in) wins for vehicles only; otherwise legacy soft path.
-            // Foot creatures never use the vehicle drive controller.
-            if (NpcVehicleDriveController.Enabled && entity is Vehicle driveVehicle)
+            // Vehicle movers: ServerConfig tier (+ wire-lever back-compat). Foot creatures: soft/hard only.
+            if (entity is Vehicle driveVehicle)
             {
-                result = NpcVehicleDriveController.Apply(
-                    result,
-                    entity.Position,
-                    GetRotation(entity),
-                    ResolveSpeed(entity),
-                    dt,
-                    path,
-                    nowMs,
-                    GetVelocity(entity),
-                    npcAi.PathLaneOffset,
-                    map.MapData?.Heightfield,
-                    driveVehicle);
+                var tier = ServerConfig.ResolveVehicleMoverTier();
+                if (tier == NpcVehicleControllerTier.Physics)
+                {
+                    result = NpcVehiclePhysicsController.Apply(
+                        result, driveVehicle, path, nowMs, dt, map, npcAi);
+                }
+                else if (tier == NpcVehicleControllerTier.Kinematic)
+                {
+                    result = NpcVehicleDriveController.Apply(
+                        result,
+                        entity.Position,
+                        GetRotation(entity),
+                        ResolveSpeed(entity),
+                        dt,
+                        path,
+                        nowMs,
+                        GetVelocity(entity),
+                        npcAi.PathLaneOffset,
+                        map.MapData?.Heightfield,
+                        driveVehicle);
+                }
+                else if (tier == NpcVehicleControllerTier.Soft)
+                {
+                    result = SoftNpcPathMotion.Apply(
+                        result,
+                        entity.Position,
+                        GetRotation(entity),
+                        ResolveSpeed(entity),
+                        dt,
+                        path,
+                        nowMs,
+                        GetVelocity(entity),
+                        npcAi.PathLaneOffset);
+                }
+                // Hard: leave NpcPathFollower result
             }
             else if (SoftNpcPathMotion.Enabled)
             {
@@ -114,11 +137,23 @@ public static class NpcTicker
             {
                 // Holding on a waypoint: re-snap Y (soft wait parks at previous XYZ) and keep
                 // pose dirty so TNL does not drop the ghost from the non-zero update list.
-                var grounded = SnapToTerrain(map, holdVehicle.Position);
-                if (MathF.Abs(grounded.Y - holdVehicle.Position.Y) > 1e-3f)
-                    holdVehicle.ApplyServerMove(grounded, holdVehicle.Rotation, holdVehicle.Velocity, 0f);
-                else
+                // Physics tier already zeroed thr/sharp via controller; still dirty the ghost.
+                if (result.HasDriveInputs)
+                {
+                    holdVehicle.ApplyServerMove(
+                        holdVehicle.Position, holdVehicle.Rotation, default, 0f,
+                        result.Throttle, result.Steering, result.SharpTurn,
+                        result.AngularVelocity);
                     holdVehicle.Ghost?.SetMaskBits(GhostObject.PositionMask);
+                }
+                else
+                {
+                    var grounded = SnapToTerrain(map, holdVehicle.Position);
+                    if (MathF.Abs(grounded.Y - holdVehicle.Position.Y) > 1e-3f)
+                        holdVehicle.ApplyServerMove(grounded, holdVehicle.Rotation, holdVehicle.Velocity, 0f);
+                    else
+                        holdVehicle.Ghost?.SetMaskBits(GhostObject.PositionMask);
+                }
             }
 
             if (result.FireReactionCoid > 0)
@@ -178,9 +213,9 @@ public static class NpcTicker
 
     private static void ApplyMove(ClonedObjectBase entity, PathStepResult result, float dt)
     {
-        // Drive controller already multi-samples the heightfield + clearance into NewPosition.
+        // Kinematic drive controller / physics sim already author a grounded pose.
         // Re-snapping to a single TGA sample would flatten pitch stance and strip ride height.
-        var pos = (NpcVehicleDriveController.Enabled && entity is Vehicle && result.HasDriveInputs)
+        var pos = (entity is Vehicle && result.HasDriveInputs)
             ? result.NewPosition
             : SnapToTerrain(entity.Map, result.NewPosition);
         // Keep target position grounded for foot creatures (client pose target).
@@ -189,13 +224,13 @@ public static class NpcTicker
         switch (entity)
         {
             case Vehicle vehicle:
-                // Pack MoveToTarget3DPoint-style thr/steer when soft path / drive controller set them
-                // so the client VehicleAction spins wheels and steers (ghost +0x614/+0x618).
+                // Pack thr/steer/sharp so client VehicleAction spins wheels (ghost +0x614/+0x618).
                 if (result.HasDriveInputs)
                 {
                     vehicle.ApplyServerMove(
                         pos, result.Rotation, result.Velocity, dt,
-                        result.Throttle, result.Steering, result.SharpTurn);
+                        result.Throttle, result.Steering, result.SharpTurn,
+                        result.AngularVelocity);
                 }
                 else
                 {

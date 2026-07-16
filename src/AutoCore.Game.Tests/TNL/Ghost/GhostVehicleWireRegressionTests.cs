@@ -12,6 +12,7 @@ using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
 using AutoCore.Game.Npc;
+using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL;
 using AutoCore.Game.TNL.Ghost;
@@ -657,6 +658,63 @@ public class GhostVehicleWireRegressionTests
         Assert.AreEqual((byte)1, firing, "Firing must be the FIRST pose flag byte (client weapon-enable set).");
         Assert.AreEqual((byte)0, drivingFlags, "VehicleFlags must be the SECOND pose flag byte.");
         Assert.AreEqual(0, drivingFlags & 0x1, "Handbreak bit (0x1) must be clear — the fire bit must not leak into the handbrake input.");
+    }
+
+    /// <summary>
+    /// Phase 6: intentional sharp/handbrake (VehicleFlags.Handbreak) packs as byte #2 bit0 while
+    /// Firing remains byte #1. Full angVel XYZ and thr/steer follow.
+    /// </summary>
+    [TestMethod]
+    public void PackUpdate_NonInitial_Pose_SharpHandbreakAndAngVelAndDriveAxes()
+    {
+        var vehicle = CreateVehicleWithMap(20_071);
+        vehicle.Position = new Vector3(1, 2, 3);
+        vehicle.Rotation = new Quaternion(0, 0, 0, 1);
+        vehicle.Firing = 0;
+        vehicle.ApplySharpTurnToVehicleFlags(1); // sharp → Handbreak
+        vehicle.Acceleration = -0.75f; // retail thr
+        vehicle.Steering = 0.5f;
+        // Stamp angVel via test hook if available; otherwise ApplyServerMove with sim omega.
+        vehicle.ApplyServerMove(
+            vehicle.Position,
+            vehicle.Rotation,
+            new Vector3(0, 0, 4),
+            dt: 1f / 60f,
+            driveThrottle: -0.75f,
+            driveSteering: 0.5f,
+            sharpTurn: 1,
+            angularVelocity: new Vector3(0.11f, 0.22f, 0.33f));
+
+        var stream = PackUpdateNonInitial(vehicle, GhostObject.PositionMask);
+
+        for (var i = 0; i < 15; ++i)
+            Assert.IsFalse(stream.ReadFlag());
+        Assert.IsTrue(stream.ReadFlag()); // Position
+
+        for (var i = 0; i < 3; ++i)
+            stream.Read(out float _); // pos
+        for (var i = 0; i < 4; ++i)
+            stream.Read(out float _); // rot
+        stream.Read(out float vx);
+        stream.Read(out float vy);
+        stream.Read(out float vz);
+        stream.Read(out float awx);
+        stream.Read(out float awy);
+        stream.Read(out float awz);
+
+        Assert.AreEqual(0.11f, awx, 1e-4f);
+        Assert.AreEqual(0.22f, awy, 1e-4f);
+        Assert.AreEqual(0.33f, awz, 1e-4f);
+
+        stream.Read(out byte firing);
+        stream.Read(out byte drivingFlags);
+        Assert.AreEqual((byte)0, firing);
+        Assert.AreEqual((byte)VehicleMovedFlags.Handbreak, (byte)(drivingFlags & 0x1));
+
+        var thr = stream.ReadSignedFloat(6);
+        var steer = stream.ReadSignedFloat(6);
+        Assert.AreEqual(-0.75f, thr, 0.05f); // 6-bit quantize
+        Assert.AreEqual(0.5f, steer, 0.05f);
     }
 
     [TestMethod]

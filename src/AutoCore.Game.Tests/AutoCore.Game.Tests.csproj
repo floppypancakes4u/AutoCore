@@ -36,4 +36,10 @@
     <ProjectReference Include="..\AutoCore.Sector\AutoCore.Sector.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Physics\oracles\**\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

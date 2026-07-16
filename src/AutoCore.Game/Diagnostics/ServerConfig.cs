@@ -42,7 +42,9 @@ public static class ServerConfig
     // --- Defaults (retail-safe: new physics off, legacy hard mover) ---
     public const bool DefaultNpcVehiclePhysicsEnabled = false;
     public const NpcVehicleControllerTier DefaultControllerTier = NpcVehicleControllerTier.Hard;
-    public const int DefaultSubstepHz = 60;      // placeholder until Phase 0.1 REs the client step rate
+    // Placeholder fixed-Hz default. Client StepTo (0x4d6c80) uses variable frameDt/N with a ~30 Hz cap
+    // (N = floor(frameDt·29.9999998)+1, substep_dt = frameDt/N; see HkVehicleSubstep). Not the retail rule.
+    public const int DefaultSubstepHz = 60;
     public const float DefaultGravity = -9.81f;  // Y-up world gravity; refined in Phase 0
     public const bool DefaultDebugLogging = false;
 
@@ -54,7 +56,10 @@ public static class ServerConfig
     /// <summary>Which mover NPC vehicles use. <see cref="NpcVehicleControllerTier.Physics"/> also requires <see cref="NpcVehiclePhysicsEnabled"/>.</summary>
     public static NpcVehicleControllerTier ControllerTier { get; set; } = DefaultControllerTier;
 
-    /// <summary>Fixed physics substep rate (Hz). Clamped to [1, 480]. Fed a variable server dt via an accumulator.</summary>
+    /// <summary>
+    /// Placeholder fixed physics substep rate (Hz). Clamped to [1, 480].
+    /// Client retail uses frameDt/N via StepTo 0x4d6c80 (max ~1/30 s per substep), not a fixed Hz — see HkVehicleSubstep.
+    /// </summary>
     public static int SubstepHz
     {
         get => _substepHz;
@@ -79,6 +84,30 @@ public static class ServerConfig
         Gravity = DefaultGravity;
         AirDensityOverride = null;
         DebugLogging = DefaultDebugLogging;
+    }
+
+    /// <summary>
+    /// Effective vehicle mover for <c>NpcTicker</c>. Physics only when both
+    /// <see cref="NpcVehiclePhysicsEnabled"/> and <see cref="ControllerTier"/> are Physics.
+    /// Wire levers map onto kinematic/soft when ServerConfig stays Hard (back-compat).
+    /// </summary>
+    public static NpcVehicleControllerTier ResolveVehicleMoverTier()
+    {
+        if (NpcVehiclePhysicsEnabled && ControllerTier == NpcVehicleControllerTier.Physics)
+            return NpcVehicleControllerTier.Physics;
+
+        if (ControllerTier == NpcVehicleControllerTier.Kinematic)
+            return NpcVehicleControllerTier.Kinematic;
+        if (ControllerTier == NpcVehicleControllerTier.Soft)
+            return NpcVehicleControllerTier.Soft;
+
+        // Hard (or physics tier with enabled=false): honor legacy wire levers for tests/A/B.
+        if (AutoCore.Game.Npc.NpcVehicleDriveController.Enabled)
+            return NpcVehicleControllerTier.Kinematic;
+        if (AutoCore.Game.Npc.SoftNpcPathMotion.Enabled)
+            return NpcVehicleControllerTier.Soft;
+
+        return NpcVehicleControllerTier.Hard;
     }
 
     /// <summary>Load YAML from the default / env path (launcher or sector content root).</summary>

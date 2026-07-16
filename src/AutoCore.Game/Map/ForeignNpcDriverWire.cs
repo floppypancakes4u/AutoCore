@@ -46,6 +46,9 @@ public static class ForeignNpcDriverWire
         if (driver == null || driver.CBID <= 0)
             return false;
 
+        // Chassis must carry a wheelset so client SetWheelset / VehicleAction can animate thr/steer.
+        vehicle.EnsureDefaultWheelSetForWire();
+
         packet = new CreateCreaturePacket();
         driver.WriteToPacket(packet);
         packet.CoidCurrentVehicle = vehicle.ObjectId.Coid;
@@ -86,6 +89,10 @@ public static class ForeignNpcDriverWire
         var driver = vehicle.Owner.GetAsCreature();
         packets.Add(new DestroyObjectPacket(vehicle.ObjectId));
         packets.Add(new DestroyObjectPacket(driver.ObjectId));
+
+        // Phase 6: re-ensure wheelset before recreate so nested CreateWheelSet is never CBID 0
+        // (client nullWheels race — thr/steer no-op without VehicleAction + wheels).
+        vehicle.EnsureDefaultWheelSetForWire();
 
         var createVehicle = new CreateVehiclePacket();
         vehicle.WriteToPacket(createVehicle);

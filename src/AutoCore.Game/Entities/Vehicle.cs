@@ -12,11 +12,13 @@ using AutoCore.Database.Char.Models;
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.Combat;
 using AutoCore.Game.Constants;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
 using AutoCore.Game.Npc;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.Physics.Vehicle;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL.Ghost;
 using AutoCore.Utils;
@@ -45,6 +47,12 @@ public class Vehicle : SimpleObject
 
     /// <summary>Server-side AI runtime state; null for player vehicles.</summary>
     public NpcAiState NpcAi { get; set; }
+
+    /// <summary>
+    /// Per-vehicle Havok physics state (Phase 5). Lazy; only for server-owned NPC vehicles
+    /// when the physics tier is enabled. Null for players / until first physics step.
+    /// </summary>
+    public VehiclePhysicsInstance PhysicsInstance { get; private set; }
     #endregion
 
     public Armor Armor { get; private set; }
@@ -642,7 +650,7 @@ public class Vehicle : SimpleObject
     /// the previous pose so client interpolation is less steppy (movement smoothness M2).
     /// </summary>
     public void ApplyServerMove(Vector3 position, Quaternion rotation, Vector3 velocity, float dt = 0f)
-        => ApplyServerMove(position, rotation, velocity, dt, driveThrottle: null, driveSteering: null, sharpTurn: null);
+        => ApplyServerMove(position, rotation, velocity, dt, driveThrottle: null, driveSteering: null, sharpTurn: null, angularVelocity: null);
 
     /// <summary>
     /// Server pose update with optional explicit drive axes (client <c>MoveToTarget3DPoint</c> /
@@ -657,6 +665,21 @@ public class Vehicle : SimpleObject
         float? driveThrottle,
         float? driveSteering,
         byte? sharpTurn)
+        => ApplyServerMove(position, rotation, velocity, dt, driveThrottle, driveSteering, sharpTurn, angularVelocity: null);
+
+    /// <summary>
+    /// Server pose update with optional sim angular velocity (physics tier).
+    /// When <paramref name="angularVelocity"/> is set, it is used instead of quat-delta estimate.
+    /// </summary>
+    public void ApplyServerMove(
+        Vector3 position,
+        Quaternion rotation,
+        Vector3 velocity,
+        float dt,
+        float? driveThrottle,
+        float? driveSteering,
+        byte? sharpTurn,
+        Vector3? angularVelocity)
     {
         if (dt > 0f && dt < 1f)
         {
@@ -665,7 +688,7 @@ public class Vehicle : SimpleObject
             var dYaw = NormalizeRadians(nextYaw - prevYaw);
             // Full angular velocity (pitch/roll too) so client soft-buffer integrate keeps slope tilt
             // between packs (FUN_0053eb90 uses angVel × dt on the rotation buffer).
-            AngularVelocity = EstimateAngularVelocity(Rotation, rotation, dt);
+            AngularVelocity = angularVelocity ?? EstimateAngularVelocity(Rotation, rotation, dt);
 
             if (driveSteering.HasValue)
                 Steering = Math.Clamp(driveSteering.Value, -1f, 1f);
@@ -678,15 +701,14 @@ public class Vehicle : SimpleObject
                 Acceleration = Math.Clamp(driveThrottle.Value, -1f, 1f);
             else
                 Acceleration = ResolvePathThrottle(prevSpeed, nextSpeed, MathF.Abs(dYaw) / Math.Max(dt, 1e-3f));
-
-            // sharpTurn maps to client vehicle+0x61c via VehicleFlags/handbrake packing history —
-            // do not set Handbrake (VehicleFlags bit0); thr/steer alone drive wheel visuals when
-            // VehicleAction exists. Reserved for a dedicated wire field later.
-            _ = sharpTurn;
         }
         else
         {
-            AngularVelocity = default;
+            // Prefer sim angVel when supplied even if dt is out of the estimate window.
+            if (angularVelocity.HasValue)
+                AngularVelocity = angularVelocity.Value;
+            else
+                AngularVelocity = default;
         }
 
         if (driveThrottle.HasValue)
@@ -694,12 +716,72 @@ public class Vehicle : SimpleObject
         if (driveSteering.HasValue)
             Steering = Math.Clamp(driveSteering.Value, -1f, 1f);
 
+        // Phase 6: sharp/handbrake-assist → VehicleFlags.Handbreak → ghost byte #2 bit0 →
+        // client vehicle+0x61c (calcWheelTorque rear cut + PushDriveAxes). Must not confuse
+        // with Firing (ghost byte #1). Only touch the bit when the mover supplies a value.
+        if (sharpTurn.HasValue)
+            ApplySharpTurnToVehicleFlags(sharpTurn.Value);
+
         Position = position;
         Rotation = rotation;
         Velocity = velocity;
 
         if (!ShouldSuppressPatrolPoseGhost())
             Ghost?.SetMaskBits(GhostObject.PositionMask);
+    }
+
+    /// <summary>
+    /// Maps AI/physics sharp byte to <see cref="VehicleMovedFlags.Handbreak"/> for ghost pack.
+    /// Non-zero → set bit; zero → clear bit (path NPCs must not stick handbrake on).
+    /// </summary>
+    internal void ApplySharpTurnToVehicleFlags(byte sharpTurn)
+    {
+        if (sharpTurn != 0)
+            VehicleFlags |= VehicleMovedFlags.Handbreak;
+        else
+            VehicleFlags &= ~VehicleMovedFlags.Handbreak;
+    }
+
+    /// <summary>
+    /// Lazy-create <see cref="PhysicsInstance"/> from CBID / clonebase. Returns null if no
+    /// vehicle data can be resolved (fail closed on the ticker — never throw).
+    /// </summary>
+    public VehiclePhysicsInstance GetOrCreatePhysicsInstance()
+    {
+        if (PhysicsInstance != null)
+            return PhysicsInstance;
+
+        var cbid = CBID;
+        HkVehicleData data = null;
+        if (cbid > 0 && HkVehicleDataCache.TryGet(cbid, out var cached))
+            data = cached;
+        else if (CloneBaseObject is CloneBaseVehicle cv)
+            data = HkVehicleDataCache.GetOrCompute(cbid > 0 ? cbid : 0, cv.VehicleSpecific, ServerConfig.Gravity);
+
+        if (data == null)
+            return null;
+
+        PhysicsInstance = new VehiclePhysicsInstance(data);
+        SyncPhysicsInstanceFromEntity();
+        return PhysicsInstance;
+    }
+
+    /// <summary>Drop sim state (despawn / teleport / death). Next physics step recreates.</summary>
+    public void ClearPhysicsInstance() => PhysicsInstance = null;
+
+    /// <summary>Copy entity pose/velocity into the physics body (spawn / resync).</summary>
+    public void SyncPhysicsInstanceFromEntity()
+    {
+        if (PhysicsInstance == null)
+            return;
+        var r = Rotation;
+        PhysicsInstance.SetPose(Position.X, Position.Y, Position.Z, r.X, r.Y, r.Z, r.W);
+        PhysicsInstance.Body.LinVelX = Velocity.X;
+        PhysicsInstance.Body.LinVelY = Velocity.Y;
+        PhysicsInstance.Body.LinVelZ = Velocity.Z;
+        PhysicsInstance.Body.AngVelX = AngularVelocity.X;
+        PhysicsInstance.Body.AngVelY = AngularVelocity.Y;
+        PhysicsInstance.Body.AngVelZ = AngularVelocity.Z;
     }
 
     /// <summary>

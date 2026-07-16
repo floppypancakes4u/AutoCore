@@ -5,17 +5,27 @@
 **Plan:** `~/.claude/plans/cheerful-swimming-reef.md` · **Reference:** `docs/NPCDriving.md`
 
 This directory holds the Phase 0 reverse-engineering evidence for the bit-exact server-side Havok
-vehicle physics port. All 14 subsystems below were RE'd (read-only) in one parallel pass.
+vehicle physics port, plus Phase 2–4 port status.
 
 ---
 
 ## Status
 
-- **DONE:** Worktree setup; Phase 1 `serverConfig.yaml` scaffold (committed, 11 tests green);
-  **Phase 0 RE — all 14 evidence files below.**
-- **NOT STARTED:** Phase 2 (`HkVehicleData`) onward — the actual C# port.
-- **Resume at:** Phase 2 (build `HkVehicleData` from `VehicleSpecific` using `setup-field-mapping.md`),
-  then Phase 3 subsystems in the order in the plan.
+| Phase | Status | Notes |
+|-------|--------|-------|
+| **0** RE evidence | **DONE** | All 14 evidence files below + large `verified/` re-gate set |
+| **1** ServerConfig scaffold | **DONE** | Config/substep knobs; physics OFF by default |
+| **2** `HkVehicleData` | **DONE** | Setup + CBID cache + unit mass/RVInertia |
+| **3** Subsystems | **DONE** | Reduced friction residuals documented; see `PHASE_2_4_COMPLETION.md` |
+| **4** Integrator + orchestrator | **DONE** | `VehicleActionSim` / `VehiclePhysicsInstance` + characterization tests |
+| **5** NPC controller + ticker | **DONE** | `NpcVehiclePhysicsController` + tier resolve; opt-in only |
+| **6** Ghost streaming | **DONE** | sharp→Handbreak, sim angVel, thr/steer pack, wheelset on foreign create |
+| **7** Live verify | **NOT STARTED** | Needs approved Launcher A/B |
+
+**Gate doc:** [`PHASE_2_4_COMPLETION.md`](PHASE_2_4_COMPLETION.md)  
+**Port rules:** [`PORTING_RULES.md`](PORTING_RULES.md)  
+
+**Resume at:** Phase 7 live A/B (after approval), or friction/geometry fidelity if handling looks wrong.
 
 ---
 
@@ -81,18 +91,36 @@ vehicle physics port. All 14 subsystems below were RE'd (read-only) in one paral
 - Mass/inertia: RVInertia Roll/Pitch/Yaw→axis pairing and COM-modifier apply site (bulk-copied struct).
 - Engine: whether the position-indexed LUT constant-factor is intentional (vs terrain traction map).
 - Brake: exact `hkpVehicleDefaultBrake` runtime call site (likely vestigial).
-- Wheel-collide: client casts against **all** Havok bodies; the server port will be **terrain-heightfield
-  only** (`MapTerrainHeightfield`) unless collision geometry is added — a known fidelity gap.
+- Wheel-collide: retail **client + server** cast against **full Havok body geometry**. Phase-2 server starts
+  **terrain-heightfield only** (`MapTerrainHeightfield`); full geometry lands later via `IVehicleCollisionQuery`.
+- Wheel `+0x88` drive scale: exact writer site still open; port maps from `TorqueRatio` provisionally.
 
 ---
 
+## Porting process (mandatory)
+
+See **`PORTING_RULES.md`**. Every C# subsystem must re-verify its client function via Ghidra
+(`decompile_function` / `batch_decompile` + `read_memory` for constants; `emulate_function` when
+practical). Phase 0 markdown is a map — **the binary wins on conflict**. Full wheel-collide geometry
+(retail client+server had it) is **planned** — plug point: `IVehicleCollisionQuery`.
+
+## Production layout (Phase 2–4)
+
+Under `src/AutoCore.Game/Physics/Vehicle/` (representative):
+
+- **Setup:** `HkVehicleData`, `HkVehicleDataCache`, `HkWheelSetup`
+- **Subsystems:** `HkVehicleSubstep`, `HkVehicleSteering`, `HkVehicleSuspension`, `HkVehicleWheelCollide`,
+  `HkVehicleEngine`, `TorqueCurve2D`, `HkVehicleBrake`, `HkVehicleAerodynamics`, `HkVehicleFrictionSolver`,
+  `HkVehicleVelocityDamper`, `HkVehicleAirStabilization`, `HkVehicleTransmission`, `HkVehicleWheelKinematics`
+- **Orchestrator:** `HkRigidBody`, `VehicleActionSim`, `VehiclePhysicsInstance`
+- **Collision:** `IVehicleCollisionQuery`, `TerrainHeightfieldCollisionQuery`
+- **Drive axes (pure):** `VehicleDriveController` (`0x4fc650`)
+- **Phase 5 wire:** `Npc/NpcVehiclePhysicsController.cs` + `NpcTicker` tier branch +
+  `Vehicle.PhysicsInstance` lifecycle
+
+Tests: `src/AutoCore.Game.Tests/Physics/` + `NpcAi/NpcVehiclePhysicsControllerTests.cs`.
+
 ## Next actions (resume here)
 
-1. **Phase 2:** `src/AutoCore.Game/Physics/Vehicle/HkVehicleData.cs` — immutable per-CBID setup from
-   `VehicleSpecific` per `setup-field-mapping.md` (mass=1.0, inertia=RVInertia, gravity −9.81, basis
-   +Z fwd/+X right/+Y up, per-wheel geometry, all component params). Cache by CBID like
-   `VehicleGroundMetricsCache`. TDD with a synthetic `VehicleSpecific`.
-2. **Phase 3:** subsystem modules (WheelCollide→Suspension→Engine→Brake→Steering→Aero→Friction→AVD),
-   each TDD against the golden vectors / formulas in this folder.
-3. **Phase 4:** `HkRigidBody` integrator + `VehicleActionSim` (applyAction order) + fixed-step accumulator.
-4. **Phases 5–7:** controller port + `NpcTicker` wiring → ghost streaming → verification.
+1. **Phases 5–6 DONE** (opt-in physics tier + ghost thr/steer/sharp/angVel).
+2. **Phase 7:** approved live Launcher A/B; full friction Jacobian / world geometry if handling gaps show up.

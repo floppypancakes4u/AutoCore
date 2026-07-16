@@ -1,0 +1,72 @@
+{
+  "source": "docs/reconstruction/physics/drive-controller-spec.md §5",
+  "symbol": "CVOGVehicle::MoveToTarget3DPoint",
+  "address": "0x004fc650",
+  "config": {
+    "position": [ 0.0, 0.0, 0.0 ],
+    "right": [ 1.0, 0.0, 0.0 ],
+    "forward": [ 0.0, 0.0, 1.0 ],
+    "acceptDist": 3.0,
+    "cruiseScale": 1.0,
+    "allowReverse": true,
+    "steerLockClear": true
+  },
+  "vectors": [
+    {
+      "id": 1,
+      "name": "straight-ahead",
+      "inputs": {
+        "aim": [ 0.0, 0.0, 20.0 ],
+        "velocity": [ 0.0, 0.0, 10.0 ]
+      },
+      "expected": {
+        "throttle": -0.6667,
+        "steer": 0.0,
+        "sharp": 0
+      },
+      "notes": "distXZ=20 (<30) → thr=-1·20/30; deadband + fAlign≥0 → steer 0; speed 10≤15 → sharp 0"
+    },
+    {
+      "id": 2,
+      "name": "hard-left-45",
+      "inputs": {
+        "aim": [ -14.0, 0.0, 14.0 ],
+        "velocity": [ 0.0, 0.0, 8.0 ]
+      },
+      "expected": {
+        "throttle": -0.660,
+        "steer": 1.0,
+        "sharp": 0
+      },
+      "notes": "distXZ≈19.799 → thr=-19.799/30; steer raw +1.414 clamp +1; speed 8≤15 → sharp 0"
+    },
+    {
+      "id": 3,
+      "name": "facing-away-reverse",
+      "inputs": {
+        "aim": [ 0.0, 0.0, -20.0 ],
+        "velocity": [ 0.0, 0.0, 0.0 ]
+      },
+      "expected": {
+        "throttle": 1.0,
+        "steer": -1.0,
+        "sharp": 0
+      },
+      "notes": "fAlign=-1 < -0.4 + allowReverse → base +1; speed≤5 → thr +1; deadband spin lateral≤0 → steer -1"
+    },
+    {
+      "id": 4,
+      "name": "high-speed-sharp-right",
+      "inputs": {
+        "aim": [ 20.0, 0.0, 10.0 ],
+        "velocity": [ 0.0, 0.0, 20.0 ]
+      },
+      "expected": {
+        "throttle": -0.745,
+        "steer": -1.0,
+        "sharp": 1
+      },
+      "notes": "distXZ≈22.361 → thr=-22.361/30; steer raw -1.789 clamp -1; speed>15 and |lat|>0.7 → sharp 1"
+    }
+  ]
+}

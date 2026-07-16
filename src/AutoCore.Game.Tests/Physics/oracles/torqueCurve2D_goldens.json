@@ -1,0 +1,61 @@
+{
+  "source": "docs/reconstruction/physics/engine-torque-spec.md §2",
+  "symbol": "VehicleEngine::torqueCurve2D",
+  "address": "0x4a9750",
+  "config": {
+    "rows": 4,
+    "cols": 4,
+    "rangeScale": 100.0,
+    "factors": [ 0.10, 0.20, 0.40, 0.60, 1.00, 1.10, 1.20, 1.60 ],
+    "lut": [
+      0, 1, 2, 3,
+      4, 5, 6, 7,
+      0, 1, 2, 3,
+      4, 5, 6, 7
+    ]
+  },
+  "vectors": [
+    {
+      "id": 1,
+      "name": "mid-high",
+      "inputs": { "enabled": true, "rpm": 240.0, "throttle": 350.0 },
+      "expected": 1.60,
+      "notes": "xbin=1, ybin=3, linIdx=7, byte&7=7 → factors[7]"
+    },
+    {
+      "id": 2,
+      "name": "grid-origin",
+      "inputs": { "enabled": true, "rpm": 50.0, "throttle": 50.0 },
+      "expected": 0.10,
+      "notes": "xbin=0, ybin=0 → factors[0]"
+    },
+    {
+      "id": 3,
+      "name": "mid-grid",
+      "inputs": { "enabled": true, "rpm": 250.0, "throttle": 250.0 },
+      "expected": 0.40,
+      "notes": "xbin=2, ybin=2, linIdx=10, byte&7=2 → factors[2]"
+    },
+    {
+      "id": 4,
+      "name": "rpm-below-base-trunc-to-zero",
+      "inputs": { "enabled": true, "rpm": 30.0, "throttle": 350.0 },
+      "expected": 0.60,
+      "notes": "rpm<base still xbin=0 (trunc-to-zero), ybin=3 → factors[3]"
+    },
+    {
+      "id": 5,
+      "name": "xbin-out-of-range",
+      "inputs": { "enabled": true, "rpm": 600.0, "throttle": 350.0 },
+      "expected": 0.10,
+      "notes": "xbin≥rows → out-of-range → factors[0]"
+    },
+    {
+      "id": 6,
+      "name": "engine-disabled",
+      "inputs": { "enabled": false, "rpm": 240.0, "throttle": 350.0 },
+      "expected": 1.00,
+      "notes": "enabled==0 → 1.0 regardless of rpm/throttle"
+    }
+  ]
+}
