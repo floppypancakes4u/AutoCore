@@ -756,7 +756,14 @@ public class Vehicle : SimpleObject
         if (cbid > 0 && HkVehicleDataCache.TryGet(cbid, out var cached))
             data = cached;
         else if (CloneBaseObject is CloneBaseVehicle cv)
-            data = HkVehicleDataCache.GetOrCompute(cbid > 0 ? cbid : 0, cv.VehicleSpecific, ServerConfig.Gravity);
+        {
+            // Cache miss: inject SimpleObjectSpecific.Mass (rlMass) — same source as WAD cache build.
+            data = HkVehicleDataCache.GetOrCompute(
+                cbid > 0 ? cbid : 0,
+                cv.VehicleSpecific,
+                ServerConfig.Gravity,
+                mass: cv.SimpleObjectSpecific.Mass);
+        }
 
         if (data == null)
             return null;

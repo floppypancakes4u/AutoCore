@@ -67,8 +67,9 @@ public class HkVehicleDataTests
     };
 
     [TestMethod]
-    public void FromVehicleSpecific_UnitMassAndInertia()
+    public void FromVehicleSpecific_DefaultMass_IsUnitMassAndInertiaEqualsRVInertia()
     {
+        // Explicit unit-mass path (tests / missing SimpleObjectSpecific.Mass).
         var d = HkVehicleData.FromVehicleSpecific(SyntheticCar(), cbid: 1001);
         Assert.AreEqual(1f, d.Mass);
         Assert.AreEqual(1f, d.InvMass);
@@ -76,6 +77,56 @@ public class HkVehicleDataTests
         Assert.AreEqual(1.2f, d.InertiaPitch, 1e-5f);
         Assert.AreEqual(1.3f, d.InertiaYaw, 1e-5f);
         Assert.AreEqual(1001, d.Cbid);
+    }
+
+    [TestMethod]
+    public void FromVehicleSpecific_RealMass_ScalesMassAndInertia()
+    {
+        // Live CE (asset-mass-findings.md): Callisto X mass=1500, RVInertia Roll/Pitch/Yaw = 1/3/3
+        // → I = mass × RVInertia = [1500, 4500, 4500] on (Roll, Pitch, Yaw).
+        var vs = SyntheticCar();
+        vs.RVInertiaRoll = 1f;
+        vs.RVInertiaPitch = 3f;
+        vs.RVInertiaYaw = 3f;
+        const float mass = 1500f;
+
+        var d = HkVehicleData.FromVehicleSpecific(vs, cbid: 1500, mass: mass);
+
+        Assert.AreEqual(mass, d.Mass, 1e-5f);
+        Assert.AreEqual(1f / mass, d.InvMass, 1e-7f);
+        Assert.AreEqual(mass * 1f, d.InertiaRoll, 1e-3f);
+        Assert.AreEqual(mass * 3f, d.InertiaPitch, 1e-3f);
+        Assert.AreEqual(mass * 3f, d.InertiaYaw, 1e-3f);
+    }
+
+    [TestMethod]
+    public void FromVehicleSpecific_NonPositiveMass_FallsBackToUnitMass()
+    {
+        var vs = SyntheticCar();
+        foreach (var bad in new[] { 0f, -1f, float.NaN })
+        {
+            var d = HkVehicleData.FromVehicleSpecific(vs, mass: bad);
+            Assert.AreEqual(1f, d.Mass, $"mass arg {bad} should fall back to UnitMass");
+            Assert.AreEqual(1f, d.InvMass, 1e-5f);
+            Assert.AreEqual(1.1f, d.InertiaRoll, 1e-5f);
+        }
+    }
+
+    [TestMethod]
+    public void FromVehicleSpecific_MassScalesInertiaRatio_Linearly()
+    {
+        var vs = SyntheticCar();
+        vs.RVInertiaRoll = 1f;
+        vs.RVInertiaPitch = 2f;
+        vs.RVInertiaYaw = 3f;
+
+        var unit = HkVehicleData.FromVehicleSpecific(vs, mass: 1f);
+        var heavy = HkVehicleData.FromVehicleSpecific(vs, mass: 2900f); // Astimiax-class weight
+
+        Assert.AreEqual(unit.InertiaRoll * 2900f, heavy.InertiaRoll, 1e-2f);
+        Assert.AreEqual(unit.InertiaPitch * 2900f, heavy.InertiaPitch, 1e-2f);
+        Assert.AreEqual(unit.InertiaYaw * 2900f, heavy.InertiaYaw, 1e-2f);
+        Assert.AreEqual(1f / 2900f, heavy.InvMass, 1e-7f);
     }
 
     [TestMethod]
@@ -435,6 +486,59 @@ public class HkVehicleDataTests
         Assert.AreEqual(1001, data.Cbid);
         Assert.AreEqual(-12.5f, data.GravityY, 1e-5f);
         Assert.AreEqual(4, data.WheelCount);
+    }
+
+    [TestMethod]
+    public void Cache_BuildFromCloneBases_ThreadsSimpleObjectMass()
+    {
+        // SimpleObjectSpecific.Mass (rlMass) is the live chassis RB mass (asset-mass-findings.md).
+        var cv = (CloneBaseVehicle)FormatterServices.GetUninitializedObject(typeof(CloneBaseVehicle));
+        cv.VehicleSpecific = SyntheticCar();
+        cv.VehicleSpecific.RVInertiaRoll = 1f;
+        cv.VehicleSpecific.RVInertiaPitch = 3f;
+        cv.VehicleSpecific.RVInertiaYaw = 3f;
+        cv.CloneBaseSpecific = new CloneBaseSpecific { CloneBaseId = 1500 };
+        cv.SimpleObjectSpecific = new SimpleObjectSpecific { Mass = 1500f };
+
+        Assert.AreEqual(1, HkVehicleDataCache.BuildFromCloneBases(
+            new Dictionary<int, CloneBase> { [1500] = cv }));
+        Assert.IsTrue(HkVehicleDataCache.TryGet(1500, out var data));
+        Assert.AreEqual(1500f, data.Mass, 1e-5f);
+        Assert.AreEqual(1500f, data.InertiaRoll, 1e-3f);
+        Assert.AreEqual(4500f, data.InertiaPitch, 1e-3f);
+        Assert.AreEqual(4500f, data.InertiaYaw, 1e-3f);
+    }
+
+    [TestMethod]
+    public void Cache_BuildFromCloneBases_MissingOrZeroMass_FallsBackToUnit()
+    {
+        var cv = (CloneBaseVehicle)FormatterServices.GetUninitializedObject(typeof(CloneBaseVehicle));
+        cv.VehicleSpecific = SyntheticCar();
+        cv.CloneBaseSpecific = new CloneBaseSpecific { CloneBaseId = 1 };
+        cv.SimpleObjectSpecific = new SimpleObjectSpecific { Mass = 0f };
+
+        Assert.AreEqual(1, HkVehicleDataCache.BuildFromCloneBases(
+            new Dictionary<int, CloneBase> { [1] = cv }));
+        Assert.IsTrue(HkVehicleDataCache.TryGet(1, out var data));
+        Assert.AreEqual(1f, data.Mass, 1e-5f);
+    }
+
+    [TestMethod]
+    public void Cache_GetOrCompute_AcceptsMassOnMiss()
+    {
+        var vs = SyntheticCar();
+        vs.RVInertiaRoll = 2f;
+        vs.RVInertiaPitch = 1f;
+        vs.RVInertiaYaw = 2f;
+        var data = HkVehicleDataCache.GetOrCompute(2900, vs, mass: 2900f);
+        Assert.AreEqual(2900f, data.Mass, 1e-5f);
+        Assert.AreEqual(5800f, data.InertiaRoll, 1e-2f);
+        Assert.AreEqual(2900f, data.InertiaPitch, 1e-2f);
+        Assert.AreEqual(5800f, data.InertiaYaw, 1e-2f);
+        // Cached: subsequent call ignores override (same as airDensity).
+        var again = HkVehicleDataCache.GetOrCompute(2900, vs, mass: 1f);
+        Assert.AreSame(data, again);
+        Assert.AreEqual(2900f, again.Mass, 1e-5f);
     }
 
     [TestMethod]

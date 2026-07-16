@@ -106,6 +106,27 @@ public class VehiclePhysicsInstanceTests
     }
 
     [TestMethod]
+    public void Construct_RealMass_BodyMassAndInvInertiaMatchLiveCallistoAxes()
+    {
+        // Live CE Callisto X: mass=1500, I_body = [4500, 4500, 1500] on (X,Y,Z)
+        // with DB Roll=1, Pitch=3, Yaw=3 → X←Pitch, Y←Yaw, Z←Roll (CreateBody path).
+        var vs = SyntheticCar();
+        vs.RVInertiaRoll = 1f;
+        vs.RVInertiaPitch = 3f;
+        vs.RVInertiaYaw = 3f;
+        const float mass = 1500f;
+
+        var data = HkVehicleData.FromVehicleSpecific(vs, cbid: 1500, mass: mass);
+        var inst = new VehiclePhysicsInstance(data);
+
+        Assert.AreEqual(mass, inst.Body.Mass, 1e-3f);
+        Assert.AreEqual(1f / mass, inst.Body.InvMass, 1e-7f);
+        Assert.AreEqual(1f / 4500f, inst.Body.InvInertiaX, 1e-7f, "X ← Pitch → I=4500");
+        Assert.AreEqual(1f / 4500f, inst.Body.InvInertiaY, 1e-7f, "Y ← Yaw → I=4500");
+        Assert.AreEqual(1f / 1500f, inst.Body.InvInertiaZ, 1e-7f, "Z ← Roll → I=1500");
+    }
+
+    [TestMethod]
     public void ReGround_CastsFromRaisedStart_SnapsToGround_ZeroesMotionAndAxes_ClearsWheels()
     {
         // Retail recovery (airStabilization 0x598320 §3.2/§3.3): cast from pos.y+10 down,

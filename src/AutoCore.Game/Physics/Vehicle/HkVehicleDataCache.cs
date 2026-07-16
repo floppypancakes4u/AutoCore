@@ -33,7 +33,11 @@ public static class HkVehicleDataCache
             try
             {
                 ByCbid[kvp.Key] = HkVehicleData.FromVehicleSpecific(
-                    cv.VehicleSpecific, kvp.Key, gravityY, airDensityOverride);
+                    cv.VehicleSpecific,
+                    kvp.Key,
+                    gravityY,
+                    airDensityOverride,
+                    mass: cv.SimpleObjectSpecific.Mass);
             }
             catch (Exception ex)
             {
@@ -52,11 +56,13 @@ public static class HkVehicleDataCache
         int cbid,
         VehicleSpecific vs,
         float gravityY = HkPhysicsConstants.DefaultGravityY,
-        float? airDensityOverride = null)
+        float? airDensityOverride = null,
+        float mass = 0f)
     {
         if (ByCbid.TryGetValue(cbid, out var cached))
             return cached;
-        var data = HkVehicleData.FromVehicleSpecific(vs, cbid, gravityY, airDensityOverride);
+        var data = HkVehicleData.FromVehicleSpecific(
+            vs, cbid, gravityY, airDensityOverride, mass: mass);
         if (cbid != 0)
             ByCbid[cbid] = data;
         return data;

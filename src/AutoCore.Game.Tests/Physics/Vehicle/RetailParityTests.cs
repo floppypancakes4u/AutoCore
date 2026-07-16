@@ -86,8 +86,12 @@ public class RetailParityTests
         AbsoluteTopSpeed = 50f,
     };
 
-    private static VehiclePhysicsInstance CreateInstance(int cbid = 9001)
-        => new(HkVehicleData.FromVehicleSpecific(SyntheticCar(), cbid));
+    /// <param name="mass">
+    /// Chassis mass for the fixture. Default 0 → unit mass (legacy characterization).
+    /// Pass a representative retail weight (e.g. 1500) when probing C-mass effects.
+    /// </param>
+    private static VehiclePhysicsInstance CreateInstance(int cbid = 9001, float mass = 0f)
+        => new(HkVehicleData.FromVehicleSpecific(SyntheticCar(), cbid, mass: mass));
 
     /// <summary>Wheel radius / rest lengths for the synthetic front axle (used for range bounds).</summary>
     private const float WheelRadius = 0.4f;
@@ -279,17 +283,13 @@ public class RetailParityTests
     }
 
     /// <summary>
-    /// Sustained speed + turn, staying grounded. Post-C4 wheel-relative slip holds ~2 m/s mean
-    /// under this unit-mass fixture (seeded 8 m/s) — still short of the 3 m/s contract.
-    /// Residual: unit mass + reduced long/lat model bleeds cornering speed; C-mass + fuller
-    /// dual-body solve expected to close.
+    /// Sustained speed + turn, staying grounded. Un-Ignored under C-mass with Callisto-class
+    /// mass (1500 kg) — real inertia/mass holds seeded cornering speed above the 3 m/s floor.
     /// </summary>
     [TestMethod]
-    [Ignore("C4 residual: unit-mass turn bleeds seeded speed to ~2.0 m/s mean (< 3 m/s contract); "
-            + "wheel-relative slip fixed the crawl but cornering hold needs C-mass / fuller Minv")]
     public void ConstantRadiusTurn_AtSpeed_StaysGrounded_NoUpwardDrift()
     {
-        var inst = CreateInstance();
+        var inst = CreateInstance(mass: 1500f);
         inst.SetPose(0f, 0.9f, 0f, 0f, 0f, 0f, 1f);
         var ground = FlatGround(GroundY);
 
@@ -372,7 +372,7 @@ public class RetailParityTests
         float epsilon = 0.01f)
     {
         var data = inst.Data;
-        const float mass = 1f; // HkVehicleData.FromVehicleSpecific: unit-mass model (Mass=InvMass=1)
+        float mass = data.Mass; // matches FromVehicleSpecific injection (unit or real)
 
         // Analytic state seeded from the real instance's launch condition — the "given", not the
         // thing under test. Independent from here on.
@@ -498,15 +498,16 @@ public class RetailParityTests
 
     /// <summary>
     /// Climb an inclined ramp under the vehicle's own engine/friction to a genuine lip.
-    /// Post-C4 still fails to climb (final PosZ≈0.4 on a 10 m ramp) under unit mass + weak
-    /// torque curve + residual damper false-compression on sloped normals.
+    /// Post-C-mass (m=1500): still does not produce a genuine free-flight lip — either fails
+    /// to climb or re-sticks immediately (AllWheelsAirborne false on frame 0 of arc check).
+    /// Residual: trivial MinTorqueFactor LUT + slope-damper / drive torque, not mass alone.
     /// </summary>
     [TestMethod]
-    [Ignore("C4 residual: unit-mass + MinTorqueFactor path cannot climb the 10 m / 2 m ramp to a "
-            + "genuine lip (final PosZ≈0.4); needs C-mass / C5 torque + residual slope-damper work")]
+    [Ignore("C-mass residual (m=1500): no genuine free-flight at lip — re-sticks on arc frame 0 "
+            + "(AllWheelsAirborne false); needs fuller engine torque curve / slope-damper work")]
     public void RampExit_GenuineLiftoffAtLip_FollowsBallisticArc()
     {
-        var inst = CreateInstance();
+        var inst = CreateInstance(mass: 1500f);
 
         // A real inclined ramp face from z=0 to the lip at z=rampLength, then no ground (free
         // flight) until a lower landing plane further out.
@@ -648,15 +649,15 @@ public class RetailParityTests
     }
 
     /// <summary>
-    /// Sustained downhill speed, contact every tick, no bounce. Post-C4 reaches ~97% contact
-    /// at seeded speed (needs ≥99%) — residual micro-hop under unit mass + r×F.
+    /// Sustained downhill speed, contact every tick, no bounce. Post-C-mass (m=1500) still
+    /// sees contactRatio≈96% (&lt; 99% contract) — r×F micro-hop residual, not fixed by mass.
     /// </summary>
     [TestMethod]
-    [Ignore("C4 residual: seeded downhill holds speed but contactRatio≈97.3% (< 99% contract) "
-            + "from unit-mass r×F micro-hop; C-mass expected to settle")]
+    [Ignore("C-mass residual (m=1500): contactRatio≈96% (< 99% contract) from r×F micro-hop; "
+            + "mass alone does not settle downhill contact — needs suspension/anti-sink polish")]
     public void Downhill_ContinuousGrade_AtSpeed_StaysGrounded_NoBounce()
     {
-        var inst = CreateInstance();
+        var inst = CreateInstance(mass: 1500f);
         const float slope = 0.15f;
         var ground = DownhillGrade(slope);
         inst.SetPose(0f, 0.9f, 0f, 0f, 0f, 0f, 1f);

@@ -5,9 +5,9 @@ using AutoCore.Game.Structures;
 
 /// <summary>
 /// Immutable per-clonebase Havok vehicle setup built from <see cref="VehicleSpecific"/>.
-/// Mass model: unit mass (1.0) + diagonal unit-inertia from RVInertia* — client normalizes
-/// per unit mass (see 0.2-mass-inertia.md / FUN_005fc620). Chassis basis: +Z fwd, +X right, +Y up.
-/// Setup path: Vehicle_buildHavokVehicleFramework 0x5fd390.
+/// Mass model: chassis mass from <c>SimpleObjectSpecific.Mass</c> (rlMass; fallback unit mass)
+/// with diagonal inertia <c>mass × RVInertia*</c> (B4 / asset-mass-findings.md). Chassis basis:
+/// +Z fwd, +X right, +Y up. Setup path: Vehicle_buildHavokVehicleFramework 0x5fd390.
 /// </summary>
 public sealed class HkVehicleData
 {
@@ -110,7 +110,7 @@ public sealed class HkVehicleData
     public int Cbid { get; }
     public float Mass { get; }
     public float InvMass { get; }
-    /// <summary>Diagonal unit-inertia components (mass·RVInertia). Axis pairing: Roll/Pitch/Yaw from DB.</summary>
+    /// <summary>Diagonal principal inertia (mass·RVInertia). Axis pairing: Roll/Pitch/Yaw from DB.</summary>
     public float InertiaRoll { get; }
     public float InertiaPitch { get; }
     public float InertiaYaw { get; }
@@ -197,11 +197,17 @@ public sealed class HkVehicleData
     /// Build setup from clonebase vehicle data. Runtime prefix multipliers default to 1.0
     /// (entity+0x1fc etc.); pass overrides when porting upgrade paths.
     /// </summary>
+    /// <param name="mass">
+    /// Chassis rigid-body mass (kg), typically <c>SimpleObjectSpecific.Mass</c> (rlMass).
+    /// Non-positive / NaN falls back to <see cref="HkPhysicsConstants.UnitMass"/>.
+    /// Absolute inertia is <c>mass × RVInertia{Roll,Pitch,Yaw}</c>.
+    /// </param>
     public static HkVehicleData FromVehicleSpecific(
         VehicleSpecific vs,
         int cbid = 0,
         float gravityY = HkPhysicsConstants.DefaultGravityY,
         float? airDensityOverride = null,
+        float mass = 0f,
         float gearWheelDimMult = 1f,
         float brakeFrontMult = 1f,
         float brakeRearMult = 1f,
@@ -212,10 +218,12 @@ public sealed class HkVehicleData
         if (vs.WheelHardPoints == null)
             throw new ArgumentException("VehicleSpecific.WheelHardPoints is required", nameof(vs));
 
-        var mass = HkPhysicsConstants.UnitMass;
-        var invMass = mass > 0f ? 1f / mass : 0f;
+        // Live-confirmed: chassis RB mass == SimpleObjectSpecific.Mass (asset-mass-findings.md).
+        if (!(mass > 0f))
+            mass = HkPhysicsConstants.UnitMass;
+        var invMass = 1f / mass;
 
-        // Unit inertia from RVInertia*; absolute inertia = mass * unit (mass=1 → same).
+        // Absolute principal inertia = mass × RVInertia* (B4 live: I = m × [Roll,Pitch,Yaw]).
         var iRoll = mass * (vs.RVInertiaRoll > 0f ? vs.RVInertiaRoll : 1f);
         var iPitch = mass * (vs.RVInertiaPitch > 0f ? vs.RVInertiaPitch : 1f);
         var iYaw = mass * (vs.RVInertiaYaw > 0f ? vs.RVInertiaYaw : 1f);
