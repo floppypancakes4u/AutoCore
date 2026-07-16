@@ -92,6 +92,50 @@ public sealed class VehiclePhysicsInstance
         Body.TorqueX = Body.TorqueY = Body.TorqueZ = 0f;
     }
 
+    /// <summary>
+    /// Recovery / spawn primitive: cast straight down from <c>PosY + 10</c>, snap the chassis
+    /// origin onto the ground hit, and clear all motion, drive axes, and wheel state. Mirrors the
+    /// retail post-collision recovery in <c>VehicleAction_airStabilization 0x598320</c> §3.2/§3.3
+    /// (zero lin+ang velocity → SetDriveAxes(0) → terrain-snap). On a miss the position is left
+    /// unchanged (no teleport into unknown), but motion/axes/wheels are still reset.
+    /// </summary>
+    public void ReGround(IVehicleCollisionQuery query)
+    {
+        query ??= NullVehicleCollisionQuery.Instance;
+
+        var startY = HkVehicleAirStabilization.ComputeReGroundCastStartY(Body.PosY);
+        if (query.CastRay(
+                Body.PosX, startY, Body.PosZ,
+                0f, -1f, 0f,
+                HkPhysicsConstants.ReGroundCastMaxDistance,
+                out var hit))
+        {
+            Body.PosY = HkVehicleAirStabilization.ResolveReGroundPositionY(hit.PointY);
+        }
+
+        Body.LinVelX = Body.LinVelY = Body.LinVelZ = 0f;
+        Body.AngVelX = Body.AngVelY = Body.AngVelZ = 0f;
+        Body.ForceX = Body.ForceY = Body.ForceZ = 0f;
+        Body.TorqueX = Body.TorqueY = Body.TorqueZ = 0f;
+
+        // SetDriveAxes(0) — retail clears throttle/steer/handbrake on recovery.
+        Throttle = 0f;
+        SteerInput = 0f;
+        SteerRamp = 0f;
+        SteerFinal = 0f;
+        Handbrake = false;
+
+        foreach (var w in Wheels)
+        {
+            w.InContact = false;
+            w.Spin = 0f;
+            w.LongContactVel = 0f;
+            w.LongImpulse = 0f;
+            w.LatImpulse = 0f;
+            w.ClosingSpeed = 0f;
+        }
+    }
+
     private static HkRigidBody CreateBody(HkVehicleData data)
     {
         var body = new HkRigidBody();

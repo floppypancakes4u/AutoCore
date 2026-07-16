@@ -106,6 +106,98 @@ public class VehiclePhysicsInstanceTests
     }
 
     [TestMethod]
+    public void ReGround_CastsFromRaisedStart_SnapsToGround_ZeroesMotionAndAxes_ClearsWheels()
+    {
+        // Retail recovery (airStabilization 0x598320 §3.2/§3.3): cast from pos.y+10 down,
+        // write terrain-hit Y, zero lin+ang velocity, clear drive axes, reset wheel state.
+        var data = HkVehicleData.FromVehicleSpecific(SyntheticCar(), cbid: 5);
+        var inst = new VehiclePhysicsInstance(data);
+        inst.Body.PosX = 5f;
+        inst.Body.PosY = 200f;
+        inst.Body.PosZ = 7f;
+        inst.Body.LinVelX = 3f; inst.Body.LinVelY = 4f; inst.Body.LinVelZ = 5f;
+        inst.Body.AngVelX = 1f; inst.Body.AngVelY = 2f; inst.Body.AngVelZ = 3f;
+        inst.Throttle = 1f; inst.SteerInput = 0.5f; inst.SteerRamp = 0.4f;
+        inst.SteerFinal = 0.3f; inst.Handbrake = true;
+        foreach (var w in inst.Wheels)
+        {
+            w.InContact = true; w.Spin = 12f; w.LongContactVel = 6f;
+            w.LongImpulse = 9f; w.LatImpulse = 8f; w.ClosingSpeed = -2f;
+        }
+
+        var query = new DownRayToGroundY(groundY: 100f);
+        inst.ReGround(query);
+
+        // Cast start raised by 10 above pos.y, snapped to the ground hit.
+        Assert.AreEqual(100f, inst.Body.PosY, 1e-4f);
+        Assert.AreEqual(210f, query.LastOriginY, 1e-4f, "cast starts at pos.y + ReGroundYRaise");
+        Assert.AreEqual(5f, inst.Body.PosX, 1e-4f);
+        Assert.AreEqual(7f, inst.Body.PosZ, 1e-4f);
+
+        Assert.AreEqual(0f, inst.Body.LinVelX, 1e-6f);
+        Assert.AreEqual(0f, inst.Body.LinVelY, 1e-6f);
+        Assert.AreEqual(0f, inst.Body.LinVelZ, 1e-6f);
+        Assert.AreEqual(0f, inst.Body.AngVelX, 1e-6f);
+        Assert.AreEqual(0f, inst.Body.AngVelY, 1e-6f);
+        Assert.AreEqual(0f, inst.Body.AngVelZ, 1e-6f);
+
+        Assert.AreEqual(0f, inst.Throttle, 1e-6f);
+        Assert.AreEqual(0f, inst.SteerInput, 1e-6f);
+        Assert.AreEqual(0f, inst.SteerRamp, 1e-6f);
+        Assert.AreEqual(0f, inst.SteerFinal, 1e-6f);
+        Assert.IsFalse(inst.Handbrake);
+
+        foreach (var w in inst.Wheels)
+        {
+            Assert.IsFalse(w.InContact);
+            Assert.AreEqual(0f, w.Spin, 1e-6f);
+            Assert.AreEqual(0f, w.LongContactVel, 1e-6f);
+            Assert.AreEqual(0f, w.LongImpulse, 1e-6f);
+            Assert.AreEqual(0f, w.LatImpulse, 1e-6f);
+        }
+    }
+
+    [TestMethod]
+    public void ReGround_NoHit_KeepsPositionButStillZeroesMotion()
+    {
+        var data = HkVehicleData.FromVehicleSpecific(SyntheticCar(), cbid: 6);
+        var inst = new VehiclePhysicsInstance(data);
+        inst.Body.PosY = 80f;
+        inst.Body.LinVelY = -50f;
+        inst.Body.AngVelX = 7f;
+
+        inst.ReGround(NullVehicleCollisionQuery.Instance);
+
+        Assert.AreEqual(80f, inst.Body.PosY, 1e-4f, "no ground hit → position unchanged");
+        Assert.AreEqual(0f, inst.Body.LinVelY, 1e-6f);
+        Assert.AreEqual(0f, inst.Body.AngVelX, 1e-6f);
+    }
+
+    /// <summary>Down-cast stub returning a fixed absolute ground Y; records the cast origin Y.</summary>
+    private sealed class DownRayToGroundY : IVehicleCollisionQuery
+    {
+        private readonly float _groundY;
+        public DownRayToGroundY(float groundY) => _groundY = groundY;
+        public float LastOriginY { get; private set; }
+
+        public bool CastRay(
+            float originX, float originY, float originZ,
+            float dirX, float dirY, float dirZ,
+            float maxDistance,
+            out VehicleRayHit hit)
+        {
+            LastOriginY = originY;
+            var dist = originY - _groundY;
+            hit = new VehicleRayHit(
+                maxDistance > 0f ? dist / maxDistance : 0f,
+                originX, _groundY, originZ,
+                0f, 1f, 0f,
+                isTerrain: true);
+            return true;
+        }
+    }
+
+    [TestMethod]
     public void Step_NullCollisionQuery_RunsWithoutThrow_AndAppliesGravity()
     {
         var data = HkVehicleData.FromVehicleSpecific(SyntheticCar(), cbid: 42);

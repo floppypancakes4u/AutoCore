@@ -57,6 +57,12 @@ public static class HkPhysicsConstants
     public const float UprightRestoreAngDamp = 0.1f;   // DAT_00af337c
     /// <summary>Re-ground cast raise (DAT_00a110d8). Client recovery only — not server hot path.</summary>
     public const float ReGroundYRaise = 10f;           // DAT_00a110d8
+    /// <summary>
+    /// Downward ray length for <see cref="VehiclePhysicsInstance.ReGround"/>. Retail uses an
+    /// unbounded heightfield lookup (<c>CVOGMap_CastTerrainHeight 0x4cfe60</c>); the server ray
+    /// API needs a finite max, so this is large enough to reach terrain from the raised start.
+    /// </summary>
+    public const float ReGroundCastMaxDistance = 100000f;
     /// <summary>Collision-window length in ms (imm 0x1900). Entity stamp wiring deferred.</summary>
     public const int CollisionWindowMs = 6400;         // 0x1900
     /// <summary>airStabilization “is moving” speed epsilon (DAT_009d54a8 ≈ 2^-23).</summary>
