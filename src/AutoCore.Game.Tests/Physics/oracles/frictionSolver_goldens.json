@@ -1,0 +1,284 @@
+{
+  "_provenance": {
+    "source": "autoassault.exe live capture via Cheat Engine MCP bridge, PID 54864, 2026-07-16 (Task B1)",
+    "capture_site": "return of hkVehicleFrictionSolver_solve call in postTickApplyForces (0x64c9b2); args read from ESP",
+    "args": "param_2=setup(fw+0x1fc,0xC8=2 axles x0x64), param_3=cb(chassis solver body,0x130), param_4=out(fw+0x2cc,0x38=2 axles x0x1c)",
+    "layout": {
+      "setup": "STATIC per-vehicle: [0]drivePackFactor? [1]?, [2..17]=16-entry friction/slip curve LUT (circleProjection table), [18..24]=per-axle params. Identical across all scenarios.",
+      "cb+0xc0": "applied LINEAR impulse (xyz,w) \u2014 chassis solver output",
+      "cb+0xd0": "applied ANGULAR impulse (xyz,w)",
+      "cb+0xe0": "principal inverse inertia+mass (invIx,invIy,invIz,invMass); this vehicle I=[90000,4500,6000] mass=1500",
+      "cb+0x100": "world rotation matrix 3x3 (rows are unit basis vectors)",
+      "out[i*7+2]": "WHEEL+0x94 longitudinal friction writeback (0 under grip, active when saturated)",
+      "out[i*7+0]": "WHEEL+0x9c lateral-ish writeback (0 under grip, active when saturated)"
+    },
+    "note": "cb impulse accumulators (+0xc0/+0xd0) are POST-solve (captured at RET). Jacobians/velocities/invMass/friction-curve are solver INPUTS and unchanged by solve. These are the C4 bit-exact target; the current simplified port will NOT match (expected -> oracle test [Ignore] until C4)."
+  },
+  "scenarios": {
+    "rest": {
+      "note": "engine idle, stationary \u2014 near-zero friction impulses (baseline)",
+      "raw": {
+        "setupHex": "b81e55403ec32e3a6778783df55bb63de2e7043e9cbf3f3ef542883e5e84bd3ef19fff3ed546253f69474a3f38e7673f330f793f700a7f3fbff67f3ff9ff7f3f0000803f0000803f1fa2be3ffd96263b0000f0418988083dfd96263de17a543f85379a3f0000003f48af8c3efe93783d12ffb23dcb1b003e02c5353eaeab7e3e3a3aaf3e3020eb3ed061183f81af3c3fe0ce5c3f3ced723f73397d3f5cc77f3f5aff7f3f0000803f0000803f0ad6ba3f1047613b0000f0418988083d1047613d3333333f6edbb63f",
+        "cbHex": "06d3d54494fd034336ddbe44000000009e52403f0000000022f6283f0000000022f6283f000000009e5240bf00000000006f1801006f1801c8790f416f12833a000090401c588946203ac33701a8063e6619d64494fd03431c8dbe44000000009e52403f0000000022f6283f0000000022f6283f000000009e5240bf00000000806f1801806f1801de6a1f416f12833a000070405c9b3d46c77be73700000000000020418082333f9fbb34bf0ebadb3e0200ab435d742bc4a08798430023e03d10424736cea0ae3dd8b8b8b5387a57222fd410353c9104b3863b6135524ca63adc693a37530469393ec32e393ec32e3af8eed544c390054395bdbe440000803f9c5240bf8ed6c0bca1da283f00000000a0fb1f3aa7d47f3f80ee143d0000000021f628bf0b12e33c1a3140bf00000000",
+        "outHex": "0000000000000000000000000bfac43da8202939006e98adba47bcb6000000000000000000000000f3e38f3d5953813480d45aad00000000"
+      },
+      "decoded": {
+        "cb_linImpulse": [
+          2.9691764211747795e-06,
+          0.08526764810085297,
+          -1.3762864909949712e-06,
+          2.920263545306183e-18
+        ],
+        "cb_linImpulseHex": "10424736cea0ae3dd8b8b8b5387a5722",
+        "cb_angImpulse": [
+          5.395294806476159e-07,
+          -3.0865734856888594e-08,
+          8.390564971705317e-07,
+          0.0012687540147453547
+        ],
+        "cb_angImpulseHex": "2fd410353c9104b3863b6135524ca63a",
+        "cb_invInertiaMass": [
+          1.1111111234640703e-05,
+          0.00022222222469281405,
+          0.00016666666488163173,
+          0.0006666666595265269
+        ],
+        "cb_invInertiaMassHex": "dc693a37530469393ec32e393ec32e3a",
+        "cb_latCutoff_0xa0": 10.0,
+        "cb_latCutoff_0xa0Hex": "00002041",
+        "out_axle0": [
+          0.0,
+          0.0,
+          0.0,
+          0.09618004411458969,
+          0.0001612926134839654,
+          -1.7329249146769143e-11,
+          -5.611186679743696e-06
+        ],
+        "out_axle0Hex": "0000000000000000000000000bfac43da8202939006e98adba47bcb6",
+        "out_axle1": [
+          0.0,
+          0.0,
+          0.0,
+          0.07025899738073349,
+          2.4088765826491e-07,
+          -1.2439049790202716e-11,
+          0.0
+        ],
+        "out_axle1Hex": "000000000000000000000000f3e38f3d5953813480d45aad00000000"
+      }
+    },
+    "launch": {
+      "note": "full throttle from rest \u2014 strong forward drive impulse, no lateral",
+      "raw": {
+        "setupHex": "b81e55403ec32e3a6778783df55bb63de2e7043e9cbf3f3ef542883e5e84bd3ef19fff3ed546253f69474a3f38e7673f330f793f700a7f3fbff67f3ff9ff7f3f0000803f0000803f1fa2be3ffd96263b0000f0418988083dfd96263de17a543f85379a3f0000003f48af8c3efe93783d12ffb23dcb1b003e02c5353eaeab7e3e3a3aaf3e3020eb3ed061183f81af3c3fe0ce5c3f3ced723f73397d3f5cc77f3f5aff7f3f0000803f0000803f0ad6ba3f1047613b0000f0418988083d1047613d3333333f6edbb63f",
+        "cbHex": "175b9544cea58342a44b4d440000000062cd7f3f242d2bba2ef0203d000000007401213d0758893c22c47fbf00000000006f1801006f18019a9919406f12833a0000904072cba246738a89c400c0853d4f5f954474af834284764c440000000064cc7f3f00000000ab88223d00000000ab88223d0000000064cc7fbf00000000806f1801806f1801000000406f12833a000070401b693e468815a3c40000000000002041eed1313f000000000000000002c96e43e04768c100002443009f273dfbf9ab3f49fd893ea2c7d6c1cc9b2a21f994ac3c5a2022bcdcf8363e68d40241dc693a37530469393ec32e393ec32e3ab75b9544a0d4864232f84c440000803fa8bc7fbf4d49c2bcfa3b1e3d000000007fabb3bcedaa7f3fde4d3c3d00000000ac7e22bde0a3383dc2897fbf00000000",
+        "outHex": "00000000000000000000000069b2cb44e84fcdc10000000000000000000000000000000000000000105fc0440771f3c10000000000000000"
+      },
+      "decoded": {
+        "cb_linImpulse": [
+          1.3435662984848022,
+          0.26951053738594055,
+          -26.847476959228516,
+          5.780443586048658e-19
+        ],
+        "cb_linImpulseHex": "fbf9ab3f49fd893ea2c7d6c1cc9b2a21",
+        "cb_angImpulse": [
+          0.02106712944805622,
+          -0.009895408526062965,
+          0.17868369817733765,
+          8.176856994628906
+        ],
+        "cb_angImpulseHex": "f994ac3c5a2022bcdcf8363e68d40241",
+        "cb_invInertiaMass": [
+          1.1111111234640703e-05,
+          0.00022222222469281405,
+          0.00016666666488163173,
+          0.0006666666595265269
+        ],
+        "cb_invInertiaMassHex": "dc693a37530469393ec32e393ec32e3a",
+        "cb_latCutoff_0xa0": 10.0,
+        "cb_latCutoff_0xa0Hex": "00002041",
+        "out_axle0": [
+          0.0,
+          0.0,
+          0.0,
+          1629.5753173828125,
+          -25.664016723632812,
+          0.0,
+          0.0
+        ],
+        "out_axle0Hex": "00000000000000000000000069b2cb44e84fcdc10000000000000000",
+        "out_axle1": [
+          0.0,
+          0.0,
+          0.0,
+          1538.970703125,
+          -30.43018913269043,
+          0.0,
+          0.0
+        ],
+        "out_axle1Hex": "000000000000000000000000105fc0440771f3c10000000000000000"
+      }
+    },
+    "cruise": {
+      "note": "steady mid-speed straight \u2014 forward impulse balances drag",
+      "raw": {
+        "setupHex": "b81e55403ec32e3a6778783df55bb63de2e7043e9cbf3f3ef542883e5e84bd3ef19fff3ed546253f69474a3f38e7673f330f793f700a7f3fbff67f3ff9ff7f3f0000803f0000803f1fa2be3ffd96263b0000f0418988083dfd96263de17a543f85379a3f0000003f48af8c3efe93783d12ffb23dcb1b003e02c5353eaeab7e3e3a3aaf3e3020eb3ed061183f81af3c3fe0ce5c3f3ced723f73397d3f5cc77f3f5aff7f3f0000803f0000803f0ad6ba3f1047613b0000f0418988083d1047613d3333333f6edbb63f",
+        "cbHex": "fbd2924456037742d8b7014500000000deff7f3f00000000cb7d04bb00000000cb7d04bb00000000deff7fbf00000000006f1801006f18019a9919406f12833a0000904074ff8d46e59486c400e17a3dc2d29244560377428682014500000000deff7f3f00000000cb7d04bb00000000cb7d04bb00000000deff7fbf00000000806f1801806f1801000000406f12833a00007040a8ff42464a939fc400000000000020410fec303f0000000000000000029d6a438a9dacc10080cf430037483da6995ebdc3b91a3eba11d7c149876421ed8398ba20b3273574da2a369b9a8742dc693a37530469393ec32e393ec32e3a02d39244f7417d42c8a201450000803fdaff7fbf9753373ac9d302bb000000008b16233a9ccf7f3f205a1d3d00000000c97d043bbc581d3d7ecf7fbf00000000",
+        "outHex": "000000000000000000000000f91f8740aab284c10000000000000000000000000000000000000000d95858c081579dc10000000000000000"
+      },
+      "decoded": {
+        "cb_linImpulse": [
+          -0.0543457493185997,
+          0.15109924972057343,
+          -26.883655548095703,
+          7.742845320305812e-19
+        ],
+        "cb_linImpulseHex": "a6995ebdc3b91a3eba11d7c149876421",
+        "cb_angImpulse": [
+          -0.001163599663414061,
+          6.247300916584209e-07,
+          2.545913048379589e-06,
+          67.80196380615234
+        ],
+        "cb_angImpulseHex": "ed8398ba20b3273574da2a369b9a8742",
+        "cb_invInertiaMass": [
+          1.1111111234640703e-05,
+          0.00022222222469281405,
+          0.00016666666488163173,
+          0.0006666666595265269
+        ],
+        "cb_invInertiaMassHex": "dc693a37530469393ec32e393ec32e3a",
+        "cb_latCutoff_0xa0": 10.0,
+        "cb_latCutoff_0xa0Hex": "00002041",
+        "out_axle0": [
+          0.0,
+          0.0,
+          0.0,
+          4.222652912139893,
+          -16.587238311767578,
+          0.0,
+          0.0
+        ],
+        "out_axle0Hex": "000000000000000000000000f91f8740aab284c10000000000000000",
+        "out_axle1": [
+          0.0,
+          0.0,
+          0.0,
+          -3.380422830581665,
+          -19.667726516723633,
+          0.0,
+          0.0
+        ],
+        "out_axle1Hex": "000000000000000000000000d95858c081579dc10000000000000000"
+      }
+    },
+    "turn": {
+      "note": "steady constant-radius grip turn \u2014 lateral+yaw impulse, friction unsaturated",
+      "raw": {
+        "setupHex": "b81e55403ec32e3a6778783df55bb63de2e7043e9cbf3f3ef542883e5e84bd3ef19fff3ed546253f69474a3f38e7673f330f793f700a7f3fbff67f3ff9ff7f3f0000803f0000803f1fa2be3ffd96263b0000f0418988083dfd96263de17a543f85379a3f0000003f48af8c3efe93783d12ffb23dcb1b003e02c5353eaeab7e3e3a3aaf3e3020eb3ed061183f81af3c3fe0ce5c3f3ced723f73397d3f5cc77f3f5aff7f3f0000803f0000803f0ad6ba3f1047613b0000f0418988083d1047613d3333333f6edbb63f",
+        "cbHex": "fc71e0447c8403435b6fb44400000000aad2973e00000000717c743f00000000717c743f00000000aad297be00000000006f1801006f180160cda7406f12833a000090407b5f964668bf0e46004d063ef4d7e0447c840343b24fb444000000001eec703f00000000201ead3e00000000201ead3e000000001eec70bf00000000806f1801806f18017ccfa0406f12833a00007040b27325460a4229460000000000002041848d463f0000000000000000028fb34370168ec1000090430068eb3d5a07c940c1375d3e3553c8c04fcfb2211fb2a43e25cc3a40a896a63d443593c3dc693a37530469393ec32e393ec32e3ab89ae0445d1305437d68b4440000803fb8ed96be0465e4bc3785743f0000000001f7dd3d72fd7d3f4ca07f3d00000000c30b73bf3eb0f93d4c3294be00000000",
+        "outHex": "0000000000000000000000005ec3ff4581e74743f1c64d3f00000000000000000000000000000000086e1dc787076d4366091d3f00000000"
+      },
+      "decoded": {
+        "cb_linImpulse": [
+          6.282147407531738,
+          0.2160329967737198,
+          -6.260157108306885,
+          1.2116623296762239e-18
+        ],
+        "cb_linImpulseHex": "5a07c940c1375d3e3553c8c04fcfb221",
+        "cb_angImpulse": [
+          0.3216714560985565,
+          2.9187099933624268,
+          0.08134204149246216,
+          -294.4161376953125
+        ],
+        "cb_angImpulseHex": "1fb2a43e25cc3a40a896a63d443593c3",
+        "cb_invInertiaMass": [
+          1.1111111234640703e-05,
+          0.00022222222469281405,
+          0.00016666666488163173,
+          0.0006666666595265269
+        ],
+        "cb_invInertiaMassHex": "dc693a37530469393ec32e393ec32e3a",
+        "cb_latCutoff_0xa0": 10.0,
+        "cb_latCutoff_0xa0Hex": "00002041",
+        "out_axle0": [
+          0.0,
+          0.0,
+          0.0,
+          8184.4208984375,
+          199.90431213378906,
+          0.8038168549537659,
+          0.0
+        ],
+        "out_axle0Hex": "0000000000000000000000005ec3ff4581e74743f1c64d3f00000000",
+        "out_axle1": [
+          0.0,
+          0.0,
+          0.0,
+          -40302.03125,
+          237.02940368652344,
+          0.6134246587753296,
+          0.0
+        ],
+        "out_axle1Hex": "000000000000000000000000086e1dc787076d4366091d3f00000000"
+      }
+    },
+    "slide": {
+      "note": "handbrake slide \u2014 friction circle SATURATED (out[0]/out[2] writebacks active)",
+      "raw": {
+        "setupHex": "b81e55403ec32e3a6778783df55bb63de2e7043e9cbf3f3ef542883e5e84bd3ef19fff3ed546253f69474a3f38e7673f330f793f700a7f3fbff67f3ff9ff7f3f0000803f0000803f1fa2be3ffd96263b0000f0418988083dfd96263de17a543f85379a3f0000003f48af8c3efe93783d12ffb23dcb1b003e02c5353eaeab7e3e3a3aaf3e3020eb3ed061183f81af3c3fe0ce5c3f3ced723f73397d3f5cc77f3f5aff7f3f0000803f0000803f0ad6ba3f1047613b0000f0418988083d1047613d3333333f6edbb63f",
+        "cbHex": "1098dd44b0860343d64eba4400000000cd80a63ed1d78dbb221572bf00000000eb1572bf351ac3ba8d7fa6be00000000006f1801006f1801000040406f12833a0000904074258746ebbd86c40136063e3a33dd4472870343282cba4400000000e661b03e3baf02bc285270bf00000000e14e70bf4c660a3c4f72b0be00000000806f1801806f1801000020406f12833a00007040b2b55646eec39fc400000000000020413c88363ff3913cbe8dbd12c00200b143a0e749c12032954300a29b3df608cbc177d3043ea1730ec1872c0a223d8fae3cedc72ebe7a496cbda4879c41dc693a37530469393ec32e393ec32e3a8270dd44261c05435c40ba440000803fc07da6bee4f2263db7dc71bf00000000fb4f6f3c79c97f3ff8f71b3d00000000eb0e723f80ceb9ba54a8a6be00000000",
+        "outHex": "54c1d5c180d240bd8dcfec43f61c8542c215eec30000000000000000000000005efe34be0000000018bf4b4650463bc10000000000000000"
+      },
+      "decoded": {
+        "cb_linImpulse": [
+          -25.379375457763672,
+          0.12971292436122894,
+          -8.903229713439941,
+          1.872606005488118e-18
+        ],
+        "cb_linImpulseHex": "f608cbc177d3043ea1730ec1872c0a22",
+        "cb_angImpulse": [
+          0.02130853570997715,
+          -0.17068453133106232,
+          -0.05768726021051407,
+          19.56623077392578
+        ],
+        "cb_angImpulseHex": "3d8fae3cedc72ebe7a496cbda4879c41",
+        "cb_invInertiaMass": [
+          1.1111111234640703e-05,
+          0.00022222222469281405,
+          0.00016666666488163173,
+          0.0006666666595265269
+        ],
+        "cb_invInertiaMassHex": "dc693a37530469393ec32e393ec32e3a",
+        "cb_latCutoff_0xa0": 10.0,
+        "cb_latCutoff_0xa0Hex": "00002041",
+        "out_axle0": [
+          -26.719398498535156,
+          -0.047075748443603516,
+          473.6214904785156,
+          66.55656433105469,
+          -476.16998291015625,
+          0.0,
+          0.0
+        ],
+        "out_axle0Hex": "54c1d5c180d240bd8dcfec43f61c8542c215eec30000000000000000",
+        "out_axle1": [
+          0.0,
+          -0.17675158381462097,
+          0.0,
+          13039.7734375,
+          -11.704666137695312,
+          0.0,
+          0.0
+        ],
+        "out_axle1Hex": "000000005efe34be0000000018bf4b4650463bc10000000000000000"
+      }
+    }
+  }
+}
