@@ -1,0 +1,28 @@
+# serverConfig.yaml — AutoCore server tuning (YAML sibling to loot.tuning.json).
+# Comment-friendly; missing keys keep retail-safe defaults. Env override: AUTOCORE_SERVER_CONFIG_FILE.
+# This file currently scopes NPC vehicle physics; other settings will migrate here over time.
+
+# Retail-faithful NPC vehicle driving (feature-NPC-Retail-Driving).
+npcVehiclePhysics:
+  # Which mover drives NPC vehicles along paths:
+  #   hard      - legacy NpcPathFollower hard stepper (default; current behaviour)
+  #   soft      - SoftNpcPathMotion pure-pursuit look-ahead
+  #   kinematic - NpcVehicleDriveController (curvature/terrain-aligned kinematic)
+  #   physics   - retail Havok single-rigid-body simulation (requires enabled: true)
+  controllerTier: hard
+
+  # Master switch for the Havok physics simulation. Must be true for controllerTier: physics.
+  enabled: false
+
+  # Fixed physics substep rate in Hz (accumulator fed the variable server dt). Clamped [1, 480].
+  # 60 is a placeholder until the client's exact Havok step rate is confirmed (RE task 0.1).
+  substepHz: 60
+
+  # World gravity in world-units/s² (negative = down, +Y up). Refined during Phase 0 RE.
+  gravity: -9.81
+
+  # Optional air-density override for aerodynamics. Omit / null to use each clonebase's own value.
+  # airDensityOverride: 1.2
+
+  # Verbose per-vehicle physics logging (development only).
+  debugLogging: false

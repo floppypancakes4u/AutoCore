@@ -27,6 +27,9 @@
     <None Update="wire-isolation.levers.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="serverConfig.yaml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Update="loot.tuning.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

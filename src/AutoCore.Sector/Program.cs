@@ -58,6 +58,9 @@ public class Program : ExitableProgram
         // Loot rate from loot.tuning.json (1.0 = retail; higher = more drops).
         LootTuning.ApplyFromConfigFiles();
 
+        // Server tuning from serverConfig.yaml (NPC vehicle physics, etc.).
+        ServerConfig.ApplyFromConfigFiles();
+
         // Initialize the loot manager (builds item index from CloneBase data)
         LootManager.Instance.Initialize();
 

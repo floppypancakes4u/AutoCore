@@ -59,6 +59,9 @@ public class Program : ExitableProgram
         // Loot rate from loot.tuning.json (1.0 = retail; higher = more drops).
         AutoCore.Game.Diagnostics.LootTuning.ApplyFromConfigFiles();
 
+        // Server tuning from serverConfig.yaml (NPC vehicle physics, etc.).
+        AutoCore.Game.Diagnostics.ServerConfig.ApplyFromConfigFiles();
+
         // Initialize the loot manager (builds item index from CloneBase data)
         LootManager.Instance.Initialize();
 
