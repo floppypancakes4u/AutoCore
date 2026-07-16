@@ -261,13 +261,93 @@ public class NpcVehiclePhysicsControllerTests
         // Absolute distance is deliberately loose — not kinematic hard-speed matching.
         Assert.IsTrue(pos.Z > 1f,
             $"expected path progress along +Z, got Z={pos.Z}");
-        // Bounded lateral slip (path is X=0).
-        Assert.IsTrue(MathF.Abs(pos.X) < 4f,
+        // Bounded lateral slip (path is X=0) — track pull keeps this tighter.
+        Assert.IsTrue(MathF.Abs(pos.X) < 2.5f,
             $"lateral slip out of bound: X={pos.X}");
 
         var speed = MathF.Sqrt(vehicle.Velocity.X * vehicle.Velocity.X + vehicle.Velocity.Z * vehicle.Velocity.Z);
         Assert.IsTrue(speed > 1f,
             $"expected non-trivial planar speed under sim-driven motion, got {speed}");
+    }
+
+    /// <summary>
+    /// Path track soft-pull: start offset from the hard line; after a few seconds lateral
+    /// error to X=0 must shrink (hard navigator stays on the path).
+    /// </summary>
+    [TestMethod]
+    public void Apply_LateralOffset_PullsTowardHardTrack()
+    {
+        var vehicle = CreateNpcVehicle();
+        vehicle.ApplyServerMove(
+            new Vector3(6f, 1f, 0f),
+            Quaternion.Default,
+            new Vector3(0f, 0f, 8f),
+            0f);
+
+        var path = StraightPath();
+        const float hardSpeed = 10f;
+        const float dt = 1f / 60f;
+        float x0 = MathF.Abs(vehicle.Position.X);
+
+        for (var i = 0; i < 180; i++) // 3 s
+        {
+            var hard = HardCruiseAlongZ(vehicle.Position.Z, hardSpeed, dt);
+            // Keep hard on the path X=0 (not on the drifted body).
+            hard.NewPosition = new Vector3(0f, 1f, hard.NewPosition.Z);
+            hard.Velocity = new Vector3(0f, 0f, hardSpeed);
+
+            var result = NpcVehiclePhysicsController.Apply(
+                hard, vehicle, path, nowMs: i * 16, dt: dt, map: null, npcAi: vehicle.NpcAi);
+            vehicle.ApplyServerMove(
+                result.NewPosition, result.Rotation, result.Velocity, dt,
+                result.Throttle, result.Steering, result.SharpTurn, result.AngularVelocity);
+        }
+
+        float x1 = MathF.Abs(vehicle.Position.X);
+        Assert.IsTrue(x1 < x0 * 0.5f,
+            $"expected lateral pull toward path X=0, start |X|={x0} end |X|={x1}");
+        Assert.IsTrue(vehicle.Position.Z > 5f,
+            $"expected forward progress while correcting, Z={vehicle.Position.Z}");
+    }
+
+    [TestMethod]
+    public void ScaleThrottleForHeadingError_CutsWhenMisaligned()
+    {
+        var forward = new Vector3(1f, 0f, 0f); // face +X
+        var aim = new Vector3(0f, 0f, 20f); // path +Z
+        var pos = new Vector3(0f, 0f, 0f);
+        float scale = NpcVehiclePhysicsController.ScaleThrottleForHeadingError(forward, aim, pos);
+        Assert.IsTrue(scale < 0.85f,
+            $"expected thr cut when ~90° misaligned, scale={scale}");
+
+        var alignedFwd = new Vector3(0f, 0f, 1f);
+        float scaleOk = NpcVehiclePhysicsController.ScaleThrottleForHeadingError(alignedFwd, aim, pos);
+        Assert.AreEqual(1f, scaleOk, 1e-4f);
+    }
+
+    [TestMethod]
+    public void ApplyPathTrackLateralPull_CorrectsOrthogonalErrorOnly()
+    {
+        var body = new HkRigidBody
+        {
+            Mass = 1f, InvMass = 1f,
+            PosX = 5f, PosY = 1f, PosZ = 10f,
+            QuatW = 1f,
+        };
+        var hard = new PathStepResult
+        {
+            NewPosition = new Vector3(0f, 1f, 12f), // ahead on path + slightly forward
+            Velocity = new Vector3(0f, 0f, 10f),     // tangent +Z
+        };
+        const float dt = 1f / 60f;
+        for (var i = 0; i < 60; i++)
+            NpcVehiclePhysicsController.ApplyPathTrackLateralPull(body, hard, dt);
+
+        Assert.IsTrue(MathF.Abs(body.PosX) < 2f,
+            $"expected X pulled toward 0, got X={body.PosX}");
+        // Should not be dragged all the way to hard.Z in 1s (only lateral).
+        Assert.IsTrue(body.PosZ < 11.5f,
+            $"longitudinal should stay mostly free, Z={body.PosZ}");
     }
 
     /// <summary>

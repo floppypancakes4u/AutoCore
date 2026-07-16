@@ -40,19 +40,53 @@ public static class NpcVehiclePhysicsController
     public const float MinUprightDot = 0.35f;
 
     /// <summary>P-gain on planar heading error → desired yaw rate (1/s).</summary>
-    public const float PathHeadingGain = 4f;
+    public const float PathHeadingGain = 6.5f;
 
     /// <summary>Max |yaw rate| from path assist at full speed (rad/s).</summary>
-    public const float PathHeadingMaxYawRate = 2.2f;
+    public const float PathHeadingMaxYawRate = 3.0f;
 
     /// <summary>
     /// Planar speed (m/s) at which path-heading assist reaches full max yaw rate.
     /// Below this, max yaw rate scales down — prevents clock-spin when nearly stopped.
     /// </summary>
-    public const float PathHeadingFullSpeed = 6f;
+    public const float PathHeadingFullSpeed = 4f;
 
     /// <summary>Below this planar speed, path assist max yaw rate is heavily limited.</summary>
-    public const float PathHeadingMinSpeed = 0.35f;
+    public const float PathHeadingMinSpeed = 0.25f;
+
+    /// <summary>
+    /// When |heading error| exceeds this (rad) and the body has any crawl speed, allow a
+    /// small minimum yaw-authority floor so NPCs can start a turn without full clock-spin.
+    /// </summary>
+    public const float PathHeadingLargeErrorRad = 0.6f; // ~34°
+
+    /// <summary>Minimum speedScale when large heading error and planar speed &gt; crawl.</summary>
+    public const float PathHeadingErrorSpeedFloor = 0.22f;
+
+    /// <summary>
+    /// Lateral track soft-pull rate (1/s) toward the hard navigator's planar position.
+    /// Only the component orthogonal to path tangent is corrected — progress along path
+    /// stays sim-authored.
+    /// </summary>
+    public const float PathTrackLateralPull = 2.8f;
+
+    /// <summary>Max lateral correction distance per second (world units).</summary>
+    public const float PathTrackLateralMaxSpeed = 12f;
+
+    /// <summary>
+    /// Blend planar velocity toward body forward after heading assist (0–1 per second
+    /// equivalent via 1-exp). Cuts crab-walk when yaw catches the path.
+    /// </summary>
+    public const float PathVelocityAlignRate = 3.5f;
+
+    /// <summary>
+    /// |heading error| (rad) above which throttle is scaled down so NPCs turn before
+    /// accelerating off the path.
+    /// </summary>
+    public const float PathThrottleCutErrorRad = 0.55f;
+
+    /// <summary>Minimum thr scale when fully misaligned (still some drive to build speed for yaw).</summary>
+    public const float PathThrottleCutMinScale = 0.25f;
 
     /// <summary>
     /// Advance one vehicle via sim-authoritative path-following.
@@ -150,14 +184,18 @@ public static class NpcVehiclePhysicsController
             allowReverse: false,
             alwaysDrive: true);
 
+        // Cut thr when badly misaligned so they reorient instead of driving off-path.
+        thr *= ScaleThrottleForHeadingError(forward, aim, bodyPos);
+
         // Step free-running; do not force-restore pose after. C8 brake owns reverse thr as pedal —
         // no kinematic reverse-throttle deceleration here.
         inst.Step(thr, steer, handbrake: sharp != 0, dt, query);
 
-        // Path-heading assist: reduced tire model still under-yaws through corners (wheels
-        // turn, chassis lags). Soft-command yaw rate toward the look-ahead aim, speed-gated
-        // so nearly-stopped NPCs cannot clock-spin. Position/velocity remain sim-authored.
+        // Path assists (reduced tire model is not enough for reliable NPC pathing):
+        // 1) yaw toward look-ahead  2) lateral soft-pull to hard track  3) align planar vel to nose
         ApplyPathHeadingAssist(body, aim, dt);
+        ApplyPathTrackLateralPull(body, hard, dt);
+        AlignPlanarVelocityToHeading(body, dt);
 
         // Publish inst.Body pose/rot/vel/angVel (post-assist).
         return new PathStepResult
@@ -177,6 +215,31 @@ public static class NpcVehiclePhysicsController
             HasDriveInputs = true,
             AngularVelocity = new Vector3(body.AngVelX, body.AngVelY, body.AngVelZ),
         };
+    }
+
+    /// <summary>
+    /// Scale retail-forward thr down when planar heading error is large (turn-before-push).
+    /// </summary>
+    internal static float ScaleThrottleForHeadingError(Vector3 forward, Vector3 aim, Vector3 bodyPos)
+    {
+        float dx = aim.X - bodyPos.X;
+        float dz = aim.Z - bodyPos.Z;
+        float len = MathF.Sqrt(dx * dx + dz * dz);
+        if (len < 0.5f)
+            return 1f;
+        float inv = 1f / len;
+        float aimX = dx * inv;
+        float aimZ = dz * inv;
+        float cross = aimX * forward.Z - aimZ * forward.X;
+        float dot = forward.X * aimX + forward.Z * aimZ;
+        float err = MathF.Abs(MathF.Atan2(cross, dot));
+        if (err <= PathThrottleCutErrorRad)
+            return 1f;
+        // Linear from 1 at cut threshold → PathThrottleCutMinScale at π
+        float t = Math.Clamp(
+            (err - PathThrottleCutErrorRad) / (MathF.PI - PathThrottleCutErrorRad),
+            0f, 1f);
+        return PathThrottleCutMinScale + (1f - PathThrottleCutMinScale) * (1f - t);
     }
 
     /// <summary>
@@ -223,6 +286,15 @@ public static class NpcVehiclePhysicsController
             ? 0f
             : Math.Clamp((planar - PathHeadingMinSpeed) / (PathHeadingFullSpeed - PathHeadingMinSpeed), 0f, 1f);
 
+        // Large heading error while crawling: allow a small floor so NPCs can start a turn
+        // without needing full cruise speed (still zero when fully stopped).
+        if (speedScale < PathHeadingErrorSpeedFloor
+            && planar > PathHeadingMinSpeed
+            && MathF.Abs(err) >= PathHeadingLargeErrorRad)
+        {
+            speedScale = PathHeadingErrorSpeedFloor;
+        }
+
         float maxRate = PathHeadingMaxYawRate * speedScale;
         float desiredYawRate = Math.Clamp(err * PathHeadingGain, -maxRate, maxRate);
 
@@ -235,15 +307,15 @@ public static class NpcVehiclePhysicsController
         }
         else
         {
-            // Blend toward commanded rate (sim may already have tire yaw).
-            body.AngVelY = body.AngVelY * 0.35f + desiredYawRate * 0.65f;
+            // Stronger blend toward path command (tire model alone under-yaws).
+            body.AngVelY = body.AngVelY * 0.2f + desiredYawRate * 0.8f;
         }
 
         // Upright: damp residual pitch/roll rates from the reduced model.
         if (BodyUpDotWorldUp(body) >= MinUprightDot)
         {
-            body.AngVelX *= 0.5f;
-            body.AngVelZ *= 0.5f;
+            body.AngVelX *= 0.35f;
+            body.AngVelZ *= 0.35f;
         }
 
         // Same-frame heading nudge so published pose yaws with the command (ghosts + wheel
@@ -251,6 +323,92 @@ public static class NpcVehiclePhysicsController
         float yawStep = Math.Clamp(body.AngVelY * dt, -maxRate * dt - 1e-4f, maxRate * dt + 1e-4f);
         if (speedScale > 0f && MathF.Abs(yawStep) > 1e-6f)
             ApplyWorldYawDelta(body, yawStep);
+    }
+
+    /// <summary>
+    /// Soft-pull body XZ toward the hard navigator, correcting only the component orthogonal
+    /// to the hard path tangent (hard velocity, else hard−body when still).
+    /// </summary>
+    internal static void ApplyPathTrackLateralPull(HkRigidBody body, PathStepResult hard, float dt)
+    {
+        if (body == null || !(dt > 0f) || !float.IsFinite(dt))
+            return;
+
+        float errX = hard.NewPosition.X - body.PosX;
+        float errZ = hard.NewPosition.Z - body.PosZ;
+        float errLen = MathF.Sqrt(errX * errX + errZ * errZ);
+        if (errLen < 1e-4f)
+            return;
+
+        // Path tangent: prefer hard velocity; fallback to error direction (no lateral then).
+        float tx = hard.Velocity.X;
+        float tz = hard.Velocity.Z;
+        float tLen = MathF.Sqrt(tx * tx + tz * tz);
+        if (tLen < 0.05f)
+        {
+            // Still navigator: pull fully toward hard (gentle).
+            float alpha = 1f - MathF.Exp(-PathTrackLateralPull * 0.5f * dt);
+            float step = Math.Min(errLen, PathTrackLateralMaxSpeed * dt);
+            float s = (step / errLen) * alpha;
+            body.PosX += errX * s;
+            body.PosZ += errZ * s;
+            return;
+        }
+
+        float invT = 1f / tLen;
+        tx *= invT;
+        tz *= invT;
+        // Lateral unit (path right) = (tz, -tx) in XZ... wait (tx,tz) cross +Y → (tz, -tx)?
+        // right = (tz, 0, -tx) so right·error = tz*errX - tx*errZ
+        float lat = tz * errX - tx * errZ;
+        if (MathF.Abs(lat) < 1e-4f)
+            return;
+
+        // Pull only lateral component of error.
+        float latX = tz * lat;
+        float latZ = -tx * lat;
+        float latLen = MathF.Abs(lat);
+        float alphaPull = 1f - MathF.Exp(-PathTrackLateralPull * dt);
+        float stepMax = PathTrackLateralMaxSpeed * dt;
+        float pull = Math.Min(latLen * alphaPull, stepMax);
+        float sPull = pull / latLen;
+        body.PosX += latX * sPull;
+        body.PosZ += latZ * sPull;
+    }
+
+    /// <summary>
+    /// Blend planar linear velocity toward body forward (same speed). Reduces crabbing after
+    /// path-heading yaw so thr push follows the nose.
+    /// </summary>
+    internal static void AlignPlanarVelocityToHeading(HkRigidBody body, float dt)
+    {
+        if (body == null || !(dt > 0f) || !float.IsFinite(dt))
+            return;
+
+        float vx = body.LinVelX;
+        float vz = body.LinVelZ;
+        float spd = MathF.Sqrt(vx * vx + vz * vz);
+        if (spd < 0.15f)
+            return;
+
+        ExtractBasis(
+            new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
+            out _, out var forward);
+        float fx = forward.X;
+        float fz = forward.Z;
+        float fLen = MathF.Sqrt(fx * fx + fz * fz);
+        if (fLen < 1e-4f)
+            return;
+        float invF = 1f / fLen;
+        fx *= invF;
+        fz *= invF;
+
+        // Desired planar vel = spd * forward (XZ).
+        float dvx = fx * spd - vx;
+        float dvz = fz * spd - vz;
+        float alpha = 1f - MathF.Exp(-PathVelocityAlignRate * dt);
+        body.LinVelX += dvx * alpha;
+        body.LinVelZ += dvz * alpha;
     }
 
     /// <summary>Left-multiply body orientation by a world-Y yaw delta (radians).</summary>
