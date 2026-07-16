@@ -462,6 +462,183 @@ public class NpcVehiclePhysicsControllerTests
     }
 
     [TestMethod]
+    public void ApplyRampLaunchBoost_SetsVyFromNoseAndPlanar()
+    {
+        // Nose-up ~20° on +Z, planar 12 m/s → wantVy ≈ 12 * tan(0.35) ≈ 4.4
+        float noseUp = 0.35f;
+        var q = TerrainContactPlane.FromYawPitchRoll(yaw: 0f, pitch: -noseUp, roll: 0f);
+        var body = new HkRigidBody
+        {
+            Mass = 1f, InvMass = 1f,
+            PosX = 0f, PosY = 5f, PosZ = 0f,
+            LinVelZ = 12f,
+            LinVelY = 0.2f, // flat launch — the regression symptom
+            QuatX = q.X, QuatY = q.Y, QuatZ = q.Z, QuatW = q.W,
+        };
+
+        NpcVehiclePhysicsController.ApplyRampLaunchBoost(body, yaw: 0f, planarSpd: 12f);
+
+        float want = 12f * MathF.Tan(noseUp);
+        Assert.IsTrue(body.LinVelY >= want * 0.9f,
+            $"launch boost should restore climb rate ~{want:F2}, got LinVelY={body.LinVelY}");
+    }
+
+    [TestMethod]
+    public void ApplyTerrainStanceAssist_ClimbingRamp_StaysPlantedWithoutLoft()
+    {
+        // Continuous climb must stay grounded and not inject lofting climb-vy (live ramp
+        // regression: mid-ramp hop → false free-flight).
+        const float slope = 0.22f;
+        var query = new TerrainHeightfieldCollisionQuery(
+            (float x, float z, out float y) =>
+            {
+                y = slope * z;
+                return true;
+            });
+        float z0 = 20f;
+        float seatY = slope * z0 + NpcVehiclePhysicsController.TerrainStanceRideHeight;
+        var body = new HkRigidBody
+        {
+            Mass = 1f, InvMass = 1f,
+            PosX = 0f, PosY = seatY, PosZ = z0,
+            LinVelZ = 14f,
+            LinVelY = 0f,
+            QuatW = 1f,
+        };
+        const float dt = 1f / 60f;
+        bool grounded = false;
+        for (var i = 0; i < 45; i++)
+            grounded = NpcVehiclePhysicsController.ApplyTerrainStanceAssist(body, query, dt);
+
+        Assert.IsTrue(grounded, "uniform slope should stay grounded");
+        float support = slope * body.PosZ;
+        float clearance = body.PosY - support;
+        Assert.IsTrue(clearance < NpcVehiclePhysicsController.TerrainStanceRideHeight + 0.35f,
+            $"must not loft above ride band, clearance={clearance}");
+        Assert.IsTrue(body.LinVelY < 6f,
+            $"must not inject large climb vy while grounded, LinVelY={body.LinVelY}");
+        NpcVehiclePhysicsController.ExtractBasis(
+            new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
+            out _, out var forward);
+        Assert.IsTrue(forward.Y > 0.08f,
+            $"expected nose-up pitch on rising slope, forward.Y={forward.Y}");
+    }
+
+    [TestMethod]
+    public void ApplyTerrainStanceAssist_RampLipOverGap_LaunchesWithClimbVy()
+    {
+        // Ramp then deep gap: z < 10 → y = 0.25*z; z >= 10 → pit.
+        // Body straddles lip (rear on ramp, front over void) — free-flight + launch vy.
+        var query = new TerrainHeightfieldCollisionQuery(
+            (float x, float z, out float y) =>
+            {
+                if (z < 10f)
+                    y = 0.25f * z;
+                else
+                    y = -12f;
+                return true;
+            });
+        float zBody = 10f - 0.2f;
+        float yRamp = 0.25f * zBody;
+        float noseUp = MathF.Atan(0.25f);
+        var q = TerrainContactPlane.FromYawPitchRoll(yaw: 0f, pitch: -noseUp, roll: 0f);
+        float planar = 14f;
+        var body = new HkRigidBody
+        {
+            Mass = 1f, InvMass = 1f,
+            PosX = 0f,
+            PosY = yRamp + NpcVehiclePhysicsController.TerrainStanceRideHeight,
+            PosZ = zBody,
+            LinVelZ = planar,
+            LinVelY = 0.1f,
+            QuatX = q.X, QuatY = q.Y, QuatZ = q.Z, QuatW = q.W,
+        };
+
+        bool grounded = NpcVehiclePhysicsController.ApplyTerrainStanceAssist(body, query, 1f / 60f);
+
+        Assert.IsFalse(grounded, "front over deep gap with rear near must be lip launch");
+        float wantVy = planar * MathF.Tan(noseUp);
+        Assert.IsTrue(body.LinVelY >= wantVy * 0.85f,
+            $"lip launch must restore climb vy (~{wantVy:F2}), got {body.LinVelY}");
+    }
+
+    [TestMethod]
+    public void ApplyTerrainStanceAssist_FloatingHigh_HardSnapsToRideHeight()
+    {
+        var query = new TerrainHeightfieldCollisionQuery(
+            (float x, float z, out float y) =>
+            {
+                y = 0f;
+                return true;
+            });
+        const float ride = 0.12f;
+        var body = new HkRigidBody
+        {
+            Mass = 1f, InvMass = 1f,
+            PosX = 0f,
+            // Hover ~1.4m above flat ground with residual loft velocity.
+            PosY = 1.4f,
+            PosZ = 0f,
+            LinVelZ = 6f,
+            LinVelY = 3f,
+            QuatW = 1f,
+        };
+
+        bool grounded = NpcVehiclePhysicsController.ApplyTerrainStanceAssist(
+            body, query, 1f / 60f, rideHeight: ride);
+
+        Assert.IsTrue(grounded, "hover just above flat ground should re-plant");
+        Assert.AreEqual(ride, body.PosY, 0.02f,
+            $"must hard-snap to ride height {ride}, PosY={body.PosY}");
+        Assert.AreEqual(0f, body.LinVelY, 0.05f,
+            $"loft velocity must be zeroed when planted, LinVelY={body.LinVelY}");
+    }
+
+    [TestMethod]
+    public void ResolveStanceRideHeight_UsesWheelRadiusMinusHardpoint()
+    {
+        // SyntheticCar: radius 0.4, hardpointY -0.2 → clearance 0.6 → clamp to max 0.55
+        var data = HkVehicleData.FromVehicleSpecific(SyntheticCar());
+        var inst = new VehiclePhysicsInstance(data);
+        float h = NpcVehiclePhysicsController.ResolveStanceRideHeight(vehicle: null, inst);
+        Assert.AreEqual(
+            NpcVehiclePhysicsController.TerrainStanceRideHeightMax, h, 0.02f,
+            $"expected clamped wheel clearance, got {h}");
+        // Must NOT include suspension rest (~0.3) which would push ~0.9.
+        Assert.IsTrue(h < 0.65f, $"ride height must exclude susp rest loft, got {h}");
+    }
+
+    [TestMethod]
+    public void ApplyTerrainStanceAssist_RollsTowardCrossSlope()
+    {
+        // Terrain tilts left-high: y = 0.15 * x  (left = +X in body-right when facing +Z)
+        // Body right = +X when yaw=0, so left samples (x negative) are lower → right side high
+        // → leftUp positive when left is higher. y = 0.15*x means +X higher.
+        var query = new TerrainHeightfieldCollisionQuery(
+            (float x, float z, out float y) =>
+            {
+                y = 0.15f * x;
+                return true;
+            });
+        var body = new HkRigidBody
+        {
+            Mass = 1f, InvMass = 1f,
+            PosX = 0f, PosY = NpcVehiclePhysicsController.TerrainStanceRideHeight, PosZ = 0f,
+            QuatW = 1f,
+        };
+        const float dt = 1f / 60f;
+        for (var i = 0; i < 40; i++)
+            NpcVehiclePhysicsController.ApplyTerrainStanceAssist(body, query, dt);
+
+        NpcVehiclePhysicsController.ExtractBasis(
+            new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
+            out var right, out _);
+        // Higher ground on +X (body right) → right.Y > 0 (right side elevated).
+        Assert.IsTrue(right.Y > 0.05f,
+            $"expected roll onto cross-slope (right elevated), right.Y={right.Y}");
+    }
+
+    [TestMethod]
     public void ForceUprightPreserveYaw_UninvertsWhileKeepingHeading()
     {
         // Build an inverted orientation about Z (roll π) while facing +Z.
