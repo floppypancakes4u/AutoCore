@@ -378,7 +378,7 @@ public class NpcVehiclePhysicsControllerTests
     [TestMethod]
     public void ApplyTerrainStanceAssist_PitchesTowardSlope()
     {
-        // Rising terrain in +Z: y = 0.2 * z
+        // Rising terrain in +Z: y = 0.2 * z  (~11° slope)
         var query = new TerrainHeightfieldCollisionQuery(
             (float x, float z, out float y) =>
             {
@@ -392,17 +392,44 @@ public class NpcVehiclePhysicsControllerTests
             QuatW = 1f, // level, face +Z
         };
         const float dt = 1f / 60f;
+        bool grounded = false;
         for (var i = 0; i < 60; i++)
-            NpcVehiclePhysicsController.ApplyTerrainStanceAssist(body, query, dt);
+            grounded = NpcVehiclePhysicsController.ApplyTerrainStanceAssist(body, query, dt);
 
+        Assert.IsTrue(grounded, "uniform slope should count as grounded");
         NpcVehiclePhysicsController.ExtractBasis(
             new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
             out _, out var forward);
         // On rising slope, nose should pitch up (forward.Y > 0).
-        Assert.IsTrue(forward.Y > 0.05f,
-            $"expected nose-up pitch on rising slope, forward.Y={forward.Y}");
+        Assert.IsTrue(forward.Y > 0.08f,
+            $"expected clear nose-up pitch on rising slope, forward.Y={forward.Y}");
         Assert.IsTrue(NpcVehiclePhysicsController.BodyUpDotWorldUp(body) > 0.7f,
             "stance must not invert the chassis");
+    }
+
+    [TestMethod]
+    public void ApplyTerrainStanceAssist_AirborneOverLedge_ReturnsFalseNoYStick()
+    {
+        // Cliff: ground at y=0 for z<5, y=-10 for z>=5. Car at z=5.5 high above lower ground.
+        var query = new TerrainHeightfieldCollisionQuery(
+            (float x, float z, out float y) =>
+            {
+                y = z < 5f ? 0f : -10f;
+                return true;
+            });
+        var body = new HkRigidBody
+        {
+            Mass = 1f, InvMass = 1f,
+            PosX = 0f, PosY = 2f, PosZ = 5.5f,
+            LinVelZ = 8f,
+            QuatW = 1f,
+        };
+        float y0 = body.PosY;
+        bool grounded = NpcVehiclePhysicsController.ApplyTerrainStanceAssist(body, query, 1f / 60f);
+        Assert.IsFalse(grounded, "over a drop should be airborne");
+        // Must not yank chassis down to the cliff floor in one tick.
+        Assert.IsTrue(body.PosY > y0 - 0.2f,
+            $"airborne must not Y-stick into void, PosY={body.PosY}");
     }
 
     [TestMethod]

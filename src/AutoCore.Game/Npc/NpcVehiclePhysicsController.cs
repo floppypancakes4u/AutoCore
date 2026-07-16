@@ -101,16 +101,31 @@ public static class NpcVehiclePhysicsController
     public const float PathHeadingMaxYawStep = 0.028f; // ~1.6°/tick @ 60 Hz
 
     /// <summary>Max same-frame pitch/roll delta from terrain stance (rad).</summary>
-    public const float TerrainStanceMaxStep = 0.02f;
+    public const float TerrainStanceMaxStep = 0.05f;
 
     /// <summary>Terrain stance blend rate (1/s) toward slope pitch/roll.</summary>
-    public const float TerrainStanceRate = 4f;
+    public const float TerrainStanceRate = 10f;
+
+    /// <summary>Max pitch/roll from stance (~40°) — steep ramps without full flip.</summary>
+    public const float TerrainStanceMaxTilt = 0.70f;
+
+    /// <summary>Target ride height above average terrain sample (m).</summary>
+    public const float TerrainStanceRideHeight = 0.72f;
+
+    /// <summary>
+    /// If chassis is this far above average terrain, treat as airborne (ledge/ramp lip):
+    /// no Y-stick, no speed-match glue — gravity/sim own the arc.
+    /// </summary>
+    public const float TerrainAirborneClearance = 1.35f;
+
+    /// <summary>Corner sample height span above this ⇒ ledge/cliff (don't glue to low samples).</summary>
+    public const float TerrainLedgeDropSpan = 1.5f;
 
     /// <summary>Half-length (m) along body forward for terrain pitch samples.</summary>
-    public const float TerrainStanceSampleHalfLength = 1.4f;
+    public const float TerrainStanceSampleHalfLength = 1.6f;
 
     /// <summary>Half-width (m) along body right for terrain roll samples.</summary>
-    public const float TerrainStanceSampleHalfWidth = 0.85f;
+    public const float TerrainStanceSampleHalfWidth = 0.9f;
 
     /// <summary>
     /// Advance one vehicle via sim-authoritative path-following.
@@ -220,14 +235,17 @@ public static class NpcVehiclePhysicsController
         // no kinematic reverse-throttle deceleration here.
         inst.Step(thr, steer, handbrake: sharp != 0, dt, query);
 
-        // Path assists (reduced tire model is not enough for reliable NPC pathing):
-        // 1) smooth yaw toward look-ahead  2) lateral soft-pull  3) vel→nose
-        // 4) terrain pitch/roll stance  5) speed match to hard path when aligned
+        // Path assists (reduced tire model is not enough for reliable NPC pathing).
+        // Terrain stance returns grounded vs airborne so we don't Y-stick through a ledge
+        // or speed-match while ballistic.
         ApplyPathHeadingAssist(body, aim, dt);
-        ApplyPathTrackLateralPull(body, hard, dt);
         AlignPlanarVelocityToHeading(body, dt);
-        ApplyTerrainStanceAssist(body, query, dt);
-        ApplyPathSpeedMatch(body, hard, aim, dt);
+        bool grounded = ApplyTerrainStanceAssist(body, query, dt);
+        if (grounded)
+        {
+            ApplyPathTrackLateralPull(body, hard, dt);
+            ApplyPathSpeedMatch(body, hard, aim, dt);
+        }
 
         // Post-assist upright guard (stance/heading must never leave the car inverted).
         if (BodyUpDotWorldUp(body) < 0.55f)
@@ -416,21 +434,21 @@ public static class NpcVehiclePhysicsController
     }
 
     /// <summary>
-    /// Soft pitch/roll to terrain slope from four height samples, built as
-    /// <c>Yaw * Pitch * Roll</c> (never axis-multiply an already inverted body).
-    /// Clamped so stance cannot invert the chassis.
+    /// Soft pitch/roll to terrain slope from four height samples.
+    /// Returns <c>true</c> when the chassis is considered grounded (path glue allowed);
+    /// <c>false</c> when airborne over a ledge/gap so gravity can own the arc.
     /// </summary>
-    internal static void ApplyTerrainStanceAssist(
+    internal static bool ApplyTerrainStanceAssist(
         HkRigidBody body,
         IVehicleCollisionQuery query,
         float dt)
     {
         if (body == null || query == null || !(dt > 0f) || !float.IsFinite(dt))
-            return;
+            return false;
 
         // Never apply stance while inverted — straighten first (caller safety net).
         if (BodyUpDotWorldUp(body) < 0.55f)
-            return;
+            return false;
 
         float yaw = ExtractYawRadians(body);
         float cy = MathF.Cos(yaw);
@@ -441,25 +459,37 @@ public static class NpcVehiclePhysicsController
 
         float halfL = TerrainStanceSampleHalfLength;
         float halfW = TerrainStanceSampleHalfWidth;
-        float ox = body.PosX, oy = body.PosY + 3f, oz = body.PosZ;
+        // Cast from well above so ramps/ledges still hit.
+        float ox = body.PosX, oy = body.PosY + 8f, oz = body.PosZ;
 
         if (!SampleTerrainY(query, ox + fx * halfL + rx * halfW, oy, oz + fz * halfL + rz * halfW, out float yFL))
-            return;
+            return false;
         if (!SampleTerrainY(query, ox + fx * halfL - rx * halfW, oy, oz + fz * halfL - rz * halfW, out float yFR))
-            return;
+            return false;
         if (!SampleTerrainY(query, ox - fx * halfL + rx * halfW, oy, oz - fz * halfL + rz * halfW, out float yRL))
-            return;
+            return false;
         if (!SampleTerrainY(query, ox - fx * halfL - rx * halfW, oy, oz - fz * halfL - rz * halfW, out float yRR))
-            return;
+            return false;
 
         float yFront = 0.5f * (yFL + yFR);
         float yRear = 0.5f * (yRL + yRR);
         float yLeft = 0.5f * (yFL + yRL);
         float yRight = 0.5f * (yFR + yRR);
+        float groundAvg = 0.25f * (yFL + yFR + yRL + yRR);
+        float yMin = MathF.Min(MathF.Min(yFL, yFR), MathF.Min(yRL, yRR));
+        float yMax = MathF.Max(MathF.Max(yFL, yFR), MathF.Max(yRL, yRR));
+        float span = yMax - yMin;
+        float clearance = body.PosY - groundAvg;
+
+        // Airborne / off a lip: do not glue Y or force stance onto the cliff face.
+        bool airborne = clearance > TerrainAirborneClearance
+                        || (span > TerrainLedgeDropSpan && clearance > 0.85f);
+        if (airborne)
+            return false;
 
         // Geometric tilt (positive = nose up / left side up). FromYawPitchRoll uses opposite
         // pitch sign (+pitch ⇒ nose down), so we convert at the end.
-        const float maxTilt = 0.45f; // ~26° — never stance into a flip
+        float maxTilt = TerrainStanceMaxTilt;
         float desiredNoseUp = Math.Clamp(MathF.Atan2(yFront - yRear, 2f * halfL), -maxTilt, maxTilt);
         float desiredLeftUp = Math.Clamp(MathF.Atan2(yLeft - yRight, 2f * halfW), -maxTilt, maxTilt);
 
@@ -488,11 +518,16 @@ public static class NpcVehiclePhysicsController
         if (BodyUpDotWorldUp(body) < 0.5f)
             ForceUprightPreserveYaw(body);
 
-        float groundAvg = 0.25f * (yFL + yFR + yRL + yRR);
-        float targetY = groundAvg + 0.75f;
+        // Y-stick while grounded: average on smooth slopes; favor high side on partial drops
+        // so we do not yank the chassis into a void.
+        float supportY = span < TerrainLedgeDropSpan * 0.5f ? groundAvg : yMax;
+        float targetY = supportY + TerrainStanceRideHeight;
         float yErr = targetY - body.PosY;
-        if (MathF.Abs(yErr) > 0.02f)
-            body.PosY += Math.Clamp(yErr * alpha, -0.08f, 0.08f);
+        // Stronger vertical settle so wheels meet the surface on slopes.
+        if (MathF.Abs(yErr) > 0.015f)
+            body.PosY += Math.Clamp(yErr * MathF.Min(1f, alpha * 1.5f), -0.15f, 0.15f);
+
+        return true;
     }
 
     private static bool SampleTerrainY(
@@ -501,7 +536,7 @@ public static class NpcVehiclePhysicsController
         out float hitY)
     {
         hitY = 0f;
-        const float maxDist = 20f;
+        const float maxDist = 40f;
         if (!query.CastRay(x, yStart, z, 0f, -1f, 0f, maxDist, out var hit))
             return false;
         hitY = hit.PointY;
