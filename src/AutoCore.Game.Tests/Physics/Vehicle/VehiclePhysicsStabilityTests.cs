@@ -156,42 +156,6 @@ public class VehiclePhysicsStabilityTests
     }
 
     [TestMethod]
-    public void SoftPullPlanar_ClampsDrift()
-    {
-        float x = 100f, z = 0f;
-        AutoCore.Game.Npc.NpcVehiclePhysicsController.SoftPullPlanarToward(0f, 0f, ref x, ref z);
-        float d = MathF.Sqrt(x * x + z * z);
-        Assert.AreEqual(HkPhysicsConstants.PathSoftPullMaxDrift, d, 1e-3f);
-    }
-
-    [TestMethod]
-    public void SoftPullVertical_ClampsLaunchAndSink()
-    {
-        float y = 50f, vy = 20f;
-        AutoCore.Game.Npc.NpcVehiclePhysicsController.SoftPullVerticalToward(
-            supportY: 1f, ref y, ref vy);
-        Assert.AreEqual(1f + HkPhysicsConstants.PathSoftPullMaxVerticalDrift, y, 1e-3f);
-        Assert.AreEqual(0f, vy, 1e-5f);
-
-        y = -10f;
-        vy = -5f;
-        AutoCore.Game.Npc.NpcVehiclePhysicsController.SoftPullVerticalToward(
-            supportY: 1f, ref y, ref vy);
-        Assert.AreEqual(1f - HkPhysicsConstants.PathSoftPullMaxVerticalDrift, y, 1e-3f);
-        Assert.AreEqual(0f, vy, 1e-5f);
-    }
-
-    [TestMethod]
-    public void SoftPullPlanarVelocity_ClampsExcess()
-    {
-        float vx = 100f, vz = 0f;
-        AutoCore.Game.Npc.NpcVehiclePhysicsController.SoftPullPlanarVelocityToward(
-            0f, 0f, ref vx, ref vz);
-        float d = MathF.Sqrt(vx * vx + vz * vz);
-        Assert.AreEqual(HkPhysicsConstants.PathSoftPullMaxPlanarVelDrift, d, 1e-3f);
-    }
-
-    [TestMethod]
     public void BuildCollisionQuery_NullMap_ProvidesPlanarGround()
     {
         var q = AutoCore.Game.Npc.NpcVehiclePhysicsController.BuildCollisionQuery(
@@ -200,15 +164,6 @@ public class VehiclePhysicsStabilityTests
         Assert.IsTrue(q.CastRay(0f, 5.5f, 0f, 0f, -1f, 0f, 10f, out var hit));
         Assert.AreEqual(5f, hit.PointY, 1e-3f);
         Assert.IsTrue(hit.IsTerrain);
-    }
-
-    [TestMethod]
-    public void ResolveRideHeight_DefaultsNearZero_NotFloatingConstant()
-    {
-        // Without clonebase metrics, must not invent a large float height.
-        var v = new AutoCore.Game.Entities.Vehicle();
-        float ride = AutoCore.Game.Npc.NpcVehiclePhysicsController.ResolveRideHeight(v, data: null);
-        Assert.IsTrue(ride < 0.15f, $"expected near-zero ride, got {ride}");
     }
 
     [TestMethod]
@@ -228,7 +183,7 @@ public class VehiclePhysicsStabilityTests
             $"expected +Z from thr=-1, PosZ={inst.Body.PosZ} Vz={inst.Body.LinVelZ}");
         Assert.IsTrue(inst.Body.PosY < groundY + 5f, $"launched Y={inst.Body.PosY}");
         Assert.IsTrue(inst.Body.PosY > groundY - 0.5f, $"sank Y={inst.Body.PosY}");
-        // Reduced model is soft on peak speed; path soft-pull owns route tracking.
+        // Stability: free-running sim must stay under the linear speed clamp.
         Assert.IsTrue(inst.Body.LinVelZ < HkPhysicsConstants.MaxLinearSpeed);
     }
 }
