@@ -410,11 +410,11 @@ public class NpcVehiclePhysicsControllerTests
     [TestMethod]
     public void ApplyTerrainStanceAssist_AirborneOverLedge_ReturnsFalseNoYStick()
     {
-        // Cliff: ground at y=0 for z<5, y=-10 for z>=5. Car at z=5.5 high above lower ground.
+        // Fully over a void: all samples hit y=-10 while chassis is at y=2.
         var query = new TerrainHeightfieldCollisionQuery(
             (float x, float z, out float y) =>
             {
-                y = z < 5f ? 0f : -10f;
+                y = -10f;
                 return true;
             });
         var body = new HkRigidBody
@@ -422,14 +422,43 @@ public class NpcVehiclePhysicsControllerTests
             Mass = 1f, InvMass = 1f,
             PosX = 0f, PosY = 2f, PosZ = 5.5f,
             LinVelZ = 8f,
+            LinVelY = -2f, // falling
             QuatW = 1f,
         };
         float y0 = body.PosY;
         bool grounded = NpcVehiclePhysicsController.ApplyTerrainStanceAssist(body, query, 1f / 60f);
-        Assert.IsFalse(grounded, "over a drop should be airborne");
-        // Must not yank chassis down to the cliff floor in one tick.
+        Assert.IsFalse(grounded, "high over void should be airborne");
+        // Must not yank chassis down to the floor in one tick.
         Assert.IsTrue(body.PosY > y0 - 0.2f,
             $"airborne must not Y-stick into void, PosY={body.PosY}");
+        // Ballistic pitch: falling → nose should dip (forward.Y < 0).
+        NpcVehiclePhysicsController.ExtractBasis(
+            new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
+            out _, out var forward);
+        Assert.IsTrue(forward.Y < -0.01f,
+            $"expected nose-down in free fall, forward.Y={forward.Y}");
+    }
+
+    [TestMethod]
+    public void ApplyBallisticPitch_FallsNoseDown()
+    {
+        var body = new HkRigidBody
+        {
+            Mass = 1f, InvMass = 1f,
+            PosX = 0f, PosY = 10f, PosZ = 0f,
+            LinVelZ = 10f,
+            LinVelY = -8f,
+            QuatW = 1f,
+        };
+        const float dt = 1f / 60f;
+        for (var i = 0; i < 30; i++)
+            NpcVehiclePhysicsController.ApplyBallisticPitch(body, yaw: 0f, dt);
+
+        NpcVehiclePhysicsController.ExtractBasis(
+            new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
+            out _, out var forward);
+        Assert.IsTrue(forward.Y < -0.15f,
+            $"expected clear nose-down ballistic pitch, forward.Y={forward.Y}");
     }
 
     [TestMethod]

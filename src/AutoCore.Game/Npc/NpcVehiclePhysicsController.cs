@@ -101,31 +101,37 @@ public static class NpcVehiclePhysicsController
     public const float PathHeadingMaxYawStep = 0.028f; // ~1.6°/tick @ 60 Hz
 
     /// <summary>Max same-frame pitch/roll delta from terrain stance (rad).</summary>
-    public const float TerrainStanceMaxStep = 0.05f;
+    public const float TerrainStanceMaxStep = 0.12f;
 
     /// <summary>Terrain stance blend rate (1/s) toward slope pitch/roll.</summary>
-    public const float TerrainStanceRate = 10f;
+    public const float TerrainStanceRate = 18f;
 
-    /// <summary>Max pitch/roll from stance (~40°) — steep ramps without full flip.</summary>
-    public const float TerrainStanceMaxTilt = 0.70f;
+    /// <summary>Max pitch/roll from stance (~50°) — steep ramps without full flip.</summary>
+    public const float TerrainStanceMaxTilt = 0.87f;
 
     /// <summary>Target ride height above average terrain sample (m).</summary>
-    public const float TerrainStanceRideHeight = 0.72f;
+    public const float TerrainStanceRideHeight = 0.65f;
 
     /// <summary>
-    /// If chassis is this far above average terrain, treat as airborne (ledge/ramp lip):
-    /// no Y-stick, no speed-match glue — gravity/sim own the arc.
+    /// A corner sample is "in contact" when bodyY − sampleY is below this (m).
+    /// Used to decide grounded vs free-flight (not average clearance alone).
     /// </summary>
-    public const float TerrainAirborneClearance = 1.35f;
+    public const float TerrainContactClearance = 1.05f;
 
-    /// <summary>Corner sample height span above this ⇒ ledge/cliff (don't glue to low samples).</summary>
-    public const float TerrainLedgeDropSpan = 1.5f;
+    /// <summary>Need this many near-contact corners (of 4) to count as grounded.</summary>
+    public const int TerrainMinContactCorners = 3;
+
+    /// <summary>Ballistic free-flight: blend rate for nose toward velocity direction (1/s).</summary>
+    public const float BallisticPitchRate = 6f;
+
+    /// <summary>Max ballistic pitch step per tick (rad).</summary>
+    public const float BallisticPitchMaxStep = 0.08f;
 
     /// <summary>Half-length (m) along body forward for terrain pitch samples.</summary>
-    public const float TerrainStanceSampleHalfLength = 1.6f;
+    public const float TerrainStanceSampleHalfLength = 1.8f;
 
     /// <summary>Half-width (m) along body right for terrain roll samples.</summary>
-    public const float TerrainStanceSampleHalfWidth = 0.9f;
+    public const float TerrainStanceSampleHalfWidth = 1.0f;
 
     /// <summary>
     /// Advance one vehicle via sim-authoritative path-following.
@@ -434,9 +440,9 @@ public static class NpcVehiclePhysicsController
     }
 
     /// <summary>
-    /// Soft pitch/roll to terrain slope from four height samples.
-    /// Returns <c>true</c> when the chassis is considered grounded (path glue allowed);
-    /// <c>false</c> when airborne over a ledge/gap so gravity can own the arc.
+    /// Soft pitch/roll to terrain when enough corners are in contact; otherwise free-flight
+    /// (ballistic nose from velocity, no Y-stick / path glue).
+    /// Returns <c>true</c> when grounded.
     /// </summary>
     internal static bool ApplyTerrainStanceAssist(
         HkRigidBody body,
@@ -446,21 +452,18 @@ public static class NpcVehiclePhysicsController
         if (body == null || query == null || !(dt > 0f) || !float.IsFinite(dt))
             return false;
 
-        // Never apply stance while inverted — straighten first (caller safety net).
         if (BodyUpDotWorldUp(body) < 0.55f)
             return false;
 
         float yaw = ExtractYawRadians(body);
         float cy = MathF.Cos(yaw);
         float sy = MathF.Sin(yaw);
-        // Planar forward/right from yaw only (+Z forward, +X right).
         float fx = sy, fz = cy;
         float rx = cy, rz = -sy;
 
         float halfL = TerrainStanceSampleHalfLength;
         float halfW = TerrainStanceSampleHalfWidth;
-        // Cast from well above so ramps/ledges still hit.
-        float ox = body.PosX, oy = body.PosY + 8f, oz = body.PosZ;
+        float ox = body.PosX, oy = body.PosY + 12f, oz = body.PosZ;
 
         if (!SampleTerrainY(query, ox + fx * halfL + rx * halfW, oy, oz + fz * halfL + rz * halfW, out float yFL))
             return false;
@@ -471,24 +474,48 @@ public static class NpcVehiclePhysicsController
         if (!SampleTerrainY(query, ox - fx * halfL - rx * halfW, oy, oz - fz * halfL - rz * halfW, out float yRR))
             return false;
 
+        // Per-corner contact: only corners with terrain near the chassis count.
+        Span<float> ys = stackalloc float[4] { yFL, yFR, yRL, yRR };
+        int near = 0;
+        float nearSum = 0f;
+        for (var i = 0; i < 4; i++)
+        {
+            // Negative clearance = chassis below sample (penetrating / under-slope) — still contact.
+            float clr = body.PosY - ys[i];
+            if (clr >= -0.85f && clr <= TerrainContactClearance)
+            {
+                near++;
+                nearSum += ys[i];
+            }
+        }
+
+        bool grounded = near >= TerrainMinContactCorners;
+        if (!grounded)
+        {
+            // Free flight / ramp lip: no ground glue — gravity owns the arc; pitch into velocity.
+            ApplyBallisticPitch(body, yaw, dt);
+            return false;
+        }
+
+        // For stance, use only near-contact corners for slope estimate when possible.
         float yFront = 0.5f * (yFL + yFR);
         float yRear = 0.5f * (yRL + yRR);
         float yLeft = 0.5f * (yFL + yRL);
         float yRight = 0.5f * (yFR + yRR);
-        float groundAvg = 0.25f * (yFL + yFR + yRL + yRR);
-        float yMin = MathF.Min(MathF.Min(yFL, yFR), MathF.Min(yRL, yRR));
-        float yMax = MathF.Max(MathF.Max(yFL, yFR), MathF.Max(yRL, yRR));
-        float span = yMax - yMin;
-        float clearance = body.PosY - groundAvg;
+        // If a side is airborne (ledge), bias samples toward supported corners.
+        bool frontNear = (body.PosY - yFL) <= TerrainContactClearance
+                         || (body.PosY - yFR) <= TerrainContactClearance;
+        bool rearNear = (body.PosY - yRL) <= TerrainContactClearance
+                        || (body.PosY - yRR) <= TerrainContactClearance;
+        if (frontNear && !rearNear)
+        {
+            yRear = yFront; // don't pitch into the void
+        }
+        else if (rearNear && !frontNear)
+        {
+            yFront = yRear;
+        }
 
-        // Airborne / off a lip: do not glue Y or force stance onto the cliff face.
-        bool airborne = clearance > TerrainAirborneClearance
-                        || (span > TerrainLedgeDropSpan && clearance > 0.85f);
-        if (airborne)
-            return false;
-
-        // Geometric tilt (positive = nose up / left side up). FromYawPitchRoll uses opposite
-        // pitch sign (+pitch ⇒ nose down), so we convert at the end.
         float maxTilt = TerrainStanceMaxTilt;
         float desiredNoseUp = Math.Clamp(MathF.Atan2(yFront - yRear, 2f * halfL), -maxTilt, maxTilt);
         float desiredLeftUp = Math.Clamp(MathF.Atan2(yLeft - yRight, 2f * halfW), -maxTilt, maxTilt);
@@ -500,12 +527,14 @@ public static class NpcVehiclePhysicsController
         float curLeftUp = MathF.Asin(Math.Clamp(-right.Y, -1f, 1f));
 
         float alpha = 1f - MathF.Exp(-TerrainStanceRate * dt);
-        float newNoseUp = curNoseUp + Math.Clamp((desiredNoseUp - curNoseUp) * alpha, -TerrainStanceMaxStep, TerrainStanceMaxStep);
-        float newLeftUp = curLeftUp + Math.Clamp((desiredLeftUp - curLeftUp) * alpha, -TerrainStanceMaxStep, TerrainStanceMaxStep);
+        // Strong catch-up: approach desired tilt quickly so ramps read as "planted".
+        float newNoseUp = curNoseUp + Math.Clamp((desiredNoseUp - curNoseUp) * MathF.Max(alpha, 0.55f),
+            -TerrainStanceMaxStep, TerrainStanceMaxStep);
+        float newLeftUp = curLeftUp + Math.Clamp((desiredLeftUp - curLeftUp) * MathF.Max(alpha, 0.55f),
+            -TerrainStanceMaxStep, TerrainStanceMaxStep);
         newNoseUp = Math.Clamp(newNoseUp, -maxTilt, maxTilt);
         newLeftUp = Math.Clamp(newLeftUp, -maxTilt, maxTilt);
 
-        // FromYawPitchRoll: pitch about +X / roll about +Z (client composition).
         float yprPitch = -newNoseUp;
         float yprRoll = -newLeftUp;
         var q = TerrainContactPlane.FromYawPitchRoll(yaw, yprPitch, yprRoll);
@@ -514,20 +543,54 @@ public static class NpcVehiclePhysicsController
         body.QuatZ = q.Z;
         body.QuatW = q.W;
 
-        // Final guard: never leave this helper inverted.
         if (BodyUpDotWorldUp(body) < 0.5f)
             ForceUprightPreserveYaw(body);
 
-        // Y-stick while grounded: average on smooth slopes; favor high side on partial drops
-        // so we do not yank the chassis into a void.
-        float supportY = span < TerrainLedgeDropSpan * 0.5f ? groundAvg : yMax;
+        // Seat on average of *near* samples so we don't pull into a void corner.
+        float supportY = nearSum / near;
         float targetY = supportY + TerrainStanceRideHeight;
         float yErr = targetY - body.PosY;
-        // Stronger vertical settle so wheels meet the surface on slopes.
-        if (MathF.Abs(yErr) > 0.015f)
-            body.PosY += Math.Clamp(yErr * MathF.Min(1f, alpha * 1.5f), -0.15f, 0.15f);
+        if (MathF.Abs(yErr) > 0.01f)
+            body.PosY += Math.Clamp(yErr * MathF.Min(1f, alpha * 2f), -0.22f, 0.22f);
+
+        // Kill residual upward float when firmly grounded (helps plant on ramps).
+        if (body.LinVelY > 0.5f && yErr > -0.1f)
+            body.LinVelY *= 0.5f;
 
         return true;
+    }
+
+    /// <summary>
+    /// Free-flight: soft-pitch the nose toward the velocity vector so ramps/ledges read as
+    /// ballistic arcs instead of flat skating through the air.
+    /// </summary>
+    internal static void ApplyBallisticPitch(HkRigidBody body, float yaw, float dt)
+    {
+        if (body == null || !(dt > 0f))
+            return;
+
+        float planar = MathF.Sqrt(body.LinVelX * body.LinVelX + body.LinVelZ * body.LinVelZ);
+        // desired geometric nose-up: positive when climbing (velY > 0), negative when falling.
+        float desiredNoseUp = 0f;
+        if (planar > 0.5f || MathF.Abs(body.LinVelY) > 0.5f)
+            desiredNoseUp = Math.Clamp(MathF.Atan2(body.LinVelY, MathF.Max(planar, 0.25f)), -0.85f, 0.85f);
+
+        ExtractBasis(
+            new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW),
+            out _, out var forward);
+        float curNoseUp = MathF.Asin(Math.Clamp(forward.Y, -1f, 1f));
+        float alpha = 1f - MathF.Exp(-BallisticPitchRate * dt);
+        float newNoseUp = curNoseUp + Math.Clamp((desiredNoseUp - curNoseUp) * alpha,
+            -BallisticPitchMaxStep, BallisticPitchMaxStep);
+
+        var q = TerrainContactPlane.FromYawPitchRoll(yaw, pitch: -newNoseUp, roll: 0f);
+        body.QuatX = q.X;
+        body.QuatY = q.Y;
+        body.QuatZ = q.Z;
+        body.QuatW = q.W;
+        // Flatten residual roll in air.
+        body.AngVelX *= 0.9f;
+        body.AngVelZ *= 0.85f;
     }
 
     private static bool SampleTerrainY(
