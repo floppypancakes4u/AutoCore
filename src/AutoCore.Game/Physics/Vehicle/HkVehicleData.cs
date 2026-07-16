@@ -292,7 +292,11 @@ public sealed class HkVehicleData
             if (isRear)
                 tRatio *= rearMu; // setup applies RearWheelFrictionScalar to rear torque/friction table
 
-            // wheel+0x88: RE writer open — map from TorqueRatio (already rear-scaled).
+            // wheel+0x88 (RESOLVED, B3): retail value is a per-wheel CONTACT GATE — 1.0 grounded,
+            // 0.0 airborne (rewritten each preUpdate; framework vtbl+0x24 override is a no-op). The
+            // torque ratio lives upstream in retail's calcWheelTorque output (wheels+0x28[i]), which
+            // this port does not yet reproduce, so tRatio is folded here as an INTERIM stand-in.
+            // C5 refactor: carry tRatio in the torque path and make DriveScale the pure contact gate.
             // See docs/reconstruction/physics/verified/fn_wheel_driveScale_0x88.md.
             var driveScale = tRatio;
 
