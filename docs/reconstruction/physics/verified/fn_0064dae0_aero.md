@@ -173,10 +173,10 @@ Written to component `+0x10..+0x1c` for the vehicle framework force applicator a
 
 ## Notes / residual risk
 
-- `body+0x2c` as inverse mass is consistent with force units (drag/lift are forces; extraG·mass matches). Not independently cross-checked against a full Havok RB type dump in this pass.
-- front/up axis labels are usage-inferred (speed along +0x10 → front; lift along +0x20 → up); consistent with Havok vehicle defaults and the map doc.
+- RESOLVED (Task B6, see below): `body+0x2c` as inverse mass is consistent with force units (drag/lift are forces; extraG·mass matches). Not independently cross-checked against a full Havok RB type dump in this pass. — cross-checked via emulation register readback (`XMM1` at `RET` = `1/invMass`, bit-exact for invMass in {0.1, 0.25, 1.0}); see "Task B6 update" below.
+- RESOLVED (Task B6, see below): front/up axis labels are usage-inferred (speed along +0x10 → front; lift along +0x20 → up); consistent with Havok vehicle defaults and the map doc. — independently re-derived from fresh disassembly this task (unambiguous straight-line instruction reading, no branches on this path); see "Task B6 update" below.
 - Output w-lane is zero for drag/lift and only non-zero if `extraGravity.w ≠ 0` (descriptor builder typically leaves w uninit/pad).
-- Emulation not practical without a full fake vehicle/body graph; goldens for TDD should be hand-derived from the formulas above with known ρ, A, Cd, Cl, v, axes, and mass.
+- RESOLVED (Task B6, see below): Emulation not practical without a full fake vehicle/body graph; goldens for TDD should be hand-derived from the formulas above with known ρ, A, Cd, Cl, v, axes, and mass. — a full fake struct graph was built and `emulate_function`'d this task for the pointer-chase and invMass portions (Fx/Fy/Fz remain hand-derived per the register-surface limitation documented below); see "Task B6 update" below.
 
 ## Task B6 update (2026-07): emulation of the full fake vehicle/body graph
 

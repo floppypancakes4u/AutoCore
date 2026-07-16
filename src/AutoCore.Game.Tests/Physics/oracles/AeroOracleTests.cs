@@ -18,7 +18,6 @@ public class AeroOracleTests
     private const string GoldensFileName = "aero_goldens.json";
     private const string AeroTypeName = "AutoCore.Game.Physics.Vehicle.HkVehicleAerodynamics";
     private const string ComputeForceMethodName = "ComputeForce";
-    private const float Tolerance = 1e-4f;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -40,13 +39,73 @@ public class AeroOracleTests
             Assert.IsNotNull(v.Expected, $"vector {v.Id} missing expected");
 
             var inputs = v.Inputs!;
+            var exp = v.Expected!;
+
+            // Fixture self-consistency guard: every *Hex field must decode (bit-exact,
+            // via BitConverter.ToSingle on the raw LE float32 bytes) to its decimal sibling.
+            AssertHexMatchesDecimal(inputs.Rho, inputs.RhoHex, v.Id, "rho");
+            AssertHexMatchesDecimal(inputs.FrontalArea, inputs.FrontalAreaHex, v.Id, "frontalArea");
+            AssertHexMatchesDecimal(inputs.DragCoefficient, inputs.DragCoefficientHex, v.Id, "dragCoefficient");
+            AssertHexMatchesDecimal(inputs.LiftCoefficient, inputs.LiftCoefficientHex, v.Id, "liftCoefficient");
+            AssertHexMatchesDecimal(inputs.ExtraGx, inputs.ExtraGxHex, v.Id, "extraGx");
+            AssertHexMatchesDecimal(inputs.ExtraGy, inputs.ExtraGyHex, v.Id, "extraGy");
+            AssertHexMatchesDecimal(inputs.ExtraGz, inputs.ExtraGzHex, v.Id, "extraGz");
+            AssertHexMatchesDecimal(inputs.WorldFrontX, inputs.WorldFrontXHex, v.Id, "worldFrontX");
+            AssertHexMatchesDecimal(inputs.WorldFrontY, inputs.WorldFrontYHex, v.Id, "worldFrontY");
+            AssertHexMatchesDecimal(inputs.WorldFrontZ, inputs.WorldFrontZHex, v.Id, "worldFrontZ");
+            AssertHexMatchesDecimal(inputs.WorldUpX, inputs.WorldUpXHex, v.Id, "worldUpX");
+            AssertHexMatchesDecimal(inputs.WorldUpY, inputs.WorldUpYHex, v.Id, "worldUpY");
+            AssertHexMatchesDecimal(inputs.WorldUpZ, inputs.WorldUpZHex, v.Id, "worldUpZ");
+            AssertHexMatchesDecimal(inputs.LinVelX, inputs.LinVelXHex, v.Id, "linVelX");
+            AssertHexMatchesDecimal(inputs.LinVelY, inputs.LinVelYHex, v.Id, "linVelY");
+            AssertHexMatchesDecimal(inputs.LinVelZ, inputs.LinVelZHex, v.Id, "linVelZ");
+            AssertHexMatchesDecimal(inputs.Mass, inputs.MassHex, v.Id, "mass");
+            AssertHexMatchesDecimal(exp.Fx, exp.FxHex, v.Id, "fx");
+            AssertHexMatchesDecimal(exp.Fy, exp.FyHex, v.Id, "fy");
+            AssertHexMatchesDecimal(exp.Fz, exp.FzHex, v.Id, "fz");
+
             var (fx, fy, fz) = InvokeComputeForce(computeForce, inputs);
 
-            var exp = v.Expected!;
-            Assert.AreEqual(exp.Fx, fx, Tolerance, $"golden #{v.Id} ({v.Name}) fx");
-            Assert.AreEqual(exp.Fy, fy, Tolerance, $"golden #{v.Id} ({v.Name}) fy");
-            Assert.AreEqual(exp.Fz, fz, Tolerance, $"golden #{v.Id} ({v.Name}) fz");
+            // Bit-exact assertion against the hex-decoded expected value (the raw LE
+            // float32 bytes are the source of truth; the decimal field is a convenience
+            // copy already proven consistent with it above).
+            var expFx = ParseHexFloat(exp.FxHex!);
+            var expFy = ParseHexFloat(exp.FyHex!);
+            var expFz = ParseHexFloat(exp.FzHex!);
+
+            AssertBitExact(expFx, fx, v.Id, v.Name, "fx");
+            AssertBitExact(expFy, fy, v.Id, v.Name, "fy");
+            AssertBitExact(expFz, fz, v.Id, v.Name, "fz");
         }
+    }
+
+    /// <summary>
+    /// Parses an 8-hex-char raw little-endian float32 (as written in aero_goldens.json)
+    /// into a <see cref="float"/>.
+    /// </summary>
+    private static float ParseHexFloat(string hex)
+    {
+        Assert.AreEqual(8, hex.Length, $"hex string '{hex}' must be 8 hex chars (raw LE float32)");
+        var bytes = Convert.FromHexString(hex);
+        return BitConverter.ToSingle(bytes, 0);
+    }
+
+    private static void AssertHexMatchesDecimal(float decimalValue, string? hex, int id, string field)
+    {
+        Assert.IsNotNull(hex, $"golden #{id} missing {field}Hex");
+        var hexValue = ParseHexFloat(hex!);
+        Assert.AreEqual(
+            BitConverter.SingleToInt32Bits(decimalValue),
+            BitConverter.SingleToInt32Bits(hexValue),
+            $"golden #{id} {field}: decimal {decimalValue} bit pattern does not match {field}Hex '{hex}' (decoded {hexValue})");
+    }
+
+    private static void AssertBitExact(float expected, float actual, int id, string? name, string field)
+    {
+        Assert.AreEqual(
+            BitConverter.SingleToInt32Bits(expected),
+            BitConverter.SingleToInt32Bits(actual),
+            $"golden #{id} ({name}) {field}: expected bit-exact {expected} (0x{BitConverter.SingleToInt32Bits(expected):X8}) but got {actual} (0x{BitConverter.SingleToInt32Bits(actual):X8})");
     }
 
     private static MethodInfo ResolveComputeForceOrSkip()
@@ -184,28 +243,48 @@ public class AeroOracleTests
     private sealed class GoldenInputs
     {
         public float Rho { get; set; }
+        public string? RhoHex { get; set; }
         public float FrontalArea { get; set; }
+        public string? FrontalAreaHex { get; set; }
         public float DragCoefficient { get; set; }
+        public string? DragCoefficientHex { get; set; }
         public float LiftCoefficient { get; set; }
+        public string? LiftCoefficientHex { get; set; }
         public float ExtraGx { get; set; }
+        public string? ExtraGxHex { get; set; }
         public float ExtraGy { get; set; }
+        public string? ExtraGyHex { get; set; }
         public float ExtraGz { get; set; }
+        public string? ExtraGzHex { get; set; }
         public float WorldFrontX { get; set; }
+        public string? WorldFrontXHex { get; set; }
         public float WorldFrontY { get; set; }
+        public string? WorldFrontYHex { get; set; }
         public float WorldFrontZ { get; set; }
+        public string? WorldFrontZHex { get; set; }
         public float WorldUpX { get; set; }
+        public string? WorldUpXHex { get; set; }
         public float WorldUpY { get; set; }
+        public string? WorldUpYHex { get; set; }
         public float WorldUpZ { get; set; }
+        public string? WorldUpZHex { get; set; }
         public float LinVelX { get; set; }
+        public string? LinVelXHex { get; set; }
         public float LinVelY { get; set; }
+        public string? LinVelYHex { get; set; }
         public float LinVelZ { get; set; }
+        public string? LinVelZHex { get; set; }
         public float Mass { get; set; }
+        public string? MassHex { get; set; }
     }
 
     private sealed class GoldenExpected
     {
         public float Fx { get; set; }
+        public string? FxHex { get; set; }
         public float Fy { get; set; }
+        public string? FyHex { get; set; }
         public float Fz { get; set; }
+        public string? FzHex { get; set; }
     }
 }
