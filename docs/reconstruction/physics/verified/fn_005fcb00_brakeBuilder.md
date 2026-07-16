@@ -210,6 +210,13 @@ for each wheel i:
 
 ## 6. Critical note — custom path may not apply service brake
 
+> **Task B8 update (RESOLVED):** the runtime ambiguity flagged at the end of this section (whether
+> `hkDefaultBrake_update` is ever vtable-dispatched) is now closed — it **is** ticked every
+> substep. See `brake-spec.md` §5 item 1 for the full call chain (`tickSubsystems` → `fw+0x24` →
+> `hkDefaultBrake_update` `0x64e6f0`, pedal from the throttle axis's reverse component, output
+> consumed by `postTickApplyForces`/`preUpdate`). Points 2–5 below (the DB→Havok field mapping)
+> remain accurate; only the "does the runtime ever call it" question changes.
+
 **This builder only configures `hkDefaultBrake` at vehicle setup.** It does **not** apply braking forces.
 
 Retail AA custom drive path:

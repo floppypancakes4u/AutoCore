@@ -240,6 +240,10 @@ Confirms ctor owns the three subclass buffers at `+0x28/+0x34/+0x40`.
 
 ---
 
+> **Task B8 update (RESOLVED):** whether `hkDefaultBrake_update` is ever ticked at runtime is now
+> settled — **yes**, every substep, as framework child 5/7 via `VehicleAction_tickSubsystems`
+> (`0x636a60`). See `brake-spec.md` §5 item 1 for the full call chain and evidence.
+
 ## 8. Runtime consumer (context only — not this function)
 
 `hkDefaultBrake_update` @ `0x64e6f0` (comment plate `WI-MOV-005`):

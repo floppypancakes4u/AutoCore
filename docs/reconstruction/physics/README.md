@@ -43,7 +43,7 @@ vehicle physics port, plus Phase 2–4 port status.
 | `0.8-struct-offsets.md` | Layout | Body `+0x30..3c`=quaternion, `+0x40..48`=linVel, `+0x50..5c`=angVel, `+0xb0..b8`=pos, `+0x2c`=invMass; VA `+0x28`=final steer | multiple |
 | `engine-torque-spec.md` | Engine port | torqueCurve2D verified + 6 golden vectors; `&7` = 8 levels; truncation toward zero | `0x4a9750` |
 | `steering-spec.md` | Steering | `angle = MaxAngle·steer·(speed≤FSL?1:(FSL/speed)²)` **quadratic**; ramp ±0.05/tick; speedFactor `min(speed/20,1)` | `hkDefaultSteering::update 0x64f840` |
-| `brake-spec.md` | Brake | **No service-brake torque** in custom path (decel from friction solver); handbrake = rear drive-torque ×0.5 | `0x598040` |
+| `brake-spec.md` | Brake | AA `applyAction`/`calcWheelTorque` add **no** brake torque directly, but the framework's `hkDefaultBrake` component **is ticked** every substep (Task B8) and applies real per-wheel brake torque + wheel lock, fed by the throttle axis's reverse component; handbrake = rear drive-torque ×0.5 **and** (if handbrake-connected) Havok lock | `0x598040`, `0x64e6f0`, `0x636a60` |
 | `avd-airstab-spec.md` | AVD/air-stab | Continuous `hkAngularVelocityDamperAction` (`update 0x64d810`): `w*=max(0,1−d·dt)`, collision branch **speed-triggered**; upright-restore when dot(up,worldUp)<0.7 | `0x64d810`, `0x598320` |
 | `drive-controller-spec.md` | AI controller | thr/steer/sharp math + 4 golden vectors; **throttle sign inverted** (fwd = base −1) | `MoveToTarget3DPoint 0x4fc650` |
 | `setup-field-mapping.md` | Setup | `VehicleSpecific` (offsets 0x4c0–0x740) → Havok components; top-speed precomputed to `vehicle+0x110` | `Vehicle_buildHavokVehicleFramework 0x5fd390` |
@@ -60,7 +60,10 @@ vehicle physics port, plus Phase 2–4 port status.
    (`vehicleData+0x740`) baked into rear μ at setup (`FUN_005fcce0 0x5fcce0`).
 4. **Engine:** effectively a **constant drive-torque factor** (LUT degenerates); real torque ≈
    `μ·upright·factor`, clamp [0,1000]. Do NOT build a full gear/RPM engine for parity.
-5. **Brake:** no per-wheel service brake; deceleration is friction + reverse throttle; handbrake = rear ×0.5.
+5. **Brake:** deceleration is friction-solver coast/reverse-drive **plus** a live Havok
+   `hkDefaultBrake` per-wheel torque + lock (Task B8: confirmed ticked every substep, pedal from
+   the throttle axis's reverse component); handbrake = rear drive-torque ×0.5 **and** Havok lock
+   on handbrake-connected wheels.
 6. **Steering:** quadratic inverse-speed falloff; front/rear steer flags at `VehicleSpecific+0x4cc`/`+0x5f0`.
 7. **Aero + AVD** give the ramp/air behaviour: lift sign from Cl, extraGravity, upright-restore impulse,
    continuous angular damping.
@@ -90,7 +93,13 @@ vehicle physics port, plus Phase 2–4 port status.
 - Friction solver: exact 2×2 row binding (a/d/b), `circleProjection` helper internals, softness composition.
 - Mass/inertia: RVInertia Roll/Pitch/Yaw→axis pairing and COM-modifier apply site (bulk-copied struct).
 - Engine: whether the position-indexed LUT constant-factor is intentional (vs terrain traction map).
-- Brake: exact `hkpVehicleDefaultBrake` runtime call site (likely vestigial).
+- ~~Brake: exact `hkpVehicleDefaultBrake` runtime call site (likely vestigial).~~ **RESOLVED
+  (Task B8): TICKED.** `hkDefaultBrake_update` (`0x64e6f0`) runs every substep as framework child
+  5/7 via `VehicleAction_tickSubsystems` (`0x636a60`), fed a pedal derived from the throttle
+  axis's reverse component (`hkDefaultAnalogDriverInput_calcStatus` `0x5fe520`) + the raw
+  handbrake byte; its per-wheel torque output is folded into the friction-solver input in
+  `postTickApplyForces` (`0x64bc70`) and its lock flag zeroes wheel spin in `preUpdate`
+  (`0x64cf20`). See `brake-spec.md` §5 item 1 for full call chain and port implications.
 - Wheel-collide: retail **client + server** cast against **full Havok body geometry**. Phase-2 server starts
   **terrain-heightfield only** (`MapTerrainHeightfield`); full geometry lands later via `IVehicleCollisionQuery`.
 - Wheel `+0x88` drive scale: exact writer site still open; port maps from `TorqueRatio` provisionally.

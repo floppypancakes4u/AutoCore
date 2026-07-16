@@ -10,7 +10,18 @@ Havok 2.3 vehicle SDK). Read-only RE; no DB edits. Cross-referenced with
 > `+0x618` steer axis → `wheelsDesc+0x1c`), and `+0x28` is the speed-scaled final steer angle.
 > **There is no dedicated service-brake float on the Havok VehicleAction, and neither
 > `applyAction` (`0x598650`) nor `calcWheelTorque` (`0x598040`) applies a per-wheel braking
-> torque.** Braking in the retail custom path is produced two ways (below).
+> torque.** That part remains true — but it is **not the whole story**.
+
+> **Task B8 update (RESOLVED).** The framework-level `hkpVehicleDefaultBrake` component **is**
+> ticked every substep — it is one of the framework's 7 fixed child components dispatched by
+> `VehicleAction_tickSubsystems` (`0x636a60`), called from `applyAction`. Its computed per-wheel
+> brake torque is read back in `hkVehicleFramework_postTickApplyForces` (`0x64bc70`) and folded
+> into the friction-solver's per-wheel torque input, and its per-wheel lock flag is read in
+> `hkVehicleFramework_preUpdate` (`0x64cf20`) to force wheel spin speed to **zero** (full lock).
+> So retail braking is the **sum** of (a) the friction-solver coast/reverse behavior described in
+> §1 below (driven through `calcWheelTorque`'s drive-torque clamp) **and** (b) a live Havok
+> service-brake torque + wheel-lock, driven by a pedal signal synthesized from the throttle axis's
+> reverse-direction component. Full evidence and call chain: **§5, item 1**.
 
 ---
 
@@ -114,6 +125,12 @@ So the handbrake byte simultaneously (a) halves rear drive torque here, and (b) 
 | `hkVehicleFrictionSolver_solve` | `0x6c4450` | longitudinal impulse = where service deceleration actually resolves |
 | `VehicleDb_LoadCloneBase`       | `0x7efb40` | parses all 6 `rlBrakes*` fields (bind block `0x7f2d61–0x7f2e78`) |
 | `PushDriveAxesToController`     | `0x4fbc10` | copies entity `+0x61c` handbrake → controller `+0x24` |
+| `VehicleAction_tickSubsystems`  | `0x636a60` | per-substep framework dispatcher; calls `hkDefaultBrake_update` as fixed child 5 of 7 (`fw+0x24`) |
+| `hkVehicleFramework_wireComponents` | `0x636940` | wires `desc[6]` (brake) → `fw+0x24` |
+| `hkDefaultAnalogDriverInput_calcStatus` | `0x5fe520` | derives brake-pedal status (`driverInput+0x10`) from the throttle axis's positive/reverse component; handbrake status (`+0x18`) = raw `driverInput+0x24` |
+| `hkDefaultBrake_update`         | `0x64e6f0` | **TICKED** — vtbl slot `+0x14` of `PTR_FUN_009e4cb8`; computes per-wheel brake torque (`brake+0x10[i]`) + lock flags (`brake+0x1c[i]`) from pedal/handbrake status |
+| `hkVehicleFramework_postTickApplyForces` | `0x64bc70` | reads `brake+0x10[i]`, folds into friction-solver per-wheel torque input |
+| `hkVehicleFramework_preUpdate`  | `0x64cf20` | reads `brake+0x1c[i]` (isBlocked); if set, zeroes wheel spin speed (`wheel+0x8c`) — full wheel lock |
 
 | DAT | Address | Value | Use |
 |---|---|---|---|
@@ -128,15 +145,100 @@ So the handbrake byte simultaneously (a) halves rear drive torque here, and (b) 
 
 ## 5. Ambiguities / open items
 
-1. **Is the `hkpVehicleDefaultBrake` component actually ticked at runtime?** The 6 config fields
-   are loaded and the Havok brake RTTI is compiled in, but the per-tick **service-brake torque
-   call site was not located** — the AA custom driver (`applyAction`/`calcWheelTorque`) does not
-   invoke it, and the retail deceleration observed is fully explained by the friction solver +
-   reverse throttle. The brake fields may be (a) consumed by a Havok brake component ticked inside
-   the framework step that this pass did not decompile, or (b) partially vestigial config carried
-   from the Havok template. **Resolve:** trace the framework per-tick component dispatch (callers
-   of `0x64bc70` / the `preUpdate` path) for a `hkpVehicleDefaultBrake::*` call, or breakpoint-hold
-   the brake and watch `wheelsDesc` angular velocities for a forced block.
+1. ~~Is the `hkpVehicleDefaultBrake` component actually ticked at runtime?~~
+   **RESOLVED (Task B8) — TICKED, and its output is consumed downstream.**
+
+   **Why `get_xrefs_to` / `get_function_callers` on `hkDefaultBrake_update` (`0x64e6f0`) find no
+   caller:** the only static reference is the vtable data slot itself
+   (`get_xrefs_to(0x64e6f0)` → `From 009e4ccc [DATA]`, i.e. `PTR_FUN_009e4cb8+0x14`). The call is
+   an **indirect vtable dispatch** (`(**(code**)(*(int*)param_1[9] + 0x14))(param_2)` inside
+   `tickSubsystems`) — Ghidra's static call graph does not resolve indirect calls through a
+   pointer loaded from a component array, so callee-side xref/caller tools give a false negative
+   here (same is true for every other Havok component `update`, e.g. `calcStatus` at `0x5fe520` —
+   only xref is its own vtable slot `0x9dd37c`). The proof comes from the **caller side**:
+   decompiling `tickSubsystems` and `wireComponents` and confirming the vtable slot address.
+
+   **Call chain (every physics substep):**
+   ```
+   VehicleAction::applyAction        (0x598650, call site 0x5987a2)
+     → VehicleAction_tickSubsystems  (0x636a60)                — this = hkVehicleFramework
+         fw.vtbl+0x14  = preUpdate            (0x64cf20)   [step 0]
+         fw+0x14.vtbl+0x14 = driverInput.calcStatus (0x5fe520) [step 1]
+         fw+0x18.vtbl+0x14 = steering.update        (0x64f840) [step 2]
+         fw+0x1c.vtbl+0x14 = engine-slot.update      (0x5d66a0) [step 3]
+         fw+0x20.vtbl+0x14 = transmission.update     (0x64f510) [step 4]
+         fw+0x24.vtbl+0x14 = hkDefaultBrake_update    (0x64e6f0) [step 5]  ← THE BRAKE, TICKED HERE
+         fw+0x28.vtbl+0x14 = suspension.update        (0x64de50) [step 6]
+         fw+0x2c.vtbl+0x14 = aero.update               (0x64dae0) [step 7]
+         fw.vtbl+0x18  = postTickApplyForces  (0x64bc70)   [step 8]
+   ```
+   `wireComponents` (`0x636940`) wires `desc[6]` → `fw+0x24` = the brake object built by
+   `FUN_005fcb00` / `hkDefaultBrake_ctor` (`0x64ed40`) — the exact same object this doc's §1/§2
+   already track. Vtable `PTR_FUN_009e4cb8` slot `+0x14` = `0x64e6f0` (confirmed by `read_memory`
+   in `fn_0064ed40_brakeCtor.md` §7).
+
+   **Pedal input is real, not zero.** `hkDefaultAnalogDriverInput_calcStatus` (`0x5fe520`, tick
+   step 1, same dispatcher) computes, from the driver's raw throttle axis at `driverInput+0x20`
+   (= `entity+0x614`, `Accel=-1`/`Reverse=+1`), optionally sign-flipped when a
+   transmission-reverse-gear flag (`*(transmission+0x14)`) **and** a local flag
+   (`driverInput+0x3c`) are both set:
+   ```
+   accel(+0xc)      = (v <= 0) ? -v : 0        // forward component → drive (unused by AA engine)
+   brakePedal(+0x10) = (v >= 0) ?  v : 0        // reverse/brake component → Havok brake pedal
+   handbrake(+0x18)  = driverInput+0x24          // raw entity+0x61c byte, verbatim
+   ```
+   So **whenever the driver's throttle axis is in the reverse direction** (or, if already
+   confirmed in reverse gear, whenever the flip condition does *not* hold), that magnitude is fed
+   as a genuine `[0,1]`-ish Havok brake-pedal value into `hkDefaultBrake_update`, which applies the
+   documented (§2a) `peak = pedal * maxBrakingTorque[i]` per-wheel torque and the
+   `minPedalInputToBlock` / instant-block (`minTimeToBlock=0`) lock logic — using the **same**
+   `wheelsMaxBrakingTorque` / `wheelsMinPedalInputToBlock` / `wheelsIsConnectedToHandbrake` arrays
+   documented in §2/§5fcb00.
+
+   **Output is consumed, not dead.** In `hkVehicleFramework_postTickApplyForces` (`0x64bc70`):
+   ```c
+   local_3ec = ( *(float*)(*(int*)(fw+0x24) + 0x10)[i]     // brake+0x10[i] — hkDefaultBrake_update output
+              +  *(float*)(*(int*)(fw+0x20) + 0x20)[i] )   // transmission residual
+              / *(float*)(wheels+0x10)[i];                  // per-wheel inertia-like divisor
+   ```
+   `local_3ec` is written into the per-wheel friction-solver input row (`acStack_280[...-4]`),
+   which is passed as `arg2`/`arg4` to `hkVehicleFrictionSolver_solve` (`0x6c4450`) alongside the
+   drive-torque term (`wheels+0x28[i] * wheel+0x88`, a separate slot in the same row). And in
+   `hkVehicleFramework_preUpdate` (`0x64cf20`, next substep):
+   ```c
+   if ( *(char*)(*(int*)(fw+0x24) + 0x1c)[i] == 0 )         // brake+0x1c[i] isBlocked == false
+        wheel[i].spinSpeed(+0x8c) = (contactTorque + residual) / wheelInertia;  // normal spin
+   else
+        wheel[i].spinSpeed(+0x8c) = 0;                       // LOCKED — full wheel lock/skid
+   ```
+   i.e. a locked wheel (handbrake-connected + handbrake asserted, or brake-armed past the
+   instant-block timer) has its angular velocity forced to **zero** every substep — a real,
+   externally-observable effect (skid marks / locked-wheel friction), not vestigial config.
+
+   **Conclusion: TICKED.** `hkpVehicleDefaultBrake` runs every physics substep as a first-class
+   framework child, consumes a real (throttle-derived) pedal + the raw handbrake byte, and its two
+   outputs (per-wheel brake torque, per-wheel lock) are both read by other framework stages in the
+   same tick loop. The §1 "friction solver only" story was based on `applyAction`/`calcWheelTorque`
+   alone and is **incomplete**: retail deceleration = friction-solver coast/reverse-drive **plus**
+   this Havok brake torque/lock layer, running in parallel every substep.
+
+   **Implications for the C# port (flagged, not applied — no C# changed in this task):**
+   - `HkVehicleBrake.cs` (see `docs/reconstruction/RESUME.md` production layout) needs to be a
+     live per-substep subsystem, not just a config holder: it must (1) receive a pedal value
+     derived the same way (`max(reverseComponentOfThrottleAxis, 0)`, gear-flip caveat above) and
+     the raw handbrake bit, (2) compute `peak = pedal * maxBrakingTorque[i]` opposing-spin torque
+     per wheel, (3) apply instant-lock semantics (`minTimeToBlock` from DB is always **0** per the
+     builder — §2/`fn_005fcb00_brakeBuilder.md` §4c — so block is immediate once
+     `pedal >= minPedalInputToBlock` on an armed wheel or handbrake-connected wheel gets handbrake asserted).
+   - The port's friction solver / wheel-spin integrator must **consume** this brake output the
+     same way retail does: fold brake torque into the per-wheel torque/inertia term feeding the
+     friction solver, and force wheel angular velocity to zero when locked — currently these two
+     read sites (`postTickApplyForces`, `preUpdate`) are exactly where the port's equivalent
+     integration step must add the same terms if not already doing so.
+   - The transmission-reverse-gear flip condition (`transmission+0x14` && `driverInput+0x3c`) was
+     **not** independently re-verified in this task (out of scope for B8); treat the "reverse
+     axis → brake pedal, unless confirmed-in-reverse-gear → drive" rule as **high confidence but
+     the exact gear-flag semantics as a follow-up if bit-exact reverse/brake blending is required.**
 2. **VehicleSpecific absolute base for `+0xbc…+0xd0`.** Relative contiguous layout is solid; the
    `EBP → VehicleSpecific*` identity should be confirmed against the struct used by the physics
    build before wiring the port.
