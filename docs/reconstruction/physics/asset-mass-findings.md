@@ -37,10 +37,30 @@ already loads**, with zero Havok-blob parsing — just replace `HkPhysicsConstan
 `HkVehicleData.FromVehicleSpecific` with `SimpleObjectSpecific.Mass` (fallback to `1.0` if absent), and
 inertia falls out as `mass × RVInertia`. Base COM from the hulls is a separate, optional refinement.
 
-## The one open confirmation
+## CONFIRMED (2026-07-16, live CE cross-check on two different-weight vehicles)
 
-**Does the live chassis rigid-body mass (`1/(rb+0x2c)` = 1500 in B4/B1) equal
-`SimpleObjectSpecific.Mass` for that vehicle?** Two ways to close it:
+**`chassis RB mass == SimpleObjectSpecific.Mass (rlMass) == the vehicle's real weight`, and
+`inertia == mass × RVInertia`.** Two vehicles with different weights, read live via a postTick
+capture (`fw → +0x30 chassis → +0x3c rb`, `mass = 1/(rb+0x2c)`, principal inertia at `rb+0xe0`):
+
+| Vehicle | UI weight | live RB mass | live inertia `rb+0xe0` | = mass × RVInertia |
+|---------|-----------|-------------:|------------------------|--------------------|
+| Callisto X   | 1500 kg | **1500.0** | I=[4500, 4500, 1500] | 1500 × [Pitch 3, Yaw 3, Roll 1] |
+| Astimiax 900 | 2900 kg | **2900.0** | I=[5800, 2900, 5800] | 2900 × [Pitch 2, Yaw 1, Roll 2] |
+
+The mass **tracks the vehicle's weight** (1500→1500, 2900→2900) — it is NOT a fixed default. Since
+`SimpleObjectSpecific.Mass` is the weight the server already loads, **the port can use real
+mass + real inertia with zero asset parsing**: `mass = SimpleObjectSpecific.Mass`, inertia =
+`mass × RVInertia` (axes Z←Roll, X←Pitch, Y←Yaw per C1). Base COM (hull centroid) remains the only
+optional asset-parse, and is low priority.
+
+> **Sequencing caveat:** real mass changes every force magnitude (`gScale = 1/invMass = mass`;
+> suspension/friction impulses scale with it). The current sim is tuned around **unit mass** (the
+> `MaxSuspensionForce=80` clamp, COM-force suspension, reduced friction). So the mass swap should land
+> **with the C-phase** (C1 real inertia + C2 hardpoint suspension + C4 friction), not in isolation —
+> dropping real mass into the unit-mass-tuned sim would destabilize it and break the current tests.
+
+### (historical) The confirmation approach used
 
 1. **Live cross-check (fastest, needs CE + user):** with a vehicle spawned, read the RB mass
    (`1/*(rb+0x2c)`, walk `VA this → +0x44 → +0x08 → +0x3c`) **and** the vehicle's SimpleObject/clonebase

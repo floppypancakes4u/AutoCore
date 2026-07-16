@@ -325,7 +325,16 @@ velocity / resets drive-axes. Deliver `airStab_goldens.json` + update `avd-airst
 (all addresses/offsets/constants, the crash-recovery latch method, the open in-window-impulse item, and the
 deliverables — everything the next agent needs). Requires the user to drive a crash; low priority.
 
-**ASSET-MASS EXTRACTION — load real chassis mass/COM/inertia from `physics.glm` (NEW, high value).**
+**ASSET-MASS — use real chassis mass/inertia (CONFIRMED 2026-07-16; supersedes "mass=1.0").**
+✅ **Confirmed by live CE cross-check:** chassis RB mass == `SimpleObjectSpecific.Mass` (rlMass) ==
+vehicle weight (Callisto X 1500→1500, Astimiax 900 2900→2900), and inertia == `mass × RVInertia`. **Both
+already loaded server-side — no asset parse needed for mass/inertia.** Port change: in
+`HkVehicleData.FromVehicleSpecific`, thread `SimpleObjectSpecific.Mass` through and replace `UnitMass`
+(fallback to 1.0 if absent); inertia is then `mass × RVInertia` automatically. **⚠️ Land this WITH the
+C-phase** (C1 inertia + C2 suspension + C4 friction) — real mass rescales every force
+(`gScale=1/invMass=mass`), so dropping it into the unit-mass-tuned sim would destabilize it + break
+tests. Base COM (compound-hull centroid from `physics.glm`) is the only remaining optional parse. See
+`asset-mass-findings.md`. **Original parse plan (now only needed for base COM):**
 Supersedes the "mass=1.0" constraint. The server already has all client files + `GLMLoader`
 (`Managers/Asset/GLMLoader.cs`), and `SimpleObjectSpecific.PhysicsName` (clonebase UTF-16 off 65) names the
 physics asset. GLM format (from GLMLoader): trailing int32 → `CHNK` header (`opts[0]=66`, `opts[1]=76` LE)
