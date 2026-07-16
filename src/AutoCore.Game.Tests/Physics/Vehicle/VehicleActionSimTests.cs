@@ -636,6 +636,59 @@ public class VehicleActionSimTests
         Assert.AreEqual(0f, body.AngVelZ, 1e-3f);
     }
 
+    // --- Anti-sink (retail 0x598650 step 3 / applyAction §5) ---
+
+    /// <summary>
+    /// Curb-penetration scenario: a very low cast fraction drives every wheel's current
+    /// suspension length (wheel+0xB0) negative. Retail scans all wheels' <c>+0xB0</c> each
+    /// substep and, when the minimum is negative, raises chassis Y by exactly <c>-min</c> —
+    /// a position-only write (see <c>fn_00598650_applyAction.md</c> §5,
+    /// <c>fn_offsets_vehicleAction.md</c> §8 step 3, <c>0.4-suspension.md</c>,
+    /// <c>0.5-wheel-collide.md</c>). It must NOT touch LinVelY.
+    /// </summary>
+    [TestMethod]
+    public void ApplyAction_CurbPenetration_LiftsChassisByMinCompression_PreservesLinVelY()
+    {
+        var inst = CreateInstance();
+        inst.SetPose(0f, 5f, 0f, 0f, 0f, 0f, 1f);
+        inst.Body.LinVelY = -2f; // falling; anti-sink must not zero/clamp this.
+
+        // dt tiny so integrate (vel*dt) and impulse-driven Δv (F*dt) contributions are
+        // negligible next to the raw, non-dt-scaled position lift under test.
+        const float dt = 1e-6f;
+        var query = new AlwaysHitQuery(fraction: 0.1f);
+
+        float posYBefore = inst.Body.PosY;
+        float linVelYBefore = inst.Body.LinVelY;
+
+        // Expected retail current-length scan: (radius + restLen) * fraction - radius per wheel.
+        float minLength = float.PositiveInfinity;
+        for (var i = 0; i < inst.Data.WheelCount; i++)
+        {
+            var setup = inst.Data.Wheels[i];
+            float len = (setup.Radius + setup.SuspensionRestLength) * 0.1f - setup.Radius;
+            if (len < minLength)
+                minLength = len;
+        }
+
+        Assert.IsTrue(minLength < 0f, "test setup must produce curb penetration (min length < 0)");
+        float expectedLift = -minLength;
+
+        VehicleActionSim.ApplyAction(
+            inst, throttleInput: 0f, steerInput: 0f, handbrake: false,
+            dt: dt, query: query);
+
+        Assert.IsFalse(inst.AllWheelsAirborne);
+
+        // (a) position-only lift by exactly -min this substep.
+        Assert.AreEqual(posYBefore + expectedLift, inst.Body.PosY, 1e-3f,
+            "anti-sink must raise chassis by exactly -min(wheel current length) this substep");
+
+        // (b) LinVelY must be preserved — no downward-velocity zeroing in the retail form.
+        Assert.AreEqual(linVelYBefore, inst.Body.LinVelY, 1e-2f,
+            "anti-sink is position-only per retail decompile; it must not modify LinVelY");
+    }
+
     /// <summary>Hits every cast at a fixed fraction with upward normal.</summary>
     private sealed class AlwaysHitQuery : IVehicleCollisionQuery
     {

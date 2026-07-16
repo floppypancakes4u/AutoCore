@@ -283,44 +283,40 @@ public static class VehicleActionSim
             body.ApplyForce(forceX[i], forceY[i], forceZ[i]);
         }
 
-        // Anti-sink: if hardpoints are below contact plane, lift chassis (applyAction lift analogue).
-        if (anyContact)
-            ApplyAntiSink(inst, grounded, hardY, data.WheelCount);
+        // Anti-sink (applyAction step 3): position-only chassis lift from suspension penetration.
+        ApplyAntiSink(inst, data.WheelCount);
 
         return anyContact;
     }
 
     /// <summary>
-    /// Lift chassis so the lowest grounded hardpoint is not deeper than the contact surface.
-    /// Uses wheel contact point Y as surface sample (heightfield hit Y).
+    /// Retail-exact anti-sink — <c>VehicleAction::applyAction</c> @ <c>0x598650</c> step 3.
+    /// Evidence: <c>fn_00598650_applyAction.md</c> §5 step 5 ("Suspension anti-sink lift":
+    /// scan wheelsArray stride 0xC0 field <c>+0xB0</c>, <c>minComp = min(wheel[+0xB0])</c>;
+    /// if <c>minComp &lt; 0</c>, raise chassis Y by <c>-minComp</c>) and
+    /// <c>fn_offsets_vehicleAction.md</c> §8 step 3. <c>wheel+0xB0</c> == current suspension
+    /// length == <see cref="HkWheelRuntimeState.CurrentLength"/> (see 0.4-suspension.md §4,
+    /// 0.5-wheel-collide.md §3: <c>(radius+suspRestLen)·hitFraction − radius</c>, miss ⇒ full
+    /// suspLen — so only genuinely penetrating wheels can go negative). The decompile shows a
+    /// position write only (<c>rb+0xB4</c> / pose Y) — no velocity modification — so this must
+    /// NOT touch <c>LinVelY</c>.
+    /// <para>
+    /// CAVEAT: the debugger confirmation planned for task B2 has not run yet. This implements
+    /// exactly what the static decompile evidence says; if B2 later contradicts it, revisit.
+    /// </para>
     /// </summary>
-    private static void ApplyAntiSink(
-        VehiclePhysicsInstance inst,
-        ReadOnlySpan<bool> grounded,
-        ReadOnlySpan<float> hardY,
-        int wheelCount)
+    private static void ApplyAntiSink(VehiclePhysicsInstance inst, int wheelCount)
     {
-        var body = inst.Body;
-        float maxPen = 0f;
+        float minLength = float.PositiveInfinity;
         for (var i = 0; i < wheelCount; i++)
         {
-            if (!grounded[i])
-                continue;
-            // Penetration when hardpoint is below contact point (contact on ground, hardpoint sunk).
-            float pen = inst.Wheels[i].ContactPointY - hardY[i];
-            // ContactPoint is along cast; for frac=0 underground ContactPointY=terrain, hardpoint below.
-            // pen > 0 means contact is above hardpoint → hardpoint is underground by pen.
-            if (pen > maxPen)
-                maxPen = pen;
+            float len = inst.Wheels[i].CurrentLength;
+            if (len < minLength)
+                minLength = len;
         }
 
-        if (maxPen > 1e-4f)
-        {
-            body.PosY += maxPen;
-            // Kill downward velocity into the ground.
-            if (body.LinVelY < 0f)
-                body.LinVelY = 0f;
-        }
+        if (minLength < 0f)
+            inst.Body.PosY -= minLength;
     }
 
     private static void ApplyEngineTorque(
