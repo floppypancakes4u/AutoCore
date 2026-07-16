@@ -178,6 +178,78 @@ Written to component `+0x10..+0x1c` for the vehicle framework force applicator a
 - Output w-lane is zero for drag/lift and only non-zero if `extraGravity.w ≠ 0` (descriptor builder typically leaves w uninit/pad).
 - Emulation not practical without a full fake vehicle/body graph; goldens for TDD should be hand-derived from the formulas above with known ρ, A, Cd, Cl, v, axes, and mass.
 
+## Task B6 update (2026-07): emulation of the full fake vehicle/body graph
+
+Contrary to the note above, a full fake struct graph **was** built and
+`emulate_function`'d this task, contradicting "not practical" — it is
+practical for the *pointer-chase* and *invMass* portions. Fresh
+`decompile_function` (0x64dae0) and `disassemble_function` (0x64dae0) were
+also re-pulled this session (not just re-read from this doc) to independently
+re-derive the algorithm below; no conflicts found with the existing writeup.
+
+**Setup:** 5 seeded memory regions (scratch addresses `0x7ffe0000..0x7ffe4000`,
+same convention as `fn_004a9750_emulate.md`), `ECX` = component address
+(fastcall `this`):
+
+| Region | Address | Contents |
+|---|---|---|
+| component | `0x7ffe0000` | `+0x08`→framework; `+0x30/34/38/3c` ρ/A/Cd/Cl; `+0x40/44/48` extraGravity xyz |
+| framework | `0x7ffe1000` | `+0x10`→vehicleData; `+0x30`→holder |
+| holder | `0x7ffe2000` | `+0x3c`→chassis body |
+| vehicleData | `0x7ffe3000` | `+0x10/14/18` front axis; `+0x20/24/28` up axis |
+| chassis body | `0x7ffe4000` | `+0x2c` invMass; `+0x40/44/48` linVel; `+0x80..+0xa8` 3×3 rotation (rows) |
+
+8 vectors run (6 identity rotation, 2 non-identity — a cyclic-permutation
+rotation matrix chosen to stress the axis-transform code path). All 8
+completed (`"success": true, "hit_return": true, "final_pc": "deadbeef"`) —
+confirms the pointer chain and every struct offset in the table above resolve
+without a memory fault, for both identity and non-identity rotation inputs.
+
+**`mass = 1/invMass` — bit-exact register confirmation:**
+
+| invMass seeded | `XMM1` at `RET` (hex) | Decoded | Expected `1/invMass` |
+|---:|---|---:|---:|
+| 0.1 | `0x41200000` | 10.0 | 10.0 — match |
+| 0.25 | `0x40800000` | 4.0 | 4.0 — match |
+| 1.0 | `0x3f800000` | 1.0 | 1.0 — match |
+
+`XMM0` at `RET` (= `Fw = extraGravity.w * mass`) was `0x0` (`0.0`) in every run,
+consistent with `extraGravity.w = 0` in all seeded descriptors.
+
+**Why `Fx/Fy/Fz` were not emulation-read directly:** the function is `void`;
+its result lives at `component+0x10..0x1c` in memory. Per the disassembly,
+`X`, `Y`, `Z`, `W` are each computed into **the same `XMM0` register** in
+sequence and stored (`MOVSS [ECX+0x10..0x1c], XMM0`), so only the
+**last-computed** lane (`W`) survives in a register through to `RET` — `X`,
+`Y`, `Z` are overwritten before the function returns. `emulate_function`
+only returns final register state (confirmed: `read_memory` on the seeded
+scratch addresses fails after the call — `"Unable to read bytes at
+ram:7ffe0010"` — those regions aren't part of the program's real memory map,
+they're an ephemeral overlay for that one call). Its `max_steps` parameter
+also does not truncate this straight-line function early enough to be useful:
+`max_steps=1` still returned `hit_return: true` with a register value
+(`EDX=0x7ffe3000`) that requires several prior instructions to establish, so
+bisecting a stop-point mid-function was not viable either. `Fx/Fy/Fz`
+bit-exactness therefore rests on the hand-derived formula (matching this
+doc's decompile-derived arithmetic exactly), the same accepted methodology as
+`fn_004a9750_torqueCurve2D.md` for the same class of tooling limitation. This
+is cross-checked against the live port in `AeroOracleTests`
+(`src/AutoCore.Game.Tests/Physics/oracles/aero_goldens.json` +
+`AeroOracleTests.cs`, 8/8 vectors pass at `1e-4f` tolerance, values chosen from
+exactly-float32-representable inputs so summation-order cannot change the bit
+pattern). A live debugger (out of scope, static/emulation-only task) could
+recover `component+0x10..0x1c` directly by breaking at `0x64dd6a` and reading
+process memory, fully closing this gap if ever needed.
+
+**Front/up axis assignment — resolved by disassembly, not emulation
+register readback (see limitation above).** Straight-line reading of the
+fresh disassembly (no branches on this path) shows `vehicleData+0x10/14/18`
+feed *both* the drag-direction world vector *and* the forward-speed scalar
+`v` (used by both `dragMag` and `liftMag`); `vehicleData+0x20/24/28` feed
+*only* the lift-direction world vector. Unambiguous from the instruction
+stream; independently re-derived this task, matching the original writeup
+above.
+
 ## Related addresses (not re-decompiled this pass)
 
 | Addr | Name | Role |
