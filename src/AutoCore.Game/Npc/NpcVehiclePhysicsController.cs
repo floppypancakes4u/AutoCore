@@ -39,6 +39,21 @@ public static class NpcVehiclePhysicsController
     /// </summary>
     public const float MinUprightDot = 0.35f;
 
+    /// <summary>P-gain on planar heading error → desired yaw rate (1/s).</summary>
+    public const float PathHeadingGain = 4f;
+
+    /// <summary>Max |yaw rate| from path assist at full speed (rad/s).</summary>
+    public const float PathHeadingMaxYawRate = 2.2f;
+
+    /// <summary>
+    /// Planar speed (m/s) at which path-heading assist reaches full max yaw rate.
+    /// Below this, max yaw rate scales down — prevents clock-spin when nearly stopped.
+    /// </summary>
+    public const float PathHeadingFullSpeed = 6f;
+
+    /// <summary>Below this planar speed, path assist max yaw rate is heavily limited.</summary>
+    public const float PathHeadingMinSpeed = 0.35f;
+
     /// <summary>
     /// Advance one vehicle via sim-authoritative path-following.
     /// On failure (no data / bad dt) returns <paramref name="hard"/> unchanged (fail closed).
@@ -139,7 +154,12 @@ public static class NpcVehiclePhysicsController
         // no kinematic reverse-throttle deceleration here.
         inst.Step(thr, steer, handbrake: sharp != 0, dt, query);
 
-        // Publish inst.Body pose/rot/vel/angVel verbatim.
+        // Path-heading assist: reduced tire model still under-yaws through corners (wheels
+        // turn, chassis lags). Soft-command yaw rate toward the look-ahead aim, speed-gated
+        // so nearly-stopped NPCs cannot clock-spin. Position/velocity remain sim-authored.
+        ApplyPathHeadingAssist(body, aim, dt);
+
+        // Publish inst.Body pose/rot/vel/angVel (post-assist).
         return new PathStepResult
         {
             NewPosition = new Vector3(body.PosX, body.PosY, body.PosZ),
@@ -157,6 +177,103 @@ public static class NpcVehiclePhysicsController
             HasDriveInputs = true,
             AngularVelocity = new Vector3(body.AngVelX, body.AngVelY, body.AngVelZ),
         };
+    }
+
+    /// <summary>
+    /// Drive <see cref="HkRigidBody.AngVelY"/> toward the planar aim heading. Speed-scales
+    /// max rate; damps pitch/roll rates when upright so assist does not reintroduce tumble.
+    /// Integrator already advanced this substep — yaw rate applies on the next integrate
+    /// inside the following <see cref="VehiclePhysicsInstance.Step"/> / residual dt path.
+    /// Also applies a single small yaw delta to the quaternion this frame so heading responds
+    /// within the same publish (NPC ghosts would otherwise lag a full tick).
+    /// </summary>
+    internal static void ApplyPathHeadingAssist(HkRigidBody body, Vector3 aim, float dt)
+    {
+        if (body == null || !(dt > 0f) || !float.IsFinite(dt))
+            return;
+
+        float dx = aim.X - body.PosX;
+        float dz = aim.Z - body.PosZ;
+        float aimLen = MathF.Sqrt(dx * dx + dz * dz);
+        if (aimLen < 0.5f)
+        {
+            // No aim: kill residual spin when nearly stopped.
+            float spdHold = MathF.Sqrt(body.LinVelX * body.LinVelX + body.LinVelZ * body.LinVelZ);
+            if (spdHold < PathHeadingMinSpeed)
+                body.AngVelY *= 0.5f;
+            return;
+        }
+
+        float invAim = 1f / aimLen;
+        float aimX = dx * invAim;
+        float aimZ = dz * invAim;
+
+        var rot = new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW);
+        ExtractBasis(rot, out _, out var forward);
+
+        // Signed planar heading error about +Y (RH): positive = need CCW yaw (toward +X from +Z).
+        // sin = aim × fwd in XZ = aim.X·fwd.Z − aim.Z·fwd.X (points which way to rotate fwd→aim).
+        float cross = aimX * forward.Z - aimZ * forward.X;
+        float dot = forward.X * aimX + forward.Z * aimZ;
+        float err = MathF.Atan2(cross, dot); // [-π, π]
+
+        float planar = MathF.Sqrt(body.LinVelX * body.LinVelX + body.LinVelZ * body.LinVelZ);
+        // Speed gate: ~0 yaw authority when stopped (no clock-spin), full by PathHeadingFullSpeed.
+        float speedScale = planar <= PathHeadingMinSpeed
+            ? 0f
+            : Math.Clamp((planar - PathHeadingMinSpeed) / (PathHeadingFullSpeed - PathHeadingMinSpeed), 0f, 1f);
+
+        float maxRate = PathHeadingMaxYawRate * speedScale;
+        float desiredYawRate = Math.Clamp(err * PathHeadingGain, -maxRate, maxRate);
+
+        // When nearly stopped, actively kill any residual yaw (friction yaw-scale is already 0).
+        if (speedScale <= 0f)
+        {
+            body.AngVelY *= 0.25f;
+            if (MathF.Abs(body.AngVelY) < 0.02f)
+                body.AngVelY = 0f;
+        }
+        else
+        {
+            // Blend toward commanded rate (sim may already have tire yaw).
+            body.AngVelY = body.AngVelY * 0.35f + desiredYawRate * 0.65f;
+        }
+
+        // Upright: damp residual pitch/roll rates from the reduced model.
+        if (BodyUpDotWorldUp(body) >= MinUprightDot)
+        {
+            body.AngVelX *= 0.5f;
+            body.AngVelZ *= 0.5f;
+        }
+
+        // Same-frame heading nudge so published pose yaws with the command (ghosts + wheel
+        // visual alignment). Magnitude capped by maxRate·dt.
+        float yawStep = Math.Clamp(body.AngVelY * dt, -maxRate * dt - 1e-4f, maxRate * dt + 1e-4f);
+        if (speedScale > 0f && MathF.Abs(yawStep) > 1e-6f)
+            ApplyWorldYawDelta(body, yawStep);
+    }
+
+    /// <summary>Left-multiply body orientation by a world-Y yaw delta (radians).</summary>
+    internal static void ApplyWorldYawDelta(HkRigidBody body, float yawRadians)
+    {
+        float half = yawRadians * 0.5f;
+        float s = MathF.Sin(half);
+        float c = MathF.Cos(half);
+        // yaw quat (x,y,z,w) = (0, s, 0, c) * body
+        float bx = body.QuatX, by = body.QuatY, bz = body.QuatZ, bw = body.QuatW;
+        float x = c * bx + s * bz;
+        float y = c * by + s * bw;
+        float z = c * bz - s * bx;
+        float w = c * bw - s * by;
+        float len = MathF.Sqrt(x * x + y * y + z * z + w * w);
+        if (len > 1e-8f)
+        {
+            float inv = 1f / len;
+            body.QuatX = x * inv;
+            body.QuatY = y * inv;
+            body.QuatZ = z * inv;
+            body.QuatW = w * inv;
+        }
     }
 
     /// <summary>

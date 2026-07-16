@@ -93,15 +93,23 @@ public sealed class HkRigidBody
     /// those were the live NPC tumble path under the reduced friction model. Yaw is kept so
     /// front-axle lateral impulses can steer the chassis.
     /// </summary>
-    public void ApplyPointImpulseYawOnly(float jx, float jy, float jz, float pointX, float pointY, float pointZ)
+    /// <param name="yawTorqueScale">
+    /// Multiplier on the yaw torque (0 = pure COM linear, 1 = full yaw arm). Live friction
+    /// scales this by planar speed so stopped cars do not "clock-spin" from tire forces.
+    /// </param>
+    public void ApplyPointImpulseYawOnly(
+        float jx, float jy, float jz,
+        float pointX, float pointY, float pointZ,
+        float yawTorqueScale = 1f)
     {
-        ApplyPointImpulseCore(jx, jy, jz, pointX, pointY, pointZ, yawTorqueOnly: true);
+        ApplyPointImpulseCore(jx, jy, jz, pointX, pointY, pointZ, yawTorqueOnly: true, yawTorqueScale);
     }
 
     private void ApplyPointImpulseCore(
         float jx, float jy, float jz,
         float pointX, float pointY, float pointZ,
-        bool yawTorqueOnly)
+        bool yawTorqueOnly,
+        float yawTorqueScale = 1f)
     {
         LinVelX += jx * InvMass;
         LinVelY += jy * InvMass;
@@ -118,7 +126,8 @@ public sealed class HkRigidBody
 
         if (yawTorqueOnly)
         {
-            AngVelY += ty * InvInertiaY;
+            if (yawTorqueScale != 0f && float.IsFinite(yawTorqueScale))
+                AngVelY += ty * InvInertiaY * yawTorqueScale;
             return;
         }
 

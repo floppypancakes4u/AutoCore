@@ -776,14 +776,20 @@ public static class VehicleActionSim
 
         // Friction at averaged wheel contact. Full r×F (pitch+roll+yaw) only when
         // ChassisPointImpulsesEnabled (retail / C2 tests). Live default uses yaw-only
-        // torque: keep steering moment (front lateral × longitudinal arm) without the
-        // pitch/roll tumble from horizontal forces at ground (|ry| large).
+        // torque speed-scaled by planar speed so stationary cars cannot clock-spin.
         float invN = 1f / n;
         float px = sumX * invN, py = sumY * invN, pz = sumZ * invN;
         if (AutoCore.Game.Diagnostics.ServerConfig.ChassisPointImpulsesEnabled)
+        {
             body.ApplyPointImpulse(jx, jy, jz, px, py, pz);
+        }
         else
-            body.ApplyPointImpulseYawOnly(jx, jy, jz, px, py, pz);
+        {
+            float planar = MathF.Sqrt(body.LinVelX * body.LinVelX + body.LinVelZ * body.LinVelZ);
+            // 0 at rest → 1 by ~4 m/s. Linear slip cancel still applies (yawScale only on ty).
+            float yawScale = Math.Clamp(planar / 4f, 0f, 1f);
+            body.ApplyPointImpulseYawOnly(jx, jy, jz, px, py, pz, yawScale);
+        }
     }
 
     private static float AverageSpan(ReadOnlySpan<float> values)

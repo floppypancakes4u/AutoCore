@@ -177,6 +177,20 @@ public class HkRigidBodyTests
         Assert.AreEqual(0f, body.AngVelZ, 1e-5f, "roll must be dropped");
     }
 
+    [TestMethod]
+    public void ApplyPointImpulseYawOnly_ZeroScale_NoYawTorque()
+    {
+        var body = new HkRigidBody
+        {
+            Mass = 1f, InvMass = 1f,
+            InvInertiaX = 1f, InvInertiaY = 1f, InvInertiaZ = 1f,
+            PosX = 0f, PosY = 1f, PosZ = 0f, QuatW = 1f,
+        };
+        body.ApplyPointImpulseYawOnly(1f, 0f, 0f, 0f, 0f, 1f, yawTorqueScale: 0f);
+        Assert.AreEqual(1f, body.LinVelX, 1e-5f);
+        Assert.AreEqual(0f, body.AngVelY, 1e-5f);
+    }
+
     /// <summary>
     /// postTick suspImpulse: I = F · dt · n̂. ApplyPointImpulse(I) and ApplyForce(F)+Integrate(dt)
     /// must agree on Δv for a COM-aligned force (no lever arm).

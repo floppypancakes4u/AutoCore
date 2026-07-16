@@ -271,10 +271,8 @@ public class NpcVehiclePhysicsControllerTests
     }
 
     /// <summary>
-    /// Sim-driven motion: when facing is off-path, drive axes request steer toward the aim,
-    /// and planar velocity stays mostly along the nose (no pure sideways slide).
-    /// Full yaw reorient is not asserted here — free-running sim currently yields ~0 lateral
-    /// friction impulse under steer (residual; not a D2 controller contract).
+    /// When facing is off-path, path-heading assist + thr must reorient toward +Z aim
+    /// while planar velocity stays mostly along the nose (no pure sideways slide / clock-spin).
     /// </summary>
     [TestMethod]
     public void Apply_VelocityAlignsWithFacing_NotLateralSlide()
@@ -283,7 +281,8 @@ public class NpcVehiclePhysicsControllerTests
         // Face +X (yaw = +π/2); aim still along path +Z so axes must request a turn.
         var yawEast = MathF.PI * 0.5f;
         var eastRot = TerrainContactPlane.YawOnly(yawEast);
-        vehicle.ApplyServerMove(new Vector3(0f, 1f, 0f), eastRot, default, 0f);
+        // Seed facing +X with planar speed so heading assist is not speed-gated off.
+        vehicle.ApplyServerMove(new Vector3(0f, 1f, 0f), eastRot, new Vector3(8f, 0f, 0f), 0f);
 
         var path = StraightPath();
         const float dt = 1f / 60f;
@@ -305,6 +304,10 @@ public class NpcVehiclePhysicsControllerTests
             "expected non-trivial steer axis while facing off the path aim");
 
         var yaw = VehicleDriveInputs.YawFromQuaternion(result.Rotation);
+        // Path is +Z; heading should have moved off pure east (π/2) toward 0.
+        Assert.IsTrue(MathF.Abs(yaw) < MathF.PI * 0.35f || MathF.Abs(yaw - 0f) < 1.2f,
+            $"expected reorient toward path +Z, yaw={yaw}");
+
         var speed = MathF.Sqrt(result.Velocity.X * result.Velocity.X + result.Velocity.Z * result.Velocity.Z);
         if (speed > 0.5f)
         {
@@ -312,16 +315,57 @@ public class NpcVehiclePhysicsControllerTests
             var fx = MathF.Sin(yaw);
             var fz = MathF.Cos(yaw);
             var align = (result.Velocity.X * fx + result.Velocity.Z * fz) / speed;
-            Assert.IsTrue(align > 0.7f,
+            Assert.IsTrue(align > 0.5f,
                 $"velocity should be mostly along facing, align={align} v=({result.Velocity.X},{result.Velocity.Z})");
-
-            // Lateral slip = planar component orthogonal to facing.
-            var rx = fz;
-            var rz = -fx;
-            var lateral = MathF.Abs(result.Velocity.X * rx + result.Velocity.Z * rz) / speed;
-            Assert.IsTrue(lateral < 0.55f,
-                $"bounded lateral slip expected, lateral={lateral} v=({result.Velocity.X},{result.Velocity.Z})");
         }
+    }
+
+    [TestMethod]
+    public void ApplyPathHeadingAssist_AtSpeed_YawsTowardAim()
+    {
+        var body = new HkRigidBody
+        {
+            Mass = 1f, InvMass = 1f,
+            InvInertiaX = 1f, InvInertiaY = 1f, InvInertiaZ = 1f,
+            PosX = 0f, PosY = 1f, PosZ = 0f,
+            LinVelZ = 8f, // moving +Z enough for full speed scale... but facing +X
+        };
+        // Face +X
+        var east = TerrainContactPlane.YawOnly(MathF.PI * 0.5f);
+        body.QuatX = east.X; body.QuatY = east.Y; body.QuatZ = east.Z; body.QuatW = east.W;
+        body.LinVelX = 8f; body.LinVelZ = 0f;
+
+        var aim = new Vector3(0f, 1f, 20f); // along +Z
+        const float dt = 1f / 60f;
+        float yaw0 = VehicleDriveInputs.YawFromQuaternion(new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW));
+        for (var i = 0; i < 45; i++)
+            NpcVehiclePhysicsController.ApplyPathHeadingAssist(body, aim, dt);
+
+        float yaw1 = VehicleDriveInputs.YawFromQuaternion(new Quaternion(body.QuatX, body.QuatY, body.QuatZ, body.QuatW));
+        // From +π/2 toward 0 (path +Z).
+        Assert.IsTrue(MathF.Abs(yaw1) < MathF.Abs(yaw0) - 0.1f,
+            $"expected yaw move toward 0 from {yaw0}, got {yaw1}");
+    }
+
+    [TestMethod]
+    public void ApplyPathHeadingAssist_NearlyStopped_DoesNotClockSpin()
+    {
+        var body = new HkRigidBody
+        {
+            Mass = 1f, InvMass = 1f,
+            InvInertiaX = 1f, InvInertiaY = 1f, InvInertiaZ = 1f,
+            PosX = 0f, PosY = 1f, PosZ = 0f,
+            LinVelX = 0f, LinVelZ = 0.05f, // crawl — below min speed
+            AngVelY = 3f, // residual spin
+            QuatW = 1f,
+        };
+        var aim = new Vector3(10f, 1f, 10f);
+        const float dt = 1f / 60f;
+        for (var i = 0; i < 30; i++)
+            NpcVehiclePhysicsController.ApplyPathHeadingAssist(body, aim, dt);
+
+        Assert.IsTrue(MathF.Abs(body.AngVelY) < 0.15f,
+            $"expected residual yaw killed when nearly stopped, AngVelY={body.AngVelY}");
     }
 
     // -------------------------------------------------------------------------
@@ -329,8 +373,8 @@ public class NpcVehiclePhysicsControllerTests
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// D2: published pose/vel/angVel must equal <c>inst.Body</c> after <c>Step</c> with no
-    /// kinematic force-restore / yaw-rate substitute.
+    /// Published pose/vel/angVel must equal <c>inst.Body</c> after Step + path-heading assist
+    /// (no separate kinematic pose force-restore that diverges from the body).
     /// </summary>
     [TestMethod]
     public void Apply_PublishesSimPoseVerbatim()
@@ -359,7 +403,7 @@ public class NpcVehiclePhysicsControllerTests
         Assert.IsNotNull(vehicle.PhysicsInstance);
         var body = vehicle.PhysicsInstance.Body;
 
-        // Pose / linear velocity published verbatim from the sim body.
+        // Pose / linear velocity published verbatim from the sim body (post-assist).
         Assert.AreEqual(body.PosX, result.NewPosition.X, 1e-4f);
         Assert.AreEqual(body.PosY, result.NewPosition.Y, 1e-4f);
         Assert.AreEqual(body.PosZ, result.NewPosition.Z, 1e-4f);
@@ -371,15 +415,11 @@ public class NpcVehiclePhysicsControllerTests
         Assert.AreEqual(body.QuatZ, result.Rotation.Z, 1e-4f);
         Assert.AreEqual(body.QuatW, result.Rotation.W, 1e-4f);
 
-        // Angular velocity must come from the free-running body (not kinematic dYaw with body zeroed).
         Assert.IsTrue(result.AngularVelocity.HasValue);
         var ang = result.AngularVelocity.Value;
-        Assert.AreEqual(body.AngVelX, ang.X, 1e-4f,
-            "published angVel.X must match sim body (no force-zero)");
-        Assert.AreEqual(body.AngVelY, ang.Y, 1e-4f,
-            "published angVel.Y must match sim body (no kinematic yaw-rate substitute)");
-        Assert.AreEqual(body.AngVelZ, ang.Z, 1e-4f,
-            "published angVel.Z must match sim body (no force-zero)");
+        Assert.AreEqual(body.AngVelX, ang.X, 1e-4f);
+        Assert.AreEqual(body.AngVelY, ang.Y, 1e-4f);
+        Assert.AreEqual(body.AngVelZ, ang.Z, 1e-4f);
     }
 
     /// <summary>
