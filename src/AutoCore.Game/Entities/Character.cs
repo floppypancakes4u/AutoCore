@@ -388,6 +388,9 @@ public partial class Character : Creature
             var cargoItems = InventoryPersistence.Instance.LoadCargo(ObjectId.Coid);
             if (Inventory.LoadItems(cargoItems))
                 Inventory.PersistRepackedCargo(ObjectId.Coid);
+
+            var lockerItems = InventoryPersistence.Instance.LoadLocker(ObjectId.Coid);
+            Inventory.LoadLockerItems(lockerItems);
         }
 
         return true;
@@ -489,9 +492,14 @@ public partial class Character : Creature
             WriteFirstTimeFlags(extendedCharPacket);
             WriteExploration(extendedCharPacket);
 
+            // Locker restore: client places COIDs from this array into the locker grid
+            // (CVOGCharacter_ApplyCreateFromPacket walks 312 longs @ packet+0x960).
+            InventoryPacketFactory.ConfigureCharacterLocker(extendedCharPacket, Inventory);
+
             AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Debug,
                 $"Character.WriteToPacket: coid={ObjectId.Coid} sending {CurrentQuests.Count} current quests [{string.Join(",", CurrentQuests.Select(q => q.MissionId))}], "
-                + $"{extendedCharPacket.NumCompletedQuests} completed [{string.Join(",", extendedCharPacket.CompletedMissionIds)}]");
+                + $"{extendedCharPacket.NumCompletedQuests} completed [{string.Join(",", extendedCharPacket.CompletedMissionIds)}], "
+                + $"lockerItems={Inventory.LockerItems.Count}");
         }
     }
 

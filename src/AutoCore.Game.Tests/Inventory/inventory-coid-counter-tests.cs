@@ -55,4 +55,16 @@ public class InventoryCoidCounterTests
 
         Assert.AreEqual(2000, harness.Character.Map.LocalCoidCounter);
     }
+
+    [TestMethod]
+    public void SyncFromCargo_BumpsCounterWhenMaxLockerCoidIsGreaterOrEqual()
+    {
+        var harness = new InventoryTestHarness();
+        InventoryTestMapHelper.AttachMap(harness.Character, localCoidCounter: 1000);
+        harness.Inventory.TryAddLocker(new CharacterInventoryItem(10, CloneBaseObjectType.Item, "L", 1800, 0, 0, 1));
+
+        InventoryCoidCounter.SyncFromCargo(harness.Character);
+
+        Assert.AreEqual(1801, harness.Character.Map.LocalCoidCounter);
+    }
 }

@@ -7,11 +7,19 @@ public interface IInventoryPersistence
 {
     IReadOnlyList<CharacterInventoryItem> LoadCargo(long characterCoid);
 
+    IReadOnlyList<CharacterInventoryItem> LoadLocker(long characterCoid);
+
     void UpsertCargo(long characterCoid, CharacterInventoryItem item);
+
+    void UpsertLocker(long characterCoid, CharacterInventoryItem item);
 
     void MoveCargo(long characterCoid, CharacterInventoryItem item);
 
+    void MoveLocker(long characterCoid, CharacterInventoryItem item);
+
     void DeleteCargo(long characterCoid, long itemCoid);
+
+    void DeleteLocker(long characterCoid, long itemCoid);
 
     void ClearCargo(long characterCoid);
 

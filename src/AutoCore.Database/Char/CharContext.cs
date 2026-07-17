@@ -129,6 +129,7 @@ public class CharContext : DbContext
                 `SlotX` TINYINT UNSIGNED NOT NULL,
                 `SlotY` TINYINT UNSIGNED NOT NULL,
                 `Quantity` INT NOT NULL DEFAULT 1,
+                `InventoryType` TINYINT UNSIGNED NOT NULL DEFAULT 1,
                 `IsMissionItem` TINYINT(1) NOT NULL DEFAULT 0,
                 PRIMARY KEY (`Id`),
                 UNIQUE KEY `IX_character_inventory_ItemCoid` (`ItemCoid`),
@@ -138,6 +139,10 @@ public class CharContext : DbContext
         TryExecute("""
             ALTER TABLE `character_inventory`
             ADD COLUMN `IsMissionItem` TINYINT(1) NOT NULL DEFAULT 0
+            """);
+        TryExecute("""
+            ALTER TABLE `character_inventory`
+            ADD COLUMN `InventoryType` TINYINT UNSIGNED NOT NULL DEFAULT 1
             """);
     }
 

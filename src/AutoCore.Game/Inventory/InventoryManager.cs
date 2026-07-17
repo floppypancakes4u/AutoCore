@@ -38,6 +38,7 @@ public sealed class InventoryManager
     public const int CargoSlotCount = DefaultCargoSlotCount;
 
     private readonly List<CharacterInventoryItem> _items = new();
+    private readonly List<CharacterInventoryItem> _lockerItems = new();
     private readonly Dictionary<long, PendingEquippedItemDrag> _pendingEquippedItemDrags = new();
     private readonly IInventoryPersistence _persistence;
     private readonly ICloneBaseLookup _cloneBases;
@@ -57,7 +58,18 @@ public sealed class InventoryManager
     public int PageCount { get; private set; } = DefaultCargoPageCount;
     public int SlotCount => Width * PageCount;
 
+    /// <summary>
+    /// Locker grid width (same retail width as cargo; LockerSendAll is 312 slots like cargo).
+    /// </summary>
+    public int LockerWidth { get; private set; } = DefaultCargoWidth;
+
+    /// <summary>Locker grid height in rows (default one page = 13).</summary>
+    public int LockerPageCount { get; private set; } = DefaultCargoPageCount;
+
+    public int LockerSlotCount => LockerWidth * LockerPageCount;
+
     public IReadOnlyList<CharacterInventoryItem> Items => _items;
+    public IReadOnlyList<CharacterInventoryItem> LockerItems => _lockerItems;
 
     /// <summary>True when no free 1×1 cell remains (not "no free multi-cell footprint").</summary>
     public bool IsFull => !TryFindFirstFreeCargoSlot(1, 1, out _, out _);
@@ -255,9 +267,82 @@ public sealed class InventoryManager
         return true;
     }
 
+    public bool TryAddLocker(CharacterInventoryItem item)
+    {
+        if (!CanAddLocker(item))
+            return false;
+
+        _lockerItems.Add(item);
+        return true;
+    }
+
     public CharacterInventoryItem FindByCoid(long coid)
     {
         return _items.LastOrDefault(i => i.Coid == coid);
+    }
+
+    public CharacterInventoryItem FindLockerByCoid(long coid)
+    {
+        return _lockerItems.LastOrDefault(i => i.Coid == coid);
+    }
+
+    /// <summary>
+    /// Load locker rows with the same re-pack rules as cargo.
+    /// </summary>
+    public bool LoadLockerItems(IEnumerable<CharacterInventoryItem> items)
+    {
+        _lockerItems.Clear();
+        if (items == null)
+            return false;
+
+        var ordered = items
+            .Where(i => i != null)
+            .OrderBy(i => i.InventoryPositionY)
+            .ThenBy(i => i.InventoryPositionX)
+            .ThenBy(i => i.Coid)
+            .ToList();
+
+        var occupied = new HashSet<(byte X, byte Y)>();
+        var changed = false;
+
+        foreach (var item in ordered)
+        {
+            if (_lockerItems.Any(i => i.Coid == item.Coid))
+            {
+                changed = true;
+                continue;
+            }
+
+            ResolveFootprintOrDefault(item.Cbid, out var sizeX, out var sizeY);
+
+            var placed = item;
+            if (!InventoryGridPlacement.CanPlace(
+                    LockerWidth, LockerPageCount, VehicleCargoCapacity.RowsPerPage,
+                    occupied, item.InventoryPositionX, item.InventoryPositionY, sizeX, sizeY))
+            {
+                if (!InventoryGridPlacement.TryFindFirstFree(
+                        LockerWidth, LockerPageCount, VehicleCargoCapacity.RowsPerPage,
+                        occupied, sizeX, sizeY, out var fx, out var fy))
+                {
+                    Logger.WriteLog(
+                        LogType.Error,
+                        "LoadLockerItems: dropped coid={0} cbid={1} — no free {2}x{3} footprint",
+                        item.Coid, item.Cbid, sizeX, sizeY);
+                    changed = true;
+                    continue;
+                }
+
+                placed = item with { InventoryPositionX = fx, InventoryPositionY = fy };
+                changed = true;
+            }
+
+            _lockerItems.Add(placed);
+            foreach (var cell in InventoryGridPlacement.EnumerateCells(
+                         placed.InventoryPositionX, placed.InventoryPositionY, sizeX, sizeY))
+                occupied.Add((cell.X, cell.Y));
+        }
+
+        return changed;
     }
 
     public bool TryMove(long coid, byte x, byte y, out CharacterInventoryItem movedItem)
@@ -285,6 +370,31 @@ public sealed class InventoryManager
         return true;
     }
 
+    public bool TryMoveLocker(long coid, byte x, byte y, out CharacterInventoryItem movedItem)
+    {
+        movedItem = null;
+        var index = _lockerItems.FindLastIndex(i => i.Coid == coid);
+        if (index < 0)
+            return false;
+
+        var item = _lockerItems[index];
+        ResolveFootprintOrDefault(item.Cbid, out var sizeX, out var sizeY);
+
+        if (!InventoryGridPlacement.CanPlace(
+                LockerWidth, LockerPageCount, VehicleCargoCapacity.RowsPerPage,
+                BuildLockerOccupiedCells(ignoreCoid: coid),
+                x, y, sizeX, sizeY))
+            return false;
+
+        movedItem = item with
+        {
+            InventoryPositionX = x,
+            InventoryPositionY = y
+        };
+        _lockerItems[index] = movedItem;
+        return true;
+    }
+
     private bool IsValidCargoSlot(byte x, byte y)
     {
         return x < Width && y < PageCount;
@@ -298,11 +408,34 @@ public sealed class InventoryManager
         if (_items.Any(i => i.Coid == item.Coid))
             return false;
 
+        // COID must be unique across cargo + locker (same client object identity).
+        if (_lockerItems.Any(i => i.Coid == item.Coid))
+            return false;
+
         ResolveFootprintOrDefault(item.Cbid, out var sizeX, out var sizeY);
 
         return InventoryGridPlacement.CanPlace(
             Width, PageCount, VehicleCargoCapacity.RowsPerPage,
             BuildOccupiedCells(ignoreCoid: null),
+            item.InventoryPositionX, item.InventoryPositionY, sizeX, sizeY);
+    }
+
+    private bool CanAddLocker(CharacterInventoryItem item)
+    {
+        if (item == null)
+            return false;
+
+        if (_lockerItems.Any(i => i.Coid == item.Coid))
+            return false;
+
+        if (_items.Any(i => i.Coid == item.Coid))
+            return false;
+
+        ResolveFootprintOrDefault(item.Cbid, out var sizeX, out var sizeY);
+
+        return InventoryGridPlacement.CanPlace(
+            LockerWidth, LockerPageCount, VehicleCargoCapacity.RowsPerPage,
+            BuildLockerOccupiedCells(ignoreCoid: null),
             item.InventoryPositionX, item.InventoryPositionY, sizeX, sizeY);
     }
 
@@ -313,8 +446,22 @@ public sealed class InventoryManager
     /// </summary>
     private HashSet<(byte X, byte Y)> BuildOccupiedCells(long? ignoreCoid)
     {
+        return BuildOccupiedCellsFor(_items, Width, PageCount, ignoreCoid);
+    }
+
+    private HashSet<(byte X, byte Y)> BuildLockerOccupiedCells(long? ignoreCoid)
+    {
+        return BuildOccupiedCellsFor(_lockerItems, LockerWidth, LockerPageCount, ignoreCoid);
+    }
+
+    private HashSet<(byte X, byte Y)> BuildOccupiedCellsFor(
+        List<CharacterInventoryItem> items,
+        int width,
+        int height,
+        long? ignoreCoid)
+    {
         var occupied = new HashSet<(byte X, byte Y)>();
-        foreach (var item in _items)
+        foreach (var item in items)
         {
             if (ignoreCoid.HasValue && item.Coid == ignoreCoid.Value)
                 continue;
@@ -323,7 +470,7 @@ public sealed class InventoryManager
             foreach (var cell in InventoryGridPlacement.EnumerateCells(
                          item.InventoryPositionX, item.InventoryPositionY, sizeX, sizeY))
             {
-                if (cell.X < Width && cell.Y < PageCount)
+                if (cell.X < width && cell.Y < height)
                     occupied.Add((cell.X, cell.Y));
             }
         }
@@ -870,7 +1017,11 @@ public sealed class InventoryManager
     public IReadOnlyList<BasePacket> CreateItemObjectPackets(InventoryCatalog catalog, IInventoryItemCreator itemCreator)
     {
         var packets = new List<BasePacket>();
-        foreach (var item in Items.OrderBy(i => i.InventoryPositionY).ThenBy(i => i.InventoryPositionX))
+        var allItems = Items
+            .Concat(LockerItems)
+            .OrderBy(i => i.InventoryPositionY)
+            .ThenBy(i => i.InventoryPositionX);
+        foreach (var item in allItems)
         {
             var entry = catalog?.FindAny(item.Cbid);
             var type = entry?.Type ?? item.Type;
@@ -938,6 +1089,12 @@ public sealed class InventoryManager
                 "HandleInventoryGrabPacket: Character or Map is null");
         }
 
+        if (packet.InventoryType == InventoryTypes.Hardpoint)
+            return GrabEquippedVehicleItem(packet, character);
+
+        if (packet.InventoryType == InventoryTypes.Locker)
+            return GrabFromLocker(packet, character);
+
         var existingInventoryItem = Items.LastOrDefault(i => i.Coid == packet.ItemCoid);
         if (existingInventoryItem != null)
         {
@@ -947,7 +1104,7 @@ public sealed class InventoryManager
                 {
                     ItemCoid = existingInventoryItem.Coid,
                     ItemGlobal = packet.ItemGlobal,
-                    InventoryType = packet.InventoryType,
+                    InventoryType = packet.InventoryType == 0 ? InventoryTypes.Cargo : packet.InventoryType,
                     Quantity = grabQuantity,
                     AddToExistingItem = false,
                     InventoryPositionX = existingInventoryItem.InventoryPositionX,
@@ -957,9 +1114,6 @@ public sealed class InventoryManager
                 $"HandleInventoryGrabPacket: Player {character.Name} grabbing existing inventory item {existingInventoryItem.Coid} (CBID: {existingInventoryItem.Cbid}) from slot {existingInventoryItem.InventoryPositionX},{existingInventoryItem.InventoryPositionY}");
         }
 
-        if (packet.InventoryType == 2)
-            return GrabEquippedVehicleItem(packet, character);
-
         if (character.Map == null)
         {
             return InventoryOperationResult.SinglePacket(
@@ -968,6 +1122,32 @@ public sealed class InventoryManager
         }
 
         return GrabFromSectorMap(packet, character);
+    }
+
+    private InventoryOperationResult GrabFromLocker(InventoryGrabPacket packet, Character character)
+    {
+        var lockerItem = FindLockerByCoid(packet.ItemCoid);
+        if (lockerItem == null)
+        {
+            return InventoryOperationResult.SinglePacket(
+                CreateGrabFailure(packet),
+                $"HandleInventoryGrabPacket: Item {packet.ItemCoid} not found in locker");
+        }
+
+        var grabQuantity = Math.Max(1, Math.Min(lockerItem.Quantity, packet.Quantity));
+        return InventoryOperationResult.SinglePacket(
+            new InventoryGrabResponsePacket
+            {
+                ItemCoid = lockerItem.Coid,
+                ItemGlobal = packet.ItemGlobal,
+                InventoryType = InventoryTypes.Locker,
+                Quantity = grabQuantity,
+                AddToExistingItem = false,
+                InventoryPositionX = lockerItem.InventoryPositionX,
+                InventoryPositionY = lockerItem.InventoryPositionY,
+                WasSuccessful = true
+            },
+            $"HandleInventoryGrabPacket: Player {character.Name} grabbing locker item {lockerItem.Coid} (CBID: {lockerItem.Cbid}) from slot {lockerItem.InventoryPositionX},{lockerItem.InventoryPositionY}");
     }
 
     [ExcludeFromCodeCoverage]
@@ -1064,59 +1244,167 @@ public sealed class InventoryManager
         }
 
         // HARDPOINT (2): equip from cargo / pending drag onto a vehicle slot.
-        if (packet.InventoryType == 2)
+        if (packet.InventoryType == InventoryTypes.Hardpoint)
             return DropToHardpoint(packet, character);
 
-        if (packet.InventoryType != 1)
+        if (packet.InventoryType is not (InventoryTypes.Cargo or InventoryTypes.Locker))
         {
             return InventoryOperationResult.SinglePacket(
                 CreateDropFailure(packet),
                 $"HandleInventoryDropPacket: Inventory type {packet.InventoryType} is not supported yet");
         }
 
-        if (packet.InventoryPositionX >= Width || packet.InventoryPositionY >= PageCount)
+        return DropToGrid(packet, character);
+    }
+
+    private InventoryOperationResult DropToGrid(InventoryDropPacket packet, Character character)
+    {
+        var destIsLocker = packet.InventoryType == InventoryTypes.Locker;
+        var destWidth = destIsLocker ? LockerWidth : Width;
+        var destHeight = destIsLocker ? LockerPageCount : PageCount;
+
+        if (packet.InventoryPositionX >= destWidth || packet.InventoryPositionY >= destHeight)
         {
             return InventoryOperationResult.SinglePacket(
                 CreateDropFailure(packet),
-                $"HandleInventoryDropPacket: Invalid cargo slot {packet.InventoryPositionX},{packet.InventoryPositionY}");
+                $"HandleInventoryDropPacket: Invalid {(destIsLocker ? "locker" : "cargo")} slot {packet.InventoryPositionX},{packet.InventoryPositionY}");
         }
 
-        var item = FindByCoid(packet.ItemCoid);
-        if (item == null)
+        var cargoItem = FindByCoid(packet.ItemCoid);
+        var lockerItem = FindLockerByCoid(packet.ItemCoid);
+
+        if (cargoItem == null && lockerItem == null)
         {
             if (_pendingEquippedItemDrags.TryGetValue(packet.ItemCoid, out var pendingEquippedItem))
+            {
+                if (destIsLocker)
+                {
+                    return InventoryOperationResult.SinglePacket(
+                        CreateDropFailure(packet),
+                        "HandleInventoryDropPacket: Dropping equipped items directly into locker is not supported yet");
+                }
+
                 return DropPendingEquippedItem(packet, character, pendingEquippedItem);
+            }
 
             return InventoryOperationResult.SinglePacket(
                 CreateDropFailure(packet),
                 $"HandleInventoryDropPacket: Item {packet.ItemCoid} not found in inventory");
         }
 
-        if (!TryMove(packet.ItemCoid, packet.InventoryPositionX, packet.InventoryPositionY, out var movedItem))
+        // Same-container rearrange.
+        if (cargoItem != null && !destIsLocker)
         {
-            return InventoryOperationResult.SinglePacket(
-                CreateDropFailure(packet),
-                $"HandleInventoryDropPacket: Could not move item {packet.ItemCoid} to slot {packet.InventoryPositionX},{packet.InventoryPositionY}");
+            if (!TryMove(packet.ItemCoid, packet.InventoryPositionX, packet.InventoryPositionY, out var movedCargo))
+            {
+                return InventoryOperationResult.SinglePacket(
+                    CreateDropFailure(packet),
+                    $"HandleInventoryDropPacket: Could not move item {packet.ItemCoid} to cargo slot {packet.InventoryPositionX},{packet.InventoryPositionY}");
+            }
+
+            PersistCargoMove(character.ObjectId.Coid, movedCargo);
+            return BuildGridDropSuccess(packet, character, movedCargo, InventoryTypes.Cargo, includeCargoSendAll: true);
         }
 
-        PersistCargoMove(character.ObjectId.Coid, movedItem);
+        if (lockerItem != null && destIsLocker)
+        {
+            if (!TryMoveLocker(packet.ItemCoid, packet.InventoryPositionX, packet.InventoryPositionY, out var movedLocker))
+            {
+                return InventoryOperationResult.SinglePacket(
+                    CreateDropFailure(packet),
+                    $"HandleInventoryDropPacket: Could not move item {packet.ItemCoid} to locker slot {packet.InventoryPositionX},{packet.InventoryPositionY}");
+            }
+
+            PersistLockerMove(character.ObjectId.Coid, movedLocker);
+            return BuildGridDropSuccess(packet, character, movedLocker, InventoryTypes.Locker, includeCargoSendAll: false);
+        }
+
+        // Cross-container: cargo → locker
+        if (cargoItem != null && destIsLocker)
+            return TransferBetweenContainers(
+                packet, character, cargoItem, fromCargo: true,
+                packet.InventoryPositionX, packet.InventoryPositionY);
+
+        // Cross-container: locker → cargo
+        return TransferBetweenContainers(
+            packet, character, lockerItem, fromCargo: false,
+            packet.InventoryPositionX, packet.InventoryPositionY);
+    }
+
+    private InventoryOperationResult TransferBetweenContainers(
+        InventoryDropPacket packet,
+        Character character,
+        CharacterInventoryItem sourceItem,
+        bool fromCargo,
+        byte destX,
+        byte destY)
+    {
+        var placed = sourceItem with
+        {
+            InventoryPositionX = destX,
+            InventoryPositionY = destY
+        };
+
+        if (fromCargo)
+        {
+            // Remove from source first so CanAddLocker does not reject the in-flight COID.
+            _items.RemoveAll(i => i.Coid == sourceItem.Coid);
+            if (!CanAddLocker(placed))
+            {
+                _items.Add(sourceItem);
+                return InventoryOperationResult.SinglePacket(
+                    CreateDropFailure(packet),
+                    $"HandleInventoryDropPacket: Could not place item {sourceItem.Coid} into locker slot {destX},{destY}");
+            }
+
+            _lockerItems.Add(placed);
+            PersistCargoDelete(character.ObjectId.Coid, sourceItem.Coid);
+            PersistLockerUpsert(character.ObjectId.Coid, placed);
+            return BuildGridDropSuccess(packet, character, placed, InventoryTypes.Locker, includeCargoSendAll: true);
+        }
+
+        _lockerItems.RemoveAll(i => i.Coid == sourceItem.Coid);
+        if (!CanAdd(placed))
+        {
+            _lockerItems.Add(sourceItem);
+            return InventoryOperationResult.SinglePacket(
+                CreateDropFailure(packet),
+                $"HandleInventoryDropPacket: Could not place item {sourceItem.Coid} into cargo slot {destX},{destY}");
+        }
+
+        _items.Add(placed);
+        PersistLockerDelete(character.ObjectId.Coid, sourceItem.Coid);
+        PersistCargoUpsert(character.ObjectId.Coid, placed);
+        return BuildGridDropSuccess(packet, character, placed, InventoryTypes.Cargo, includeCargoSendAll: true);
+    }
+
+    private InventoryOperationResult BuildGridDropSuccess(
+        InventoryDropPacket packet,
+        Character character,
+        CharacterInventoryItem movedItem,
+        byte inventoryType,
+        bool includeCargoSendAll)
+    {
+        var packets = new List<BasePacket>
+        {
+            new InventoryDropResponsePacket
+            {
+                ItemCoid = movedItem.Coid,
+                ItemGlobal = packet.ItemGlobal,
+                InventoryPositionX = movedItem.InventoryPositionX,
+                InventoryPositionY = movedItem.InventoryPositionY,
+                InventoryType = inventoryType,
+                WasSuccessful = true,
+                HasSwappedOrConcatenatedItem = false
+            }
+        };
+
+        if (includeCargoSendAll)
+            packets.Add(InventoryPacketFactory.CreateCargoSendAll(this));
 
         return new InventoryOperationResult(
-            new BasePacket[]
-            {
-                new InventoryDropResponsePacket
-                {
-                    ItemCoid = movedItem.Coid,
-                    ItemGlobal = packet.ItemGlobal,
-                    InventoryPositionX = movedItem.InventoryPositionX,
-                    InventoryPositionY = movedItem.InventoryPositionY,
-                    InventoryType = packet.InventoryType,
-                    WasSuccessful = true,
-                    HasSwappedOrConcatenatedItem = false
-                },
-                InventoryPacketFactory.CreateCargoSendAll(this)
-            },
-            $"HandleInventoryDropPacket: Player {character.Name} moved item {movedItem.Coid} (CBID: {movedItem.Cbid}) to slot {movedItem.InventoryPositionX},{movedItem.InventoryPositionY}");
+            packets,
+            $"HandleInventoryDropPacket: Player {character.Name} moved item {movedItem.Coid} (CBID: {movedItem.Cbid}) to {(inventoryType == InventoryTypes.Locker ? "locker" : "cargo")} slot {movedItem.InventoryPositionX},{movedItem.InventoryPositionY}");
     }
 
     private InventoryOperationResult DropToHardpoint(InventoryDropPacket packet, Character character)
@@ -1770,6 +2058,64 @@ public sealed class InventoryManager
                 "PersistCargoMove failed char={0} coid={1}: {2}",
                 characterCoid,
                 item.Coid,
+                ex.Message);
+        }
+    }
+
+    private void PersistLockerUpsert(long characterCoid, CharacterInventoryItem item)
+    {
+        if (_persistence == null || characterCoid == 0 || item == null)
+            return;
+
+        try
+        {
+            _persistence.UpsertLocker(characterCoid, item);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "PersistLockerUpsert failed char={0} coid={1} cbid={2}: {3}",
+                characterCoid,
+                item.Coid,
+                item.Cbid,
+                ex.Message);
+        }
+    }
+
+    private void PersistLockerMove(long characterCoid, CharacterInventoryItem item)
+    {
+        if (_persistence == null || characterCoid == 0 || item == null)
+            return;
+
+        try
+        {
+            _persistence.MoveLocker(characterCoid, item);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "PersistLockerMove failed char={0} coid={1}: {2}",
+                characterCoid,
+                item.Coid,
+                ex.Message);
+        }
+    }
+
+    private void PersistLockerDelete(long characterCoid, long itemCoid)
+    {
+        if (_persistence == null || characterCoid == 0)
+            return;
+
+        try
+        {
+            _persistence.DeleteLocker(characterCoid, itemCoid);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "PersistLockerDelete failed char={0} coid={1}: {2}",
+                characterCoid,
+                itemCoid,
                 ex.Message);
         }
     }

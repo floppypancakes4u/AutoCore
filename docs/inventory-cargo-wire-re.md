@@ -63,3 +63,20 @@ But **do not** assume it fixes client desync by itself. Placement parity on AddI
 ## Exit criterion
 
 **Origin-only wire** selected for PR4. Runtime multi-cell occupancy is PR1–PR3 scope.
+
+---
+
+## Locker (type 3) — cargo ↔ locker moves
+
+| Fact | Evidence |
+|------|----------|
+| Enum | `eVOG_INVENTORY_TYPE_LOCKER = 3` (`Documentation/PACKET STRUCTURES.md`) |
+| C2S Grab | `Client_SendInventoryGrab_FromGrid` @ `0x00860e20` — same `0x2034` size `0x20`; `ucTypeFrom` from window inventory type |
+| C2S Drop | `Client_UI_InventoryDropToGrid` @ `0x00860a50` — same `0x2036` size `0x20`; `ucTypeTo` from target grid; early allows types 1 and 3 |
+| S2C DropResponse | `Client_RecvInventoryDropResponse` @ `0x00813730` — **case 3** binds locker grid (`client+0x1034` / character `+0xcbc`) and places via `FUN_00571620` |
+| SendAll | `0x2041` LockerSendAll same no-op path as cargo in `Client_PacketDispatch` |
+| **Login restore** | `CreateCharacterExtended.InventoryCoids[312]` @ packet `+0x960` — `CVOGCharacter_ApplyCreateFromPacket` @ `0x00534bd0` resolves each global COID and places into locker via `FUN_00571d30`. Create object packets must precede the character create. |
+
+**Server sequence (live move):** Grab (typeFrom 1 or 3) → GrabResponse → Drop (typeTo 1 or 3) → DropResponse. No new opcodes.
+
+**Server sequence (login):** Create locker items (`IsInInventory`) → CreateCharacterExtended with locker COIDs filled → client `FUN_00571d30` stamps locker grid.

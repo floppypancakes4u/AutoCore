@@ -482,10 +482,15 @@ public class CurrencySyncTests
     {
         public IReadOnlyList<CharacterInventoryItem> LoadCargo(long characterCoid) =>
             Array.Empty<CharacterInventoryItem>();
+        public IReadOnlyList<CharacterInventoryItem> LoadLocker(long characterCoid) =>
+            Array.Empty<CharacterInventoryItem>();
 
         public void UpsertCargo(long characterCoid, CharacterInventoryItem item) { }
+        public void UpsertLocker(long characterCoid, CharacterInventoryItem item) { }
         public void MoveCargo(long characterCoid, CharacterInventoryItem item) { }
+        public void MoveLocker(long characterCoid, CharacterInventoryItem item) { }
         public void DeleteCargo(long characterCoid, long itemCoid) { }
+        public void DeleteLocker(long characterCoid, long itemCoid) { }
         public void ClearCargo(long characterCoid) { }
         public void EnsureSimpleObject(long itemCoid, byte type, int cbid, int faction = 0, int teamFaction = 0) { }
         public void SaveVehicleEquipment(long vehicleCoid, VehicleEquipmentSnapshot snapshot) { }
@@ -499,10 +504,15 @@ public class CurrencySyncTests
     {
         public IReadOnlyList<CharacterInventoryItem> LoadCargo(long characterCoid) =>
             Array.Empty<CharacterInventoryItem>();
+        public IReadOnlyList<CharacterInventoryItem> LoadLocker(long characterCoid) =>
+            Array.Empty<CharacterInventoryItem>();
 
         public void UpsertCargo(long characterCoid, CharacterInventoryItem item) { }
+        public void UpsertLocker(long characterCoid, CharacterInventoryItem item) { }
         public void MoveCargo(long characterCoid, CharacterInventoryItem item) { }
+        public void MoveLocker(long characterCoid, CharacterInventoryItem item) { }
         public void DeleteCargo(long characterCoid, long itemCoid) { }
+        public void DeleteLocker(long characterCoid, long itemCoid) { }
         public void ClearCargo(long characterCoid) { }
         public void EnsureSimpleObject(long itemCoid, byte type, int cbid, int faction = 0, int teamFaction = 0) { }
         public void SaveVehicleEquipment(long vehicleCoid, VehicleEquipmentSnapshot snapshot) { }
@@ -519,10 +529,15 @@ public class CurrencySyncTests
 
         public IReadOnlyList<CharacterInventoryItem> LoadCargo(long characterCoid) =>
             Array.Empty<CharacterInventoryItem>();
+        public IReadOnlyList<CharacterInventoryItem> LoadLocker(long characterCoid) =>
+            Array.Empty<CharacterInventoryItem>();
 
         public void UpsertCargo(long characterCoid, CharacterInventoryItem item) { }
+        public void UpsertLocker(long characterCoid, CharacterInventoryItem item) { }
         public void MoveCargo(long characterCoid, CharacterInventoryItem item) { }
+        public void MoveLocker(long characterCoid, CharacterInventoryItem item) { }
         public void DeleteCargo(long characterCoid, long itemCoid) { }
+        public void DeleteLocker(long characterCoid, long itemCoid) { }
         public void ClearCargo(long characterCoid) { }
         public void EnsureSimpleObject(long itemCoid, byte type, int cbid, int faction = 0, int teamFaction = 0) { }
         public void SaveVehicleEquipment(long vehicleCoid, VehicleEquipmentSnapshot snapshot) { }

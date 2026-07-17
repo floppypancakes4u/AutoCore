@@ -66,4 +66,28 @@ public static class InventoryPacketFactory
 
         return packet;
     }
+
+    /// <summary>
+    /// Fill CreateCharacterExtended.InventoryCoids with locker origins (origin-only, width 6).
+    /// Client CVOGCharacter_ApplyCreateFromPacket @ 0x00534bd0 walks 312 COIDs from packet+0x960
+    /// and places each resolved object into the locker grid via FUN_00571d30.
+    /// Requires Create (IsInInventory) packets for those COIDs to have been sent first.
+    /// </summary>
+    public static void ConfigureCharacterLocker(CreateCharacterExtendedPacket packet, InventoryManager inventory)
+    {
+        if (packet == null || inventory == null)
+            return;
+
+        var width = inventory.LockerWidth;
+        var maxSlots = Math.Min(packet.InventoryCoids.Length, inventory.LockerSlotCount);
+
+        foreach (var item in inventory.LockerItems)
+        {
+            var slot = item.InventoryPositionY * width + item.InventoryPositionX;
+            if (slot < 0 || slot >= maxSlots)
+                continue;
+
+            packet.InventoryCoids[slot] = item.Coid;
+        }
+    }
 }
