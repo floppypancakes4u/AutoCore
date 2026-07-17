@@ -793,6 +793,28 @@ public partial class TNLConnection
         SendInventoryOperationPackets(result);
     }
 
+    private void HandleInventoryGrabMMPacket(BinaryReader reader)
+    {
+        var packet = new InventoryGrabMMPacket();
+        packet.Read(reader);
+
+        Logger.WriteLog(
+            LogType.Debug,
+            $"HandleInventoryGrabMMPacket: raw={Convert.ToHexString(packet.RawBytes)} parsedCoid={packet.ItemCoid} quantity={packet.Quantity} invType={packet.InventoryType}");
+
+        // Mass-move grab is the same as a normal grid grab (client sends one GrabMM per item).
+        // Respond with InventoryGrabResponse (0x2035): client early-outs on GrabMMResponse 0x2039.
+        var grab = packet.ToGrabPacket();
+        var result = CurrentCharacter?.Inventory.Grab(grab, CurrentCharacter)
+            ?? InventoryOperationResult.SinglePacket(
+                InventoryManager.CreateGrabFailure(grab),
+                "HandleInventoryGrabMMPacket: Character is null");
+
+        LogInventoryOperationResult(result);
+        SendInventoryOperationPackets(result);
+        DestroyInventoryWorldObject(result.WorldObjectToDestroy);
+    }
+
     private void HandleInventoryDropMMPacket(BinaryReader reader)
     {
         var packet = new InventoryDropMMPacket();
@@ -802,9 +824,16 @@ public partial class TNLConnection
             packet.InventoryType, packet.InventoryPositionX, packet.InventoryPositionY, packet.TailBytes,
             packet.EnumerateInt64Candidates(), packet.EnumerateInt32Candidates());
 
-        Logger.WriteLog(
-            LogType.Network,
-            "HandleInventoryDropMMPacket: log-only stub — world toss via InventoryDropMM is not implemented yet");
+        // Mass-move drop: same as InventoryDrop (cargo/locker rearrange or transfer).
+        // Respond with InventoryDropResponse (0x2037): client early-outs on DropMMResponse 0x203B.
+        var drop = packet.ToDropPacket();
+        var result = CurrentCharacter?.Inventory.Drop(drop, CurrentCharacter)
+            ?? InventoryOperationResult.SinglePacket(
+                InventoryManager.CreateDropFailure(drop),
+                "HandleInventoryDropMMPacket: Character is null");
+
+        LogInventoryOperationResult(result);
+        SendInventoryOperationPackets(result);
     }
 
     private void HandleInventoryDestroyItemPacket(BinaryReader reader)

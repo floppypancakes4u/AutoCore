@@ -268,6 +268,8 @@ These rules are enforced by client code paths (Ghidra) and covered by regression
 | `ItemDrop` (0x2057) | Client → server | World toss; **not** `InventoryDrop` |
 | `ItemDropResponse` (0x2058) | Server → client | Echo **dragged item COID** at +0x8, not a spawned world COID |
 | `InventoryDrop` (0x2036) | Client → server | Cargo/locker slot move (`inventoryType` 1 or 3) / hardpoint equip (`2`) |
+| `InventoryGrabMM` (0x2038) | Client → server | Mass Move grab (same fields as Grab); server reuses Grab, replies with **GrabResponse 0x2035** (client early-outs on 0x2039) |
+| `InventoryDropMM` (0x203A) | Client → server | Mass Move drop (same fields as Drop); server reuses Drop, replies with **DropResponse 0x2037** (client early-outs on 0x203B) |
 | `InventoryEquip` (0x203C) | Server → client | Hardpoint equip ack; **no** `InventoryDropResponse` with `inventoryType=2` |
 | `InventoryUnequip` (0x203E) | Server → client | Sent **before** `InventoryGrabResponse` on equipped grab |
 | `InventoryCargoSendAll` | Server → client | Refresh cargo after mutations |

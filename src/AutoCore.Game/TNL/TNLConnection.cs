@@ -898,6 +898,10 @@ public partial class TNLConnection : GhostConnection
                     HandleInventoryGrabPacket(reader);
                     break;
 
+                case GameOpcode.InventoryGrabMM:
+                    HandleInventoryGrabMMPacket(reader);
+                    break;
+
                 case GameOpcode.InventoryDrop:
                     HandleInventoryDropPacket(reader);
                     break;

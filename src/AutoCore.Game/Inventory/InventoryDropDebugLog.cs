@@ -13,6 +13,7 @@ public static class InventoryDropDebugLog
     public static bool ShouldRecordIncoming(GameOpcode opcode) =>
         opcode is GameOpcode.InventoryDrop
             or GameOpcode.InventoryDropMM
+            or GameOpcode.InventoryGrabMM
             or GameOpcode.InventoryDestroyItem
             or GameOpcode.ItemDrop;
 
