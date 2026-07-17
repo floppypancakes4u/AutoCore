@@ -34,12 +34,14 @@ public class ServerConfigTests
         Assert.IsNull(ServerConfig.AirDensityOverride);
         Assert.IsFalse(ServerConfig.DebugLogging);
         Assert.IsFalse(ServerConfig.CompositeWheelCollisionEnabled);
+        Assert.IsFalse(ServerConfig.EnableRamming);
     }
 
     [TestMethod]
     public void ApplyFromYaml_FullSection_SetsAll()
     {
         var yaml = """
+            enableRamming: true
             npcVehiclePhysics:
               controllerTier: physics
               enabled: true
@@ -59,6 +61,7 @@ public class ServerConfigTests
         Assert.AreEqual(1.2f, ServerConfig.AirDensityOverride!.Value, 1e-6f);
         Assert.IsTrue(ServerConfig.DebugLogging);
         Assert.IsTrue(ServerConfig.CompositeWheelCollisionEnabled);
+        Assert.IsTrue(ServerConfig.EnableRamming);
     }
 
     [TestMethod]
@@ -67,6 +70,15 @@ public class ServerConfigTests
         Assert.IsTrue(ServerConfig.ApplyFromYaml("someOtherSetting: 5", out var error), error);
         Assert.IsFalse(ServerConfig.NpcVehiclePhysicsEnabled);
         Assert.AreEqual(NpcVehicleControllerTier.Hard, ServerConfig.ControllerTier);
+        Assert.IsFalse(ServerConfig.EnableRamming);
+    }
+
+    [TestMethod]
+    public void ApplyFromYaml_EnableRamming_False_SetsFalse()
+    {
+        ServerConfig.EnableRamming = true;
+        Assert.IsTrue(ServerConfig.ApplyFromYaml("enableRamming: false", out var error), error);
+        Assert.IsFalse(ServerConfig.EnableRamming);
     }
 
     [TestMethod]
@@ -149,12 +161,14 @@ public class ServerConfigTests
         ServerConfig.SubstepHz = 33;
         ServerConfig.AirDensityOverride = 9f;
         ServerConfig.CompositeWheelCollisionEnabled = true;
+        ServerConfig.EnableRamming = true;
         ServerConfig.ResetToDefaults();
         Assert.IsFalse(ServerConfig.NpcVehiclePhysicsEnabled);
         Assert.AreEqual(NpcVehicleControllerTier.Hard, ServerConfig.ControllerTier);
         Assert.AreEqual(60, ServerConfig.SubstepHz);
         Assert.IsNull(ServerConfig.AirDensityOverride);
         Assert.IsFalse(ServerConfig.CompositeWheelCollisionEnabled);
+        Assert.IsFalse(ServerConfig.EnableRamming);
     }
 
     [TestMethod]

@@ -79,6 +79,9 @@ public static class VehicleMapPropRam
         if (vehicle?.Map == null || vehicle.IsCorpse)
             return 0;
 
+        if (!ServerConfig.EnableRamming)
+            return 0;
+
         var speed = ResolveSpeed(vehicle, previousPosition, dtSeconds);
         if (speed < MinSpeed)
             return 0;

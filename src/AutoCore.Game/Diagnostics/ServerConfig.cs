@@ -58,6 +58,8 @@ public static class ServerConfig
     /// assert r×J enable this flag.
     /// </summary>
     public const bool DefaultChassisPointImpulsesEnabled = false;
+    /// <summary>Server-side map-prop ramming (<c>VehicleMapPropRam</c>) — defaults OFF.</summary>
+    public const bool DefaultEnableRamming = false;
 
     private static int _substepHz = DefaultSubstepHz;
 
@@ -108,6 +110,12 @@ public static class ServerConfig
     /// </summary>
     public static bool ChassisPointImpulsesEnabled { get; set; } = DefaultChassisPointImpulsesEnabled;
 
+    /// <summary>
+    /// When true, moving vehicles damage collidable map props via <c>VehicleMapPropRam</c>.
+    /// Defaults <b>OFF</b> until an operator opts in.
+    /// </summary>
+    public static bool EnableRamming { get; set; } = DefaultEnableRamming;
+
     /// <summary>Reset every setting to retail-safe defaults (tests + startup before load).</summary>
     public static void ResetToDefaults()
     {
@@ -120,6 +128,7 @@ public static class ServerConfig
         SuspensionForceClampEnabled = DefaultSuspensionForceClampEnabled;
         CompositeWheelCollisionEnabled = DefaultCompositeWheelCollisionEnabled;
         ChassisPointImpulsesEnabled = DefaultChassisPointImpulsesEnabled;
+        EnableRamming = DefaultEnableRamming;
     }
 
     /// <summary>
@@ -164,7 +173,7 @@ public static class ServerConfig
             var yaml = File.ReadAllText(file);
             if (ApplyFromYaml(yaml, out var error))
                 Logger.WriteLog(LogType.Initialize,
-                    $"ServerConfig: loaded {file} — tier={ControllerTier} enabled={NpcVehiclePhysicsEnabled} substepHz={SubstepHz}");
+                    $"ServerConfig: loaded {file} — tier={ControllerTier} enabled={NpcVehiclePhysicsEnabled} substepHz={SubstepHz} enableRamming={EnableRamming}");
             else
                 Logger.WriteLog(LogType.Error, $"ServerConfig: failed to load {file}: {error}");
         }
@@ -202,9 +211,12 @@ public static class ServerConfig
             return false;
         }
 
+        if (root?.EnableRamming.HasValue == true)
+            EnableRamming = root.EnableRamming.Value;
+
         var p = root?.NpcVehiclePhysics;
         if (p == null)
-            return true; // valid YAML, no section → keep defaults
+            return true; // valid YAML, no npc section → keep physics defaults (enableRamming already applied)
 
         if (p.Enabled.HasValue)
             NpcVehiclePhysicsEnabled = p.Enabled.Value;
@@ -272,6 +284,7 @@ public static class ServerConfig
 
     private sealed class RootDto
     {
+        public bool? EnableRamming { get; set; }
         public NpcVehiclePhysicsDto NpcVehiclePhysics { get; set; }
     }
 
