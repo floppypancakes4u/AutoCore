@@ -68,8 +68,8 @@ public class CharacterQuest
                 ? Math.Max(1, ObjectiveMax[ActiveObjectiveSequence])
                 : 1;
 
-            // Multi-pad patrol + UseItem: client Eval casts slot floats to absolute counts
-            // (0,1,2…), not 0..1 ratios.
+            // Multi-pad patrol + UseItem + kill: client Eval casts slot floats to absolute counts
+            // (0,1,2…), not 0..1 ratios. Kill_Eval: (float)NumToKill <= slotFloat.
             var multiPad = objective.Requirements?
                 .OfType<ObjectiveRequirementPatrol>()
                 .FirstOrDefault(p => MissionPatrolProgress.CountListedTargets(p) > 1
@@ -77,6 +77,8 @@ public class CharacterQuest
             var useItem = objective.Requirements?
                 .OfType<ObjectiveRequirementUseItem>()
                 .FirstOrDefault();
+            var killReq = objective.Requirements?
+                .FirstOrDefault(r => r is ObjectiveRequirementKill or ObjectiveRequirementKillAggregate);
 
             if (multiPad != null)
             {
@@ -87,6 +89,12 @@ public class CharacterQuest
             else if (useItem != null)
             {
                 var slot = useItem.FirstStateSlot;
+                if (slot < slots.Length)
+                    slots[slot] = Math.Max(0, progress);
+            }
+            else if (killReq != null)
+            {
+                var slot = killReq.FirstStateSlot;
                 if (slot < slots.Length)
                     slots[slot] = Math.Max(0, progress);
             }
@@ -143,7 +151,8 @@ public class CharacterQuest
     }
 
     /// <summary>
-    /// CompleteCount when authored; otherwise UseItem RepeatCount when present; else 1.
+    /// CompleteCount when authored; otherwise max of UseItem RepeatCount / kill NumToKill; else 1.
+    /// Grouchy Gun (and many kill quests) author CompleteCount=0 with NumToKill on the requirement.
     /// </summary>
     internal static int ResolveObjectiveMax(MissionObjective objective)
     {
@@ -153,16 +162,26 @@ public class CharacterQuest
         if (objective.CompleteCount > 0)
             return objective.CompleteCount;
 
-        var maxRepeat = 0;
+        var derived = 0;
         if (objective.Requirements != null)
         {
             foreach (var req in objective.Requirements)
             {
-                if (req is ObjectiveRequirementUseItem useItem && useItem.RepeatCount > maxRepeat)
-                    maxRepeat = useItem.RepeatCount;
+                switch (req)
+                {
+                    case ObjectiveRequirementUseItem useItem when useItem.RepeatCount > derived:
+                        derived = useItem.RepeatCount;
+                        break;
+                    case ObjectiveRequirementKill kill when kill.NumToKill > derived:
+                        derived = kill.NumToKill;
+                        break;
+                    case ObjectiveRequirementKillAggregate agg when agg.NumToKill > derived:
+                        derived = agg.NumToKill;
+                        break;
+                }
             }
         }
 
-        return maxRepeat > 0 ? maxRepeat : 1;
+        return derived > 0 ? derived : 1;
     }
 }

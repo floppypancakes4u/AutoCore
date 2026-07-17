@@ -41,7 +41,8 @@ public class MissionEndToEndScenarioTests
     public void Scenario_Grant_KillComplete_PersistComplete()
     {
         var o0 = _fx.CreateKillObjective(ObjectiveA, 0, MissionId, TargetCbid, numToKill: 1);
-        _fx.SeedMission(MissionId, 0, o0);
+        var o1 = _fx.CreateSimpleObjective(ObjectiveB, 1, MissionId);
+        _fx.SeedMission(MissionId, 0, o0, o1);
         var player = _fx.CreatePlayer();
 
         NpcInteractHandler.GrantMission(player.Connection, player.Character, MissionId);
@@ -50,6 +51,12 @@ public class MissionEndToEndScenarioTests
         var prop = _fx.PlaceKillTarget(player.Map, _fx.NextCoid(), TargetCbid);
         prop.SetMurderer(player.Vehicle);
         prop.OnDeath(DeathType.Silent);
+
+        // Mid-chain kill auto-advances; final complete still via advance path below.
+        MissionInvariantAssertions.AssertActiveMission(player.Character, MissionId, 1);
+        var mission = AssetManager.Instance.GetMission(MissionId)!;
+        NpcInteractHandler.AdvanceOrCompleteObjective(
+            player.Connection, player.Character, player.Character.CurrentQuests[0], mission, o1, source: "Scenario");
 
         MissionInvariantAssertions.AssertCompleted(player.Character, MissionId);
         _fx.FlushPersist();
@@ -98,7 +105,10 @@ public class MissionEndToEndScenarioTests
         prop2.SetMurderer(player.Vehicle);
         prop2.OnDeath(DeathType.Silent);
 
-        MissionInvariantAssertions.AssertCompleted(player.Character, MissionId);
+        // Final kill-only: ready for giver turn-in, not auto-completed on last kill.
+        MissionInvariantAssertions.AssertActiveMission(player.Character, MissionId, 0);
+        Assert.AreEqual(2, player.Character.CurrentQuests[0].ObjectiveProgress[0]);
+        Assert.IsTrue(MissionKillProgress.IsKillOnlyObjective(o0));
     }
 
     [TestMethod]
@@ -164,13 +174,25 @@ public class MissionEndToEndScenarioTests
     public void Scenario_CompletedNonRepeatable_RejectsRegrant_AndKillDoesNotReopen()
     {
         var o0 = _fx.CreateKillObjective(ObjectiveA, 0, MissionId, TargetCbid, 1);
-        _fx.SeedMission(MissionId, 0, o0);
+        var mission = Mission.CreateForTests(MissionId, o0);
+        mission.NPC = NpcCbid;
+        AssetManager.Instance.SetTestMission(mission);
         var player = _fx.CreatePlayer();
         _fx.GiveQuest(player.Character, MissionId);
 
         var prop = _fx.PlaceKillTarget(player.Map, _fx.NextCoid(), TargetCbid);
         prop.SetMurderer(player.Vehicle);
         prop.OnDeath(DeathType.Silent);
+        // Kill-only final stays active until giver turn-in.
+        Assert.AreEqual(1, player.Character.CurrentQuests.Count);
+
+        PlaceNpc(player.Map, NpcCoid, NpcCbid, new Vector3(2, 0, 0));
+        NpcInteractHandler.HandleMissionDialogResponse(player.Connection, new MissionDialogResponsePacket
+        {
+            MissionId = MissionId,
+            Accepted = false,
+            MissionGiver = new TFID(NpcCoid, false),
+        });
         MissionInvariantAssertions.AssertCompleted(player.Character, MissionId);
 
         var reaction = _fx.PlaceReaction(player.Map, _fx.NextCoid(), ReactionType.GiveMission, MissionId);

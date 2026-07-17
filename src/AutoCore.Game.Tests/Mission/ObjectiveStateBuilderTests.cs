@@ -16,8 +16,9 @@ public class ObjectiveStateBuilderTests
 {
 
     [TestMethod]
-    public void Build_SetsBitmaskForRequirementIndex_AndSlotFloatFromProgress()
+    public void Build_Kill_UsesAbsoluteCount_NotRatio()
     {
+        // Client Kill_Eval: (float)NumToKill <= slotFloat; UI casts slot to int for "N / NumToKill".
         var obj = MissionObjective.CreateForTests(objectiveId: 5001, sequence: 0, questId: 4001, completeCount: 4);
         obj.Requirements.Add(new ObjectiveRequirementKill(obj)
         {
@@ -30,8 +31,28 @@ public class ObjectiveStateBuilderTests
 
         Assert.AreEqual(5001, packet.ObjectiveId);
         Assert.AreEqual(1u, packet.ObjectiveBitmask, "bit 0 = first requirement index");
-        Assert.AreEqual(0.5f, packet.SlotProgress[0], 0.001f);
+        Assert.AreEqual(2f, packet.SlotProgress[0], 0.001f);
+        Assert.AreNotEqual(0.5f, packet.SlotProgress[0], 0.001f);
         Assert.AreEqual(0f, packet.SlotProgress[1]);
+    }
+
+    [TestMethod]
+    public void Build_Kill_GrouchyGunShape_TwoOfFive()
+    {
+        var obj = MissionObjective.CreateForTests(objectiveId: 614, sequence: 0, questId: 470, completeCount: 0);
+        obj.Requirements.Add(new ObjectiveRequirementKill(obj)
+        {
+            NumToKill = 5,
+            TargetCBID = 2531,
+            FirstStateSlot = 0,
+            ContinentId = 693,
+        });
+
+        var packet = ObjectiveStateBuilder.Build(obj, progress: 2, maximum: 5);
+
+        Assert.AreEqual(614, packet.ObjectiveId);
+        Assert.AreEqual(1u, packet.ObjectiveBitmask);
+        Assert.AreEqual(2f, packet.SlotProgress[0], 0.001f);
     }
 
     [TestMethod]
@@ -93,16 +114,31 @@ public class ObjectiveStateBuilderTests
     }
 
     [TestMethod]
-    public void Build_ClampsProgressRatio()
+    public void Build_Kill_WritesAbsoluteEvenWhenOverMax()
     {
         var obj = MissionObjective.CreateForTests(5005, 0, 4005, 1);
-        obj.Requirements.Add(new ObjectiveRequirementKill(obj) { NumToKill = 1, FirstStateSlot = 1 });
+        obj.Requirements.Add(new ObjectiveRequirementKill(obj) { NumToKill = 3, FirstStateSlot = 1 });
 
         var over = ObjectiveStateBuilder.Build(obj, progress: 9, maximum: 3);
-        Assert.AreEqual(1.0f, over.SlotProgress[1], 0.001f);
+        Assert.AreEqual(9f, over.SlotProgress[1], 0.001f);
+    }
 
-        var zeroMax = ObjectiveStateBuilder.Build(obj, progress: 1, maximum: 0);
-        Assert.AreEqual(1.0f, zeroMax.SlotProgress[1], 0.001f);
+    [TestMethod]
+    public void Build_Deliver_StillUsesRatio()
+    {
+        var obj = MissionObjective.CreateForTests(5005, 0, 4005, 1);
+        obj.Requirements.Add(new ObjectiveRequirementDeliver(obj)
+        {
+            NPCTargetCBID = 1,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 1,
+        });
+
+        var full = ObjectiveStateBuilder.Build(obj, progress: 1, maximum: 1);
+        Assert.AreEqual(1.0f, full.SlotProgress[1], 0.001f);
+
+        var half = ObjectiveStateBuilder.Build(obj, progress: 1, maximum: 2);
+        Assert.AreEqual(0.5f, half.SlotProgress[1], 0.001f);
     }
 
     [TestMethod]
@@ -142,5 +178,27 @@ public class ObjectiveStateBuilderTests
         var packet = ObjectiveStateBuilder.Build(obj, quest);
 
         Assert.AreEqual(1f, packet.SlotProgress[0], 0.001f, "UseItem must not normalize to 0..1");
+    }
+
+    [TestMethod]
+    public void Build_FromQuest_Kill_UsesAbsoluteProgress()
+    {
+        var obj = MissionObjective.CreateForTests(5008, 0, 4008, 0);
+        obj.Requirements.Add(new ObjectiveRequirementKill(obj)
+        {
+            NumToKill = 5,
+            TargetCBID = 2531,
+            FirstStateSlot = 0,
+        });
+        var quest = new CharacterQuest(4008, 0)
+        {
+            ObjectiveProgress = new[] { 3 },
+            ObjectiveMax = new[] { 5 },
+        };
+
+        var packet = ObjectiveStateBuilder.Build(obj, quest);
+
+        Assert.AreEqual(3f, packet.SlotProgress[0], 0.001f, "Kill client Eval expects absolute kill count");
+        Assert.AreNotEqual(0.6f, packet.SlotProgress[0], 0.001f);
     }
 }

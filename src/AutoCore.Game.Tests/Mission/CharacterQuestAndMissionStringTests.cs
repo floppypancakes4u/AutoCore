@@ -119,6 +119,52 @@ public class CharacterQuestAndMissionStringTests
     }
 
     [TestMethod]
+    public void CharacterQuest_PopulateFromMission_KillNumToKill_BecomesObjectiveMax_WhenCompleteCountZero()
+    {
+        // A Grouchy Gun: CompleteCount=0, NumToKill=5
+        var obj = MissionObjective.CreateForTests(614, 0, 470, completeCount: 0);
+        obj.Requirements.Add(new ObjectiveRequirementKill(obj)
+        {
+            NumToKill = 5,
+            TargetCBID = 2531,
+            FirstStateSlot = 0,
+        });
+        var mission = Mission.CreateForTests(470, obj);
+
+        var quest = new CharacterQuest(470, 0);
+        quest.PopulateFromMission(mission);
+
+        Assert.AreEqual(5, quest.ObjectiveMax[0]);
+    }
+
+    [TestMethod]
+    public void CharacterQuest_Write_Kill_UsesAbsoluteSlotProgress()
+    {
+        var obj = MissionObjective.CreateForTests(614, 0, 470, completeCount: 0);
+        obj.Requirements.Add(new ObjectiveRequirementKill(obj)
+        {
+            NumToKill = 5,
+            TargetCBID = 2531,
+            FirstStateSlot = 0,
+        });
+        AssetManager.Instance.SetTestMission(Mission.CreateForTests(470, obj));
+
+        var quest = new CharacterQuest(470, 0);
+        quest.PopulateFromAssets();
+        quest.ObjectiveProgress[0] = 3;
+
+        using var ms = new MemoryStream();
+        using (var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+            quest.Write(writer);
+
+        ms.Position = 4 + 4 + 40 + 4;
+        using var reader = new BinaryReader(ms);
+        var slot0 = reader.ReadSingle();
+        Assert.AreEqual(3f, slot0, 0.001f, "Kill client Eval expects absolute kill count, not 0..1 ratio");
+        Assert.AreNotEqual(0.6f, slot0, 0.001f);
+    }
+
+    [TestMethod]
     public void CharacterQuest_PopulateFromAssets_UsesTestMission()
     {
         var obj = MissionObjective.CreateForTests(11, 0, 12, 5);

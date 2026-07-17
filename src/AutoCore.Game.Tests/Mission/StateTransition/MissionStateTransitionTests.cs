@@ -234,7 +234,7 @@ public class MissionStateTransitionTests
 
     [TestMethod]
     [TestCategory("MissionCritical")]
-    public void KillProgress_AtThreshold_Completes()
+    public void KillProgress_AtThreshold_ReadyForTurnIn_NotAutoComplete()
     {
         var o0 = _fx.CreateKillObjective(ObjectiveA, 0, MissionId, TargetCbid, numToKill: 1);
         _fx.SeedMission(MissionId, 0, o0);
@@ -245,21 +245,21 @@ public class MissionStateTransitionTests
         prop.SetMurderer(player.Vehicle);
         prop.OnDeath(DeathType.Silent);
 
-        MissionInvariantAssertions.AssertCompleted(player.Character, MissionId);
+        MissionInvariantAssertions.AssertActiveMission(player.Character, MissionId, 0);
+        Assert.AreEqual(1, player.Character.CurrentQuests[0].ObjectiveProgress[0]);
+        Assert.IsFalse(player.Character.CompletedMissionIds.Contains(MissionId));
     }
 
     [TestMethod]
     [TestCategory("MissionCritical")]
-    public void KillProgress_AfterComplete_DoesNotReopen()
+    public void KillProgress_AfterForceComplete_DoesNotReopen()
     {
         var o0 = _fx.CreateKillObjective(ObjectiveA, 0, MissionId, TargetCbid, numToKill: 1);
         _fx.SeedMission(MissionId, 0, o0);
         var player = _fx.CreatePlayer();
         _fx.GiveQuest(player.Character, MissionId);
 
-        var prop1 = _fx.PlaceKillTarget(player.Map, _fx.NextCoid(), TargetCbid);
-        prop1.SetMurderer(player.Vehicle);
-        prop1.OnDeath(DeathType.Silent);
+        NpcInteractHandler.ForceCompleteMission(player.Connection, player.Character, MissionId);
         Assert.IsTrue(player.Character.CompletedMissionIds.Contains(MissionId));
 
         var prop2 = _fx.PlaceKillTarget(player.Map, _fx.NextCoid(), TargetCbid);
@@ -288,7 +288,8 @@ public class MissionStateTransitionTests
         prop.SetMurderer(a.Vehicle);
         prop.OnDeath(DeathType.Silent);
 
-        MissionInvariantAssertions.AssertCompleted(a.Character, MissionId);
+        MissionInvariantAssertions.AssertActiveMission(a.Character, MissionId, 0);
+        Assert.AreEqual(1, a.Character.CurrentQuests[0].ObjectiveProgress[0]);
         MissionInvariantAssertions.AssertActiveMission(b.Character, MissionId, 0);
         Assert.AreEqual(0, b.Character.CurrentQuests[0].ObjectiveProgress[0]);
     }

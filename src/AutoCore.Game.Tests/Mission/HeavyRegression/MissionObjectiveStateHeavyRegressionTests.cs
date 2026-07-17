@@ -18,12 +18,12 @@ public class MissionObjectiveStateHeavyRegressionTests
     // --- Build ratio path (5+) ---
 
     [TestMethod]
-    public void Build_HalfProgress_HalfRatio()
+    public void Build_Kill_HalfProgress_AbsoluteTwo()
     {
         var obj = MissionObjective.CreateForTests(1, 0, 1, 4);
         obj.Requirements.Add(new ObjectiveRequirementKill(obj) { NumToKill = 4, FirstStateSlot = 0 });
         var p = ObjectiveStateBuilder.Build(obj, 2, 4);
-        Assert.AreEqual(0.5f, p.SlotProgress[0], 0.001f);
+        Assert.AreEqual(2f, p.SlotProgress[0], 0.001f);
         Assert.AreEqual(1u, p.ObjectiveBitmask);
     }
 
@@ -51,16 +51,16 @@ public class MissionObjectiveStateHeavyRegressionTests
         => Assert.IsNull(ObjectiveStateBuilder.Build(null, 0, 1));
 
     [TestMethod]
-    public void Build_ClampsOverMax()
+    public void Build_Kill_OverMax_WritesAbsolute()
     {
         var obj = MissionObjective.CreateForTests(4, 0, 1, 1);
-        obj.Requirements.Add(new ObjectiveRequirementKill(obj) { FirstStateSlot = 0 });
+        obj.Requirements.Add(new ObjectiveRequirementKill(obj) { FirstStateSlot = 0, NumToKill = 3 });
         var p = ObjectiveStateBuilder.Build(obj, 9, 3);
-        Assert.AreEqual(1f, p.SlotProgress[0], 0.001f);
+        Assert.AreEqual(9f, p.SlotProgress[0], 0.001f);
     }
 
     [TestMethod]
-    public void Build_FromQuest_UsesProgressArrays()
+    public void Build_FromQuest_Kill_UsesAbsoluteProgressArrays()
     {
         var obj = MissionObjective.CreateForTests(5, 0, 1, 4);
         obj.Requirements.Add(new ObjectiveRequirementKill(obj) { NumToKill = 4, FirstStateSlot = 0 });
@@ -68,7 +68,7 @@ public class MissionObjectiveStateHeavyRegressionTests
         quest.ObjectiveProgress[0] = 1;
         quest.ObjectiveMax[0] = 4;
         var p = ObjectiveStateBuilder.Build(obj, quest);
-        Assert.AreEqual(0.25f, p.SlotProgress[0], 0.001f);
+        Assert.AreEqual(1f, p.SlotProgress[0], 0.001f);
     }
 
     // --- BuildPatrolPadCount absolute (5+) ---
@@ -142,7 +142,7 @@ public class MissionObjectiveStateHeavyRegressionTests
     // --- CharacterQuest.Write multi-pad absolute (5+) ---
 
     [TestMethod]
-    public void QuestWrite_SinglePadKill_UsesRatio()
+    public void QuestWrite_Kill_UsesAbsolute()
     {
         var obj = MissionObjective.CreateForTests(20, 0, 200, 4);
         obj.Requirements.Add(new ObjectiveRequirementKill(obj) { NumToKill = 4, FirstStateSlot = 0 });
@@ -152,7 +152,7 @@ public class MissionObjectiveStateHeavyRegressionTests
         quest.ObjectiveProgress[0] = 2;
         quest.ObjectiveMax[0] = 4;
         var slots = ReadQuestSlots(quest);
-        Assert.AreEqual(0.5f, slots[0], 0.001f);
+        Assert.AreEqual(2f, slots[0], 0.001f);
         AssetManager.Instance.ClearTestMissions();
     }
 

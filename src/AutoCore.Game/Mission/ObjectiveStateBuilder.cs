@@ -14,7 +14,8 @@ public static class ObjectiveStateBuilder
 {
     /// <summary>
     /// Build an ObjectiveState packet from objective-level progress/max.
-    /// Progress is written into each requirement's authored <c>FirstStateSlot</c> float as a 0..1 ratio.
+    /// Kill / kill_aggregate slots use absolute counts (client Eval: NumToKill &lt;= slot float).
+    /// Other requirements write a 0..1 ratio into each authored <c>FirstStateSlot</c>.
     /// Bitmask bits mark every requirement index that should receive a client callback.
     /// </summary>
     public static ObjectiveStatePacket Build(MissionObjective objective, int progress, int maximum)
@@ -29,6 +30,7 @@ public static class ObjectiveStateBuilder
 
         var max = maximum > 0 ? maximum : 1;
         var ratio = Math.Clamp((float)progress / max, 0.0f, 1.0f);
+        var absolute = Math.Max(0, progress);
 
         var requirements = objective.Requirements;
         if (requirements == null || requirements.Count == 0)
@@ -48,7 +50,11 @@ public static class ObjectiveStateBuilder
             bitmask |= 1u << i;
             var slot = requirements[i].FirstStateSlot;
             if (slot < ObjectiveStatePacket.SlotCount)
-                packet.SlotProgress[slot] = ratio;
+            {
+                packet.SlotProgress[slot] = IsAbsoluteCountRequirement(requirements[i])
+                    ? absolute
+                    : ratio;
+            }
         }
 
         packet.ObjectiveBitmask = bitmask;
@@ -57,7 +63,8 @@ public static class ObjectiveStateBuilder
 
     /// <summary>
     /// Build from a live quest's progress arrays for the given objective sequence.
-    /// UseItem requirements use absolute slot counts (client Eval compares to RepeatCount).
+    /// UseItem / kill / kill_aggregate use absolute slot counts (client Eval compares to
+    /// RepeatCount / NumToKill). Other types use a 0..1 ratio.
     /// </summary>
     public static ObjectiveStatePacket Build(MissionObjective objective, CharacterQuest quest)
     {
@@ -78,6 +85,11 @@ public static class ObjectiveStateBuilder
 
         return Build(objective, progress, maximum);
     }
+
+    internal static bool IsAbsoluteCountRequirement(ObjectiveRequirement requirement)
+        => requirement is ObjectiveRequirementKill
+            or ObjectiveRequirementKillAggregate
+            or ObjectiveRequirementUseItem;
 
     /// <summary>
     /// UseItem mid-progress / resync. Client

@@ -78,24 +78,87 @@ public static class MissionKillProgress
                 victimCbid,
                 victimTemplateId);
 
+            // Always publish absolute kill progress to the client (0x2071).
+            var statePacket = ObjectiveStateBuilder.Build(
+                objective,
+                quest.ObjectiveProgress[seq],
+                needed);
+            if (statePacket != null)
+                conn.SendGamePacket(statePacket);
+            MissionPersistence.Instance.OnQuestChanged(killer, quest);
+            NpcInteractHandler.PushJournalMissionList(conn, killer);
+            TriggerManager.Instance.OnMissionStateChanged(
+                killer.CurrentVehicle ?? (ClonedObjectBase)killer);
+
             if (quest.ObjectiveProgress[seq] < needed)
+                return;
+
+            // Kill count satisfied.
+            // Mid-chain: auto-advance to the next objective (kill → deliver, kill → kill, …).
+            var hasNext = mission.Objectives.Values.Any(o => o.Sequence > seq);
+            if (hasNext)
             {
-                var partialState = ObjectiveStateBuilder.Build(
-                    objective,
-                    quest.ObjectiveProgress[seq],
-                    needed);
-                if (partialState != null)
-                    conn.SendGamePacket(partialState);
-                MissionPersistence.Instance.OnQuestChanged(killer, quest);
-                NpcInteractHandler.PushJournalMissionList(conn, killer);
-                TriggerManager.Instance.OnMissionStateChanged(
-                    killer.CurrentVehicle ?? (ClonedObjectBase)killer);
+                NpcInteractHandler.AdvanceOrCompleteObjective(
+                    conn, killer, quest, mission, objective, source: "Kill");
                 return;
             }
 
-            NpcInteractHandler.AdvanceOrCompleteObjective(conn, killer, quest, mission, objective, source: "Kill");
+            // Final objective that is kill/kill_aggregate only: do NOT complete here.
+            // Client marks interact state 8 (ready for turn-in) when Kill_Eval passes while
+            // the quest is still active; CompleteText / NotCompleteText are shown at the
+            // mission giver (FUN_0052b420). Completing requires dialog with mission.NPC.
+            if (IsKillOnlyObjective(objective))
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "Kill progress: mission={0} objective={1} ready for giver turn-in ({2}/{3})",
+                    quest.MissionId,
+                    objective.ObjectiveId,
+                    quest.ObjectiveProgress[seq],
+                    needed);
+                return;
+            }
+
+            // Multi-req final (e.g. kill+deliver on same objective): kill alone does not finish.
+            // Deliver turn-in / other paths complete when all reqs are satisfied.
+            if (HasNonKillRequirement(objective))
+                return;
+
+            NpcInteractHandler.AdvanceOrCompleteObjective(
+                conn, killer, quest, mission, objective, source: "Kill");
             return;
         }
+    }
+
+    /// <summary>
+    /// True when every authored requirement is kill or kill_aggregate (final bounty-style
+    /// objectives that complete at the mission giver, not on the last kill).
+    /// </summary>
+    internal static bool IsKillOnlyObjective(MissionObjective objective)
+    {
+        if (objective?.Requirements == null || objective.Requirements.Count == 0)
+            return false;
+
+        foreach (var req in objective.Requirements)
+        {
+            if (req is not ObjectiveRequirementKill and not ObjectiveRequirementKillAggregate)
+                return false;
+        }
+
+        return true;
+    }
+
+    internal static bool HasNonKillRequirement(MissionObjective objective)
+    {
+        if (objective?.Requirements == null)
+            return false;
+
+        foreach (var req in objective.Requirements)
+        {
+            if (req is not ObjectiveRequirementKill and not ObjectiveRequirementKillAggregate)
+                return true;
+        }
+
+        return false;
     }
 
     internal static Character ResolveKillerCharacter(ClonedObjectBase victim)

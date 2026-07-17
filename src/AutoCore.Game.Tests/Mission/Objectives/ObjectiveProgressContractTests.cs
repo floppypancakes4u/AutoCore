@@ -50,7 +50,10 @@ public class ObjectiveProgressContractTests
             var last = _fx.PlaceKillTarget(player.Map, _fx.NextCoid(), TargetCbid);
             last.SetMurderer(player.Vehicle);
             last.OnDeath(DeathType.Silent);
-            MissionInvariantAssertions.AssertCompleted(player.Character, MissionId);
+            // Final kill-only: threshold is ready-for-turn-in, not mission complete.
+            Assert.AreEqual(1, player.Character.CurrentQuests.Count, $"n={n} at threshold");
+            Assert.AreEqual(n, player.Character.CurrentQuests[0].ObjectiveProgress[0]);
+            Assert.IsFalse(player.Character.CompletedMissionIds.Contains(MissionId));
         }
     }
 

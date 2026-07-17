@@ -186,12 +186,15 @@ public class MissionKillProgressUnitTests
         prop.SetMurderer(character.CurrentVehicle);
         prop.OnDeath(DeathType.Silent);
 
-        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
-        Assert.IsTrue(_sent.OfType<CompleteDynamicObjectivePacket>().Any());
+        // Final kill-only: full progress, still active (giver turn-in).
+        Assert.AreEqual(1, character.CurrentQuests.Count);
+        Assert.AreEqual(1, character.CurrentQuests[0].ObjectiveProgress[0]);
+        Assert.IsFalse(character.CompletedMissionIds.Contains(MissionId));
+        Assert.IsTrue(_sent.OfType<ObjectiveStatePacket>().Any());
     }
 
     [TestMethod]
-    public void KillProp_AggregateCbidList_Completes()
+    public void KillProp_AggregateCbidList_CreditsProgress()
     {
         var obj = MissionObjective.CreateForTests(ObjectiveId, 0, MissionId, 1);
         var agg = new ObjectiveRequirementKillAggregate(obj) { NumToKill = 1 };
@@ -213,7 +216,9 @@ public class MissionKillProgressUnitTests
         prop.SetMurderer(character.CurrentVehicle);
         prop.OnDeath(DeathType.Silent);
 
-        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
+        Assert.AreEqual(1, character.CurrentQuests.Count);
+        Assert.AreEqual(1, character.CurrentQuests[0].ObjectiveProgress[0]);
+        Assert.IsFalse(character.CompletedMissionIds.Contains(MissionId));
     }
 
     [TestMethod]
@@ -322,7 +327,7 @@ public class MissionKillProgressUnitTests
     }
 
     [TestMethod]
-    public void NotifyObjectKilled_TemplateVehicle_CompletesObjective()
+    public void NotifyObjectKilled_TemplateVehicle_CreditsKillOnlyObjective()
     {
         var obj = MissionObjective.CreateForTests(ObjectiveId, 0, MissionId, 1);
         obj.Requirements.Add(new ObjectiveRequirementKill(obj)
@@ -347,8 +352,11 @@ public class MissionKillProgressUnitTests
         npcVehicle.SetMurderer(character.CurrentVehicle);
         npcVehicle.OnDeath(DeathType.Silent);
 
-        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId),
-            "Template-vehicle kill must complete the single kill objective");
+        Assert.AreEqual(1, character.CurrentQuests.Count);
+        Assert.AreEqual(1, character.CurrentQuests[0].ObjectiveProgress[0],
+            "Template-vehicle kill must credit the kill-only objective");
+        Assert.IsFalse(character.CompletedMissionIds.Contains(MissionId),
+            "Final kill-only waits for giver turn-in");
     }
 
     private void SeedKillCbid(int cbid)

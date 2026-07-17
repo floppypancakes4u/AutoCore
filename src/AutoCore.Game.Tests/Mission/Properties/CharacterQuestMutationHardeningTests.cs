@@ -46,8 +46,9 @@ public class CharacterQuestMutationHardeningTests
 
     [TestMethod]
     [TestCategory("MissionCritical")]
-    public void Write_HalfProgress_NormalizesToHalfInAuthoredSlot()
+    public void Write_KillProgress_UsesAbsoluteCountInAuthoredSlot()
     {
+        // Client Kill_Eval / UI treat slot floats as absolute kill counts (0,1,2…), not 0..1 ratios.
         const int missionId = 99001;
         const int objectiveId = 99002;
         var obj = MissionObjective.CreateForTests(objectiveId, 0, missionId, completeCount: 4);
@@ -56,7 +57,7 @@ public class CharacterQuestMutationHardeningTests
 
         var quest = new CharacterQuest(missionId, 0);
         quest.PopulateFromAssets();
-        quest.ObjectiveProgress[0] = 2; // 2/4 = 0.5
+        quest.ObjectiveProgress[0] = 2;
 
         using var ms = new MemoryStream();
         using (var w = new BinaryWriter(ms, System.Text.Encoding.Unicode, leaveOpen: true))
@@ -68,7 +69,7 @@ public class CharacterQuestMutationHardeningTests
         Assert.AreEqual(objectiveId, r.ReadInt32());
         var slots = new[] { r.ReadSingle(), r.ReadSingle(), r.ReadSingle(), r.ReadSingle() };
         Assert.AreEqual(0f, slots[0], 0.001f);
-        Assert.AreEqual(0.5f, slots[1], 0.001f);
+        Assert.AreEqual(2f, slots[1], 0.001f);
         Assert.AreEqual(0f, slots[2], 0.001f);
         Assert.AreEqual(0f, slots[3], 0.001f);
     }

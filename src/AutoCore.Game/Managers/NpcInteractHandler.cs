@@ -240,14 +240,22 @@ public static class NpcInteractHandler
 
         var playerPos = GetPlayerInteractPosition(character);
 
-        // Resolve NPC: live creature, spawn-marker → child, or nearby active deliver target.
+        // Resolve NPC: live creature, spawn-marker → child, or nearby mission partner.
         // Client 0x206C Create often uses map-local COIDs while server pad NPCs use global
         // MapNpcIdentity TFIDs — direct GetObjectByCoid then fails; fall back by CBID+range.
+        // Kill-only turn-ins need the same nearby path as deliver (mission.NPC giver).
         var npc = FindNpcByCoid(character, character.Map, targetCoid)
-            ?? TryResolveNearbyDeliverNpc(character, packet.ObjectiveId, playerPos, targetCoid);
+            ?? TryResolveNearbyMissionPartner(character, packet.ObjectiveId, playerPos, targetCoid);
 
         if (npc == null)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "UseObject: no mission NPC for target={0} charCoid={1} objectiveId={2}",
+                targetCoid,
+                character.ObjectId.Coid,
+                packet.ObjectiveId);
             return false;
+        }
 
         if (character.MapPresence.IsSuppressed(npc.ObjectId.Coid))
             return false;
@@ -288,7 +296,15 @@ public static class NpcInteractHandler
         }
 
         if (dialogMissions.Count == 0)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "UseObject: NPC cbid={0} coid={1} has no dialog missions for char={2} objectiveId={3}",
+                npcCbid,
+                npc.ObjectId.Coid,
+                character.ObjectId.Coid,
+                packet.ObjectiveId);
             return false;
+        }
 
         // Client often advances objectives (0x206C / local UI) before the server — e.g. patrol
         // done client-side while ActiveObjectiveSequence is still 0. Reconcile from objectiveId
@@ -345,7 +361,19 @@ public static class NpcInteractHandler
 
     /// <summary>
     /// When the client clicks a map-local Create body that has no matching server COID, resolve
-    /// an active deliver-turn-in NPC by CBID near the player (Final Exam pad Gunny class).
+    /// a nearby mission partner by CBID: completing deliver targets <b>or</b> active-mission
+    /// givers (kill turn-in / status dialog). Final Exam pad Gunny + bounty givers like Kaplan.
+    /// </summary>
+    internal static Creature TryResolveNearbyMissionPartner(
+        Character character,
+        int objectiveId,
+        Vector3 playerPos,
+        long clickedCoid)
+        => TryResolveNearbyDeliverNpc(character, objectiveId, playerPos, clickedCoid);
+
+    /// <summary>
+    /// Nearby mission-partner resolution (deliver turn-in NPC and/or mission.NPC giver).
+    /// Name retained for existing tests/callers.
     /// </summary>
     internal static Creature TryResolveNearbyDeliverNpc(
         Character character,
@@ -361,6 +389,7 @@ public static class NpcInteractHandler
         var rangeSq = MaxInteractDistance * MaxInteractDistance;
         Creature best = null;
         var bestDist = float.MaxValue;
+        var targetCbids = new HashSet<int>();
 
         foreach (var quest in character.CurrentQuests)
         {
@@ -368,8 +397,14 @@ public static class NpcInteractHandler
                 continue;
 
             var mission = AssetManager.Instance.GetMission(quest.MissionId);
-            if (mission == null
-                || !mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var objective)
+            if (mission == null)
+                continue;
+
+            // Active mission giver (status dialog + kill-only turn-in).
+            if (mission.NPC > 0)
+                targetCbids.Add(mission.NPC);
+
+            if (!mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var objective)
                 || objective?.Requirements == null)
             {
                 continue;
@@ -387,38 +422,60 @@ public static class NpcInteractHandler
 
             foreach (var deliver in scanObjective.Requirements.OfType<ObjectiveRequirementDeliver>())
             {
-                if (!deliver.NPCTargetCompletes || deliver.NPCTargetCBID <= 0)
-                    continue;
-
-                foreach (var obj in character.Map.Objects.Values)
-                {
-                    if (obj is not Creature creature || creature is Character)
-                        continue;
-                    if (creature.CBID != deliver.NPCTargetCBID || !IsNpc(creature))
-                        continue;
-                    if (IsSuppressedFor(character, creature.ObjectId.Coid))
-                        continue;
-
-                    var dist = DistXZSq(playerPos, GetNpcInteractPosition(creature, character.Map));
-                    if (dist > rangeSq || dist >= bestDist)
-                        continue;
-
-                    bestDist = dist;
-                    best = creature;
-                }
+                if (deliver.NPCTargetCompletes && deliver.NPCTargetCBID > 0)
+                    targetCbids.Add(deliver.NPCTargetCBID);
             }
+        }
+
+        if (targetCbids.Count == 0)
+            return null;
+
+        foreach (var obj in character.Map.Objects.Values)
+        {
+            var creature = ResolveInteractableNpcFromMapObject(obj);
+            if (creature == null)
+                continue;
+            if (!targetCbids.Contains(creature.CBID) || !IsNpc(creature))
+                continue;
+            if (IsSuppressedFor(character, creature.ObjectId.Coid))
+                continue;
+
+            var dist = DistXZSq(playerPos, GetNpcInteractPosition(creature, character.Map));
+            if (dist > rangeSq || dist >= bestDist)
+                continue;
+
+            bestDist = dist;
+            best = creature;
         }
 
         if (best != null)
         {
             Logger.WriteLog(LogType.Debug,
-                "UseObject: resolved deliver NPC cbid={0} coid={1} from click coid={2} (client/server TFID mismatch)",
+                "UseObject: resolved mission partner cbid={0} coid={1} from click coid={2} (client/server TFID mismatch)",
                 best.CBID,
                 best.ObjectId.Coid,
                 clickedCoid);
         }
 
         return best;
+    }
+
+    /// <summary>
+    /// Map object → interactable NPC creature (direct creature or seated vehicle driver).
+    /// </summary>
+    internal static Creature ResolveInteractableNpcFromMapObject(ClonedObjectBase obj)
+    {
+        if (obj is Creature creature && creature is not Character)
+            return creature;
+
+        if (obj is Vehicle vehicle)
+        {
+            var driver = vehicle.Owner as Creature ?? vehicle.GetSuperCharacter(false);
+            if (driver != null && driver is not Character)
+                return driver;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -511,17 +568,25 @@ public static class NpcInteractHandler
         var resolvedOfferMissionId = ResolveMissionIdForGrant(packet.MissionId);
 
         // Note: retail turn-in dialogs often send Accepted=false on OK (tests + live captures).
-        // Do not gate deliver completion on Accepted — only offer grant below cares about reject.
+        // Do not gate deliver / kill-giver completion on Accepted — only offer grant cares about reject.
         foreach (var missionId in ResolveDialogResponseMissions(character, packet.MissionId, npcCbid))
         {
             if (TryCompleteDeliverFromDialog(conn, character, missionId, npcCbid, npcTfid))
                 return;
+            if (TryCompleteKillTurnInFromDialog(conn, character, missionId, npcCbid))
+                return;
         }
 
-        // Second pass: packet mission id may be active with deliver to this NPC even when the
+        // Second pass: packet mission id may be active with deliver/kill turn-in even when the
         // first list was built with npcCbid=0 (FindNpc failed, CBID recovered from map object).
         if (resolvedOfferMissionId > 0
             && TryCompleteDeliverFromDialog(conn, character, resolvedOfferMissionId, npcCbid, npcTfid))
+        {
+            return;
+        }
+
+        if (resolvedOfferMissionId > 0
+            && TryCompleteKillTurnInFromDialog(conn, character, resolvedOfferMissionId, npcCbid))
         {
             return;
         }
@@ -682,11 +747,26 @@ public static class NpcInteractHandler
         if (missions.Count > 0)
             return missions;
 
+        // 1b) Kill-only final objectives ready for turn-in at this mission giver
+        foreach (var quest in character.CurrentQuests)
+        {
+            var objective = GetActiveObjective(quest);
+            if (objective != null
+                && IsKillTurnInReady(quest, objective, npcCbid)
+                && !missions.Contains(quest.MissionId))
+            {
+                missions.Add(quest.MissionId);
+            }
+        }
+
+        if (missions.Count > 0)
+            return missions;
+
         // 2) Client objective-id hint (UseObject IDObjective) for an owned mission related to this NPC
         if (TryAddMissionFromObjectiveHint(character, npcCbid, objectiveId, missions) && missions.Count > 0)
             return missions;
 
-        // 3) In-progress missions given by this NPC (status dialog)
+        // 3) In-progress missions given by this NPC (status / NotCompleteText dialog)
         foreach (var quest in character.CurrentQuests)
         {
             if (IsMissionNpcGiver(quest.MissionId, npcCbid) && !missions.Contains(quest.MissionId))
@@ -1137,23 +1217,135 @@ public static class NpcInteractHandler
             if (quest == null)
                 continue;
 
-            var deliver = GetActiveDeliver(quest, npcCbid);
-            if (deliver == null)
-                continue;
-
             var objective = GetActiveObjective(quest);
             if (objective == null)
                 continue;
 
+            var deliver = GetActiveDeliver(quest, npcCbid);
+            var killReady = IsKillTurnInReady(quest, objective, npcCbid);
+            if (deliver == null && !killReady)
+                continue;
+
             var seq = quest.ActiveObjectiveSequence;
-            if (seq < quest.ObjectiveProgress.Length && seq < quest.ObjectiveMax.Length)
+            if (seq < quest.ObjectiveProgress.Length && seq < quest.ObjectiveMax.Length
+                && deliver != null)
+            {
+                // Deliver turn-in prep: force max so client Eval/UI shows ready.
                 quest.ObjectiveProgress[seq] = quest.ObjectiveMax[seq];
+            }
 
             // Client requirement callbacks need lChangeBitmask bits (requirement index).
-            var packet = ObjectiveStateBuilder.BuildTurnInReady(objective);
+            // Kill-ready: absolute kill count from live progress; deliver: full turn-in ready.
+            var packet = killReady && deliver == null
+                ? ObjectiveStateBuilder.Build(objective, quest)
+                : ObjectiveStateBuilder.BuildTurnInReady(objective);
             if (packet != null)
                 conn.SendGamePacket(packet);
         }
+    }
+
+    /// <summary>
+    /// Final kill/kill_aggregate-only objective at full progress, talking to mission.NPC giver.
+    /// Client: FUN_0052b420 + Kill_Eval → turn-in dialog (CompleteText), CompleteObjective on OK.
+    /// </summary>
+    private static bool TryCompleteKillTurnInFromDialog(
+        TNLConnection conn,
+        Character character,
+        int missionId,
+        int npcCbid)
+    {
+        var quest = character.CurrentQuests.FirstOrDefault(q => q.MissionId == missionId);
+        if (quest == null)
+            return false;
+
+        var objective = GetActiveObjective(quest);
+        if (objective == null || !IsKillTurnInReady(quest, objective, npcCbid))
+            return false;
+
+        var mission = AssetManager.Instance.GetMission(missionId);
+        if (mission == null)
+            return false;
+
+        // Same soft-pedal as deliver: client already runs CompleteObjective on dialog OK.
+        AdvanceOrCompleteObjective(
+            conn,
+            character,
+            quest,
+            mission,
+            objective,
+            source: "KillTurnIn",
+            sendCompleteDynamicObjective: false,
+            notifyClientRewards: false,
+            syncClientImmediately: false);
+
+        MissionClientSoftPedal.ArmAfterDialogTurnIn(character.ObjectId.Coid);
+
+        ScheduleDialogTurnInFollowup(
+            conn,
+            character,
+            missionId,
+            objective.ObjectiveId,
+            forceClientObjectiveComplete: false);
+
+        Logger.WriteLog(LogType.Debug,
+            "MissionDialogResponse: kill turn-in mission={0} objective={1} npcCbid={2}",
+            missionId,
+            objective.ObjectiveId,
+            npcCbid);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Kill-only active objective, progress full, and NPC is the mission giver (not a deliver pad).
+    /// </summary>
+    internal static bool IsKillTurnInReady(CharacterQuest quest, MissionObjective objective, int npcCbid)
+    {
+        if (quest == null || objective == null || npcCbid <= 0)
+            return false;
+
+        if (!MissionKillProgress.IsKillOnlyObjective(objective))
+            return false;
+
+        var mission = AssetManager.Instance.GetMission(quest.MissionId);
+        if (mission == null || mission.NPC != npcCbid)
+            return false;
+
+        // Must be the final objective sequence (client turn-in checks last objective).
+        if (mission.Objectives.Values.Any(o => o.Sequence > quest.ActiveObjectiveSequence))
+            return false;
+
+        var seq = quest.ActiveObjectiveSequence;
+        if (seq < 0 || seq >= quest.ObjectiveProgress.Length)
+            return false;
+
+        var needed = ResolveKillTurnInNeeded(objective, quest, seq);
+        return quest.ObjectiveProgress[seq] >= needed;
+    }
+
+    internal static int ResolveKillTurnInNeeded(MissionObjective objective, CharacterQuest quest, int seq)
+    {
+        var needed = quest != null && seq >= 0 && seq < quest.ObjectiveMax.Length
+            ? Math.Max(1, quest.ObjectiveMax[seq])
+            : 1;
+
+        if (objective?.Requirements == null)
+            return needed;
+
+        foreach (var req in objective.Requirements)
+        {
+            switch (req)
+            {
+                case ObjectiveRequirementKill kill when kill.NumToKill > needed:
+                    needed = kill.NumToKill;
+                    break;
+                case ObjectiveRequirementKillAggregate agg when agg.NumToKill > needed:
+                    needed = agg.NumToKill;
+                    break;
+            }
+        }
+
+        return needed;
     }
 
     private static void SendNpcMissionDialog(
@@ -2369,8 +2561,15 @@ public static class NpcInteractHandler
 
     private static bool IsNpc(Creature creature)
     {
-        if (creature == null)
+        if (creature == null || creature is Character)
             return false;
+
+        // Mission givers / deliver targets must be UseObject-able even if clonebase IsNPC=0
+        // (some dialog CBIDs are flagged combat-ish in data but are still mission partners).
+        if (creature.IsMissionGiver)
+            return true;
+        if (creature.CBID > 0 && IsMissionGiverCbid(creature.CBID))
+            return true;
 
         if (creature.CloneBaseObject is CloneBaseCreature cb)
             return cb.CreatureSpecific.IsNPC != 0;
