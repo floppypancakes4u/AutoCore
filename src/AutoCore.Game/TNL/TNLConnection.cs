@@ -635,7 +635,8 @@ public partial class TNLConnection : GhostConnection
             or GameOpcode.InventoryGrabResponse
             or GameOpcode.InventoryDropResponse)
         {
-            if (Diagnostics.LogFilters.InventoryFlow)
+            // log.filters.json InventoryFlow and/or serverConfig inventory.debugPackets
+            if (Diagnostics.LogFilters.InventoryFlow || Diagnostics.ServerConfig.InventoryDebugPackets)
             {
                 var previewLength = Math.Min(arr.Length, 96);
                 Logger.WriteLog(

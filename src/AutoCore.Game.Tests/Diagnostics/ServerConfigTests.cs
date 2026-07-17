@@ -34,6 +34,7 @@ public class ServerConfigTests
         Assert.IsNull(ServerConfig.AirDensityOverride);
         Assert.IsFalse(ServerConfig.DebugLogging);
         Assert.IsFalse(ServerConfig.CompositeWheelCollisionEnabled);
+        Assert.IsFalse(ServerConfig.InventoryDebugPackets);
     }
 
     [TestMethod]
@@ -67,6 +68,37 @@ public class ServerConfigTests
         Assert.IsTrue(ServerConfig.ApplyFromYaml("someOtherSetting: 5", out var error), error);
         Assert.IsFalse(ServerConfig.NpcVehiclePhysicsEnabled);
         Assert.AreEqual(NpcVehicleControllerTier.Hard, ServerConfig.ControllerTier);
+        Assert.IsFalse(ServerConfig.InventoryDebugPackets);
+    }
+
+    [TestMethod]
+    public void ApplyFromYaml_InventoryDebugPackets_SetsFlag()
+    {
+        var yaml = """
+            inventory:
+              debugPackets: true
+            """;
+
+        Assert.IsTrue(ServerConfig.ApplyFromYaml(yaml, out var error), error);
+        Assert.IsTrue(ServerConfig.InventoryDebugPackets);
+
+        // Physics section remains default when only inventory is present.
+        Assert.IsFalse(ServerConfig.NpcVehiclePhysicsEnabled);
+    }
+
+    [TestMethod]
+    public void ApplyFromYaml_InventoryAndPhysics_Independent()
+    {
+        var yaml = """
+            npcVehiclePhysics:
+              enabled: true
+            inventory:
+              debugPackets: true
+            """;
+
+        Assert.IsTrue(ServerConfig.ApplyFromYaml(yaml, out var error), error);
+        Assert.IsTrue(ServerConfig.NpcVehiclePhysicsEnabled);
+        Assert.IsTrue(ServerConfig.InventoryDebugPackets);
     }
 
     [TestMethod]
@@ -149,12 +181,14 @@ public class ServerConfigTests
         ServerConfig.SubstepHz = 33;
         ServerConfig.AirDensityOverride = 9f;
         ServerConfig.CompositeWheelCollisionEnabled = true;
+        ServerConfig.InventoryDebugPackets = true;
         ServerConfig.ResetToDefaults();
         Assert.IsFalse(ServerConfig.NpcVehiclePhysicsEnabled);
         Assert.AreEqual(NpcVehicleControllerTier.Hard, ServerConfig.ControllerTier);
         Assert.AreEqual(60, ServerConfig.SubstepHz);
         Assert.IsNull(ServerConfig.AirDensityOverride);
         Assert.IsFalse(ServerConfig.CompositeWheelCollisionEnabled);
+        Assert.IsFalse(ServerConfig.InventoryDebugPackets);
     }
 
     [TestMethod]

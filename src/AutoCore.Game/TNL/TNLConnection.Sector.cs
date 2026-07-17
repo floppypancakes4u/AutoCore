@@ -742,9 +742,10 @@ public partial class TNLConnection
         var packet = new ItemDropPacket();
         packet.Read(reader);
 
-        Logger.WriteLog(
-            LogType.Network,
-            $"HandleItemDropPacket: raw={Convert.ToHexString(packet.RawBytes)} source={packet.SourceObjectId} coid={packet.ItemCoid} pos={packet.DropPosition}" +
+        LogInventoryDebugPacket(
+            "HandleItemDropPacket",
+            packet.RawBytes,
+            $"source={packet.SourceObjectId} coid={packet.ItemCoid} pos={packet.DropPosition}" +
             (packet.RawBytes.Length >= ItemDropPacket.MinimumLength ? $" tail={packet.TailValue}" : string.Empty));
 
         var result = CurrentCharacter?.Inventory.TossToWorld(packet, CurrentCharacter)
@@ -761,9 +762,10 @@ public partial class TNLConnection
         var packet = new InventoryGrabPacket();
         packet.Read(reader);
 
-        Logger.WriteLog(
-            LogType.Debug,
-            $"HandleInventoryGrabPacket: raw={Convert.ToHexString(packet.RawBytes)} parsedCoid={packet.ItemCoid} quantity={packet.Quantity} invType={packet.InventoryType}");
+        LogInventoryDebugPacket(
+            "HandleInventoryGrabPacket",
+            packet.RawBytes,
+            $"coid={packet.ItemCoid} quantity={packet.Quantity} invType={packet.InventoryType}");
 
         var result = CurrentCharacter?.Inventory.Grab(packet, CurrentCharacter)
             ?? InventoryOperationResult.SinglePacket(
@@ -780,9 +782,10 @@ public partial class TNLConnection
         var packet = new InventoryDropPacket();
         packet.Read(reader);
 
-        LogInventoryTossPacket("HandleInventoryDropPacket", packet.RawBytes, packet.ItemCoid, packet.ItemGlobal,
-            packet.InventoryType, packet.InventoryPositionX, packet.InventoryPositionY, packet.TailBytes,
-            packet.EnumerateInt64Candidates(), packet.EnumerateInt32Candidates());
+        LogInventoryDebugPacket(
+            "HandleInventoryDropPacket",
+            packet.RawBytes,
+            $"coid={packet.ItemCoid} global={packet.ItemGlobal} invType={packet.InventoryType} slot={packet.InventoryPositionX},{packet.InventoryPositionY}");
 
         var result = CurrentCharacter?.Inventory.Drop(packet, CurrentCharacter)
             ?? InventoryOperationResult.SinglePacket(
@@ -798,9 +801,10 @@ public partial class TNLConnection
         var packet = new InventoryGrabMMPacket();
         packet.Read(reader);
 
-        Logger.WriteLog(
-            LogType.Debug,
-            $"HandleInventoryGrabMMPacket: raw={Convert.ToHexString(packet.RawBytes)} parsedCoid={packet.ItemCoid} quantity={packet.Quantity} invType={packet.InventoryType}");
+        LogInventoryDebugPacket(
+            "HandleInventoryGrabMMPacket",
+            packet.RawBytes,
+            $"coid={packet.ItemCoid} quantity={packet.Quantity} invType={packet.InventoryType}");
 
         // Mass-move grab is the same as a normal grid grab (client sends one GrabMM per item).
         // Respond with InventoryGrabResponse (0x2035): client early-outs on GrabMMResponse 0x2039.
@@ -820,9 +824,10 @@ public partial class TNLConnection
         var packet = new InventoryDropMMPacket();
         packet.Read(reader);
 
-        LogInventoryTossPacket("HandleInventoryDropMMPacket", packet.RawBytes, packet.ItemCoid, packet.ItemGlobal,
-            packet.InventoryType, packet.InventoryPositionX, packet.InventoryPositionY, packet.TailBytes,
-            packet.EnumerateInt64Candidates(), packet.EnumerateInt32Candidates());
+        LogInventoryDebugPacket(
+            "HandleInventoryDropMMPacket",
+            packet.RawBytes,
+            $"coid={packet.ItemCoid} global={packet.ItemGlobal} invType={packet.InventoryType} slot={packet.InventoryPositionX},{packet.InventoryPositionY}");
 
         // Mass-move drop: same as InventoryDrop (cargo/locker rearrange or transfer).
         // Respond with InventoryDropResponse (0x2037): client early-outs on DropMMResponse 0x203B.
@@ -841,45 +846,37 @@ public partial class TNLConnection
         var packet = new InventoryDestroyItemPacket();
         packet.Read(reader);
 
-        Logger.WriteLog(
-            LogType.Network,
-            $"HandleInventoryDestroyItemPacket: raw={Convert.ToHexString(packet.RawBytes)} coid={packet.ItemCoid} global={packet.ItemGlobal}" +
-            (packet.TailBytes.Length > 0 ? $" tail={Convert.ToHexString(packet.TailBytes)}" : string.Empty) +
-            $" i32=[{string.Join(",", packet.EnumerateInt32Candidates())}] i64=[{string.Join(",", packet.EnumerateInt64Candidates())}]");
+        LogInventoryDebugPacket(
+            "HandleInventoryDestroyItemPacket",
+            packet.RawBytes,
+            $"coid={packet.ItemCoid} global={packet.ItemGlobal}");
 
         Logger.WriteLog(
             LogType.Network,
             "HandleInventoryDestroyItemPacket: log-only stub — inventory destroy/toss is not implemented yet");
     }
 
-    private static void LogInventoryTossPacket(
-        string handler,
-        byte[] rawBytes,
-        long itemCoid,
-        bool itemGlobal,
-        byte inventoryType,
-        byte inventoryPositionX,
-        byte inventoryPositionY,
-        ReadOnlySpan<byte> tailBytes,
-        IEnumerable<long> int64Candidates,
-        IEnumerable<int> int32Candidates)
+    /// <summary>
+    /// Packet detail logs (including raw hex) for inventory handlers.
+    /// Gated by <see cref="Diagnostics.ServerConfig.InventoryDebugPackets"/> (<c>serverConfig.yaml</c> → inventory.debugPackets).
+    /// </summary>
+    private static void LogInventoryDebugPacket(string handler, byte[] rawBytes, string summary)
     {
-        var message =
-            $"{handler}: raw={Convert.ToHexString(rawBytes)} coid={itemCoid} global={itemGlobal} invType={inventoryType} slot={inventoryPositionX},{inventoryPositionY}";
+        if (!Diagnostics.ServerConfig.InventoryDebugPackets)
+            return;
 
-        if (tailBytes.Length > 0)
-            message += $" tail={Convert.ToHexString(tailBytes)}";
+        var message = $"{handler}: {summary}";
+        if (rawBytes is { Length: > 0 })
+            message += $" raw={Convert.ToHexString(rawBytes)}";
 
-        if (inventoryType is not 1 and not 2)
-        {
-            message += $" i32=[{string.Join(",", int32Candidates)}] i64=[{string.Join(",", int64Candidates)}]";
-        }
-
-        Logger.WriteLog(LogType.Network, message);
+        Logger.WriteLog(LogType.Debug, message);
     }
 
     private void LogInventoryOperationResult(InventoryOperationResult result)
     {
+        if (!Diagnostics.ServerConfig.InventoryDebugPackets)
+            return;
+
         if (!string.IsNullOrWhiteSpace(result?.LogMessage))
             Logger.WriteLog(LogType.Debug, result.LogMessage);
     }

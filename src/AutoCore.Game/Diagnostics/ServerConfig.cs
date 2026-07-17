@@ -26,8 +26,8 @@ public enum NpcVehicleControllerTier
 
 /// <summary>
 /// Server tuning loaded from <c>serverConfig.yaml</c> next to the launcher — a YAML (comment-friendly)
-/// sibling to <c>loot.tuning.json</c>. Currently scopes the NPC vehicle physics simulation; other
-/// settings migrate here over time.
+/// sibling to <c>loot.tuning.json</c>. Includes NPC vehicle physics and inventory debug gates;
+/// other settings migrate here over time.
 /// </summary>
 /// <remarks>
 /// Loader mirrors <see cref="LootTuning"/>: env override → content root → cwd → base dir. Missing file
@@ -58,6 +58,8 @@ public static class ServerConfig
     /// assert r×J enable this flag.
     /// </summary>
     public const bool DefaultChassisPointImpulsesEnabled = false;
+    /// <summary>Verbose inventory grab/drop/MM packet logs (raw hex + op results). Default off.</summary>
+    public const bool DefaultInventoryDebugPackets = false;
 
     private static int _substepHz = DefaultSubstepHz;
 
@@ -108,6 +110,12 @@ public static class ServerConfig
     /// </summary>
     public static bool ChassisPointImpulsesEnabled { get; set; } = DefaultChassisPointImpulsesEnabled;
 
+    /// <summary>
+    /// When true, sector inventory handlers log grab/drop/MM packet details (including raw hex)
+    /// and operation result messages. Default <b>false</b> — production stays quiet once moves work.
+    /// </summary>
+    public static bool InventoryDebugPackets { get; set; } = DefaultInventoryDebugPackets;
+
     /// <summary>Reset every setting to retail-safe defaults (tests + startup before load).</summary>
     public static void ResetToDefaults()
     {
@@ -120,6 +128,7 @@ public static class ServerConfig
         SuspensionForceClampEnabled = DefaultSuspensionForceClampEnabled;
         CompositeWheelCollisionEnabled = DefaultCompositeWheelCollisionEnabled;
         ChassisPointImpulsesEnabled = DefaultChassisPointImpulsesEnabled;
+        InventoryDebugPackets = DefaultInventoryDebugPackets;
     }
 
     /// <summary>
@@ -203,43 +212,47 @@ public static class ServerConfig
         }
 
         var p = root?.NpcVehiclePhysics;
-        if (p == null)
-            return true; // valid YAML, no section → keep defaults
-
-        if (p.Enabled.HasValue)
-            NpcVehiclePhysicsEnabled = p.Enabled.Value;
-
-        if (!string.IsNullOrWhiteSpace(p.ControllerTier))
+        if (p != null)
         {
-            if (Enum.TryParse<NpcVehicleControllerTier>(p.ControllerTier, ignoreCase: true, out var tier))
-                ControllerTier = tier;
-            else
+            if (p.Enabled.HasValue)
+                NpcVehiclePhysicsEnabled = p.Enabled.Value;
+
+            if (!string.IsNullOrWhiteSpace(p.ControllerTier))
             {
-                error = $"controllerTier '{p.ControllerTier}' is not one of hard|soft|kinematic|physics";
-                return false;
+                if (Enum.TryParse<NpcVehicleControllerTier>(p.ControllerTier, ignoreCase: true, out var tier))
+                    ControllerTier = tier;
+                else
+                {
+                    error = $"controllerTier '{p.ControllerTier}' is not one of hard|soft|kinematic|physics";
+                    return false;
+                }
             }
+
+            if (p.SubstepHz.HasValue)
+                SubstepHz = p.SubstepHz.Value;
+
+            if (p.Gravity.HasValue)
+                Gravity = p.Gravity.Value;
+
+            if (p.AirDensityOverride.HasValue)
+                AirDensityOverride = p.AirDensityOverride.Value;
+
+            if (p.DebugLogging.HasValue)
+                DebugLogging = p.DebugLogging.Value;
+
+            if (p.SuspensionForceClampEnabled.HasValue)
+                SuspensionForceClampEnabled = p.SuspensionForceClampEnabled.Value;
+
+            if (p.CompositeWheelCollisionEnabled.HasValue)
+                CompositeWheelCollisionEnabled = p.CompositeWheelCollisionEnabled.Value;
+
+            if (p.ChassisPointImpulsesEnabled.HasValue)
+                ChassisPointImpulsesEnabled = p.ChassisPointImpulsesEnabled.Value;
         }
 
-        if (p.SubstepHz.HasValue)
-            SubstepHz = p.SubstepHz.Value;
-
-        if (p.Gravity.HasValue)
-            Gravity = p.Gravity.Value;
-
-        if (p.AirDensityOverride.HasValue)
-            AirDensityOverride = p.AirDensityOverride.Value;
-
-        if (p.DebugLogging.HasValue)
-            DebugLogging = p.DebugLogging.Value;
-
-        if (p.SuspensionForceClampEnabled.HasValue)
-            SuspensionForceClampEnabled = p.SuspensionForceClampEnabled.Value;
-
-        if (p.CompositeWheelCollisionEnabled.HasValue)
-            CompositeWheelCollisionEnabled = p.CompositeWheelCollisionEnabled.Value;
-
-        if (p.ChassisPointImpulsesEnabled.HasValue)
-            ChassisPointImpulsesEnabled = p.ChassisPointImpulsesEnabled.Value;
+        var inv = root?.Inventory;
+        if (inv?.DebugPackets.HasValue == true)
+            InventoryDebugPackets = inv.DebugPackets.Value;
 
         return true;
     }
@@ -273,6 +286,7 @@ public static class ServerConfig
     private sealed class RootDto
     {
         public NpcVehiclePhysicsDto NpcVehiclePhysics { get; set; }
+        public InventoryDto Inventory { get; set; }
     }
 
     private sealed class NpcVehiclePhysicsDto
@@ -286,5 +300,10 @@ public static class ServerConfig
         public bool? SuspensionForceClampEnabled { get; set; }
         public bool? CompositeWheelCollisionEnabled { get; set; }
         public bool? ChassisPointImpulsesEnabled { get; set; }
+    }
+
+    private sealed class InventoryDto
+    {
+        public bool? DebugPackets { get; set; }
     }
 }

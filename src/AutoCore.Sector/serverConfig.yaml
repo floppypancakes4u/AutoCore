@@ -33,3 +33,9 @@ npcVehiclePhysics:
   # CW: wheel casts also hit map-prop / vehicle proxy volumes (Scale + SkirtExtents).
   # Defaults off — terrain-only until opted in. Residual gaps in IMPLEMENTATION-GAPS.md.
   # compositeWheelCollisionEnabled: false
+
+# Inventory system (grab/drop/mass-move, cargo/locker).
+inventory:
+  # Verbose packet logs: raw hex + parsed fields + operation result lines (HandleInventory*).
+  # Default off — enable only while reverse-engineering or diagnosing inventory bugs.
+  debugPackets: false
