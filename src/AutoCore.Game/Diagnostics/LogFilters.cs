@@ -6,8 +6,9 @@ using AutoCore.Utils;
 
 /// <summary>
 /// Named log categories loaded from <c>log.filters.json</c> and toggled live via console
-/// <c>sector.log</c> / <c>log</c>. Defaults keep loot + map-prop ram visible and silence
-/// high-volume packet / wire spam.
+/// <c>sector.log</c> / <c>log</c>. Defaults keep loot + map-prop ram + TakeDamage visible and silence
+/// high-volume packet / wire / death-net spam. Nested JSON sections (Damage, Props) are optional
+/// grouping only — leaf names match filter identifiers.
 /// </summary>
 public static class LogFilters
 {
@@ -40,6 +41,24 @@ public static class LogFilters
             () => Loot, v => Loot = v, defaultOn: true),
         new("MapPropRam", "VehicleMapPropRam collision hits",
             () => MapPropRam, v => MapPropRam = v, defaultOn: true),
+
+        // Damage section (log.filters.json "Damage": { … })
+        new("TakeDamage", "GraphicsObject TakeDamage HP delta lines",
+            () => TakeDamage, v => TakeDamage = v, defaultOn: true),
+        new("OnDeath", "OnDeath map-prop / Vehicle.OnDeath debug lines",
+            () => OnDeath, v => OnDeath = v, defaultOn: false),
+        new("RestoreHealth", "RestoreHealth stale-corpse clear lines",
+            () => RestoreHealth, v => RestoreHealth = v, defaultOn: false),
+        new("DeathNet", "BroadcastDeath per-player DeathNet network lines",
+            () => DeathNet, v => DeathNet = v, defaultOn: false),
+        new("PlayerDeathGhost", "Player vehicle death ghost flush lines",
+            () => PlayerDeathGhost, v => PlayerDeathGhost = v, defaultOn: false),
+
+        // Props section (log.filters.json "Props": { … })
+        new("MapPropCorpseDespawn", "MapPropCorpseDespawn schedule/finalize lines",
+            () => MapPropCorpseDespawn, v => MapPropCorpseDespawn = v, defaultOn: false),
+        new("MapPropDeathLoot", "Map prop death loot position debug lines",
+            () => MapPropDeathLoot, v => MapPropDeathLoot = v, defaultOn: false),
     };
 
     public static bool OutgoingPackets { get; set; }
@@ -52,6 +71,17 @@ public static class LogFilters
     public static bool GiveXp { get; set; }
     public static bool Loot { get; set; } = true;
     public static bool MapPropRam { get; set; } = true;
+
+    // Damage
+    public static bool TakeDamage { get; set; } = true;
+    public static bool OnDeath { get; set; }
+    public static bool RestoreHealth { get; set; }
+    public static bool DeathNet { get; set; }
+    public static bool PlayerDeathGhost { get; set; }
+
+    // Props
+    public static bool MapPropCorpseDespawn { get; set; }
+    public static bool MapPropDeathLoot { get; set; }
 
     public static void ResetToDefaults()
     {
@@ -106,13 +136,33 @@ public static class LogFilters
 
             foreach (var prop in doc.RootElement.EnumerateObject())
             {
+                // Nested sections (Damage / Props / …) group leaf filter names; section labels
+                // are organizational only and do not themselves become filters.
+                if (prop.Value.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var child in prop.Value.EnumerateObject())
+                    {
+                        if (!TryParseBoolElement(child.Value, out var nestedValue))
+                        {
+                            error = $"property '{prop.Name}.{child.Name}' must be boolean";
+                            return false;
+                        }
+
+                        if (!TrySet(child.Name, nestedValue, out _))
+                            Logger.WriteLog(LogType.Network,
+                                $"LogFilters: unknown key '{prop.Name}.{child.Name}' ignored");
+                    }
+
+                    continue;
+                }
+
                 if (!TryParseBoolElement(prop.Value, out var value))
                 {
                     error = $"property '{prop.Name}' must be boolean";
                     return false;
                 }
 
-                if (!TrySet(prop.Name, value, out var setError))
+                if (!TrySet(prop.Name, value, out _))
                 {
                     // Unknown keys ignored with log (same spirit as wire levers)
                     Logger.WriteLog(LogType.Network, $"LogFilters: unknown key '{prop.Name}' ignored");
@@ -172,7 +222,7 @@ public static class LogFilters
 
             case "quiet":
                 ApplyQuietPreset();
-                Logger.WriteLog(LogType.Command, "Log filters: quiet preset (Loot+MapPropRam only).\n" + FormatStatus());
+                Logger.WriteLog(LogType.Command, "Log filters: quiet preset (Loot+MapPropRam+TakeDamage).\n" + FormatStatus());
                 break;
 
             case "loot":
@@ -203,10 +253,14 @@ public static class LogFilters
                     Log filter commands:
                       log list                     Show all filters
                       log set <Name> <true|false>  Flip one category (live)
-                      log quiet                    Only Loot + MapPropRam (+ errors always)
+                      log quiet                    Loot + MapPropRam + TakeDamage (+ errors always)
                       log loot                     Loot work: Loot+MapPropRam on, packet spam off
                       log reset                    Defaults
                       log help                     This text
+
+                    Damage leaves: TakeDamage (default on), OnDeath, RestoreHealth, DeathNet, PlayerDeathGhost
+                    Props leaves:  MapPropCorpseDespawn, MapPropDeathLoot  (MapPropRam stays top-level)
+                    Nested JSON sections Damage/Props in log.filters.json are optional grouping only.
                     """);
                 break;
 
@@ -216,7 +270,7 @@ public static class LogFilters
         }
     }
 
-    /// <summary>Silence packet/wire spam; keep loot + ram.</summary>
+    /// <summary>Silence packet/wire/death spam; keep loot + ram + TakeDamage.</summary>
     public static void ApplyQuietPreset()
     {
         ResetToDefaults();
@@ -232,6 +286,13 @@ public static class LogFilters
         GhostObjectDiag.Enabled = false;
         Loot = true;
         MapPropRam = true;
+        TakeDamage = true;
+        OnDeath = false;
+        RestoreHealth = false;
+        DeathNet = false;
+        PlayerDeathGhost = false;
+        MapPropCorpseDespawn = false;
+        MapPropDeathLoot = false;
     }
 
     /// <summary>Same as quiet for now — intended while debugging loot/ram.</summary>

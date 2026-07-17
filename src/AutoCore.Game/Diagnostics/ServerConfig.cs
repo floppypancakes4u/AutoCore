@@ -58,6 +58,9 @@ public static class ServerConfig
     /// assert r×J enable this flag.
     /// </summary>
     public const bool DefaultChassisPointImpulsesEnabled = false;
+    /// <summary>Server-side map-prop ramming (<c>VehicleMapPropRam</c>) — defaults OFF.</summary>
+    public const bool DefaultEnableRamming = false;
+
     /// <summary>Verbose inventory grab/drop/MM packet logs (raw hex + op results). Default off.</summary>
     public const bool DefaultInventoryDebugPackets = false;
 
@@ -111,6 +114,11 @@ public static class ServerConfig
     public static bool ChassisPointImpulsesEnabled { get; set; } = DefaultChassisPointImpulsesEnabled;
 
     /// <summary>
+    /// When true, moving vehicles damage collidable map props via <c>VehicleMapPropRam</c>.
+    /// Defaults <b>OFF</b> until an operator opts in.
+    /// </summary>
+    public static bool EnableRamming { get; set; } = DefaultEnableRamming;
+
     /// When true, sector inventory handlers log grab/drop/MM packet details (including raw hex)
     /// and operation result messages. Default <b>false</b> — production stays quiet once moves work.
     /// </summary>
@@ -128,6 +136,7 @@ public static class ServerConfig
         SuspensionForceClampEnabled = DefaultSuspensionForceClampEnabled;
         CompositeWheelCollisionEnabled = DefaultCompositeWheelCollisionEnabled;
         ChassisPointImpulsesEnabled = DefaultChassisPointImpulsesEnabled;
+        EnableRamming = DefaultEnableRamming;
         InventoryDebugPackets = DefaultInventoryDebugPackets;
     }
 
@@ -173,7 +182,7 @@ public static class ServerConfig
             var yaml = File.ReadAllText(file);
             if (ApplyFromYaml(yaml, out var error))
                 Logger.WriteLog(LogType.Initialize,
-                    $"ServerConfig: loaded {file} — tier={ControllerTier} enabled={NpcVehiclePhysicsEnabled} substepHz={SubstepHz}");
+                    $"ServerConfig: loaded {file} — tier={ControllerTier} enabled={NpcVehiclePhysicsEnabled} substepHz={SubstepHz} enableRamming={EnableRamming}");
             else
                 Logger.WriteLog(LogType.Error, $"ServerConfig: failed to load {file}: {error}");
         }
@@ -211,7 +220,13 @@ public static class ServerConfig
             return false;
         }
 
+        if (root?.EnableRamming.HasValue == true)
+            EnableRamming = root.EnableRamming.Value;
+
         var p = root?.NpcVehiclePhysics;
+        if (p == null)
+            return true; // valid YAML, no npc section → keep physics defaults (enableRamming already applied)
+
         if (p != null)
         {
             if (p.Enabled.HasValue)
@@ -285,6 +300,7 @@ public static class ServerConfig
 
     private sealed class RootDto
     {
+        public bool? EnableRamming { get; set; }
         public NpcVehiclePhysicsDto NpcVehiclePhysics { get; set; }
         public InventoryDto Inventory { get; set; }
     }

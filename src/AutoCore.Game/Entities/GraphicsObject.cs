@@ -72,7 +72,9 @@ public class GraphicsObject : ClonedObjectBase
             EnsureCombatGhost();
             Ghost?.SetMaskBits(GhostObject.HealthMask);
 
-            Logger.WriteLog(LogType.Debug,
+            LogFilters.WriteIf(
+                LogFilters.TakeDamage,
+                LogType.Debug,
                 "TakeDamage: {0} coid={1} {2}->{3}/{4} dealt={5} (rolled={6})",
                 GetType().Name,
                 ObjectId.Coid,
@@ -101,7 +103,9 @@ public class GraphicsObject : ClonedObjectBase
             if (HP <= 0)
                 return 0;
 
-            Logger.WriteLog(LogType.Debug,
+            LogFilters.WriteIf(
+                LogFilters.RestoreHealth,
+                LogType.Debug,
                 "RestoreHealth: clearing stale corpse state for {0} coid={1} hp={2}/{3}",
                 GetType().Name,
                 ObjectId.Coid,
@@ -188,7 +192,9 @@ public class GraphicsObject : ClonedObjectBase
             Ghost,
             useInitCreateDeath: deathType != DeathType.Silent);
 
-        Logger.WriteLog(LogType.Debug,
+        LogFilters.WriteIf(
+            LogFilters.OnDeath,
+            LogType.Debug,
             "OnDeath map-prop coid={0} type={1} deathType={2} cbid={3} pos={4} — destroy now, leave map in {5}ms",
             objectId.Coid,
             GetType().Name,
@@ -239,7 +245,9 @@ public class GraphicsObject : ClonedObjectBase
             if (lootRot.W == 0f && lootRot.X == 0f && lootRot.Y == 0f && lootRot.Z == 0f)
                 lootRot = new Quaternion(0f, 0f, 0f, 1f);
 
-            Logger.WriteLog(LogType.Debug,
+            LogFilters.WriteIf(
+                LogFilters.MapPropDeathLoot,
+                LogType.Debug,
                 "Map prop death loot coid={0} cbid={1} lootPos={2} propPos={3} override={4} murderer={5}",
                 ObjectId.Coid,
                 CBID,
@@ -489,7 +497,9 @@ public class GraphicsObject : ClonedObjectBase
                 if (destroyPacket != null)
                     conn.SendGamePacket(destroyPacket);
 
-                Logger.WriteLog(LogType.Network,
+                LogFilters.WriteIf(
+                    LogFilters.DeathNet,
+                    LogType.Network,
                     "DeathNet coid={0} deathType={1} murderer={2} initDoDeath={3} destroy={4} force={5} player={6}",
                     objectId.Coid,
                     deathType,

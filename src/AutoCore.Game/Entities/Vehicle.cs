@@ -2317,7 +2317,9 @@ public class Vehicle : SimpleObject
         // Drop stale sim immediately — corpse / leave-map must not keep a free-running body.
         ClearPhysicsInstance();
 
-        Logger.WriteLog(LogType.Debug,
+        LogFilters.WriteIf(
+            LogFilters.OnDeath,
+            LogType.Debug,
             "Vehicle.OnDeath coid={0} cbid={1} templateId={2} npcAi={3} murderer={4} inv={5} hp={6}/{7}",
             ObjectId.Coid,
             CBID,
@@ -2341,7 +2343,9 @@ public class Vehicle : SimpleObject
 
             var ownerConnection = Owner?.GetAsCharacter()?.OwningConnection;
             ownerConnection?.FlushDeathGhostUpdate();
-            Logger.WriteLog(LogType.Network,
+            LogFilters.WriteIf(
+                LogFilters.PlayerDeathGhost,
+                LogType.Network,
                 "PlayerDeathGhost coid={0} hp={1}/{2} corpse={3} ghost={4} scoped={5} ghosting={6}",
                 ObjectId.Coid,
                 GetCurrentHP(),

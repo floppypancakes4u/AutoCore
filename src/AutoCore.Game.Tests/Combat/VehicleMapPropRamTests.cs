@@ -6,6 +6,7 @@ using AutoCore.Database.World.Models;
 using AutoCore.Game.CloneBases.Specifics;
 using AutoCore.Game.Combat;
 using AutoCore.Game.Constants;
+using AutoCore.Game.Diagnostics;
 // MapPropCorpseDespawn
 using AutoCore.Game.Entities;
 using AutoCore.Game.Managers;
@@ -30,6 +31,8 @@ public class VehicleMapPropRamTests
         LootManager.Instance.ResetForTests();
         VehicleMapPropRam.ResetCooldownsForTests();
         MapPropCorpseDespawn.ResetForTests();
+        // Production default is off; unit tests exercise the feature when enabled.
+        ServerConfig.EnableRamming = true;
     }
 
     [TestCleanup]
@@ -40,6 +43,7 @@ public class VehicleMapPropRamTests
         LootManager.Instance.ResetForTests();
         VehicleMapPropRam.ResetCooldownsForTests();
         MapPropCorpseDespawn.ResetForTests();
+        ServerConfig.ResetToDefaults();
     }
 
     [TestMethod]
@@ -60,6 +64,22 @@ public class VehicleMapPropRamTests
         MapPropCorpseDespawn.FlushAllForTests();
         Assert.IsNull(map.GetObjectByCoid(88001), "after delay, prop leaves the map");
         Assert.IsTrue(_sent.OfType<DestroyObjectPacket>().Any(p => p.ObjectId.Coid == 88001));
+    }
+
+    [TestMethod]
+    public void Process_WhenEnableRammingFalse_DoesNotDamageProp()
+    {
+        ServerConfig.EnableRamming = false;
+
+        const int propCbid = 9900;
+        RegisterPhysicsProp(propCbid, minHp: 1, maxHp: 20, collidable: true);
+
+        var (vehicle, map) = CreateVehicleOnMap(speed: 20f);
+        var prop = CreatePropOnMap(map, coid: 88000, cbid: propCbid, maxHp: 20, position: vehicle.Position);
+
+        Assert.AreEqual(0, VehicleMapPropRam.Process(vehicle));
+        Assert.AreEqual(20, prop.GetCurrentHP());
+        Assert.IsFalse(prop.IsCorpse);
     }
 
     [TestMethod]

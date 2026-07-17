@@ -64,7 +64,7 @@ public static class MapPropCorpseDespawn
         }
 
         LogFilters.WriteIf(
-            LogFilters.MapPropRam,
+            LogFilters.MapPropCorpseDespawn,
             LogType.Debug,
             "MapPropCorpseDespawn: scheduled coid={0} cbid={1} delayMs={2}",
             objectId.Coid,
@@ -141,7 +141,7 @@ public static class MapPropCorpseDespawn
                 return;
 
             LogFilters.WriteIf(
-                LogFilters.MapPropRam,
+                LogFilters.MapPropCorpseDespawn,
                 LogType.Debug,
                 "MapPropCorpseDespawn: finalize coid={0} cbid={1}",
                 p.ObjectId.Coid,
