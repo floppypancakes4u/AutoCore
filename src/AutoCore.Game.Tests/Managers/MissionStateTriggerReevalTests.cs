@@ -8,6 +8,7 @@ using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
 using AutoCore.Game.Mission;
+using AutoCore.Game.Mission.Requirements;
 using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
@@ -41,6 +42,7 @@ public class MissionStateTriggerReevalTests
         TNLConnection.TestPacketSink = (_, p) => _sent.Add(p);
         AssetManager.Instance.ClearTestMissions();
         NpcInteractHandler.InvalidateMissionIndex();
+        NpcInteractHandler.ResetDialogTurnInFollowupForTests();
         TriggerManager.Instance.ClearAllForTests();
     }
 
@@ -50,6 +52,7 @@ public class MissionStateTriggerReevalTests
         TNLConnection.TestPacketSink = null;
         AssetManager.Instance.ClearTestMissions();
         NpcInteractHandler.InvalidateMissionIndex();
+        NpcInteractHandler.ResetDialogTurnInFollowupForTests();
         TriggerManager.Instance.ClearAllForTests();
         _sent.Clear();
     }
@@ -141,6 +144,111 @@ public class MissionStateTriggerReevalTests
 
         Assert.IsNotNull(map.GetObjectByCoid(GateObjectCoid));
         Assert.IsTrue(character.MapPresence.IsSuppressed(GateObjectCoid));
+    }
+
+    /// <summary>
+    /// Biomek Dunlap-class gate: collision volume (scale &gt; 2) + type-9 completed mission.
+    /// Must open on mission re-eval even when the player is outside the volume — turn-in
+    /// happens at the NPC, not necessarily inside the gate trigger sphere.
+    /// </summary>
+    [TestMethod]
+    public void OnMissionStateChanged_CollisionConditional_CompletedMission_OpensGateOutsideVolume()
+    {
+        SeedMission(MissionId, ObjectiveId);
+        var (character, vehicle, map) = CreatePlayer();
+        SeedMissionVars(map);
+
+        // Collision+conditional (scale 25 like wastes open-gate): completed mission == const 1
+        PlaceConditionalTrigger(
+            map,
+            VolumeTriggerCoid,
+            scale: 25f,
+            leftVar: VarCompleted,
+            rightVar: VarConstOne,
+            reactionCoid: DeleteReactionCoid,
+            gateObjectCoid: GateObjectCoid);
+
+        PlaceDeletableObject(map, GateObjectCoid, new Vector3(0, 0, 0));
+        // Player far outside the scale-25 sphere at origin.
+        vehicle.Position = new Vector3(500, 0, 500);
+        character.Position = vehicle.Position;
+
+        TriggerManager.Instance.OnMissionStateChanged(vehicle);
+        Assert.IsFalse(character.MapPresence.IsSuppressed(GateObjectCoid),
+            "No complete yet — gate must stay closed");
+
+        character.CompletedMissionIds.Add(MissionId);
+        // Empty CurrentQuests: complete-only chain step before re-interact for next offer.
+        Assert.AreEqual(0, character.CurrentQuests.Count);
+        TriggerManager.Instance.OnMissionStateChanged(vehicle);
+
+        Assert.IsNotNull(map.GetObjectByCoid(GateObjectCoid), "Shared map keeps gate object");
+        Assert.IsTrue(character.MapPresence.IsSuppressed(GateObjectCoid),
+            "Type-9 complete must personally suppress gate outside volume");
+    }
+
+    /// <summary>
+    /// Dialog deliver turn-in (soft-pedal delay 0): complete-only with empty quests still opens
+    /// a collision+conditional type-9 gate outside the volume.
+    /// </summary>
+    [TestMethod]
+    public void DialogDeliverTurnIn_CompletedMission_OpensCollisionGateOutsideVolume()
+    {
+        NpcInteractHandler.DialogTurnInFollowupDelayMs = 0;
+
+        SeedMission(MissionId, ObjectiveId);
+        var (character, vehicle, map) = CreatePlayer();
+        SeedMissionVars(map);
+        character.SetOwningConnection(character.OwningConnection);
+        character.OwningConnection.CurrentCharacter = character;
+
+        PlaceConditionalTrigger(
+            map,
+            VolumeTriggerCoid,
+            scale: 25f,
+            leftVar: VarCompleted,
+            rightVar: VarConstOne,
+            reactionCoid: DeleteReactionCoid,
+            gateObjectCoid: GateObjectCoid);
+        PlaceDeletableObject(map, GateObjectCoid, new Vector3(0, 0, 0));
+        vehicle.Position = new Vector3(500, 0, 500);
+        character.Position = vehicle.Position;
+
+        // Active deliver to NPC — single-objective mission so turn-in completes it.
+        var deliverObj = MissionObjective.CreateForTests(ObjectiveId, 0, MissionId, 1);
+        var deliver = new ObjectiveRequirementDeliver(deliverObj)
+        {
+            NPCTargetCBID = 93050,
+            NPCTargetCompletes = true,
+        };
+        deliverObj.Requirements.Add(deliver);
+        var mission = Mission.CreateForTests(MissionId, deliverObj);
+        mission.NPC = 93050;
+        AssetManager.Instance.SetTestMission(mission);
+        NpcInteractHandler.InvalidateMissionIndex();
+
+        var quest = new CharacterQuest(MissionId, 0);
+        quest.PopulateFromAssets();
+        character.CurrentQuests.Add(quest);
+
+        var npcCoid = 97001L;
+        var npc = new Creature();
+        npc.SetCoid(npcCoid, false);
+        npc.SetCbidForTests(93050);
+        npc.Position = vehicle.Position;
+        npc.SetMap(map);
+
+        NpcInteractHandler.HandleMissionDialogResponse(character.OwningConnection, new MissionDialogResponsePacket
+        {
+            MissionId = MissionId,
+            Accepted = true,
+            MissionGiver = new TFID(npcCoid, false),
+        });
+
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
+        Assert.AreEqual(0, character.CurrentQuests.Count);
+        Assert.IsTrue(character.MapPresence.IsSuppressed(GateObjectCoid),
+            "Deliver turn-in follow-up must open type-9 collision gate outside volume");
     }
 
     [TestMethod]

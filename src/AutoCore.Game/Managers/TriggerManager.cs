@@ -359,8 +359,16 @@ public class TriggerManager : Singleton<TriggerManager>
         else
             CheckTriggersFor(activator);
 
-        ReevaluateConditionalTriggers(activator, watchVarId: null);
+        FireMissionConditionTriggers(activator);
     }
+
+    /// <summary>
+    /// Fire latched condition-passing triggers for mission state (types 9/10/11/12), including
+    /// collision+conditional gate openers outside volume. Used by OnMissionStateChanged and
+    /// login/world-phase replay so Create+Delete reaction lists run once per actor.
+    /// </summary>
+    public void FireMissionConditionTriggers(ClonedObjectBase activator)
+        => ReevaluateConditionalTriggers(activator, watchVarId: null);
 
     /// <summary>
     /// After a VariableSet (etc.) writes a Type-0 flag, fire remote triggers watching that variable.
@@ -395,14 +403,16 @@ public class TriggerManager : Singleton<TriggerManager>
         var character = activator.GetAsCharacter() ?? activator.GetSuperCharacter(false);
         var actorCoid = character?.ObjectId.Coid ?? activator.ObjectId.Coid;
 
+        // Mission re-eval (watchVarId null): also open collision+conditional *gate* triggers
+        // (Create/Delete/Death) outside volume — Biomek Dunlap type-9 complete, Human door
+        // type-11 accept. Pure Activate cascade volumes (Gunny initiate) stay movement-only.
+        // Variable-watch path stays remote-only so large volumes are not mass-fired.
+        var missionStateReeval = !watchVarId.HasValue;
+
         foreach (var kvp in map.Triggers.ToList())
         {
             var trigger = kvp.Value;
             if (trigger.Template.Conditions.Count == 0)
-                continue;
-
-            // Collision volumes are handled by CheckTriggersFor, not mission re-eval.
-            if (trigger.Template.DoCollision)
                 continue;
 
             // Pure Activate targets (DoOnActivate, no conditionals) are only fired by
@@ -413,13 +423,32 @@ public class TriggerManager : Singleton<TriggerManager>
             if (trigger.Template.DoOnActivate && !trigger.Template.DoConditionals)
                 continue;
 
-            // Remote logic watchers are small; large spheres are pure collision volumes.
-            if (trigger.Scale > 2.0f)
-                continue;
-
             // Prefer triggers that actually evaluate conditionals (mission/var watchers).
             if (!trigger.Template.DoConditionals)
                 continue;
+
+            if (missionStateReeval)
+            {
+                if (trigger.Template.DoCollision)
+                {
+                    // Outside-volume mission fire only for gate openers (Create/Delete/Death).
+                    if (!HasWorldMutatingGateReactions(map, trigger))
+                        continue;
+                }
+                else if (trigger.Scale > 2.0f)
+                {
+                    // Non-collision remotes stay small (existing remote-watcher contract).
+                    continue;
+                }
+            }
+            else
+            {
+                // Variable-watch: remote logic watchers only (small, non-collision).
+                if (trigger.Template.DoCollision)
+                    continue;
+                if (trigger.Scale > 2.0f)
+                    continue;
+            }
 
             if (watchVarId.HasValue
                 && !trigger.Template.Conditions.Any(c => c.LeftId == watchVarId.Value || c.RightId == watchVarId.Value))
@@ -436,19 +465,49 @@ public class TriggerManager : Singleton<TriggerManager>
 
             _firedConditionalTriggers[key] = true;
             MissionFlowDiag.Log(
-                "REMOTE-TRIGGER FIRE trigger={0} name='{1}' actor={2} watchVar={3} reactions=[{4}]",
+                "COND-TRIGGER FIRE trigger={0} name='{1}' actor={2} watchVar={3} coll={4} scale={5} reactions=[{6}]",
                 kvp.Key.Coid,
                 trigger.Template.Name ?? string.Empty,
                 actorCoid,
                 watchVarId?.ToString() ?? "mission",
+                trigger.Template.DoCollision ? 1 : 0,
+                trigger.Scale,
                 string.Join(',', trigger.Template.Reactions));
             Logger.WriteLog(LogType.Debug,
-                "TriggerManager: remote condition fire trigger={0} actor={1} watchVar={2}",
+                "TriggerManager: condition fire trigger={0} actor={1} watchVar={2} coll={3}",
                 kvp.Key.Coid,
                 actorCoid,
-                watchVarId?.ToString() ?? "mission");
+                watchVarId?.ToString() ?? "mission",
+                trigger.Template.DoCollision);
             FireTriggerReactions(activator, trigger);
         }
+    }
+
+    /// <summary>
+    /// True when the trigger's reaction list includes Create/Delete/Death (map gate openers).
+    /// Pure Activate cascade volumes (e.g. Gunny initiate → rem initiator) are excluded so
+    /// mission re-eval does not start combat from outside the initiate sphere.
+    /// </summary>
+    private static bool HasWorldMutatingGateReactions(Map.SectorMap map, Trigger trigger)
+    {
+        if (map == null || trigger?.Template?.Reactions == null)
+            return false;
+
+        foreach (var coid in trigger.Template.Reactions)
+        {
+            if (map.GetObjectByCoid(coid) is not Reaction reaction)
+                continue;
+
+            switch (reaction.Template.ReactionType)
+            {
+                case ReactionType.Create:
+                case ReactionType.Delete:
+                case ReactionType.Death:
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     private static void LogPlayerTrigger(ClonedObjectBase activator, Trigger trigger)

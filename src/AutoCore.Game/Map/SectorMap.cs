@@ -524,8 +524,13 @@ public class SectorMap
         var deliverCbids = CollectDeliverCbidsForWorldPhase(character).ToList();
         var killSpawnTypes = CollectActiveKillSpawnTypes(character).ToList();
         var hasActiveQuests = character.CurrentQuests.Count > 0;
-        if (!hasActiveQuests && deliverCbids.Count == 0)
+        var hasCompletedMissions = character.CompletedMissionIds.Count > 0;
+        // Type-9 complete-only gates (Biomek Welcome turn-in) need replay with empty CurrentQuests.
+        if (!hasActiveQuests && deliverCbids.Count == 0 && killSpawnTypes.Count == 0
+            && !hasCompletedMissions)
+        {
             return 0;
+        }
 
         character.EnsureLogicVariables();
         character.MapPresence.EnsureContinent(ContinentId);
@@ -533,33 +538,11 @@ public class SectorMap
         var fired = 0;
         var firedCreateCoids = new HashSet<long>();
 
-        // 1) Condition-gated Creates (mission vars type 9/11/12). Require DoConditionals so pure
-        // Activate remotes are not re-fired. Callers that only need a deliver NPC (AutoPatrol)
-        // should use EnsureDeliverTurnInNpc instead of full ReplayMissionWorldSetup.
-        if (hasActiveQuests)
-        {
-            foreach (var trigger in Triggers.Values.ToList())
-            {
-                if (!trigger.Template.DoConditionals || trigger.Template.Conditions.Count == 0)
-                    continue;
-
-                if (!trigger.ConditionsPass(activator))
-                    continue;
-
-                var createCoids = CollectCreateReactionCoids(trigger.Template.Reactions);
-                if (createCoids.Count == 0)
-                    continue;
-
-                foreach (var coid in createCoids)
-                {
-                    if (!firedCreateCoids.Add(coid))
-                        continue;
-
-                    TriggerReactions(activator, new List<long> { coid });
-                    fired++;
-                }
-            }
-        }
+        // 1) Condition-gated full reaction lists (mission vars type 9/11/12): Create+Delete gate
+        // openers, not Create-only. Latched in TriggerManager so ApplyMissionPhaseWorldState
+        // (OnMissionStateChanged + this) does not double-fire. Callers that only need a deliver
+        // NPC (AutoPatrol) should use EnsureDeliverTurnInNpc instead.
+        TriggerManager.Instance.FireMissionConditionTriggers(activator);
 
         // 2) Deliver-CBID pad/turn-in NPCs (active alternate-form + active deliver only).
         foreach (var deliverCbid in deliverCbids)
@@ -806,18 +789,6 @@ public class SectorMap
         }
 
         return fired;
-    }
-
-    private List<long> CollectCreateReactionCoids(List<long> reactionCoids)
-    {
-        var result = new List<long>();
-        foreach (var coid in reactionCoids)
-        {
-            if (GetObjectByCoid(coid) is Reaction { Template.ReactionType: ReactionType.Create })
-                result.Add(coid);
-        }
-
-        return result;
     }
 
     /// <summary>

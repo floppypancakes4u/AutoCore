@@ -228,8 +228,11 @@ public class MissionPhaseSpawnReplayTests
         vehicle.SetMap(map);
         character.EnsureLogicVariables();
 
-        var fired = map.ReplayMissionWorldSetup(vehicle);
-        Assert.IsTrue(fired > 0, "Mission-conditioned Create must fire when type12 is true");
+        // SetMap / ApplyMissionPhaseWorldState may already fire condition-gated Creates.
+        // Replay is idempotent (TriggerManager latch); assert world effect, not fire count.
+        map.ReplayMissionWorldSetup(vehicle);
+        Assert.IsTrue(spawn.HasLiveSpawn() || character.MapPresence.IsMaterialized(gatedSpawnCoid),
+            "Mission-conditioned Create must materialize gated spawn when type12 is true");
     }
 
     private static void SeedDeliverMission(int deliverCbid)

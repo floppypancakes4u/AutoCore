@@ -1037,12 +1037,12 @@ public static class NpcInteractHandler
     {
         if (character.CurrentQuests.Any(q => q.MissionId == missionId))
         {
-            // Duplicate grant path: top up cargo first, then resync UI.
+            // Duplicate grant path: top up cargo first, then resync UI + world phase.
             var existing = character.CurrentQuests.First(q => q.MissionId == missionId);
             MissionCargoService.EnsureAndSend(character, existing);
             ResyncActiveMissionToClient(conn, character, existing);
-            TriggerManager.Instance.OnMissionStateChanged(
-                character.CurrentVehicle ?? (ClonedObjectBase)character);
+            var dupActivator = character.CurrentVehicle ?? (ClonedObjectBase)character;
+            character.Map?.ApplyMissionPhaseWorldState(dupActivator);
             return;
         }
 
@@ -1063,8 +1063,10 @@ public static class NpcInteractHandler
             missionId,
             character.ObjectId.Coid);
 
-        // Mission-computed logic vars (type 11/12) may unlock gates / remote triggers.
-        TriggerManager.Instance.OnMissionStateChanged(character.CurrentVehicle ?? (ClonedObjectBase)character);
+        // Mission-computed logic vars (type 9/11/12) may unlock gates / remote triggers;
+        // world-phase replay restores pad Creates and condition-gated reaction lists.
+        var grantActivator = character.CurrentVehicle ?? (ClonedObjectBase)character;
+        character.Map?.ApplyMissionPhaseWorldState(grantActivator);
     }
 
     /// <summary>
