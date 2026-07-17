@@ -1906,17 +1906,18 @@ public class SectorMap
         // skipOpcode: true — client bitstream parser (0x6374F0) reads RPC payload from byte 0
         // as entry count; opcode is carried by TNL RPC type (same as MapInfoPacket).
         // Soft-pedal: after dialog turn-in, hold 0x206C briefly so client interact FX / dialog
-        // MSXML loads are not stacked with reaction UI (AV @ 0x007B6DB0). Server reactions already ran.
+        // MSXML loads are not stacked with reaction UI (AV @ 0x007B6DB0). Server reactions already
+        // ran; queue the packet and flush when the window ends so gate Create/Delete still arrive.
         if (SendGroupReactionCall && clientPacket.Count > 0)
         {
             var character = ResolveCharacter(activator);
             if (character != null
                 && MissionClientSoftPedal.ShouldSuppressGroupReactionCall(character.ObjectId.Coid))
             {
-                Logger.WriteLog(LogType.Debug,
-                    "GroupReactionCall suppressed (mission UI soft-pedal) charCoid={0} entries={1}",
+                MissionClientSoftPedal.EnqueueSuppressedGroupReaction(
                     character.ObjectId.Coid,
-                    clientPacket.Count);
+                    character.OwningConnection,
+                    clientPacket);
             }
             else
             {

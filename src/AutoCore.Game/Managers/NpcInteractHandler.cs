@@ -174,6 +174,9 @@ public static class NpcInteractHandler
                     TriggerManager.Instance.OnMissionStateChanged(phaseActivator);
                     // Keep pad form / suppress original giver after turn-in (personal presence).
                     character.Map?.ReplayMissionWorldSetup(phaseActivator);
+                    // Gate Create/Delete 0x206C may have been queued during soft-pedal — flush if
+                    // the suppress window already ended (else MissionClientSoftPedal flush timer).
+                    MissionClientSoftPedal.FlushPendingGroupReactions(coid);
 
                     Logger.WriteLog(LogType.Debug,
                         "MissionDialogResponse: delayed follow-up after deliver mission={0} coid={1} delayMs={2} forceComplete={3}",
