@@ -11,7 +11,12 @@
       "Bash(powershell -Command:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(claude mcp list:*)"
+      "Bash(claude mcp list:*)",
+      "mcp__ghidra-mcp__list_instances",
+      "mcp__ghidra-mcp__connect_instance"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "memory-editor"
+  ]
 }

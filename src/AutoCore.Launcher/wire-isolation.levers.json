@@ -18,5 +18,6 @@
   "EnableForeignReghostOwner": false,
   "EnableForeignVehiclePosePriorityBoost": true,
   "EnableSoftNpcPathMotion": true,
-  "EnableClientSidePathVisual": false
+  "EnableClientSidePathVisual": false,
+  "EnableNpcVehicleDriveController": true,
 }

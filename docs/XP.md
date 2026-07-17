@@ -7,6 +7,10 @@ Server-authoritative experience awards for Auto Assault, reverse-engineered from
 
 Ghidra target: `autoassault.exe`.
 
+**Reconstruction tree (client handlers, raw decompiles, exact control flow):**  
+[`docs/reconstruction/systems/progression-xp.md`](reconstruction/systems/progression-xp.md) — advances UF-005 / WQ-018.  
+This file (`docs/XP.md`) remains the **formula and server-design authority**; the reconstruction tree links here and does not replace it.
+
 ---
 
 ## Authority model

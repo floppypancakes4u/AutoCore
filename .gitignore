@@ -297,3 +297,8 @@ src/AutoCore.sln
 
 # RE scratch directory
 tmp/
+/.superpowers
+/src/mcps
+src/.mcp.json
+src/.claude/settings.local.json
+src/.mcp.json
