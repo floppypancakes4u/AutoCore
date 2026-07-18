@@ -1,5 +1,7 @@
 # Mission System Testing Map
 
+> **Canonical handler behavior:** [missionHandler.md](../missionHandler.md) — lifecycle, requirement-type processing rules, and consistency checklist. This file is the **test inventory** companion.
+
 Living inventory of mission-related production code and how it must be tested.  
 Trace source: implementation as of 2026-07-12 (not enum wish-lists).
 
@@ -11,9 +13,10 @@ Trace source: implementation as of 2026-07-12 (not enum wish-lists).
 | Not tracked | `NpcInteractHandler.GrantMission` | `CanOfferMission` | Active seq=0 | Same as grant | Level/continent/NPC/prereq fail → no grant |
 | Not tracked | Dialog accept (`MissionDialogResponse`) | Offer path | Active | GrantMission | Ineligible → no-op |
 | Active | Kill credit (`MissionKillProgress`) | Active kill/kill_aggregate req matches | Progress++ or complete | ObjectiveState on partial; Advance on threshold | Wrong player/CBID; already completed mission skipped |
+| Active | Collect drop/pickup (`MissionCollectProgress`) | Active collect + optional target + drop % | Progress from inventory; final waits giver | Mission ground loot; absolute ObjectiveState | Wrong CBID; pct=0; already at NumToCollect |
 | Active | UseItem UseObject | Active useitem req | Advance/complete | AdvanceOrCompleteObjective | Wrong target |
 | Active | AutoPatrol | Patrol AutoComplete + in radius | Partial pad progress → advance/complete **or** ensure deliver NPC | Sibling deliver blocks complete | Multi-waypoint/sequential/laps via `MissionPatrolProgress` |
-| Active | Deliver dialog turn-in | Active deliver NPC match | Advance **or** complete | Soft-pedal (no 0x2070 when client already completed); rewards | Wrong NPC; not deliver objective |
+| Active | Deliver / kill / collect dialog turn-in | Active deliver NPC match or kill/collect giver ready | Advance **or** complete | Soft-pedal (no 0x2070 when client already completed); rewards | Wrong NPC; not deliver objective |
 | Active mid-seq | `AdvanceOrCompleteObjective` (has next) | Called from kill/patrol/useitem/reaction | seq → next | 0x2070; progress max on old seq; Upsert; ObjectiveState next; phase replay | Multi-req treated satisfied (incomplete) |
 | Active final | `AdvanceOrCompleteObjective` (no next) | Final objective | Not active; in CompletedMissionIds | Remove quest; Complete persist; rewards; journal; phase replay | Duplicate call after remove → no quest |
 | Active | `Reaction.CompleteObjective` | G1 objective id matches **active** seq | Advance or complete | Shared Advance path; returns false (no 0x206C) | Wrong/stale objective seq → no-op |
@@ -100,7 +103,7 @@ Legend: **STUB** = implemented as no-op / log only today.
 | Responsibility | UseObject, dialog offer/accept, deliver turn-in, AutoPatrol, UseItem, Grant, ForceComplete, Advance, rewards |
 | Inputs | Packets, character, map NPCs |
 | Outputs | Packets, quest mutations, persist, triggers, rewards |
-| Existing tests | NpcInteractUseObject*, Deliver*, UseItem*, AutoPatrol*, CoverageGap*, HealthGated*, SoftPedal*, GiverCbid* |
+| Existing tests | NpcInteractUseObject*, Deliver*, UseItem*, AutoPatrol*, CoverageGap*, HealthGated*, SoftPedal*, GiverCbid*, **MissionRogersUseObjectHeavyRegression*** |
 | Missing tests | Full state-transition matrix; duplicate complete; prereq chain offer; force-complete rewards once |
 | Risks | Soft-pedal timing; deliver bypassing shared path history; multi-req complete |
 | Categories | Component, E2E, transition |
@@ -113,6 +116,15 @@ Legend: **STUB** = implemented as no-op / log only today.
 | Existing tests | Unit matchers + integration progress |
 | Missing tests | Two missions same kill; post-complete ignore; player B isolation |
 | Categories | Unit, contract, isolation |
+
+### 2.7b MissionCollectProgress
+
+| Field | Detail |
+| ----- | ------ |
+| Responsibility | Collect kill-to-loot drop (`OptionalDropPercent`), inventory progress, giver turn-in |
+| Existing tests | `MissionCollectProgressUnitTests`, `MissionHideAndSeekCollectHeavyRegressionTests`, ObjectiveState/Cargo take specs |
+| Missing tests | Convoy share; pct=0 world collect; multi-target optional lists |
+| Categories | Unit, HeavyRegression |
 
 ### 2.8 Reaction mission handlers (`Entities/Reaction.cs`)
 

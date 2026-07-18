@@ -17,6 +17,11 @@ using AutoCore.Utils;
 /// </summary>
 public static class MissionCargoService
 {
+    /// <summary>
+    /// Sentinel quantity for Collect <c>TakeAllItems</c>: remove every matching stack at take time.
+    /// </summary>
+    public const int TakeAllQuantity = int.MaxValue;
+
     public static int QuantityNeeded(int numToDeliver) => numToDeliver > 0 ? numToDeliver : 1;
 
     public static int QuantityMissing(int needed, int have) => Math.Max(0, needed - Math.Max(0, have));
@@ -69,7 +74,7 @@ public static class MissionCargoService
     }
 
     /// <summary>
-    /// Deliver requirements that remove cargo on objective/mission complete.
+    /// Deliver TakeItemAtEnd and Collect turn-in cargo removals.
     /// </summary>
     public static IReadOnlyList<(int Cbid, int Quantity)> GetTakeSpecs(MissionObjective objective)
     {
@@ -79,12 +84,25 @@ public static class MissionCargoService
         var specs = new List<(int, int)>();
         foreach (var req in objective.Requirements)
         {
-            if (req is not ObjectiveRequirementDeliver deliver)
+            if (req is ObjectiveRequirementDeliver deliver)
+            {
+                if (!deliver.TakeItemAtEnd || deliver.ItemCBID <= 0)
+                    continue;
+
+                specs.Add((deliver.ItemCBID, QuantityNeeded(deliver.NumToDeliver)));
                 continue;
-            if (!deliver.TakeItemAtEnd || deliver.ItemCBID <= 0)
+            }
+
+            if (req is not ObjectiveRequirementCollect collect)
+                continue;
+            if (collect.ItemCBID <= 0)
                 continue;
 
-            specs.Add((deliver.ItemCBID, QuantityNeeded(deliver.NumToDeliver)));
+            // Collect always removes gathered items on objective/mission complete.
+            var qty = collect.TakeItems
+                ? TakeAllQuantity
+                : QuantityNeeded(collect.NumToCollect);
+            specs.Add((collect.ItemCBID, qty));
         }
 
         return specs;
@@ -290,7 +308,13 @@ public static class MissionCargoService
         var packets = new List<BasePacket>();
         foreach (var (cbid, quantity) in GetTakeSpecs(objective))
         {
-            var result = character.Inventory.RemoveCargoByCbid(character.ObjectId.Coid, cbid, quantity);
+            var takeQty = quantity == TakeAllQuantity
+                ? Math.Max(1, character.Inventory.CountByCbid(cbid))
+                : quantity;
+            if (takeQty < 1)
+                continue;
+
+            var result = character.Inventory.RemoveCargoByCbid(character.ObjectId.Coid, cbid, takeQty);
             if (result.Packets != null && result.Packets.Count > 0)
                 packets.AddRange(result.Packets);
         }

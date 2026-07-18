@@ -714,7 +714,9 @@ public partial class TNLConnection
             displayName,
             inventoryCoid,
             new InventoryItemCreator(),
-            CurrentCharacter.ObjectId.Coid);
+            CurrentCharacter.ObjectId.Coid,
+            quantity: 1,
+            isMissionItem: simpleObject.PossibleMissionItem);
 
         if (claim.AddedItem == null)
         {
@@ -735,6 +737,18 @@ public partial class TNLConnection
 
         Logger.WriteLog(LogType.Debug,
             $"HandleItemPickupPacket: world coid={worldObjectId.Coid} cbid={cbid} → cargo coid={inventoryCoid} slot ({claim.AddedItem.InventoryPositionX},{claim.AddedItem.InventoryPositionY})");
+
+        try
+        {
+            Managers.MissionCollectProgress.SyncProgressFromInventory(CurrentCharacter, cbid);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "MissionCollectProgress.SyncProgressFromInventory failed cbid={0}: {1}",
+                cbid,
+                ex.Message);
+        }
     }
 
     private void HandleItemDropPacket(BinaryReader reader)

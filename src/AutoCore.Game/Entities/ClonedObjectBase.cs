@@ -302,6 +302,18 @@ public abstract class ClonedObjectBase
                 ex.Message);
         }
 
+        try
+        {
+            Managers.MissionCollectProgress.NotifyObjectKilled(this);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLog(LogType.Error,
+                "MissionCollectProgress.NotifyObjectKilled failed for coid={0}: {1}",
+                ObjectId.Coid,
+                ex.Message);
+        }
+
         // Kill XP (docs/XP.md) — murderer full credit, grey/hard level diff.
         try
         {

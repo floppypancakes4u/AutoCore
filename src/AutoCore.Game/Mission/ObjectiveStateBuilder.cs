@@ -14,7 +14,7 @@ public static class ObjectiveStateBuilder
 {
     /// <summary>
     /// Build an ObjectiveState packet from objective-level progress/max.
-    /// Kill / kill_aggregate slots use absolute counts (client Eval: NumToKill &lt;= slot float).
+    /// Kill / kill_aggregate / Collect slots use absolute counts (client Eval: NumToKill/NumToCollect &lt;= slot float).
     /// Other requirements write a 0..1 ratio into each authored <c>FirstStateSlot</c>.
     /// Bitmask bits mark every requirement index that should receive a client callback.
     /// </summary>
@@ -89,7 +89,8 @@ public static class ObjectiveStateBuilder
     internal static bool IsAbsoluteCountRequirement(ObjectiveRequirement requirement)
         => requirement is ObjectiveRequirementKill
             or ObjectiveRequirementKillAggregate
-            or ObjectiveRequirementUseItem;
+            or ObjectiveRequirementUseItem
+            or ObjectiveRequirementCollect;
 
     /// <summary>
     /// UseItem mid-progress / resync. Client

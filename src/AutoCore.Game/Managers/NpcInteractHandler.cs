@@ -225,7 +225,8 @@ public static class NpcInteractHandler
         => ObjectUseManager.Handle(conn, packet);
 
     /// <summary>
-    /// Mission dialog branch of UseObject. Returns true when a dialog packet was sent.
+    /// Mission dialog branch of UseObject. Returns true when the mission path consumed the
+    /// interact (dialog packet sent, or known mission NPC with nothing to say for this character).
     /// Does not handle use-item, stores, or other facilities.
     /// </summary>
     internal static bool TryHandleMissionDialog(TNLConnection conn, Character character, UseObjectPacket packet)
@@ -299,28 +300,50 @@ public static class NpcInteractHandler
         }
 
         if (dialogMissions.Count == 0)
-        {
-            Logger.WriteLog(LogType.Debug,
-                "UseObject: NPC cbid={0} coid={1} has no dialog missions for char={2} objectiveId={3}",
-                npcCbid,
-                npc.ObjectId.Coid,
-                character.ObjectId.Coid,
-                packet.ObjectiveId);
-            return false;
-        }
+            return ConsumeEmptyMissionNpcInteract(npcCbid, npc.ObjectId.Coid, character.ObjectId.Coid, packet.ObjectiveId);
 
         // Client often advances objectives (0x206C / local UI) before the server — e.g. patrol
         // done client-side while ActiveObjectiveSequence is still 0. Reconcile from objectiveId
         // so deliver turn-in and PrepareClientTurnInDialog see the correct active sequence.
         TryReconcileClientObjectiveHint(conn, character, packet.ObjectiveId, npcCbid);
+        // Track This: UseObject still carries the first deliver objective id after server moved
+        // onto the intervening AutoComplete patrol — skip patrol-only gaps to the next deliver
+        // at this NPC so turn-in prep sees the active deliver sequence.
+        TryReconcileAtDeliverNpcDestination(conn, character, npcCbid);
 
         // Re-build after reconcile so deliver-active sequence is reflected if hint advanced it.
         dialogMissions = BuildDialogMissions(character, npcCbid, packet.ObjectiveId);
         if (dialogMissions.Count == 0)
-            return false;
+            return ConsumeEmptyMissionNpcInteract(npcCbid, npc.ObjectId.Coid, character.ObjectId.Coid, packet.ObjectiveId);
 
         PrepareClientTurnInDialog(conn, character, npcCbid, dialogMissions);
         SendNpcMissionDialog(conn, character, npc.ObjectId, npcCbid, dialogMissions);
+        return true;
+    }
+
+    /// <summary>
+    /// Known mission giver/deliver CBIDs with nothing to offer/turn in must still consume
+    /// UseObject so spatial OpenStore / facilities do not open for nearby town stores.
+    /// </summary>
+    static bool ConsumeEmptyMissionNpcInteract(int npcCbid, long npcCoid, long charCoid, int objectiveId)
+    {
+        if (!IsMissionGiverCbid(npcCbid))
+        {
+            Logger.WriteLog(LogType.Debug,
+                "UseObject: NPC cbid={0} coid={1} has no dialog missions for char={2} objectiveId={3}",
+                npcCbid,
+                npcCoid,
+                charCoid,
+                objectiveId);
+            return false;
+        }
+
+        Logger.WriteLog(LogType.Debug,
+            "UseObject: mission NPC cbid={0} coid={1} has nothing for char={2} objectiveId={3} — consuming (no store fallthrough)",
+            npcCbid,
+            npcCoid,
+            charCoid,
+            objectiveId);
         return true;
     }
 
@@ -532,6 +555,133 @@ public static class NpcInteractHandler
     }
 
     /// <summary>
+    /// When the player interacts with an NPC that is the target of a later deliver, skip any
+    /// intervening AutoComplete-only patrol objectives so turn-in can proceed.
+    /// </summary>
+    /// <remarks>
+    /// Track This (3979): after the first Gareth deliver the server is on patrol seq1 while the
+    /// client UseObject still sends objective 7656 (first deliver). The final take-deliver is
+    /// seq2 to the same NPC — without this, dialog hits "already active" with
+    /// <c>activeDeliverCbids=[]</c> / <c>remainingDeliverToNpc=1</c>.
+    /// Does not skip kills, use-item, or non-AutoComplete objectives.
+    /// </remarks>
+    private static void TryReconcileAtDeliverNpcDestination(
+        TNLConnection conn,
+        Character character,
+        int npcCbid)
+    {
+        if (character == null || npcCbid <= 0)
+            return;
+
+        foreach (var quest in character.CurrentQuests.ToList())
+        {
+            if (character.CompletedMissionIds.Contains(quest.MissionId))
+                continue;
+
+            var mission = AssetManager.Instance.GetMission(quest.MissionId);
+            if (mission?.Objectives == null || mission.Objectives.Count == 0)
+                continue;
+
+            // Already on a deliver to this NPC — HasDeliverTurnIn will handle turn-in.
+            if (HasDeliverTurnIn(quest, npcCbid))
+                continue;
+
+            MissionObjective targetDeliver = null;
+            foreach (var obj in mission.Objectives.Values.OrderBy(o => o.Sequence))
+            {
+                if (obj.Sequence <= quest.ActiveObjectiveSequence)
+                    continue;
+
+                var deliver = obj.Requirements?
+                    .OfType<ObjectiveRequirementDeliver>()
+                    .FirstOrDefault(d => d.NPCTargetCompletes && d.NPCTargetCBID == npcCbid);
+                if (deliver == null)
+                    continue;
+
+                targetDeliver = obj;
+                break;
+            }
+
+            if (targetDeliver == null)
+                continue;
+
+            if (!CanSkipObjectivesToDeliver(mission, quest.ActiveObjectiveSequence, targetDeliver.Sequence))
+                continue;
+
+            var guard = 0;
+            while (character.CurrentQuests.Contains(quest)
+                && quest.ActiveObjectiveSequence < targetDeliver.Sequence
+                && guard++ < 16)
+            {
+                if (!mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var current)
+                    || current == null)
+                {
+                    break;
+                }
+
+                MissionFlowDiag.Log(
+                    "DeliverDest RECONCILE-ADVANCE mission={0} seq {1} -> toward {2} npcCbid={3}",
+                    quest.MissionId,
+                    quest.ActiveObjectiveSequence,
+                    targetDeliver.Sequence,
+                    npcCbid);
+                Logger.WriteLog(LogType.Debug,
+                    "DeliverDestination: skip AutoComplete patrol mission={0} seq {1} -> toward {2} npcCbid={3}",
+                    quest.MissionId,
+                    quest.ActiveObjectiveSequence,
+                    targetDeliver.Sequence,
+                    npcCbid);
+
+                // 0x2070 clears client AutoPatrol waypoints for the finished patrol.
+                AdvanceOrCompleteObjective(
+                    conn,
+                    character,
+                    quest,
+                    mission,
+                    current,
+                    source: "DeliverDestinationReconcile");
+            }
+        }
+    }
+
+    /// <summary>
+    /// True when every objective in <paramref name="fromSeq"/>..<paramref name="toSeq"/>-1 is an
+    /// AutoComplete patrol with no blocking sibling requirements.
+    /// </summary>
+    private static bool CanSkipObjectivesToDeliver(Mission mission, byte fromSeq, byte toSeq)
+    {
+        if (mission?.Objectives == null || toSeq <= fromSeq)
+            return false;
+
+        foreach (var obj in mission.Objectives.Values)
+        {
+            if (obj.Sequence < fromSeq || obj.Sequence >= toSeq)
+                continue;
+
+            if (!IsSkippableAutoCompletePatrol(obj))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsSkippableAutoCompletePatrol(MissionObjective objective)
+    {
+        if (objective?.Requirements == null || objective.Requirements.Count == 0)
+            return false;
+
+        var patrol = objective.Requirements.OfType<ObjectiveRequirementPatrol>().FirstOrDefault();
+        if (patrol == null || !patrol.AutoComplete)
+            return false;
+
+        // Any non-patrol requirement (deliver/kill/use-item/…) must not be skipped.
+        if (objective.Requirements.Any(r => r is not ObjectiveRequirementPatrol))
+            return false;
+
+        return !ObjectiveHasBlockingSiblingRequirements(objective, RequirementType.Patrol);
+    }
+
+    /// <summary>
     /// Active UseItem requirement via <see cref="MissionUseItemProgress"/>.
     /// ProgressTime is client-authoritative (channel then UseObject); server validates on packet.
     /// </summary>
@@ -570,6 +720,10 @@ public static class NpcInteractHandler
         // Client may echo mission id OR an objective id (same pattern as deliver turn-in).
         var resolvedOfferMissionId = ResolveMissionIdForGrant(packet.MissionId);
 
+        // Dialog OK at the destination NPC while server is still on an intervening AutoComplete
+        // patrol (Track This after first Gareth deliver): land on the later deliver first.
+        TryReconcileAtDeliverNpcDestination(conn, character, npcCbid);
+
         // Note: retail turn-in dialogs often send Accepted=false on OK (tests + live captures).
         // Do not gate deliver / kill-giver completion on Accepted — only offer grant cares about reject.
         foreach (var missionId in ResolveDialogResponseMissions(character, packet.MissionId, npcCbid))
@@ -577,6 +731,8 @@ public static class NpcInteractHandler
             if (TryCompleteDeliverFromDialog(conn, character, missionId, npcCbid, npcTfid))
                 return;
             if (TryCompleteKillTurnInFromDialog(conn, character, missionId, npcCbid))
+                return;
+            if (TryCompleteCollectTurnInFromDialog(conn, character, missionId, npcCbid))
                 return;
         }
 
@@ -590,6 +746,12 @@ public static class NpcInteractHandler
 
         if (resolvedOfferMissionId > 0
             && TryCompleteKillTurnInFromDialog(conn, character, resolvedOfferMissionId, npcCbid))
+        {
+            return;
+        }
+
+        if (resolvedOfferMissionId > 0
+            && TryCompleteCollectTurnInFromDialog(conn, character, resolvedOfferMissionId, npcCbid))
         {
             return;
         }
@@ -750,12 +912,13 @@ public static class NpcInteractHandler
         if (missions.Count > 0)
             return missions;
 
-        // 1b) Kill-only final objectives ready for turn-in at this mission giver
+        // 1b) Kill-only / collect-only final objectives ready for turn-in at this mission giver
         foreach (var quest in character.CurrentQuests)
         {
             var objective = GetActiveObjective(quest);
             if (objective != null
-                && IsKillTurnInReady(quest, objective, npcCbid)
+                && (IsKillTurnInReady(quest, objective, npcCbid)
+                    || IsCollectTurnInReady(quest, objective, npcCbid))
                 && !missions.Contains(quest.MissionId))
             {
                 missions.Add(quest.MissionId);
@@ -1228,7 +1391,8 @@ public static class NpcInteractHandler
 
             var deliver = GetActiveDeliver(quest, npcCbid);
             var killReady = IsKillTurnInReady(quest, objective, npcCbid);
-            if (deliver == null && !killReady)
+            var collectReady = IsCollectTurnInReady(quest, objective, npcCbid);
+            if (deliver == null && !killReady && !collectReady)
                 continue;
 
             var seq = quest.ActiveObjectiveSequence;
@@ -1240,8 +1404,8 @@ public static class NpcInteractHandler
             }
 
             // Client requirement callbacks need lChangeBitmask bits (requirement index).
-            // Kill-ready: absolute kill count from live progress; deliver: full turn-in ready.
-            var packet = killReady && deliver == null
+            // Kill/collect-ready: absolute count from live progress; deliver: full turn-in ready.
+            var packet = (killReady || collectReady) && deliver == null
                 ? ObjectiveStateBuilder.Build(objective, quest)
                 : ObjectiveStateBuilder.BuildTurnInReady(objective);
             if (packet != null)
@@ -1299,6 +1463,100 @@ public static class NpcInteractHandler
             npcCbid);
 
         return true;
+    }
+
+    /// <summary>
+    /// Final collect-only objective at full progress, talking to mission.NPC giver.
+    /// </summary>
+    private static bool TryCompleteCollectTurnInFromDialog(
+        TNLConnection conn,
+        Character character,
+        int missionId,
+        int npcCbid)
+    {
+        var quest = character.CurrentQuests.FirstOrDefault(q => q.MissionId == missionId);
+        if (quest == null)
+            return false;
+
+        var objective = GetActiveObjective(quest);
+        if (objective == null || !IsCollectTurnInReady(quest, objective, npcCbid))
+            return false;
+
+        var mission = AssetManager.Instance.GetMission(missionId);
+        if (mission == null)
+            return false;
+
+        AdvanceOrCompleteObjective(
+            conn,
+            character,
+            quest,
+            mission,
+            objective,
+            source: "CollectTurnIn",
+            sendCompleteDynamicObjective: false,
+            notifyClientRewards: false,
+            syncClientImmediately: false);
+
+        MissionClientSoftPedal.ArmAfterDialogTurnIn(character.ObjectId.Coid);
+
+        ScheduleDialogTurnInFollowup(
+            conn,
+            character,
+            missionId,
+            objective.ObjectiveId,
+            forceClientObjectiveComplete: false);
+
+        Logger.WriteLog(LogType.Debug,
+            "MissionDialogResponse: collect turn-in mission={0} objective={1} npcCbid={2}",
+            missionId,
+            objective.ObjectiveId,
+            npcCbid);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Collect-only active objective, progress full, and NPC is the mission giver.
+    /// </summary>
+    internal static bool IsCollectTurnInReady(CharacterQuest quest, MissionObjective objective, int npcCbid)
+    {
+        if (quest == null || objective == null || npcCbid <= 0)
+            return false;
+
+        if (!MissionCollectProgress.IsCollectOnlyObjective(objective))
+            return false;
+
+        var mission = AssetManager.Instance.GetMission(quest.MissionId);
+        if (mission == null || mission.NPC != npcCbid)
+            return false;
+
+        if (mission.Objectives.Values.Any(o => o.Sequence > quest.ActiveObjectiveSequence))
+            return false;
+
+        var seq = quest.ActiveObjectiveSequence;
+        if (seq < 0 || seq >= quest.ObjectiveProgress.Length)
+            return false;
+
+        var needed = ResolveCollectTurnInNeeded(objective, quest, seq);
+        return quest.ObjectiveProgress[seq] >= needed;
+    }
+
+    internal static int ResolveCollectTurnInNeeded(MissionObjective objective, CharacterQuest quest, int seq)
+    {
+        var needed = quest != null && seq >= 0 && seq < quest.ObjectiveMax.Length
+            ? Math.Max(1, quest.ObjectiveMax[seq])
+            : 1;
+
+        if (objective?.Requirements == null)
+            return needed;
+
+        foreach (var req in objective.Requirements)
+        {
+            if (req is ObjectiveRequirementCollect collect && collect.NumToCollect > needed)
+                needed = collect.NumToCollect;
+        }
+
+        return needed;
     }
 
     /// <summary>

@@ -37,6 +37,26 @@ public class ObjectiveStateBuilderTests
     }
 
     [TestMethod]
+    public void Build_Collect_UsesAbsoluteCount_NotRatio()
+    {
+        var obj = MissionObjective.CreateForTests(objectiveId: 6948, sequence: 0, questId: 3668, completeCount: 2);
+        obj.Requirements.Add(new ObjectiveRequirementCollect(obj)
+        {
+            ItemCBID = 4172,
+            NumToCollect = 2,
+            OptionalDropPercent = 35f,
+            FirstStateSlot = 0,
+        });
+
+        var packet = ObjectiveStateBuilder.Build(obj, progress: 1, maximum: 2);
+
+        Assert.AreEqual(6948, packet.ObjectiveId);
+        Assert.AreEqual(1u, packet.ObjectiveBitmask);
+        Assert.AreEqual(1f, packet.SlotProgress[0], 0.001f);
+        Assert.AreNotEqual(0.5f, packet.SlotProgress[0], 0.001f);
+    }
+
+    [TestMethod]
     public void Build_Kill_GrouchyGunShape_TwoOfFive()
     {
         var obj = MissionObjective.CreateForTests(objectiveId: 614, sequence: 0, questId: 470, completeCount: 0);

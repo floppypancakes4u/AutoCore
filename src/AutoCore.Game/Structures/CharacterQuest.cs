@@ -79,6 +79,9 @@ public class CharacterQuest
                 .FirstOrDefault();
             var killReq = objective.Requirements?
                 .FirstOrDefault(r => r is ObjectiveRequirementKill or ObjectiveRequirementKillAggregate);
+            var collectReq = objective.Requirements?
+                .OfType<ObjectiveRequirementCollect>()
+                .FirstOrDefault();
 
             if (multiPad != null)
             {
@@ -95,6 +98,12 @@ public class CharacterQuest
             else if (killReq != null)
             {
                 var slot = killReq.FirstStateSlot;
+                if (slot < slots.Length)
+                    slots[slot] = Math.Max(0, progress);
+            }
+            else if (collectReq != null)
+            {
+                var slot = collectReq.FirstStateSlot;
                 if (slot < slots.Length)
                     slots[slot] = Math.Max(0, progress);
             }
@@ -177,6 +186,9 @@ public class CharacterQuest
                         break;
                     case ObjectiveRequirementKillAggregate agg when agg.NumToKill > derived:
                         derived = agg.NumToKill;
+                        break;
+                    case ObjectiveRequirementCollect collect when collect.NumToCollect > derived:
+                        derived = collect.NumToCollect;
                         break;
                 }
             }

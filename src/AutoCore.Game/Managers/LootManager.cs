@@ -1030,7 +1030,8 @@ public class LootManager : Singleton<LootManager>
         Vector3 position,
         Quaternion rotation,
         SectorMap map,
-        out long spawnedCoid)
+        out long spawnedCoid,
+        bool possibleMissionItem = false)
     {
         spawnedCoid = -1;
 
@@ -1083,6 +1084,9 @@ public class LootManager : Singleton<LootManager>
             spawnedCoid = -1;
             return false;
         }
+
+        if (possibleMissionItem)
+            simpleObject.PossibleMissionItem = true;
 
         var createPacket = BuildGroundLootCreatePacket(simpleObject);
 

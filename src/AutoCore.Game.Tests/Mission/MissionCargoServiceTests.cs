@@ -65,6 +65,39 @@ public class MissionCargoServiceTests
     }
 
     [TestMethod]
+    public void GetTakeSpecs_Collect_TakesNumToCollect_ByDefault()
+    {
+        var obj = MissionObjective.CreateForTests(10, 0, 3668, 1);
+        obj.Requirements.Add(new ObjectiveRequirementCollect(obj)
+        {
+            ItemCBID = 4172,
+            NumToCollect = 2,
+            TakeItems = false,
+        });
+
+        var take = MissionCargoService.GetTakeSpecs(obj);
+        Assert.AreEqual(1, take.Count);
+        Assert.AreEqual((4172, 2), take[0]);
+    }
+
+    [TestMethod]
+    public void GetTakeSpecs_Collect_TakeAllItems_UsesSentinelAll()
+    {
+        var obj = MissionObjective.CreateForTests(11, 0, 3669, 1);
+        obj.Requirements.Add(new ObjectiveRequirementCollect(obj)
+        {
+            ItemCBID = 4172,
+            NumToCollect = 2,
+            TakeItems = true,
+        });
+
+        var take = MissionCargoService.GetTakeSpecs(obj);
+        Assert.AreEqual(1, take.Count);
+        Assert.AreEqual(4172, take[0].Cbid);
+        Assert.AreEqual(MissionCargoService.TakeAllQuantity, take[0].Quantity);
+    }
+
+    [TestMethod]
     public void GetGiveSpecs_IncludesUseItemGiveAtStart_WithMultipleUseQtyRules()
     {
         var obj = MissionObjective.CreateForTests(2, 0, 200, 0);

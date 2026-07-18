@@ -752,7 +752,8 @@ public sealed class InventoryManager
         long inventoryCoid,
         IInventoryItemCreator itemCreator,
         long characterCoid = 0,
-        int quantity = 1)
+        int quantity = 1,
+        bool isMissionItem = false)
     {
         if (cbid <= 0)
             return new InventoryCommandResult("Invalid loot CBID.");
@@ -768,6 +769,19 @@ public sealed class InventoryManager
 
         var name = string.IsNullOrWhiteSpace(displayName) ? $"CBID {cbid}" : displayName;
         var entry = new InventoryCatalogEntry(cbid, type, name);
+        if (isMissionItem)
+        {
+            return AddItemInternal(
+                entry,
+                itemCreator,
+                inventoryCoid,
+                characterCoid,
+                quantity,
+                isMissionItem: true,
+                allocateAdditionalCoid: null,
+                action: "Picked up mission item");
+        }
+
         return AddItem(entry, itemCreator, inventoryCoid, characterCoid, quantity);
     }
 

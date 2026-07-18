@@ -37,6 +37,12 @@ public class SimpleObject : GraphicsObject
     protected byte SkillLevel2 { get; set; }
     protected byte SkillLevel3 { get; set; }
     protected bool AlreadyAssembled { get; set; }
+
+    /// <summary>
+    /// When true, ground CreateSimpleObject and inventory claim treat this as mission gear
+    /// (PossibleMissionItem / IsMissionItem). Set for Collect kill-to-loot drops.
+    /// </summary>
+    public bool PossibleMissionItem { get; set; }
     #endregion
 
     public override int GetCurrentHP() => HP;
@@ -232,7 +238,7 @@ public class SimpleObject : GraphicsObject
         packet.SkillLevel2 = SkillLevel2;
         packet.SkillLevel3 = SkillLevel3;
         packet.IsIdentified = true;
-        packet.PossibleMissionItem = false;
+        packet.PossibleMissionItem = PossibleMissionItem;
         packet.TempItem = false;
         packet.WillEquip = false;
         packet.IsInInventory = false;
