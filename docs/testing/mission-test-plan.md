@@ -30,7 +30,7 @@ dotnet test src/AutoCore.Game.Tests/AutoCore.Game.Tests.csproj --filter "FullyQu
 dotnet test src/AutoCore.Game.Tests/AutoCore.Game.Tests.csproj --filter TestCategory=MissionCritical
 
 # Broader mission ecosystem (interact, kill, deliver, tutorial, etc.)
-dotnet test src/AutoCore.Game.Tests/AutoCore.Game.Tests.csproj --filter "FullyQualifiedName~Mission|FullyQualifiedName~NpcInteract|FullyQualifiedName~PerPlayerLoad|FullyQualifiedName~ApplyMission|FullyQualifiedName~ObjectiveRequirement|FullyQualifiedName~DeliverTurn|FullyQualifiedName~AutoPatrol|FullyQualifiedName~UseObject|FullyQualifiedName~HealthGated|FullyQualifiedName~TutorialNpc"
+dotnet test src/AutoCore.Game.Tests/AutoCore.Game.Tests.csproj --filter "FullyQualifiedName~Mission|FullyQualifiedName~NpcInteract|FullyQualifiedName~PerPlayerLoad|FullyQualifiedName~ApplyMission|FullyQualifiedName~ObjectiveRequirement|FullyQualifiedName~DeliverTurn|FullyQualifiedName~AutoPatrol|FullyQualifiedName~UseObject|FullyQualifiedName~HealthGated|FullyQualifiedName~TutorialNpc|FullyQualifiedName~MissionRogersUseObject|FullyQualifiedName~MissionGlmXml"
 
 # Coverage
 dotnet test src/AutoCore.Game.Tests/AutoCore.Game.Tests.csproj `

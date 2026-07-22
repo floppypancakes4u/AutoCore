@@ -1,5 +1,7 @@
 # Mission Persistence — Work Log & Handoff
 
+> **Canonical handler behavior:** [missionHandler.md](missionHandler.md) — how grant/progress/advance/complete must work per requirement type. This file remains the **persistence handoff** and open live-bug log.
+
 Handoff for continuing the mission-persistence feature. Read this top to bottom, then
 `docs/missionState.md` for the deeper protocol/RE reference. Work is on branch
 **`feature/mission-persistence`** (branched from `feature/npc-ai`).
@@ -147,6 +149,62 @@ was offered anyway.
 `ReactionGiveMission_ActiveMission_NotReSentToClient`,
 `ReactionGiveMission_CompletedRepeatable_IsReGrantedAndSent`.
 
+### Rogers UseObject / New Day deliver (FIXED)
+UseObject on Rogers (CBID **2477**) logged `no dialog missions` then fell through to OpenStore even
+with mission **554** (New Day Dawning) active. Retail shape: `Mission.NPC = -1` (no giver); turn-in
+is deliver-only via GLM `TargetNPCCBID=2477` on objective **714**. Live and Direct (**3032**) is
+given by the same NPC after turn-in.
+
+**Root cause:** `AssetManager.LoadAllData` started WAD and GLM in parallel. `Mission.Read` pulls
+`{name}.xml` from GLM during WAD load; when WAD won the race, objective **Requirements** stayed
+empty, so `HasDeliverTurnIn` never matched Rogers.
+
+**Fix:**
+1. Load GLM to completion before starting WAD.
+2. `Mission.ApplyGlmXml` / `MissionObjective.ApplyGlmXml` can re-attach requirements; after both
+   loaders succeed, `ReapplyMissingMissionGlmXml` backfills any mission still missing Requirement
+   children.
+
+**Tests:** `HandleUseObject_NpcMinusOneDeliverOnly_OpensTurnInDialog`,
+`HandleUseObject_AfterNpcMinusOneTurnIn_OffersFollowUpFromSameNpc`,
+`MissionGlmXmlApplyTests.ApplyGlmXml_AttachesDeliverTarget_EnablesRogersStyleUseObject`.
+
+### Mission NPC vehicles looked invulnerable (FIXED)
+`FactionDirty` combat spawns (Final Exam Gunny template **580**, fam `OriginalFaction=22`) never
+copied `OriginalFaction` onto `ObjectTemplate.Faction`. Override applied Human **0**, so
+`WeaponFireTargetAcquisition` rejected hits as same-faction. Fix: fam read + Create path wire
+`Faction` from `OriginalFaction`; spawn override falls back to `OriginalFaction` when Faction is
+unset/0. Details: `docs/NPC.md` §15.3. Tests in `SpawnPointTemplateSpawnTests` /
+`WeaponFireTargetAcquisitionTests`.
+
+### Target NPC frozen, then deleted (FIXED)
+With `ScopeGlobalVehicleGhost=false` (code default / crash isolation), combat targets still got
+`CreateVehicle` but never `ObjectInScope`. No pose or HealthMask → looks immobile and undamageable;
+client later drops the stale object. Fix: pathing / AI foreign vehicles still ghost after the
+create-hold even when the lever is off (`SectorMap.PerformScopeQuery`). See `docs/ghostPlan.md`
+(containment exception) and `docs/nullWheels.md` (lever table). Tests:
+`PerformScopeQuery_GhostLeverOff_PathVehicleStillGhostsAfterHold`,
+`PerformScopeQuery_GhostLeverOff_AiVehicleWithoutPathStillGhostsAfterHold`.
+
+### Track This — cannot turn in to Gareth (FIXED)
+Mission **3979** is deliver → AutoComplete patrol → deliver (same NPC **11155**). After the first
+Gareth dialog the server is on patrol `seq1`, but UseObject still sends objective **7656** (first
+deliver). Reconcile only advanced for *later* objective ids, so dialog hit
+`activeDeliverCbids=[]` / `remainingDeliverToNpc=1` and status-resync'd. Fix:
+`TryReconcileAtDeliverNpcDestination` skips AutoComplete-only patrol gaps to the next deliver at
+that NPC (UseObject + dialog response). Does not skip kills. Tests:
+`HandleUseObject_TrackThisStaleFirstDeliverHint_AdvancesPastPatrolToFinalDeliver`,
+`HandleMissionDialogResponse_TrackThisAtGarethDuringPatrol_CompletesFinalDeliver`. Catalog REG-005.
+
+### Empty mission NPC opens nearby store (FIXED)
+UseObject on Kid Gareth (CBID **11155**) with nothing to give/receive logged
+`has no dialog missions`, then spatial OpenStore opened a nearby town store (e.g. reaction
+**5445** / store **4810**) and the client sent unused `StoreOpen` (`0x2024`). Fix:
+`TryHandleMissionDialog` **consumes** UseObject for in-range `IsMissionGiverCbid` NPCs with an
+empty dialog list (no fallthrough to TriggerEvents / VendorStore / facilities). Tests:
+`EmptyDialogMissionNpc_NearOpenStore_DoesNotOpenStore`,
+`EmptyDialogMissionNpc_UseObject_NoDialogNoCrash`. Catalog REG-006.
+
 ---
 
 ## Open issue — follow-up mission not offered after relog
@@ -160,7 +218,8 @@ it.
 - The client does **not** filter offered missions — `Client_RecvNpcMissionDialog` @`0x00815070`
   displays whatever the server sends. So "not offered" is a **server-side** decision in
   `NpcInteractHandler.GetOfferableMissions` → `CanOfferMission`, gated on `CompletedMissionIds`
-  containing 554 (Live and Direct's presumed prerequisite).
+  containing 554 (Live and Direct's presumed prerequisite — note WAD **3032** has empty
+  `ReqMissionId`; continent **707** / race gates still apply).
 - Historical parallel-table DB snapshot (MariaDB `autocore_char`) during investigation:
   - `character_quest`: coid **18381** → mission **554 active**, seq 0, zero progress.
   - `character_completed_mission`: coids **18325**, **18423** → **554 completed**.
@@ -181,6 +240,9 @@ reload + re-grant. This needs confirmation with a **clean run on the rebuilt ser
 If a clean run shows 554 correctly completed after relog but Live and Direct is still not offered,
 then Live and Direct has prerequisites beyond just 554 (or a continent/level/NPC gate mismatch) —
 pull its mission definition and check `ReqMissionId`, `Continent`, `ReqLevelMin/Max`, `NPC`.
+
+**Note:** If UseObject on Rogers still logs `no dialog missions` *before* turn-in with 554 active,
+rebuild so the GLM-before-WAD fix is loaded; that path is separate from this relog-offer issue.
 
 ---
 

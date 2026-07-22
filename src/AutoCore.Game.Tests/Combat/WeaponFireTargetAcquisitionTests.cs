@@ -232,6 +232,27 @@ public class WeaponFireTargetAcquisitionTests
         Assert.IsFalse(WeaponFireTargetAcquisition.IsEligible(c, 1, 99, null, null));
     }
 
+    /// <summary>
+    /// Mission combat NPCs (e.g. Final Exam Gunny faction 22) must be hittable by Human (0).
+    /// Wrong FactionDirty wiring left NPC at faction 0 → same-faction skip looked like invulnerability.
+    /// </summary>
+    [TestMethod]
+    public void IsEligible_HumanShooter_VsMissionNpcFaction_True()
+    {
+        var gunny = Cand(14138, 0, 10, faction: 22);
+        Assert.IsTrue(WeaponFireTargetAcquisition.IsEligible(
+            gunny, shooterFaction: 0, shooterCoid: 1, ownerCoid: null, excludeCoid: null));
+    }
+
+    [TestMethod]
+    public void IsEligible_HumanShooter_VsWronglyHumanFactionNpc_False()
+    {
+        var brokenGunny = Cand(14138, 0, 10, faction: 0);
+        Assert.IsFalse(WeaponFireTargetAcquisition.IsEligible(
+            brokenGunny, shooterFaction: 0, shooterCoid: 1, ownerCoid: null, excludeCoid: null),
+            "FactionDirty bug: NPC left at Human 0 is rejected as same-faction");
+    }
+
     [TestMethod]
     public void Acquire_ClosestSoftTargetWins_EvenIfNonCombatant_WhenCapIsOne()
     {

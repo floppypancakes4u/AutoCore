@@ -352,7 +352,7 @@ Available gates:
 
 | Lever | Default | Meaning |
 | --- | --- | --- |
-| `ScopeGlobalVehicleGhost` | false in code default; true in current test config | Allows foreign vehicle TNL ghost registration. |
+| `ScopeGlobalVehicleGhost` | false in code default; true in current test config | Allows foreign vehicle TNL ghost registration. When false, ambient foreign vehicles stay create-only; pathing (`CoidCurrentPath > 0`) and AI (`NpcAi != null`) combat vehicles still ghost (pose + HealthMask + path pin). |
 | `EnableMinimalForeignInitialProfile` | false in code default | Enables pose-only foreign profile. |
 | `EnableMinimalForeignPathBlock` | false | Admits the path block on initial. |
 | `EnableMinimalForeignTemplateSpawnBlock` | false | Admits template and spawn-owner blocks on initial. |

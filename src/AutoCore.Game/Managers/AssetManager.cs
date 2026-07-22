@@ -56,6 +56,23 @@ public class AssetManager : Singleton<AssetManager>
         if (DataLoaded)
             return false;
 
+        // GLM before WAD: Mission.Read needs `{name}.xml` for deliver TargetNPCCBID etc.
+        // Parallel load raced and left New Day / Rogers turn-ins without requirements.
+        var loadGLMTask = Task<bool>.Factory.StartNew(() =>
+        {
+            try
+            {
+                return GLMLoader.Load(GamePath);
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLog(LogType.Error, $"Exception while loading GLM: {ex}");
+                return false;
+            }
+        });
+
+        loadGLMTask.Wait();
+
         var loadWadTask = Task<bool>.Factory.StartNew(() =>
         {
             try
@@ -100,24 +117,11 @@ public class AssetManager : Singleton<AssetManager>
             }
         });
 
-        var loadGLMTask = Task<bool>.Factory.StartNew(() =>
+        var loadWorldDBTask = Task<bool>.Factory.StartNew(() =>
         {
             try
             {
-                return GLMLoader.Load(GamePath);
-            }
-            catch (Exception ex)
-            {
-                Logger.WriteLog(LogType.Error, $"Exception while loading GLM: {ex}");
-                return false;
-            }
-        });
-
-        var loadWorldDBTask = loadGLMTask.ContinueWith((prevTask) =>
-        {
-            try
-            {
-                if (!prevTask.Result)
+                if (!loadGLMTask.Result)
                     return false;
 
                 return WorldDBLoader.Load();
@@ -189,6 +193,9 @@ public class AssetManager : Singleton<AssetManager>
             return false;
         }
 
+        if (loadWadTask.Result && loadGLMTask.Result)
+            ReapplyMissingMissionGlmXml();
+
         DataLoaded = true;
 
         if (failures.Count == 0)
@@ -201,6 +208,34 @@ public class AssetManager : Singleton<AssetManager>
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Backfill objective requirements from GLM when Mission.Read ran without XML.
+    /// </summary>
+    private void ReapplyMissingMissionGlmXml()
+    {
+        var repaired = 0;
+        foreach (var mission in WADLoader.Missions.Values)
+        {
+            if (mission?.Objectives == null || mission.Objectives.Count == 0)
+                continue;
+
+            var needsXml = mission.Objectives.Values.Any(o =>
+                o != null && (o.Requirements == null || o.Requirements.Count == 0));
+            if (!needsXml)
+                continue;
+
+            if (mission.TryApplyGlmXmlFromAssetManager())
+                repaired++;
+        }
+
+        if (repaired > 0)
+        {
+            Logger.WriteLog(LogType.Initialize,
+                $"Reapplied GLM XML requirements to {repaired} mission(s) missing Requirement data.");
+            NpcInteractHandler.InvalidateMissionIndex();
+        }
     }
     #endregion
 

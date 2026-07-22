@@ -1616,11 +1616,22 @@ public class SectorMap
                 gameConnection.NoteForeignVehicleCreateSent(coid);
                 if (scopedForeign.WheelSet != null && scopedForeign.WheelSet.CBID > 0)
                     ghost.SetMaskBits(GhostVehicle.WheelSetMask);
-                if (ScopeGlobalVehicleGhost)
+                // Defer ObjectInScope through the foreign create-hold. Path/AI combat NPCs still
+                // need that hold when ScopeGlobalVehicleGhost is off (see requiresCombatGhost below).
+                if (ScopeGlobalVehicleGhost
+                    || scopedForeign.CoidCurrentPath > 0
+                    || scopedForeign.NpcAi != null)
                     continue;
             }
 
-            if (foreignGlobalVehicle && !ScopeGlobalVehicleGhost)
+            // Crash-isolation lever: skip ghost for ambient foreign vehicles when false.
+            // Pathing / AI combat NPCs still need pose + HealthMask — CreateVehicle alone leaves
+            // them frozen with a stuck HP bar until the client drops the object.
+            var requiresCombatGhost = foreignGlobalVehicle
+                && entity is Vehicle combatVeh
+                && (combatVeh.CoidCurrentPath > 0 || combatVeh.NpcAi != null);
+
+            if (foreignGlobalVehicle && !ScopeGlobalVehicleGhost && !requiresCombatGhost)
                 continue;
 
             if (foreignGlobalVehicle

@@ -427,6 +427,237 @@ public class SpawnPointTemplateSpawnTests
         Assert.AreEqual(-100, vehicle.GetIDFaction(), "aggro chain must resolve to spawn Neutral override");
     }
 
+    /// <summary>
+    /// Fam load stores OriginalFaction but historically left ObjectTemplate.Faction at 0.
+    /// FactionDirty must promote OriginalFaction onto Faction (Gunny combat spawn 14138 → 22).
+    /// </summary>
+    [TestMethod]
+    public void ApplyFactionDirtyAuthoredFaction_CopiesOriginalFactionOntoFaction()
+    {
+        var template = new SpawnPointTemplate
+        {
+            FactionDirty = true,
+            OriginalFaction = 22,
+            Faction = 0,
+        };
+
+        template.ApplyFactionDirtyAuthoredFaction();
+
+        Assert.AreEqual(22, template.Faction,
+            "FactionDirty fam rows must expose OriginalFaction as spawnpoint Faction");
+    }
+
+    [TestMethod]
+    public void ApplyFactionDirtyAuthoredFaction_WhenNotDirty_LeavesFactionAlone()
+    {
+        var template = new SpawnPointTemplate
+        {
+            FactionDirty = false,
+            OriginalFaction = 22,
+            Faction = 0,
+        };
+
+        template.ApplyFactionDirtyAuthoredFaction();
+
+        Assert.AreEqual(0, template.Faction);
+    }
+
+    /// <summary>
+    /// Mission combat vehicles: FactionDirty + OriginalFaction only (Faction still 0 on spawnpoint)
+    /// must not leave GetIDFaction at Human 0 — that makes weapons skip the target.
+    /// </summary>
+    [TestMethod]
+    public void Spawn_TemplateVehicle_FactionDirty_OriginalFactionOnly_OverridesGetIDFaction()
+    {
+        const int vehicleCbid = 650_020;
+        const int driverCbid = 650_021;
+        const int templateId = 650_022;
+        const int missionFaction = 22;
+        var map = CreateTestMap(9113);
+
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid, faction: 10);
+        AssetManagerTestHelper.RegisterCreatureCloneBase(driverCbid, faction: 10, aiBehaviorId: 0);
+        AssetManager.Instance.SetTestVehicleTemplates(new[]
+        {
+            new VehicleTemplate
+            {
+                Id = templateId,
+                VehicleCbid = vehicleCbid,
+                DriverCbid = driverCbid,
+                BaseHp = 150,
+            }
+        });
+
+        var template = new SpawnPointTemplate
+        {
+            COID = 14_138,
+            Faction = 0,
+            FactionDirty = true,
+            OriginalFaction = missionFaction,
+            OriginalIsActive = false,
+            IsActive = false,
+        };
+        template.ApplyFactionDirtyAuthoredFaction();
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList
+        {
+            SpawnType = templateId,
+            IsTemplate = true,
+        });
+
+        // Map placement copies template.Faction; also cover spawnpoint left at 0 with OriginalFaction set.
+        var spawnPoint = new SpawnPoint(template) { Faction = template.Faction };
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var vehicle = map.Objects.Values.OfType<Vehicle>().Single();
+        Assert.IsFalse(vehicle.IsInvincible, "template NPC combat vehicles must be damageable");
+        Assert.AreEqual(missionFaction, vehicle.GetIDFaction(),
+            "FactionDirty OriginalFaction must win over default Human Faction=0");
+        Assert.AreEqual(missionFaction, vehicle.Owner.Faction);
+    }
+
+    /// <summary>
+    /// Fallback when live spawnpoint Faction was never copied from fam (still 0) but OriginalFaction is set.
+    /// </summary>
+    [TestMethod]
+    public void Spawn_TemplateVehicle_FactionDirty_SpawnPointFactionZero_UsesOriginalFaction()
+    {
+        const int vehicleCbid = 650_030;
+        const int driverCbid = 650_031;
+        const int templateId = 650_032;
+        const int missionFaction = 22;
+        var map = CreateTestMap(9114);
+
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid, faction: 10);
+        AssetManagerTestHelper.RegisterCreatureCloneBase(driverCbid, faction: 10, aiBehaviorId: 0);
+        AssetManager.Instance.SetTestVehicleTemplates(new[]
+        {
+            new VehicleTemplate
+            {
+                Id = templateId,
+                VehicleCbid = vehicleCbid,
+                DriverCbid = driverCbid,
+            }
+        });
+
+        var template = new SpawnPointTemplate
+        {
+            COID = 14_139,
+            Faction = 0,
+            FactionDirty = true,
+            OriginalFaction = missionFaction,
+        };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList
+        {
+            SpawnType = templateId,
+            IsTemplate = true,
+        });
+
+        var spawnPoint = new SpawnPoint(template) { Faction = 0 };
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var vehicle = map.Objects.Values.OfType<Vehicle>().Single();
+        Assert.AreEqual(missionFaction, vehicle.GetIDFaction(),
+            "ApplySpawnFactionOverride must fall back to OriginalFaction when Faction is 0");
+    }
+
+    /// <summary>
+    /// Final Exam class: personal Create leaves marker; Activate materializes combat car.
+    /// Must be damageable, correctly factioned, and not MapPresence-suppressed.
+    /// </summary>
+    [TestMethod]
+    public void Activate_TemplateCombatSpawn_MaterializesDamageableUnsuppressedVehicle()
+    {
+        const int vehicleCbid = 650_040;
+        const int driverCbid = 650_041;
+        const int templateId = 580;
+        const int missionFaction = 22;
+        const long spawnCoid = 14138;
+        const long createRx = 14139;
+        const long actRx = 14142;
+
+        var map = CreateTestMap(9115);
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid, faction: 10);
+        AssetManagerTestHelper.RegisterCreatureCloneBase(driverCbid, faction: 10, aiBehaviorId: 0);
+        AssetManager.Instance.SetTestVehicleTemplates(new[]
+        {
+            new VehicleTemplate
+            {
+                Id = templateId,
+                VehicleCbid = vehicleCbid,
+                DriverCbid = driverCbid,
+                BaseHp = 150,
+            }
+        });
+
+        var template = new SpawnPointTemplate
+        {
+            COID = (int)spawnCoid,
+            FactionDirty = true,
+            OriginalFaction = missionFaction,
+            OriginalIsActive = false,
+            IsActive = false,
+        };
+        template.ApplyFactionDirtyAuthoredFaction();
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList
+        {
+            SpawnType = templateId,
+            IsTemplate = true,
+        });
+        map.MapData.Templates[spawnCoid] = template;
+
+        var character = new Character();
+        character.SetCoid(9001, true);
+        var playerVehicle = new Vehicle();
+        playerVehicle.SetCoid(9002, true);
+        character.SetCurrentVehicleForTests(playerVehicle);
+        character.SetMap(map);
+        playerVehicle.SetMap(map);
+
+        var createTpl = new ReactionTemplate
+        {
+            COID = (int)createRx,
+            ReactionType = ReactionType.Create,
+            DoForAllPlayers = false,
+        };
+        createTpl.Objects.Add(spawnCoid);
+        var create = new Reaction(createTpl);
+        create.SetCoid(createRx, false);
+        create.SetMap(map);
+
+        Assert.IsTrue(create.TriggerIfPossible(playerVehicle));
+        var marker = map.GetObjectByCoid(spawnCoid) as SpawnPoint;
+        Assert.IsNotNull(marker);
+        Assert.IsFalse(marker.HasLiveSpawn(), "personal Create must leave template combat marker-only");
+
+        var actTpl = new ReactionTemplate
+        {
+            COID = (int)actRx,
+            ReactionType = ReactionType.Activate,
+        };
+        actTpl.Objects.Add(spawnCoid);
+        var activate = new Reaction(actTpl);
+        activate.SetCoid(actRx, false);
+        activate.SetMap(map);
+
+        Assert.IsTrue(activate.TriggerIfPossible(playerVehicle));
+        Assert.IsTrue(marker.HasLiveSpawn(), "Activate must materialize combat children");
+
+        var npcCar = map.Objects.Values.OfType<Vehicle>()
+            .Single(v => v.TemplateId == templateId);
+        Assert.IsFalse(npcCar.IsInvincible);
+        Assert.AreEqual(missionFaction, npcCar.GetIDFaction());
+        Assert.IsFalse(character.MapPresence.IsSuppressed(npcCar.ObjectId.Coid),
+            "kill-target combat NPC must not be presence-suppressed");
+        Assert.IsFalse(character.MapPresence.IsSuppressed(spawnCoid),
+            "combat spawn marker must not be suppressed for the activator");
+    }
+
     private static SectorMap CreateTestMap(int continentId)
     {
         var continent = new ContinentObject

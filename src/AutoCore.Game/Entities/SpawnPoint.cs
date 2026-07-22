@@ -674,9 +674,12 @@ public class SpawnPoint : ClonedObjectBase
     }
 
     /// <summary>
-    /// When the map spawn has <see cref="SpawnPointTemplate.FactionDirty"/> set, copy this
-    /// spawnpoint's <see cref="ClonedObjectBase.Faction"/> onto the child (client
-    /// <c>FUN_00512460</c> after <c>Object_GetRootRaceId(spawnpoint)</c> — NPC.md §15.3).
+    /// When the map spawn has <see cref="SpawnPointTemplate.FactionDirty"/> set, copy the
+    /// authored spawn faction onto the child (client <c>FUN_00512460</c> after
+    /// <c>Object_GetRootRaceId(spawnpoint)</c> — NPC.md §15.3).
+    /// Prefers live spawnpoint / template <see cref="ClonedObjectBase.Faction"/>, then fam
+    /// <see cref="SpawnPointTemplate.OriginalFaction"/> when Faction was left at default 0/-1
+    /// (Human / unset) — otherwise mission combat NPCs share Human faction and weapons skip them.
     /// No-op when dirty is false; clonebase faction from <see cref="SimpleObject.SetupCBFields"/> remains.
     /// </summary>
     private void ApplySpawnFactionOverride(ClonedObjectBase entity)
@@ -684,7 +687,26 @@ public class SpawnPoint : ClonedObjectBase
         if (entity == null || Template == null || !Template.FactionDirty)
             return;
 
-        entity.Faction = Faction;
+        entity.Faction = ResolveFactionDirtyOverride();
+    }
+
+    /// <summary>
+    /// Resolves FactionDirty override: live spawnpoint Faction, else template Faction,
+    /// else fam <see cref="SpawnPointTemplate.OriginalFaction"/>.
+    /// </summary>
+    internal int ResolveFactionDirtyOverride()
+    {
+        if (Template == null)
+            return Faction;
+
+        // Neutral (-100) and positive mission factions are valid; -1 is ClonedObjectBase unset.
+        if (Faction != -1 && (Faction != 0 || Template.OriginalFaction == 0))
+            return Faction;
+
+        if (Template.Faction != -1 && (Template.Faction != 0 || Template.OriginalFaction == 0))
+            return Template.Faction;
+
+        return Template.OriginalFaction;
     }
 
     /// <summary>Copies the driver's wad.xml AI behavior onto the vehicle it owns, if any.</summary>

@@ -38,7 +38,9 @@ public class SpawnPointTemplate : GraphicsObjectTemplate
         {
             Layer = Layer,
             Position = Location.ToVector3(),
-            Rotation = Rotation
+            Rotation = Rotation,
+            // Reaction Create / map placement must carry authored Faction (FactionDirty → OriginalFaction).
+            Faction = Faction,
         };
 
         // TODO: moar fields?
@@ -83,6 +85,7 @@ public class SpawnPointTemplate : GraphicsObjectTemplate
         {
             FactionDirty = reader.ReadBoolean();
             OriginalFaction = reader.ReadInt32();
+            ApplyFactionDirtyAuthoredFaction();
         }
 
         if (mapVersion >= 24)
@@ -90,6 +93,17 @@ public class SpawnPointTemplate : GraphicsObjectTemplate
 
         if (mapVersion >= 32)
             MaybeChampionName = reader.ReadLengthedString();
+    }
+
+    /// <summary>
+    /// When <see cref="FactionDirty"/>, promote fam <see cref="OriginalFaction"/> onto
+    /// <see cref="ObjectTemplate.Faction"/> so map placement and
+    /// <c>ApplySpawnFactionOverride</c> see the authored race id (not default Human 0).
+    /// </summary>
+    internal void ApplyFactionDirtyAuthoredFaction()
+    {
+        if (FactionDirty)
+            Faction = OriginalFaction;
     }
 
     private Random TempRandom = new();

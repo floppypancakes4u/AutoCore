@@ -74,24 +74,37 @@ public class MissionObjective
         missionObjective.CreditScaler = reader.ReadSingle();
 
         var obj = elem?.Elements("Objective").SingleOrDefault(e => (uint)e.Attribute("sequence") == missionObjective.Sequence);
-        if (obj == null)
-        {
-            //Logger.WriteLog(LogType.Debug, $"Mission ({owner.Id}, {owner.Name})'s objective {missionObjective.ObjectiveId} has no XML data?");
-
-            return missionObjective;
-        }
-
-        missionObjective.ExternalMapText = (string)obj.Element("ExternalText");
-        missionObjective.Title = (string)obj.Element("Title");
-        missionObjective.DefaultMapText = (string)obj.Element("DefaultText");
-        var cCountElem = obj.Element("CompleteCount");
-        missionObjective.CompleteCount = (cCountElem == null || string.IsNullOrEmpty((string)cCountElem)) ? 0 : (int)cCountElem;
-
-        var req = obj.Elements("Requirement").ToList();
-        if (req.Any())
-            missionObjective.Requirements.AddRange(req.Select(xElem => ObjectiveRequirement.Create(missionObjective, xElem)).Where(requirement => requirement != null));
+        if (obj != null)
+            missionObjective.ApplyGlmXml(obj);
 
         return missionObjective;
+    }
+
+    /// <summary>
+    /// Applies GLM objective extras (text + requirements). Used at WAD read and when
+    /// re-applying XML after a GLM-before-WAD race left requirements empty.
+    /// </summary>
+    internal bool ApplyGlmXml(XElement obj)
+    {
+        if (obj == null)
+            return false;
+
+        ExternalMapText = (string)obj.Element("ExternalText");
+        Title = (string)obj.Element("Title");
+        DefaultMapText = (string)obj.Element("DefaultText");
+        var cCountElem = obj.Element("CompleteCount");
+        CompleteCount = (cCountElem == null || string.IsNullOrEmpty((string)cCountElem)) ? 0 : (int)cCountElem;
+
+        Requirements ??= new List<ObjectiveRequirement>();
+        if (Requirements.Count > 0)
+            return true;
+
+        var req = obj.Elements("Requirement").ToList();
+        if (req.Count == 0)
+            return false;
+
+        Requirements.AddRange(req.Select(xElem => ObjectiveRequirement.Create(this, xElem)).Where(requirement => requirement != null));
+        return Requirements.Count > 0;
     }
 
     /// <summary>Unit-test factory.</summary>

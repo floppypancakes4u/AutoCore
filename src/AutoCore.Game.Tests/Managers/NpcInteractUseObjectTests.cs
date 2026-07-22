@@ -139,6 +139,56 @@ public class NpcInteractUseObjectTests
         Assert.IsTrue(_sent.OfType<ObjectiveStatePacket>().Any());
     }
 
+    /// <summary>
+    /// Rogers / New Day shape: mission has no giver NPC (NPC=-1); turn-in is deliver-only
+    /// to the clicked CBID. Must open dialog (not fall through to OpenStore).
+    /// </summary>
+    [TestMethod]
+    public void HandleUseObject_NpcMinusOneDeliverOnly_OpensTurnInDialog()
+    {
+        SeedDeliverMission(MissionA, ObjectiveA, NpcCbid, missionGiverNpc: -1);
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveA,
+        });
+
+        var dialog = _sent.OfType<NpcMissionDialogPacket>().SingleOrDefault();
+        Assert.IsNotNull(dialog,
+            "Deliver-only turn-in (Mission.NPC=-1) must open dialog at the deliver NPC.");
+        CollectionAssert.Contains(dialog.MissionIds, MissionA);
+    }
+
+    /// <summary>
+    /// After New Day turn-in, same NPC offers Live and Direct (Mission.NPC = clicked CBID).
+    /// </summary>
+    [TestMethod]
+    public void HandleUseObject_AfterNpcMinusOneTurnIn_OffersFollowUpFromSameNpc()
+    {
+        SeedDeliverMission(MissionA, ObjectiveA, NpcCbid, missionGiverNpc: -1);
+        SeedOfferMission(MissionB, NpcCbid, reqMissionId: MissionA, continentId: ContinentId, objectiveId: ObjectiveB);
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        character.CompletedMissionIds.Add(MissionA);
+        _sent.Clear();
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = -1,
+        });
+
+        var dialog = _sent.OfType<NpcMissionDialogPacket>().SingleOrDefault();
+        Assert.IsNotNull(dialog, "Giver NPC must offer follow-up after prior deliver-only mission completes.");
+        CollectionAssert.Contains(dialog.MissionIds, MissionB);
+    }
+
     [TestMethod]
     public void HandleUseObject_OutOfRange_DoesNotSendDialog()
     {
@@ -484,6 +534,120 @@ public class NpcInteractUseObjectTests
         // and rebuild UI (client AV @ 0x007B6DB0 MSXML Release during re-entrant interface load).
         Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
         Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
+    }
+
+    /// <summary>
+    /// Live Track This (3979): after first Gareth deliver, server is on AutoComplete patrol
+    /// (seq1) while UseObject still sends the first deliver objective id (7656). Player is
+    /// already at Gareth for the final take-deliver — must skip patrol and complete.
+    /// </summary>
+    [TestMethod]
+    public void HandleUseObject_TrackThisStaleFirstDeliverHint_AdvancesPastPatrolToFinalDeliver()
+    {
+        SeedTrackThisShapeMission(
+            MissionA,
+            giverNpcCbid: OtherNpcCbid,
+            firstDeliverObjId: ObjectiveA,
+            patrolObjId: ObjectiveA + 10,
+            finalDeliverObjId: ObjectiveB,
+            deliverNpcCbid: NpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+        character.CurrentQuests[0].ActiveObjectiveSequence = 1; // stuck on patrol after first deliver
+        _sent.Clear();
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveA, // stale first-deliver id (retail Gareth wire)
+        });
+
+        Assert.AreEqual(2, character.CurrentQuests[0].ActiveObjectiveSequence,
+            "at destination NPC must skip AutoComplete patrol to final deliver");
+        Assert.IsTrue(
+            _sent.OfType<ObjectiveStatePacket>().Any(p => p.ObjectiveId == ObjectiveB),
+            "final deliver must get turn-in ObjectiveState");
+    }
+
+    [TestMethod]
+    public void HandleMissionDialogResponse_TrackThisAtGarethDuringPatrol_CompletesFinalDeliver()
+    {
+        SeedTrackThisShapeMission(
+            MissionA,
+            giverNpcCbid: OtherNpcCbid,
+            firstDeliverObjId: ObjectiveA,
+            patrolObjId: ObjectiveA + 10,
+            finalDeliverObjId: ObjectiveB,
+            deliverNpcCbid: NpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+        character.CurrentQuests[0].ActiveObjectiveSequence = 1;
+
+        NpcInteractHandler.HandleMissionDialogResponse(conn, new MissionDialogResponsePacket
+        {
+            MissionId = MissionA,
+            Accepted = false,
+            MissionGiver = new TFID(NpcCoid, false),
+        });
+
+        Assert.AreEqual(0, character.CurrentQuests.Count,
+            "dialog at Gareth during intervening patrol must complete final deliver");
+        Assert.IsTrue(character.CompletedMissionIds.Contains(MissionA));
+    }
+
+    [TestMethod]
+    public void HandleMissionDialogResponse_DuringPatrolWithKillBetween_DoesNotSkipToDeliver()
+    {
+        // Intervening kill must not be skipped when talking to a later deliver NPC.
+        const int killObj = 92150;
+        var d0 = MissionObjective.CreateForTests(ObjectiveA, 0, MissionA, 1);
+        d0.Requirements.Add(new ObjectiveRequirementDeliver(d0)
+        {
+            NPCTargetCBID = NpcCbid,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 0,
+        });
+        var kill = MissionObjective.CreateForTests(killObj, 1, MissionA, 1);
+        kill.Requirements.Add(new ObjectiveRequirementKill(kill)
+        {
+            NumToKill = 1,
+            TargetCBID = 7,
+            FirstStateSlot = 0,
+        });
+        var d2 = MissionObjective.CreateForTests(ObjectiveB, 2, MissionA, 1);
+        d2.Requirements.Add(new ObjectiveRequirementDeliver(d2)
+        {
+            NPCTargetCBID = NpcCbid,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 0,
+        });
+        var mission = Mission.CreateForTests(MissionA, d0, kill, d2);
+        mission.NPC = OtherNpcCbid;
+        AssetManager.Instance.SetTestMission(mission);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+        character.CurrentQuests[0].ActiveObjectiveSequence = 1;
+
+        NpcInteractHandler.HandleMissionDialogResponse(conn, new MissionDialogResponsePacket
+        {
+            MissionId = MissionA,
+            Accepted = false,
+            MissionGiver = new TFID(NpcCoid, false),
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests.Count);
+        Assert.AreEqual(1, character.CurrentQuests[0].ActiveObjectiveSequence,
+            "must not skip a kill objective to reach deliver");
+        Assert.IsFalse(character.CompletedMissionIds.Contains(MissionA));
     }
 
     [TestMethod]
@@ -1127,7 +1291,8 @@ public class NpcInteractUseObjectTests
         float balance = 0f,
         short creditsIndex = 0,
         float creditScaler = 0f,
-        int staticCredits = 0)
+        int staticCredits = 0,
+        int? missionGiverNpc = null)
     {
         var objective = MissionObjective.CreateForTests(objectiveId, 0, missionId, 1);
         var deliver = new ObjectiveRequirementDeliver(objective)
@@ -1154,7 +1319,8 @@ public class NpcInteractUseObjectTests
         }
 
         var mission = Mission.CreateForTests(missionId, objective);
-        mission.NPC = npcTargetCbid;
+        // Default matches older tests (giver == deliver target). Rogers/New Day uses NPC=-1.
+        mission.NPC = missionGiverNpc ?? npcTargetCbid;
         mission.ReqMissionId = new[] { -1, -1, -1, -1 };
         if (targetLevel > 0)
             mission.TargetLevel = targetLevel;
@@ -1185,6 +1351,52 @@ public class NpcInteractUseObjectTests
         });
 
         var mission = Mission.CreateForTests(missionId, patrol, deliverObj);
+        mission.NPC = giverNpcCbid;
+        mission.Continent = ContinentId;
+        mission.ReqMissionId = new[] { -1, -1, -1, -1 };
+        AssetManager.Instance.SetTestMission(mission);
+    }
+
+    /// <summary>
+    /// Track This: deliver (give) → AutoComplete patrol → deliver (take) to the same NPC.
+    /// </summary>
+    private static void SeedTrackThisShapeMission(
+        int missionId,
+        int giverNpcCbid,
+        int firstDeliverObjId,
+        int patrolObjId,
+        int finalDeliverObjId,
+        int deliverNpcCbid)
+    {
+        var d0 = MissionObjective.CreateForTests(firstDeliverObjId, 0, missionId, 1);
+        d0.Requirements.Add(new ObjectiveRequirementDeliver(d0)
+        {
+            NPCTargetCBID = deliverNpcCbid,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 0,
+            TakeItemAtEnd = false,
+        });
+        var patrol = MissionObjective.CreateForTests(patrolObjId, 1, missionId, 1);
+        var patrolReq = new ObjectiveRequirementPatrol(patrol)
+        {
+            AutoComplete = true,
+            AutoCompleteDistance = 25f,
+            TargetCount = 2,
+            Laps = 1,
+        };
+        patrolReq.GenericTargets[0] = 10310;
+        patrolReq.GenericTargets[1] = 10311;
+        patrol.Requirements.Add(patrolReq);
+        var d2 = MissionObjective.CreateForTests(finalDeliverObjId, 2, missionId, 1);
+        d2.Requirements.Add(new ObjectiveRequirementDeliver(d2)
+        {
+            NPCTargetCBID = deliverNpcCbid,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 0,
+            TakeItemAtEnd = true,
+        });
+
+        var mission = Mission.CreateForTests(missionId, d0, patrol, d2);
         mission.NPC = giverNpcCbid;
         mission.Continent = ContinentId;
         mission.ReqMissionId = new[] { -1, -1, -1, -1 };

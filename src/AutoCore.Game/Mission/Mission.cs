@@ -122,31 +122,8 @@ public class Mission
 
         reader.BaseStream.Position += 7;
 
-        XElement element = null;
-
-        var stream = AssetManager.Instance.GetFileStreamFromGLMs($"{mission.Name}.xml");
-        if (stream != null)
-        {
-            using (stream)
-            {
-                var doc = XDocument.Load(stream);
-                Debug.Assert(doc != null);
-
-                element = doc.Element("Mission");
-                if (element != null)
-                {
-                    mission.Title = (string)element.Element("Title");
-                    mission.InternalName = (string)element.Element("Internal");
-                    mission.Description = (string)element.Element("Description");
-                    mission.OnLineAccept = (string)element.Element("OnLineAccept");
-                    mission.OnLineReject = (string)element.Element("OnLineReject");
-                    mission.NotCompleteText = (string)element.Element("NotCompleteText");
-                    mission.CompleteText = (string)element.Element("CompleteText");
-                    mission.FailText = (string)element.Element("FailText");
-                    mission.CoreMission = (string)element.Element("CoreMission") != "0";
-                }
-            }
-        }
+        // Prefer in-memory GLM XML when available (GLM must load before WAD — see AssetManager).
+        var element = TryLoadGlmMissionElement(mission.Name);
 
         var numOfObjective = reader.ReadInt32();
         for (var i = 0; i < numOfObjective; ++i)
@@ -155,7 +132,77 @@ public class Mission
             mission.Objectives.Add(obj.Sequence, obj);
         }
 
+        if (element != null)
+            mission.ApplyGlmMissionHeader(element);
+
         return mission;
+    }
+
+    /// <summary>
+    /// Applies / re-applies GLM mission XML (header + objective requirements).
+    /// Safe to call after a WAD/GLM race left objectives without Requirement children.
+    /// </summary>
+    /// <returns>True when at least one objective gained requirements (or already had them).</returns>
+    internal bool ApplyGlmXml(XElement missionElement)
+    {
+        if (missionElement == null)
+            return false;
+
+        ApplyGlmMissionHeader(missionElement);
+
+        var applied = false;
+        foreach (var objective in Objectives.Values)
+        {
+            if (objective == null)
+                continue;
+
+            var objElem = missionElement.Elements("Objective")
+                .FirstOrDefault(e => (uint)e.Attribute("sequence") == objective.Sequence);
+            if (objElem == null)
+                continue;
+
+            if (objective.ApplyGlmXml(objElem))
+                applied = true;
+        }
+
+        return applied;
+    }
+
+    /// <summary>Loads <c>{name}.xml</c> from GLMs and applies it when present.</summary>
+    internal bool TryApplyGlmXmlFromAssetManager()
+    {
+        var element = TryLoadGlmMissionElement(Name);
+        return element != null && ApplyGlmXml(element);
+    }
+
+    private void ApplyGlmMissionHeader(XElement element)
+    {
+        Title = (string)element.Element("Title");
+        InternalName = (string)element.Element("Internal");
+        Description = (string)element.Element("Description");
+        OnLineAccept = (string)element.Element("OnLineAccept");
+        OnLineReject = (string)element.Element("OnLineReject");
+        NotCompleteText = (string)element.Element("NotCompleteText");
+        CompleteText = (string)element.Element("CompleteText");
+        FailText = (string)element.Element("FailText");
+        CoreMission = (string)element.Element("CoreMission") != "0";
+    }
+
+    private static XElement TryLoadGlmMissionElement(string missionName)
+    {
+        if (string.IsNullOrEmpty(missionName))
+            return null;
+
+        var stream = AssetManager.Instance.GetFileStreamFromGLMs($"{missionName}.xml");
+        if (stream == null)
+            return null;
+
+        using (stream)
+        {
+            var doc = XDocument.Load(stream);
+            Debug.Assert(doc != null);
+            return doc.Element("Mission");
+        }
     }
 
     /// <summary>Unit-test factory.</summary>

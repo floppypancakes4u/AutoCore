@@ -2264,7 +2264,15 @@ public class Vehicle : SimpleObject
                 victimPerception,
                 targetDefenseBonus);
 
-            if (rng.NextDouble() > hitChance)
+            var roll = rng.NextDouble();
+            var hit = roll <= hitChance;
+            CombatDebugLog.LogHitChanceRoll(
+                this,
+                target,
+                hitChance,
+                roll,
+                hit);
+            if (!hit)
                 return;
         }
 
@@ -2299,6 +2307,7 @@ public class Vehicle : SimpleObject
         var flags = dmgResult.IsCrit ? DamagePacket.DamageEntryFlags.Crit : default;
         packet.AddHit(target.ObjectId, actualDamage, flags);
         victimsHit.Add(target);
+        CombatDebugLog.LogWeaponDamage(this, target, actualDamage, dmgResult.IsCrit);
 
         if (target.GetCurrentHP() <= 0)
         {

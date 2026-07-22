@@ -26,13 +26,13 @@ public enum NpcVehicleControllerTier
 
 /// <summary>
 /// Server tuning loaded from <c>serverConfig.yaml</c> next to the launcher — a YAML (comment-friendly)
-/// sibling to <c>loot.tuning.json</c>. Includes NPC vehicle physics and inventory debug gates;
-/// other settings migrate here over time.
+/// sibling to <c>loot.tuning.json</c>. Includes NPC vehicle physics, inventory debug gates, and combat
+/// debug log toggles; other settings migrate here over time.
 /// </summary>
 /// <remarks>
 /// Loader mirrors <see cref="LootTuning"/>: env override → content root → cwd → base dir. Missing file
-/// or missing keys leave retail-safe defaults (physics OFF, <see cref="NpcVehicleControllerTier.Hard"/>),
-/// so behaviour is unchanged until an operator opts in.
+/// or missing keys leave defaults (physics OFF, <see cref="NpcVehicleControllerTier.Hard"/>,
+/// combat debug logs ON), so behaviour is unchanged until an operator opts in.
 /// </remarks>
 public static class ServerConfig
 {
@@ -63,6 +63,15 @@ public static class ServerConfig
 
     /// <summary>Verbose inventory grab/drop/MM packet logs (raw hex + op results). Default off.</summary>
     public const bool DefaultInventoryDebugPackets = false;
+
+    /// <summary>Server debug log: weapon damage applied to player-owned vehicles. Default on.</summary>
+    public const bool DefaultLogDamageToPlayers = true;
+    /// <summary>Server debug log: weapon damage applied to NPC vehicles / creatures. Default on.</summary>
+    public const bool DefaultLogDamageToNpcs = true;
+    /// <summary>Server debug log: each fire-cycle hit-chance roll. Default on.</summary>
+    public const bool DefaultLogHitChanceRolls = true;
+    /// <summary>Server debug log: NPC-vs-NPC weapon fire lines. Default off (avoids world combat spam).</summary>
+    public const bool DefaultLogNpcToNpc = false;
 
     private static int _substepHz = DefaultSubstepHz;
 
@@ -124,6 +133,30 @@ public static class ServerConfig
     /// </summary>
     public static bool InventoryDebugPackets { get; set; } = DefaultInventoryDebugPackets;
 
+    /// <summary>
+    /// When true, weapon fire logs damage applied to player-owned vehicles.
+    /// Log-only — does not change DamagePacket / HP. Default <b>true</b>.
+    /// </summary>
+    public static bool LogDamageToPlayers { get; set; } = DefaultLogDamageToPlayers;
+
+    /// <summary>
+    /// When true, weapon fire logs damage applied to NPC vehicles / creatures.
+    /// Log-only — does not change DamagePacket / HP. Default <b>true</b>.
+    /// </summary>
+    public static bool LogDamageToNpcs { get; set; } = DefaultLogDamageToNpcs;
+
+    /// <summary>
+    /// When true, weapon fire logs each hit-chance roll (chance + hit/miss).
+    /// Log-only — hit resolution always runs. Default <b>true</b>.
+    /// </summary>
+    public static bool LogHitChanceRolls { get; set; } = DefaultLogHitChanceRolls;
+
+    /// <summary>
+    /// When true, allow combat debug logs for NPC-vs-NPC fire (still gated by the other combat log flags).
+    /// Default <b>false</b> so world NPC skirmishes do not flood the log.
+    /// </summary>
+    public static bool LogNpcToNpc { get; set; } = DefaultLogNpcToNpc;
+
     /// <summary>Reset every setting to retail-safe defaults (tests + startup before load).</summary>
     public static void ResetToDefaults()
     {
@@ -138,6 +171,10 @@ public static class ServerConfig
         ChassisPointImpulsesEnabled = DefaultChassisPointImpulsesEnabled;
         EnableRamming = DefaultEnableRamming;
         InventoryDebugPackets = DefaultInventoryDebugPackets;
+        LogDamageToPlayers = DefaultLogDamageToPlayers;
+        LogDamageToNpcs = DefaultLogDamageToNpcs;
+        LogHitChanceRolls = DefaultLogHitChanceRolls;
+        LogNpcToNpc = DefaultLogNpcToNpc;
     }
 
     /// <summary>
@@ -182,7 +219,8 @@ public static class ServerConfig
             var yaml = File.ReadAllText(file);
             if (ApplyFromYaml(yaml, out var error))
                 Logger.WriteLog(LogType.Initialize,
-                    $"ServerConfig: loaded {file} — tier={ControllerTier} enabled={NpcVehiclePhysicsEnabled} substepHz={SubstepHz} enableRamming={EnableRamming}");
+                    $"ServerConfig: loaded {file} — tier={ControllerTier} enabled={NpcVehiclePhysicsEnabled} substepHz={SubstepHz} enableRamming={EnableRamming} " +
+                    $"logDamageToPlayers={LogDamageToPlayers} logDamageToNpcs={LogDamageToNpcs} logHitChanceRolls={LogHitChanceRolls} logNpcToNpc={LogNpcToNpc}");
             else
                 Logger.WriteLog(LogType.Error, $"ServerConfig: failed to load {file}: {error}");
         }
@@ -224,9 +262,6 @@ public static class ServerConfig
             EnableRamming = root.EnableRamming.Value;
 
         var p = root?.NpcVehiclePhysics;
-        if (p == null)
-            return true; // valid YAML, no npc section → keep physics defaults (enableRamming already applied)
-
         if (p != null)
         {
             if (p.Enabled.HasValue)
@@ -269,6 +304,19 @@ public static class ServerConfig
         if (inv?.DebugPackets.HasValue == true)
             InventoryDebugPackets = inv.DebugPackets.Value;
 
+        var combat = root?.Combat;
+        if (combat != null)
+        {
+            if (combat.LogDamageToPlayers.HasValue)
+                LogDamageToPlayers = combat.LogDamageToPlayers.Value;
+            if (combat.LogDamageToNpcs.HasValue)
+                LogDamageToNpcs = combat.LogDamageToNpcs.Value;
+            if (combat.LogHitChanceRolls.HasValue)
+                LogHitChanceRolls = combat.LogHitChanceRolls.Value;
+            if (combat.LogNpcToNpc.HasValue)
+                LogNpcToNpc = combat.LogNpcToNpc.Value;
+        }
+
         return true;
     }
 
@@ -303,6 +351,7 @@ public static class ServerConfig
         public bool? EnableRamming { get; set; }
         public NpcVehiclePhysicsDto NpcVehiclePhysics { get; set; }
         public InventoryDto Inventory { get; set; }
+        public CombatDto Combat { get; set; }
     }
 
     private sealed class NpcVehiclePhysicsDto
@@ -321,5 +370,13 @@ public static class ServerConfig
     private sealed class InventoryDto
     {
         public bool? DebugPackets { get; set; }
+    }
+
+    private sealed class CombatDto
+    {
+        public bool? LogDamageToPlayers { get; set; }
+        public bool? LogDamageToNpcs { get; set; }
+        public bool? LogHitChanceRolls { get; set; }
+        public bool? LogNpcToNpc { get; set; }
     }
 }

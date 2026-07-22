@@ -985,11 +985,16 @@ if (spawnpoint +0x1a8 /* FactionDirty */) {
 }
 ```
 
-Map fields (already loaded): `SpawnPointTemplate.FactionDirty`, `OriginalFaction`, object `Faction`.
+Map fields: `SpawnPointTemplate.FactionDirty`, `OriginalFaction`, and `ObjectTemplate.Faction`.
 
-**AutoCore:** `SpawnPoint.ApplySpawnFactionOverride` (after `SetupCBFields` on creature, vehicle,
-and driver) copies spawnpoint `Faction` when `Template.FactionDirty` is true. When dirty is false,
-clonebase faction is kept (Osterake Ark Bay pattern).
+**AutoCore:** At fam read, when `FactionDirty` is true, `SpawnPointTemplate.ApplyFactionDirtyAuthoredFaction`
+sets `Faction = OriginalFaction` (otherwise `Faction` stayed at default **0 / Human** and mission
+combat NPCs such as Final Exam Gunny `OriginalFaction=22` shared the player faction — weapons
+skipped them as same-faction). `SpawnPointTemplate.Create` copies `Faction` onto the live marker
+(reaction Create path). `SpawnPoint.ApplySpawnFactionOverride` (after `SetupCBFields` on creature,
+vehicle, and driver) applies that override, falling back to `OriginalFaction` when live/template
+`Faction` is still unset (`-1`) or default Human `0` while `OriginalFaction != 0`. When dirty is
+false, clonebase faction is kept (Osterake Ark Bay pattern).
 
 ### 15.4 Case study — Osterakes, Hestia Ark Bay 313 (continent 707)
 
@@ -1080,4 +1085,4 @@ made vehicles cut cross-country (looked like pursuit).
 
 ---
 
-*Last updated: 2026-07-13 — §15.7 soft Y + path-stay combat; §15 FactionDirty/Osterake. Previously 2026-07-11 §14.4 Cur/Max.*
+*Last updated: 2026-07-17 — §15.3 FactionDirty copies OriginalFaction onto Faction at fam read (mission NPC vehicle hits). Previously 2026-07-13 §15.7 / FactionDirty/Osterake; 2026-07-11 §14.4 Cur/Max.*

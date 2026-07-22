@@ -1,6 +1,6 @@
 # serverConfig.yaml — AutoCore server tuning (YAML sibling to loot.tuning.json).
-# Comment-friendly; missing keys keep retail-safe defaults. Env override: AUTOCORE_SERVER_CONFIG_FILE.
-# This file currently scopes NPC vehicle physics; other settings will migrate here over time.
+# Comment-friendly; missing keys keep defaults. Env override: AUTOCORE_SERVER_CONFIG_FILE.
+# Scopes: NPC vehicle physics, map-prop ramming, inventory debug, combat debug logs.
 
 # Map-prop ramming (VehicleMapPropRam): moving vehicles damage collidable scenery on contact.
 # Defaults off — set true to enable server-side ram damage + loot.
@@ -43,3 +43,14 @@ inventory:
   # Verbose packet logs: raw hex + parsed fields + operation result lines (HandleInventory*).
   # Default off — enable only while reverse-engineering or diagnosing inventory bugs.
   debugPackets: false
+
+# Combat debug logs only — does not change DamagePacket / HP / hit resolution.
+combat:
+  # Log weapon damage applied to player-owned vehicles.
+  logDamageToPlayers: true
+  # Log weapon damage applied to NPC vehicles / creatures (player↔NPC).
+  logDamageToNpcs: true
+  # Log each fire-cycle hit-chance roll (chance + hit/miss) for creature/vehicle targets.
+  logHitChanceRolls: true
+  # NPC-vs-NPC combat debug lines. Default off — world skirmishes otherwise flood the log.
+  logNpcToNpc: false

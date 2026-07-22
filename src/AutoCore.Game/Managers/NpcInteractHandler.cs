@@ -918,7 +918,7 @@ public static class NpcInteractHandler
             var objective = GetActiveObjective(quest);
             if (objective != null
                 && (IsKillTurnInReady(quest, objective, npcCbid)
-                    || IsCollectTurnInReady(quest, objective, npcCbid))
+                    || IsCollectTurnInReady(character, quest, objective, npcCbid))
                 && !missions.Contains(quest.MissionId))
             {
                 missions.Add(quest.MissionId);
@@ -1391,7 +1391,7 @@ public static class NpcInteractHandler
 
             var deliver = GetActiveDeliver(quest, npcCbid);
             var killReady = IsKillTurnInReady(quest, objective, npcCbid);
-            var collectReady = IsCollectTurnInReady(quest, objective, npcCbid);
+            var collectReady = IsCollectTurnInReady(character, quest, objective, npcCbid);
             if (deliver == null && !killReady && !collectReady)
                 continue;
 
@@ -1479,7 +1479,7 @@ public static class NpcInteractHandler
             return false;
 
         var objective = GetActiveObjective(quest);
-        if (objective == null || !IsCollectTurnInReady(quest, objective, npcCbid))
+        if (objective == null || !IsCollectTurnInReady(character, quest, objective, npcCbid))
             return false;
 
         var mission = AssetManager.Instance.GetMission(missionId);
@@ -1516,9 +1516,15 @@ public static class NpcInteractHandler
     }
 
     /// <summary>
-    /// Collect-only active objective, progress full, and NPC is the mission giver.
+    /// Collect-only active objective, cargo count full (or progress full), and NPC is the mission giver.
+    /// Recounts from inventory first — client Collect_Eval uses cargo; ObjectiveProgress can be stale
+    /// if pickup sync missed (live Hide and Seek 3668).
     /// </summary>
-    internal static bool IsCollectTurnInReady(CharacterQuest quest, MissionObjective objective, int npcCbid)
+    internal static bool IsCollectTurnInReady(
+        Character character,
+        CharacterQuest quest,
+        MissionObjective objective,
+        int npcCbid)
     {
         if (quest == null || objective == null || npcCbid <= 0)
             return false;
@@ -1532,6 +1538,10 @@ public static class NpcInteractHandler
 
         if (mission.Objectives.Values.Any(o => o.Sequence > quest.ActiveObjectiveSequence))
             return false;
+
+        // Align server progress with cargo before gating (no auto-advance — dialog owns complete).
+        if (character != null)
+            MissionCollectProgress.SyncQuestProgressFromInventory(character, quest);
 
         var seq = quest.ActiveObjectiveSequence;
         if (seq < 0 || seq >= quest.ObjectiveProgress.Length)

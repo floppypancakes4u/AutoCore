@@ -5,7 +5,12 @@
 `ObjectUseManager` dispatches C2S **UseObject `0x2072`**:
 
 1. Use-item mission progress  
-2. Mission dialog (`NpcInteractHandler.TryHandleMissionDialog`)  
+2. Mission dialog (`NpcInteractHandler.TryHandleMissionDialog`) — needs GLM mission XML
+   attached at load (deliver `TargetNPCCBID`); `AssetManager` loads GLM **before** WAD so
+   New Day → Rogers turn-ins are not empty. **Known mission CBIDs**
+   (`IsMissionGiverCbid`: giver or deliver target) with **nothing to offer/turn in** still
+   **consume** UseObject (no dialog packet) so the pipeline does not fall through to a nearby
+   town OpenStore (Kid Gareth / empty Rogers case).  
 3. **Spawn/object TriggerEvents** — `InteractTriggerService` (primary vendor path)  
 4. **Vendor store spatial fallback** — `VendorStoreService`  
 5. **Facilities** — BodyShop / Garage / Refinery / SkillTrainer / …  

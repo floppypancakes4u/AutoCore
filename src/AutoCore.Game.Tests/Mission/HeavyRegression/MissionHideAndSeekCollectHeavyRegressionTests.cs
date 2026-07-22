@@ -97,6 +97,7 @@ public class MissionHideAndSeekCollectHeavyRegressionTests
 
         Assert.AreEqual(2, ch.CurrentQuests[0].ObjectiveProgress[0]);
         Assert.IsTrue(NpcInteractHandler.IsCollectTurnInReady(
+            ch,
             ch.CurrentQuests[0],
             AssetManager.Instance.GetMission(MissionId).Objectives[0],
             GiverNpcCbid));
@@ -109,6 +110,37 @@ public class MissionHideAndSeekCollectHeavyRegressionTests
         });
 
         Assert.IsTrue(ch.CompletedMissionIds.Contains(MissionId));
+        Assert.AreEqual(0, ch.CurrentQuests.Count);
+        Assert.AreEqual(0, ch.Inventory.CountByCbid(HideCbid), "Turn-in must take collected hides");
+    }
+
+    /// <summary>
+    /// Live Hide and Seek (3668): client Collect_Eval uses cargo; server ObjectiveProgress can stay 0
+    /// if pickup sync missed. Dialog OK must still complete and take hides (not "already active").
+    /// </summary>
+    [TestMethod]
+    public void HideAndSeek_TurnInWithHidesButStaleProgress_CompletesAndTakesCargo()
+    {
+        SeedHideAndSeek(continentId: MissionHeavyRegressionFixture.ContId);
+        var (conn, ch, map, _) = _fx.CreatePlayer();
+        MissionHeavyRegressionFixture.GiveQuest(ch, MissionId);
+        _fx.AttachInventory(ch);
+        MissionHeavyRegressionFixture.PlaceNpc(map, GiverCoid, GiverNpcCbid, new Vector3(5, 0, 0));
+
+        ch.Inventory.TryAdd(new CharacterInventoryItem(
+            HideCbid, CloneBaseObjectType.Item, "hide", 97002, 0, 0, 2, true));
+        // Intentionally do NOT call SyncProgressFromInventory — stale 0 progress.
+        Assert.AreEqual(0, ch.CurrentQuests[0].ObjectiveProgress[0]);
+
+        NpcInteractHandler.HandleMissionDialogResponse(conn, new MissionDialogResponsePacket
+        {
+            MissionId = MissionId,
+            Accepted = true,
+            MissionGiver = new TFID(GiverCoid, false),
+        });
+
+        Assert.IsTrue(ch.CompletedMissionIds.Contains(MissionId),
+            "Collect turn-in must complete from cargo even when ObjectiveProgress was stale");
         Assert.AreEqual(0, ch.CurrentQuests.Count);
         Assert.AreEqual(0, ch.Inventory.CountByCbid(HideCbid), "Turn-in must take collected hides");
     }

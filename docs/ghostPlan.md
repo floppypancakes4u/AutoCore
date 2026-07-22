@@ -37,11 +37,12 @@ The server now equips `CloneBaseVehicle.VehicleSpecific.DefaultWheelset` for bot
 `SectorMap.ScopeGlobalVehicleGhost` defaults to `false`.
 
 - Foreign NPC vehicles still receive their guaranteed `CreateVehicle` packet.
-- `ObjectInScope` is skipped for those foreign global vehicle ghosts.
+- `ObjectInScope` is skipped for **ambient** foreign global vehicle ghosts when the lever is off.
+- **Exception (mission combat):** foreign vehicles with `CoidCurrentPath > 0` or non-null `NpcAi` still ghost (create-hold → `ObjectInScope` → path pin) even when the lever is false. Without this, pathing combat targets stay frozen with a stuck HP bar until the client drops them.
 - The local player vehicle is also intentionally excluded from ghost registration because `CreateVehicleExtended` constructs it on the client.
-- The lever remains available for controlled experiments. Do not enable it in shared or normal play until a milestone below explicitly authorizes it.
+- The lever remains available for controlled experiments on ambient NPCs. Full ghosting for all foreign vehicles still needs the milestones below / `nullWheels.md` product defaults.
 
-The expected functional limitation is static/creation-only NPC vehicles: no reliable TNL-driven movement, health, AI, equipment, or despawn behavior.
+Ambient NPCs with the lever off remain create-only (no reliable TNL movement/HP). Path/AI combat NPCs are intentionally excluded from that limitation.
 
 ## Safety rules
 

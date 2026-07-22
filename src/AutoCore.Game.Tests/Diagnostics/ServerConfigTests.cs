@@ -36,6 +36,10 @@ public class ServerConfigTests
         Assert.IsFalse(ServerConfig.CompositeWheelCollisionEnabled);
         Assert.IsFalse(ServerConfig.EnableRamming);
         Assert.IsFalse(ServerConfig.InventoryDebugPackets);
+        Assert.IsTrue(ServerConfig.LogDamageToPlayers);
+        Assert.IsTrue(ServerConfig.LogDamageToNpcs);
+        Assert.IsTrue(ServerConfig.LogHitChanceRolls);
+        Assert.IsFalse(ServerConfig.LogNpcToNpc);
     }
 
     [TestMethod]
@@ -73,6 +77,10 @@ public class ServerConfigTests
         Assert.AreEqual(NpcVehicleControllerTier.Hard, ServerConfig.ControllerTier);
         Assert.IsFalse(ServerConfig.EnableRamming);
         Assert.IsFalse(ServerConfig.InventoryDebugPackets);
+        Assert.IsTrue(ServerConfig.LogDamageToPlayers);
+        Assert.IsTrue(ServerConfig.LogDamageToNpcs);
+        Assert.IsTrue(ServerConfig.LogHitChanceRolls);
+        Assert.IsFalse(ServerConfig.LogNpcToNpc);
     }
 
     [TestMethod]
@@ -111,6 +119,41 @@ public class ServerConfigTests
         Assert.IsTrue(ServerConfig.ApplyFromYaml(yaml, out var error), error);
         Assert.IsTrue(ServerConfig.NpcVehiclePhysicsEnabled);
         Assert.IsTrue(ServerConfig.InventoryDebugPackets);
+    }
+
+    [TestMethod]
+    public void ApplyFromYaml_Combat_SetsAllFlags()
+    {
+        var yaml = """
+            combat:
+              logDamageToPlayers: false
+              logDamageToNpcs: false
+              logHitChanceRolls: false
+              logNpcToNpc: true
+            """;
+
+        Assert.IsTrue(ServerConfig.ApplyFromYaml(yaml, out var error), error);
+        Assert.IsFalse(ServerConfig.LogDamageToPlayers);
+        Assert.IsFalse(ServerConfig.LogDamageToNpcs);
+        Assert.IsFalse(ServerConfig.LogHitChanceRolls);
+        Assert.IsTrue(ServerConfig.LogNpcToNpc);
+        // Unrelated sections stay default.
+        Assert.IsFalse(ServerConfig.NpcVehiclePhysicsEnabled);
+        Assert.IsFalse(ServerConfig.InventoryDebugPackets);
+    }
+
+    [TestMethod]
+    public void ApplyFromYaml_Combat_PartialSection_KeepsOtherCombatDefaults()
+    {
+        var yaml = """
+            combat:
+              logHitChanceRolls: false
+            """;
+
+        Assert.IsTrue(ServerConfig.ApplyFromYaml(yaml, out var error), error);
+        Assert.IsFalse(ServerConfig.LogHitChanceRolls);
+        Assert.IsTrue(ServerConfig.LogDamageToPlayers);
+        Assert.IsTrue(ServerConfig.LogDamageToNpcs);
     }
 
     [TestMethod]
@@ -195,6 +238,10 @@ public class ServerConfigTests
         ServerConfig.CompositeWheelCollisionEnabled = true;
         ServerConfig.EnableRamming = true;
         ServerConfig.InventoryDebugPackets = true;
+        ServerConfig.LogDamageToPlayers = false;
+        ServerConfig.LogDamageToNpcs = false;
+        ServerConfig.LogHitChanceRolls = false;
+        ServerConfig.LogNpcToNpc = true;
         ServerConfig.ResetToDefaults();
         Assert.IsFalse(ServerConfig.NpcVehiclePhysicsEnabled);
         Assert.AreEqual(NpcVehicleControllerTier.Hard, ServerConfig.ControllerTier);
@@ -203,6 +250,10 @@ public class ServerConfigTests
         Assert.IsFalse(ServerConfig.CompositeWheelCollisionEnabled);
         Assert.IsFalse(ServerConfig.EnableRamming);
         Assert.IsFalse(ServerConfig.InventoryDebugPackets);
+        Assert.IsTrue(ServerConfig.LogDamageToPlayers);
+        Assert.IsTrue(ServerConfig.LogDamageToNpcs);
+        Assert.IsTrue(ServerConfig.LogHitChanceRolls);
+        Assert.IsFalse(ServerConfig.LogNpcToNpc);
     }
 
     [TestMethod]

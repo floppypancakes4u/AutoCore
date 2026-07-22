@@ -5,6 +5,7 @@ namespace AutoCore.Game.Tests.Map;
 using AutoCore.Database.World.Models;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
+using AutoCore.Game.Npc;
 using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
@@ -300,6 +301,47 @@ public class GlobalVehicleScopeTests
         Assert.IsNotNull(packets.OfType<CreateVehiclePacket>().SingleOrDefault());
         Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef(),
             "Ghost lever off must skip ObjectInScope after create");
+    }
+
+    /// <summary>
+    /// Crash-isolation leaves ScopeGlobalVehicleGhost=false by default. Pathing mission combat
+    /// NPCs (Final Exam Gunny) still need ghost pose + HealthMask — CreateVehicle alone freezes
+    /// them and leaves HP stuck until the client drops the object.
+    /// </summary>
+    [TestMethod]
+    public void PerformScopeQuery_GhostLeverOff_PathVehicleStillGhostsAfterHold()
+    {
+        var (map, npcVehicle, self, connection, packets) = ArrangeScopedNpc();
+        npcVehicle.CoidCurrentPath = 17937;
+        SectorMap.ScopeGlobalVehicleGhost = false;
+
+        map.PerformScopeQuery(null, self, connection); // create
+        Assert.IsNotNull(packets.OfType<CreateVehiclePacket>().SingleOrDefault());
+        Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef());
+
+        map.PerformScopeQuery(null, self, connection); // hold
+        Assert.IsNull(npcVehicle.Ghost.GetFirstObjectRef());
+
+        map.PerformScopeQuery(null, self, connection); // must ghost + pin despite lever off
+        Assert.IsNotNull(npcVehicle.Ghost.GetFirstObjectRef(),
+            "pathing foreign NPC must ghost for pose/HP even when ScopeGlobalVehicleGhost=false");
+        Assert.IsTrue(connection.PinnedPathVehicles.ContainsKey(npcVehicle.ObjectId.Coid),
+            "path vehicle must stay ScopeLocalAlways-pinned");
+    }
+
+    [TestMethod]
+    public void PerformScopeQuery_GhostLeverOff_AiVehicleWithoutPathStillGhostsAfterHold()
+    {
+        var (map, npcVehicle, self, connection, packets) = ArrangeScopedNpc();
+        npcVehicle.NpcAi = new Npc.NpcAiState { HomePosition = npcVehicle.Position };
+        SectorMap.ScopeGlobalVehicleGhost = false;
+
+        map.PerformScopeQuery(null, self, connection);
+        map.PerformScopeQuery(null, self, connection);
+        map.PerformScopeQuery(null, self, connection);
+
+        Assert.IsNotNull(npcVehicle.Ghost.GetFirstObjectRef(),
+            "AI combat NPC without path must still ghost when ScopeGlobalVehicleGhost=false");
     }
 
     [TestMethod]

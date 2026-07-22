@@ -226,6 +226,90 @@ public sealed class MissionHeavyRegressionFixture : IDisposable
     public void UseObject(TNLConnection conn, long targetCoid, int objectiveId = -1)
         => NpcInteractHandler.HandleUseObject(conn, UsePacket(targetCoid, objectiveId));
 
+    /// <summary>
+    /// Rogers / New Day shape: Mission.NPC=-1, single deliver objective to <paramref name="deliverNpcCbid"/>.
+    /// </summary>
+    public void SeedNpcMinusOneDeliver(
+        int missionId,
+        int objectiveId,
+        int deliverNpcCbid,
+        int continentId = ContId)
+    {
+        var objective = MissionObjective.CreateForTests(objectiveId, 0, missionId, 1);
+        objective.Requirements.Add(new ObjectiveRequirementDeliver(objective)
+        {
+            NPCTargetCBID = deliverNpcCbid,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 0,
+            NumToDeliver = 0,
+            RequireItemToComplete = false,
+            ItemCBID = -1,
+        });
+        var mission = Mission.CreateForTests(missionId, objective);
+        mission.NPC = -1;
+        mission.Continent = continentId;
+        mission.ReqMissionId = new[] { -1, -1, -1, -1 };
+        mission.ReqRace = -1;
+        mission.ReqClass = -1;
+        AssetManager.Instance.SetTestMission(mission);
+    }
+
+    /// <summary>
+    /// Live-and-Direct offer shape: Mission.NPC = giver CBID, optional prereq, continent-gated.
+    /// </summary>
+    public void SeedGiverOffer(
+        int missionId,
+        int giverNpcCbid,
+        int continentId = ContId,
+        int objectiveId = 0,
+        int reqMissionId = -1,
+        short reqRace = -1)
+    {
+        var objectives = objectiveId > 0
+            ? new[] { MissionObjective.CreateForTests(objectiveId, 0, missionId, 1) }
+            : Array.Empty<MissionObjective>();
+        var mission = Mission.CreateForTests(missionId, objectives);
+        mission.NPC = giverNpcCbid;
+        mission.Continent = continentId;
+        mission.ReqMissionId = new[] { reqMissionId, -1, -1, -1 };
+        mission.ReqRace = reqRace;
+        mission.ReqClass = -1;
+        mission.IsRepeatable = 0;
+        AssetManager.Instance.SetTestMission(mission);
+    }
+
+    /// <summary>Binary-only New Day shape (no Requirement children) — simulates WAD-before-GLM race.</summary>
+    public Mission SeedNpcMinusOneDeliverWithoutRequirements(
+        int missionId,
+        int objectiveId,
+        int continentId = ContId)
+    {
+        var objective = MissionObjective.CreateForTests(objectiveId, 0, missionId, 0);
+        var mission = Mission.CreateForTests(missionId, objective);
+        mission.NPC = -1;
+        mission.Name = $"h_heavy_npc_minus_one_{missionId}";
+        mission.Continent = continentId;
+        mission.ReqMissionId = new[] { -1, -1, -1, -1 };
+        AssetManager.Instance.SetTestMission(mission);
+        return mission;
+    }
+
+    public static Creature PlaceNpc(SectorMap map, long coid, int cbid, Vector3 position)
+    {
+        var npc = new Creature();
+        npc.SetCoid(coid, false);
+        npc.SetCbidForTests(cbid);
+        npc.Position = position;
+        npc.SetMap(map);
+        return npc;
+    }
+
+    public int CountNpcMissionDialog()
+        => Sent.OfType<NpcMissionDialogPacket>().Count();
+
+    public NpcMissionDialogPacket LastNpcMissionDialog()
+        => Sent.OfType<NpcMissionDialogPacket>().LastOrDefault();
+
     public static void GrantMissionCargo(
         Character character,
         int cbid,

@@ -192,18 +192,43 @@ public class MissionCollectProgressUnitTests
     [TestMethod]
     public void IsCollectTurnInReady_RequiresFullCountAtGiver()
     {
+        AssetManagerTestHelper.RegisterCloneBase(HideCbid, CloneBaseObjectType.Item);
         SeedHideAndSeekMission(giverNpc: GiverNpcCbid);
+        var (_, character, _) = CreatePlayer(ContinentId);
         var quest = new CharacterQuest(MissionId, 0);
         quest.PopulateFromAssets();
-        quest.ObjectiveProgress[0] = 1;
-        quest.ObjectiveMax[0] = 2;
+        character.CurrentQuests.Add(quest);
 
         var objective = AssetManager.Instance.GetMission(MissionId).Objectives[0];
-        Assert.IsFalse(NpcInteractHandler.IsCollectTurnInReady(quest, objective, GiverNpcCbid));
+        Assert.IsFalse(NpcInteractHandler.IsCollectTurnInReady(character, quest, objective, GiverNpcCbid));
 
-        quest.ObjectiveProgress[0] = 2;
-        Assert.IsTrue(NpcInteractHandler.IsCollectTurnInReady(quest, objective, GiverNpcCbid));
-        Assert.IsFalse(NpcInteractHandler.IsCollectTurnInReady(quest, objective, npcCbid: 1));
+        character.Inventory.TryAdd(new CharacterInventoryItem(
+            HideCbid, CloneBaseObjectType.Item, "hide", 70011, 0, 0, 1, true));
+        Assert.IsFalse(NpcInteractHandler.IsCollectTurnInReady(character, quest, objective, GiverNpcCbid));
+
+        character.Inventory.ClearCargo(character.ObjectId.Coid);
+        character.Inventory.TryAdd(new CharacterInventoryItem(
+            HideCbid, CloneBaseObjectType.Item, "hide", 70012, 0, 0, 2, true));
+        Assert.IsTrue(NpcInteractHandler.IsCollectTurnInReady(character, quest, objective, GiverNpcCbid));
+        Assert.IsFalse(NpcInteractHandler.IsCollectTurnInReady(character, quest, objective, npcCbid: 1));
+    }
+
+    [TestMethod]
+    public void IsCollectTurnInReady_RecountsFromInventoryWhenProgressStale()
+    {
+        AssetManagerTestHelper.RegisterCloneBase(HideCbid, CloneBaseObjectType.Item);
+        SeedHideAndSeekMission(giverNpc: GiverNpcCbid);
+        var (_, character, _) = CreatePlayer(ContinentId);
+        var quest = new CharacterQuest(MissionId, 0);
+        quest.PopulateFromAssets();
+        character.CurrentQuests.Add(quest);
+        character.Inventory.TryAdd(new CharacterInventoryItem(
+            HideCbid, CloneBaseObjectType.Item, "hide", 70010, 0, 0, 2, true));
+
+        Assert.AreEqual(0, quest.ObjectiveProgress[0]);
+        var objective = AssetManager.Instance.GetMission(MissionId).Objectives[0];
+        Assert.IsTrue(NpcInteractHandler.IsCollectTurnInReady(character, quest, objective, GiverNpcCbid));
+        Assert.AreEqual(2, quest.ObjectiveProgress[0]);
     }
 
     private static ObjectiveRequirementCollect SeedCollectReq(

@@ -100,6 +100,7 @@ public static class MissionCollectProgress
 
     /// <summary>
     /// After a cargo change for <paramref name="itemCbid"/>, recount Collect progress for active quests.
+    /// Continent filters apply to drops only — progress follows cargo wherever the player is.
     /// </summary>
     public static void SyncProgressFromInventory(Character character, int itemCbid)
     {
@@ -107,7 +108,6 @@ public static class MissionCollectProgress
             return;
 
         var conn = character.OwningConnection;
-        var continentId = character.Map?.ContinentId ?? -1;
 
         foreach (var quest in character.CurrentQuests.ToList())
         {
@@ -127,28 +127,69 @@ public static class MissionCollectProgress
             if (collect == null)
                 continue;
 
-            if (collect.ContinentId > 0 && continentId > 0 && collect.ContinentId != continentId)
+            ApplyInventoryProgress(character, conn, quest, mission, objective, collect);
+            return;
+        }
+    }
+
+    /// <summary>
+    /// Recount Collect progress for one quest from cargo (no continent gate).
+    /// Used at giver turn-in so stale ObjectiveProgress cannot block a cargo-complete collect.
+    /// </summary>
+    public static void SyncQuestProgressFromInventory(Character character, CharacterQuest quest)
+    {
+        if (character?.Inventory == null || quest == null)
+            return;
+
+        var mission = AssetManager.Instance.GetMission(quest.MissionId);
+        if (mission == null
+            || !mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var objective)
+            || objective?.Requirements == null)
+        {
+            return;
+        }
+
+        var conn = character.OwningConnection;
+        foreach (var collect in objective.Requirements.OfType<ObjectiveRequirementCollect>())
+        {
+            if (collect.ItemCBID <= 0)
                 continue;
 
-            var needed = NumNeeded(collect);
-            var have = character.Inventory.CountByCbid(itemCbid);
-            var progress = Math.Min(have, needed);
+            ApplyInventoryProgress(character, conn, quest, mission, objective, collect, advanceOnFull: false);
+        }
+    }
 
-            var seq = quest.ActiveObjectiveSequence;
-            MissionKillProgress.EnsureProgressCapacity(quest, seq);
-            quest.ObjectiveProgress[seq] = progress;
-            if (quest.ObjectiveMax[seq] < needed)
-                quest.ObjectiveMax[seq] = needed;
+    private static void ApplyInventoryProgress(
+        Character character,
+        AutoCore.Game.TNL.TNLConnection conn,
+        CharacterQuest quest,
+        Mission mission,
+        MissionObjective objective,
+        ObjectiveRequirementCollect collect,
+        bool advanceOnFull = true)
+    {
+        var itemCbid = collect.ItemCBID;
+        var needed = NumNeeded(collect);
+        var have = character.Inventory.CountByCbid(itemCbid);
+        var progress = Math.Min(have, needed);
 
-            Logger.WriteLog(LogType.Debug,
-                "Collect progress: mission={0} seq={1} objective={2} progress={3}/{4} item={5}",
-                quest.MissionId,
-                seq,
-                objective.ObjectiveId,
-                progress,
-                needed,
-                itemCbid);
+        var seq = quest.ActiveObjectiveSequence;
+        MissionKillProgress.EnsureProgressCapacity(quest, seq);
+        quest.ObjectiveProgress[seq] = progress;
+        if (quest.ObjectiveMax[seq] < needed)
+            quest.ObjectiveMax[seq] = needed;
 
+        Logger.WriteLog(LogType.Debug,
+            "Collect progress: mission={0} seq={1} objective={2} progress={3}/{4} item={5}",
+            quest.MissionId,
+            seq,
+            objective.ObjectiveId,
+            progress,
+            needed,
+            itemCbid);
+
+        if (conn != null)
+        {
             var statePacket = ObjectiveStateBuilder.Build(objective, progress, needed);
             if (statePacket != null)
                 conn.SendGamePacket(statePacket);
@@ -157,36 +198,39 @@ public static class MissionCollectProgress
             NpcInteractHandler.PushJournalMissionList(conn, character);
             TriggerManager.Instance.OnMissionStateChanged(
                 character.CurrentVehicle ?? (ClonedObjectBase)character);
+        }
+        else
+        {
+            MissionPersistence.Instance.OnQuestChanged(character, quest);
+        }
 
-            if (progress < needed)
-                return;
+        if (!advanceOnFull || progress < needed)
+            return;
 
-            var hasNext = mission.Objectives.Values.Any(o => o.Sequence > seq);
-            if (hasNext)
-            {
-                NpcInteractHandler.AdvanceOrCompleteObjective(
-                    conn, character, quest, mission, objective, source: "Collect");
-                return;
-            }
-
-            if (IsCollectOnlyObjective(objective))
-            {
-                Logger.WriteLog(LogType.Debug,
-                    "Collect progress: mission={0} objective={1} ready for giver turn-in ({2}/{3})",
-                    quest.MissionId,
-                    objective.ObjectiveId,
-                    progress,
-                    needed);
-                return;
-            }
-
-            if (HasNonCollectRequirement(objective))
-                return;
-
+        var hasNext = mission.Objectives.Values.Any(o => o.Sequence > seq);
+        if (hasNext)
+        {
             NpcInteractHandler.AdvanceOrCompleteObjective(
                 conn, character, quest, mission, objective, source: "Collect");
             return;
         }
+
+        if (IsCollectOnlyObjective(objective))
+        {
+            Logger.WriteLog(LogType.Debug,
+                "Collect progress: mission={0} objective={1} ready for giver turn-in ({2}/{3})",
+                quest.MissionId,
+                objective.ObjectiveId,
+                progress,
+                needed);
+            return;
+        }
+
+        if (HasNonCollectRequirement(objective))
+            return;
+
+        NpcInteractHandler.AdvanceOrCompleteObjective(
+            conn, character, quest, mission, objective, source: "Collect");
     }
 
     internal static bool ShouldDrop(ObjectiveRequirementCollect collect)

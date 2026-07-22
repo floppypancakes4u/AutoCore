@@ -267,7 +267,7 @@ Must pass all of:
 
 **Progress:** On `ItemPickup`, if CBID matches active Collect item → recount cargo → absolute `0x2071` (same absolute-slot pattern as kill/useitem). Mid-chain auto-advances; final **collect-only** waits for giver dialog.
 
-**Turn-in:** `IsCollectTurnInReady` / `TryCompleteCollectTurnInFromDialog` at `mission.NPC` when progress full — soft-pedal like kill turn-in. `MissionCargoService.GetTakeSpecs` removes `NumToCollect` (or all stacks when `TakeAllItems`).
+**Turn-in:** `IsCollectTurnInReady` / `TryCompleteCollectTurnInFromDialog` at `mission.NPC`. Before gating, **recount cargo** into `ObjectiveProgress` (`SyncQuestProgressFromInventory`) — client Collect_Eval uses inventory, and pickup sync can leave progress stale (live Hide and Seek 3668). Soft-pedal like kill turn-in. `MissionCargoService.GetTakeSpecs` removes `NumToCollect` (or all stacks when `TakeAllItems`).
 
 **Non-goals (still incomplete):** `OptionalDropPercent == 0` world/vendor collects; `GiveToAllConvoyMembers`; `QuestItemPickup` (0x205D).
 
@@ -366,7 +366,7 @@ Wire layout / RE: [missionState.md](missionState.md).
 | LOA class | Multi-pad / laps / sequential | `MissionPatrolProgress` encoding; no early complete | Patrol heavy + unit encoding tests |
 | UseItem plant/destroy | Multi-site, RepeatCount, GiveAtStart | UseObject-first; cargo; abandon reclaim | Use-item heavy / coverage tests |
 | Kill bounty | Final kill-only | Giver turn-in, not last-kill complete | Kill progress + dialog turn-in tests |
-| Hide and Seek class | Collect kill-to-loot (`OptionalDropPercent` + targets) | Mission drop not loot table; absolute progress; giver turn-in | `MissionCollectProgressUnitTests`, `MissionHideAndSeekCollectHeavyRegressionTests` |
+| Hide and Seek class | Collect kill-to-loot (`OptionalDropPercent` + targets) | Mission drop not loot table; absolute progress; giver turn-in recounts cargo (REG-007) | `MissionCollectProgressUnitTests`, `MissionHideAndSeekCollectHeavyRegressionTests` |
 | Patrol+deliver sibling | Same objective | AutoPatrol ensures NPC; deliver finishes | Sibling + soft-pedal tests |
 
 Permanent REG catalog: [mission-regression-catalog.md](testing/mission-regression-catalog.md).
