@@ -147,7 +147,8 @@ public static class WireIsolationLevers
         GhostVehicle.EnableMinimalForeignPathBlock = false;
         GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = false;
         GhostVehicle.EnableMinimalForeignOwnerBlock = false;
-        GhostVehicle.EnableMinimalForeignHealthBlock = false;
+        // SS-38: health ships by default — a levers JSON that fails to load must not strip NPC HP.
+        GhostVehicle.EnableMinimalForeignHealthBlock = true;
         GhostVehicle.EnableInitialHardpointPack = false;
         GhostVehicle.EnableDeferredForeignPose = false;
         GhostVehicle.EnableForeignReghostOwner = false;
@@ -187,7 +188,14 @@ public static class WireIsolationLevers
 
         try
         {
-            using var doc = JsonDocument.Parse(json);
+            // SS-38: hand-edited config — tolerate trailing commas and comments (the deployed
+            // Launcher levers JSON shipped with a trailing comma and was silently rejected).
+            var options = new JsonDocumentOptions
+            {
+                AllowTrailingCommas = true,
+                CommentHandling = JsonCommentHandling.Skip,
+            };
+            using var doc = JsonDocument.Parse(json, options);
             if (doc.RootElement.ValueKind != JsonValueKind.Object)
             {
                 error = "root must be a JSON object";

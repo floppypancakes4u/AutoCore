@@ -19,5 +19,5 @@
   "EnableForeignVehiclePosePriorityBoost": true,
   "EnableSoftNpcPathMotion": true,
   "EnableClientSidePathVisual": false,
-  "EnableNpcVehicleDriveController": true,
+  "EnableNpcVehicleDriveController": true
 }

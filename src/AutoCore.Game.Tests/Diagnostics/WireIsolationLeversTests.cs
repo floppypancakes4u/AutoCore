@@ -52,8 +52,10 @@ public class WireIsolationLeversTests
             "vehicle drive controller is opt-in — default preserves legacy path motion");
         Assert.IsFalse(GhostVehicle.EnableClientSidePathVisual,
             "client-side path visual freezes server pose authority when misused");
-        Assert.IsFalse(GhostVehicle.EnableMinimalForeignHealthBlock,
-            "NPC health under minimal foreign is opt-in via production levers JSON");
+        Assert.IsTrue(GhostVehicle.EnableMinimalForeignHealthBlock,
+            "SS-38: foreign NPC health must ship by DEFAULT — a stale/missing/unparseable levers " +
+            "JSON that enables the minimal profile but can't supply this key must not strip NPC " +
+            "HP (frozen green bar reads as 'invulnerable')");
         Assert.IsFalse(WireDiag.Enabled);
         Assert.IsFalse(GhostObjectDiag.Enabled);
     }
@@ -101,6 +103,27 @@ public class WireIsolationLeversTests
 
         WireIsolationLevers.ResetToDefaults();
         Assert.IsTrue(WireIsolationLevers.TrySet("MINIMAL_FOREIGN_HEALTH", true, out _));
+        Assert.IsTrue(GhostVehicle.EnableMinimalForeignHealthBlock);
+    }
+
+    /// <summary>
+    /// SS-38: the deployed Launcher wire-isolation.levers.json shipped with a trailing comma and
+    /// was silently rejected wholesale, reverting every lever to compiled defaults. Hand-edited
+    /// config must tolerate trailing commas and comments.
+    /// </summary>
+    [TestMethod]
+    public void ApplyFromJson_TrailingCommaAndComments_Accepted()
+    {
+        var applied = WireIsolationLevers.ApplyFromJson(
+            """
+            {
+              // hand-edited config
+              "EnableMinimalForeignInitialProfile": true,
+              "EnableMinimalForeignHealthBlock": true,
+            }
+            """, out var error);
+        Assert.IsTrue(applied, error);
+        Assert.IsTrue(GhostVehicle.EnableMinimalForeignInitialProfile);
         Assert.IsTrue(GhostVehicle.EnableMinimalForeignHealthBlock);
     }
 

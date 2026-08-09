@@ -52,10 +52,11 @@ public class GhostVehicle : GhostObject
     /// Admits <see cref="GhostObject.HealthMask"/>/<see cref="GhostObject.HealthMaxMask"/> under
     /// the minimal foreign profile so clients render NPC health (full bar on initial, drops on
     /// damage deltas, corpse flag). Health bytes apply to the vehicle object itself (client
-    /// vtable +0x240/+0x248) — no clientHasOwner gate needed. Default false; enabled in the
-    /// production wire-isolation.levers.json.
+    /// vtable +0x240/+0x248) — no clientHasOwner gate needed. SS-38: defaults TRUE — a stale or
+    /// unparseable levers JSON must not strip NPC HP (frozen green bar reads as invulnerable);
+    /// the lever remains available for emergency rollback.
     /// </summary>
-    public static bool EnableMinimalForeignHealthBlock = false;
+    public static bool EnableMinimalForeignHealthBlock = true;
 
     /// <summary>Default for <see cref="HealthResendWindowMs"/>.</summary>
     public const int DefaultHealthResendWindowMs = 5000;

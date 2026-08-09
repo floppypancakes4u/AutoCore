@@ -47,7 +47,7 @@ public class GhostVehicleWireRegressionTests
         GhostVehicle.EnableMinimalForeignPathBlock = false;
         GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = false;
         GhostVehicle.EnableMinimalForeignOwnerBlock = false;
-        GhostVehicle.EnableMinimalForeignHealthBlock = false;
+        GhostVehicle.EnableMinimalForeignHealthBlock = true; // SS-38 compiled default
         GhostVehicle.HealthResendWindowMs = GhostVehicle.DefaultHealthResendWindowMs;
         GhostVehicle.EnableInitialHardpointPack = false;
         GhostVehicle.EnableDeferredForeignPose = false;
@@ -778,6 +778,7 @@ public class GhostVehicleWireRegressionTests
         vehicle.SetOwner(driver);
 
         GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = false; // this test pins the fully-stripped profile
         WireDiag.Enabled = true;
         var stream = PackInitial(vehicle, ulong.MaxValue);
 
@@ -803,6 +804,7 @@ public class GhostVehicleWireRegressionTests
         vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_073, true);
 
         GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = false; // this test pins the fully-stripped profile
         WireDiag.Enabled = true;
         var stream = PackUpdateNonInitial(vehicle, ulong.MaxValue);
 
@@ -991,6 +993,33 @@ public class GhostVehicleWireRegressionTests
         }
     }
 
+    /// <summary>
+    /// SS-38: with the minimal foreign profile on (as the deployed levers JSON sets it) and the
+    /// health lever left at its COMPILED DEFAULT, health bits must still pack. A stale or
+    /// unparseable JSON must not strip NPC HP into a frozen green bar.
+    /// </summary>
+    [TestMethod]
+    public void PackDelta_ForeignMinimal_CompiledDefaults_PacksHealthBits()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_186);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_186, true);
+
+        AutoCore.Game.Diagnostics.WireIsolationLevers.ResetToDefaults();
+        GhostVehicle.EnableMinimalForeignInitialProfile = true; // profile on, health lever untouched
+        var stream = PackUpdateNonInitial(vehicle, GhostObject.HealthMask | GhostObject.HealthMaxMask);
+
+        Assert.IsFalse(stream.ReadFlag()); // Skills
+        for (var i = 0; i < 7; ++i)
+            Assert.IsFalse(stream.ReadFlag(), $"equipment lead flag {i} must stay false");
+        Assert.IsFalse(stream.ReadFlag()); // GM
+        Assert.IsFalse(stream.ReadFlag()); // clan
+        Assert.IsFalse(stream.ReadFlag()); // pet
+        Assert.IsFalse(stream.ReadFlag()); // murderer
+        Assert.IsTrue(stream.ReadFlag(),
+            "SS-38: health must pack under the minimal foreign profile with compiled defaults");
+        Assert.AreEqual((uint)vehicle.GetCurrentHP(), stream.ReadInt(18));
+    }
+
     [TestMethod]
     public void PackDelta_ForeignMinimal_HealthLever_AdmitsHealthBits()
     {
@@ -1050,6 +1079,7 @@ public class GhostVehicleWireRegressionTests
         vehicle.CreateGhost();
 
         GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = false; // lever-off strip is the behavior under test
         WireDiag.Enabled = true;
         NetObject.PIsInitialUpdate = false;
         var stream = new BitStream(new byte[8192], 8192);
@@ -1281,6 +1311,7 @@ public class GhostVehicleWireRegressionTests
 
         GhostVehicle.EnableMinimalForeignInitialProfile = true;
         GhostVehicle.EnableMinimalForeignOwnerBlock = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = false; // pinned wire shape predates SS-38 health bits
         GhostVehicle.EnableDeferredForeignPose = true;
         WireDiag.Enabled = true;
 
