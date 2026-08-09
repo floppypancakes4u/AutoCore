@@ -1994,6 +1994,7 @@ public class Vehicle : SimpleObject
         // Server-side ram: client DoVehicleCollision is LOCAL ONLY (no C2S collision packet).
         // Must run even when Ghost is null so props die + loot while ghosting is not ready.
         Combat.VehicleMapPropRam.Process(this, previousPosition);
+        Combat.VehicleCreatureRam.Process(this, previousPosition);
 
         if (Ghost == null)
             return;

@@ -45,4 +45,23 @@ public class UnknownOpcodeLoggingTests
         var rec = _sink.Single("UnknownOpcodeReceived");
         Assert.AreEqual("NET-001", rec.GetProperty("ErrorCode"));
     }
+
+    [TestMethod]
+    public void HandlePacket_StuntComplete_IsAcceptedSilently()
+    {
+        // The client fires StuntComplete whenever its local stunt/airborne state ends —
+        // including on ram impacts — so it must be a known no-op, not an unknown-opcode error.
+        var conn = new TNLConnection();
+        conn.SetGhostFrom(true);
+        conn.SetGhostTo(false);
+
+        var bytes = BitConverter.GetBytes((uint)Constants.GameOpcode.StuntComplete);
+        var buffer = new ByteBuffer(bytes, (uint)bytes.Length);
+        _sink.Clear();
+
+        conn.HandlePacketForTests(buffer);
+
+        Assert.AreEqual(0, _sink.Records.Count(r => r.EventName == "UnknownOpcodeReceived"),
+            "StuntComplete is a known client notification and must not log as unknown.");
+    }
 }

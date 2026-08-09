@@ -292,6 +292,14 @@ public class GhostVehicle : GhostObject
             updateMask &= ~PositionMask;
         }
 
+        // The owning client is authoritative for its own pose (C2S VehicleMoved) and applies
+        // any received pose via the hard-snap input path (Vehicle_setDrivingInputs). Echoing
+        // the server's dead-reckoned pose back fights local physics exactly when client
+        // velocity changes abruptly (ram impacts) — a visible movement freeze. Owner deltas
+        // carry combat pools etc., never pose; foreign viewers stream pose normally.
+        if (!isInitial && isOwnerControlConnection)
+            updateMask &= ~PositionMask;
+
         // A connection-scoped override is deliberately limited to foreign initial updates. It
         // provides a deterministic recovery harness without changing the stream for any other
         // player or for later deltas.
@@ -667,7 +675,9 @@ public class GhostVehicle : GhostObject
         // has non-zero velocity so TNL resends every write. Velocity-only was dropping the
         // ghost from GhostZeroUpdateIndex on waypoint waits / zero-vel frames → only ~3 pose
         // packs then silence (client hard-snaps at that starved cadence).
-        if (!isInitial && ShouldStreamPose(parentVehicle))
+        // Owner connections never pack pose (stripped above), so keep-dirty must not re-arm
+        // there either — it would resend empty pose-less updates every period forever.
+        if (!isInitial && !isOwnerControlConnection && ShouldStreamPose(parentVehicle))
             ret |= PositionMask;
 
         return ret;

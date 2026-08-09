@@ -60,6 +60,13 @@ public static class ServerConfig
     public const bool DefaultChassisPointImpulsesEnabled = false;
     /// <summary>Server-side map-prop ramming (<c>VehicleMapPropRam</c>) — defaults OFF.</summary>
     public const bool DefaultEnableRamming = false;
+    /// <summary>
+    /// Server-side vehicle-vs-creature ramming (<c>VehicleCreatureRam</c>) — defaults <b>ON</b>.
+    /// Client parity, not an optional feature: the retail client locally soft-destroys low-HP
+    /// creatures on ram contact regardless of the server, so a server that disagrees fights the
+    /// client with a CreateCreature resync loop (visible movement hitch on impact).
+    /// </summary>
+    public const bool DefaultEnableCreatureRamming = true;
 
     /// <summary>Verbose inventory grab/drop/MM packet logs (raw hex + op results). Default off.</summary>
     public const bool DefaultInventoryDebugPackets = false;
@@ -131,6 +138,13 @@ public static class ServerConfig
     /// </summary>
     public static bool EnableRamming { get; set; } = DefaultEnableRamming;
 
+    /// <summary>
+    /// When true, moving vehicles damage hostile creatures on contact via
+    /// <c>VehicleCreatureRam</c>. Default <b>true</b> (client-parity; see
+    /// <see cref="DefaultEnableCreatureRamming"/>).
+    /// </summary>
+    public static bool EnableCreatureRamming { get; set; } = DefaultEnableCreatureRamming;
+
     /// When true, sector inventory handlers log grab/drop/MM packet details (including raw hex)
     /// and operation result messages. Default <b>false</b> — production stays quiet once moves work.
     /// </summary>
@@ -184,6 +198,7 @@ public static class ServerConfig
         CompositeWheelCollisionEnabled = DefaultCompositeWheelCollisionEnabled;
         ChassisPointImpulsesEnabled = DefaultChassisPointImpulsesEnabled;
         EnableRamming = DefaultEnableRamming;
+        EnableCreatureRamming = DefaultEnableCreatureRamming;
         InventoryDebugPackets = DefaultInventoryDebugPackets;
         LogDamageToPlayers = DefaultLogDamageToPlayers;
         LogDamageToNpcs = DefaultLogDamageToNpcs;
@@ -276,6 +291,9 @@ public static class ServerConfig
         if (root?.EnableRamming.HasValue == true)
             EnableRamming = root.EnableRamming.Value;
 
+        if (root?.EnableCreatureRamming.HasValue == true)
+            EnableCreatureRamming = root.EnableCreatureRamming.Value;
+
         var p = root?.NpcVehiclePhysics;
         if (p != null)
         {
@@ -366,6 +384,7 @@ public static class ServerConfig
     private sealed class RootDto
     {
         public bool? EnableRamming { get; set; }
+        public bool? EnableCreatureRamming { get; set; }
         public NpcVehiclePhysicsDto NpcVehiclePhysics { get; set; }
         public InventoryDto Inventory { get; set; }
         public CombatDto Combat { get; set; }

@@ -1020,6 +1020,12 @@ private void HandlePacket(ByteBuffer buffer)
                     // C2S damage is not used; combat is server-authoritative via VehicleMoved/Firing.
                     break;
 
+                case GameOpcode.StuntComplete:
+                    // Client-local stunt tracker end notification (fires on landings and ram
+                    // impacts). Mission Stunt objectives are parse-only server-side, so there
+                    // is nothing to award yet — accept silently instead of logging an error.
+                    break;
+
                 default:
                     Logger.WriteLog(LogType.Error, "Unhandled Opcode: {0}", gameOpcode);
                     GameLog.Warn("UnknownOpcodeReceived", "NET-001",
