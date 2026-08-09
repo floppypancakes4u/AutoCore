@@ -407,32 +407,30 @@ public class SpawnPoint : ClonedObjectBase
         npc.SetCoid(objectId.Coid, objectId.Global);
     }
 
-    /// <summary>Retail max level — docs/XP.md (intXPLevel through 80; tContinentObject intMaxLevel=80).</summary>
-    internal const int RetailMaxNpcLevel = 80;
-
-    // Warn-once per distinct authored (baseLevel, offset) pair — bounded by data variety.
-    private static readonly HashSet<(int BaseLevel, int Offset)> _warnedSpawnLevelClamps = new();
+    /// <summary>
+    /// Retail max NPC level. SS-48: this is the <c>tCreatureExperienceLevel</c> ceiling (125), not
+    /// the 80 originally used — authored content genuinely reaches level 86
+    /// (<c>tVehicleTemplate.sinBaseLevel</c>) and <see cref="Experience.ExperienceService"/> caps
+    /// players at 120, so a cap of 80 silently nerfed real bosses.
+    /// </summary>
+    internal const int RetailMaxNpcLevel = 125;
 
     /// <summary>
-    /// Clamps spawn level to retail's [1, 80] (SS-40). fam <c>LevelOffset</c> is SIGNED —
+    /// Clamps spawn level to retail's [1, 125] (SS-40/SS-48). fam <c>LevelOffset</c> is SIGNED —
     /// reading it unsigned turned retail "−1" into +255: forced 0.95 hit chance vs players,
-    /// a flat DamageBonusPerLevel×255 on every shot, and 3.75× crits.
+    /// a flat DamageBonusPerLevel×255 on every shot, and 3.75× crits. Both ends of the clamp warn
+    /// once per authored pair, because a silently floored level is as wrong as a ceilinged one.
     /// </summary>
     internal static byte CalculateSpawnLevel(int baseLevel, int levelOffset)
     {
         var calculatedLevel = baseLevel + levelOffset;
         var clamped = Math.Clamp(calculatedLevel, 1, RetailMaxNpcLevel);
-        if (calculatedLevel > RetailMaxNpcLevel)
+        if (calculatedLevel != clamped
+            && IncompleteHandlerLog.TryMarkOnce($"SpawnLevelClamp:{baseLevel}:{levelOffset}"))
         {
-            bool firstTime;
-            lock (_warnedSpawnLevelClamps)
-                firstTime = _warnedSpawnLevelClamps.Add((baseLevel, levelOffset));
-            if (firstTime)
-            {
-                Logger.WriteLog(LogType.Warning,
-                    "SpawnLevel clamp (SS-40): baseLevel={0} offset={1} -> {2} (retail max {3}) — check authored spawn data",
-                    baseLevel, levelOffset, clamped, RetailMaxNpcLevel);
-            }
+            Logger.WriteLog(LogType.Warning,
+                "SpawnLevel clamp (SS-40): baseLevel={0} offset={1} -> {2} (valid range 1..{3}) — check authored spawn data",
+                baseLevel, levelOffset, clamped, RetailMaxNpcLevel);
         }
 
         return (byte)clamped;
@@ -766,7 +764,10 @@ public class SpawnPoint : ClonedObjectBase
         if (Template.Faction != -1 && Template.Faction != 0)
             return Template.Faction;
 
-        if (Template.OriginalFaction != 0)
+        // SS-48: -1 is the ClonedObjectBase "unset" sentinel, exactly like the two branches above.
+        // Stamping it makes the NPC a negative-faction attacker, which the gate fails closed —
+        // hittable but unable to damage anything (the same defect class SS-41 fixed for 0).
+        if (Template.OriginalFaction != 0 && Template.OriginalFaction != -1)
             return Template.OriginalFaction;
 
         return null;

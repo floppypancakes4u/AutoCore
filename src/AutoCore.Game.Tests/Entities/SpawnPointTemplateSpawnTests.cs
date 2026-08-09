@@ -72,11 +72,19 @@ public class SpawnPointTemplateSpawnTests
     /// became +255 — level-255 drivers forced 0.95 hit chance vs players, added a flat
     /// DamageBonusPerLevel×255 to every shot, and crit at 3.75× (live log: level=255 spawns).
     /// </summary>
+    /// <summary>
+    /// SS-48: the cap must sit above authored content. tCreatureExperienceLevel runs to 125 and
+    /// tVehicleTemplate authors sinBaseLevel up to 86, so the original cap of 80 would have
+    /// silently nerfed real bosses — a level-86 NPC losing 6 levels of damage bonus, hit chance
+    /// and crit magnitude, reported by one warn-once line for the whole map.
+    /// </summary>
     [TestMethod]
-    public void CalculateSpawnLevel_ClampsToRetailMax80()
+    public void CalculateSpawnLevel_ClampsToRetailMax125_AndKeepsAuthoredHighLevels()
     {
-        Assert.AreEqual((byte)80, SpawnPoint.CalculateSpawnLevel(60, 127),
-            "levels above retail's max 80 (docs/XP.md) must clamp");
+        Assert.AreEqual((byte)86, SpawnPoint.CalculateSpawnLevel(86, 0),
+            "authored level-86 templates must survive the clamp");
+        Assert.AreEqual((byte)125, SpawnPoint.CalculateSpawnLevel(60, 127),
+            "the ceiling is the tCreatureExperienceLevel maximum, 125");
         Assert.AreEqual((byte)1, SpawnPoint.CalculateSpawnLevel(1, -5), "floor stays 1");
         Assert.AreEqual((byte)4, SpawnPoint.CalculateSpawnLevel(5, -1), "signed offsets level DOWN");
     }
@@ -312,8 +320,16 @@ public class SpawnPointTemplateSpawnTests
             "raw spawns must be owned by their spawn point so DespawnOwnedEntities can clean them up");
     }
 
+    /// <summary>
+    /// SS-48 tripwire: SS-43 originally picked the lowest-Id row when a chassis had several
+    /// tVehicleTemplate variants. 114 of 407 shipped chassis are ambiguous and 112 of those differ
+    /// materially — chassis 2818's lowest-Id row is a 465-HP mob while another row is a 4000-HP
+    /// boss with a different driver, and chassis 4584 spans 153..7500 HP. Since the driver decides
+    /// the owner-chain faction and BaseHp overwrites chassis HP, guessing could silently swap an
+    /// NPC's hostility or nerf a boss 49x. An ambiguous chassis must NOT be delegated.
+    /// </summary>
     [TestMethod]
-    public void Spawn_RawVehicleCbid_MultipleTemplateRows_PicksLowestId()
+    public void Spawn_RawVehicleCbid_AmbiguousTemplateRows_DoesNotDelegate()
     {
         const int vehicleCbid = 660_020;
         const int weaponCbid = 660_021;
@@ -322,8 +338,8 @@ public class SpawnPointTemplateSpawnTests
         AssetManagerTestHelper.RegisterWeaponCloneBase(weaponCbid);
         AssetManager.Instance.SetTestVehicleTemplates(new[]
         {
-            new VehicleTemplate { Id = 900, VehicleCbid = vehicleCbid, WeaponFrontCbid = weaponCbid, BaseHp = 200 },
-            new VehicleTemplate { Id = 400, VehicleCbid = vehicleCbid, WeaponFrontCbid = weaponCbid, BaseHp = 100 },
+            new VehicleTemplate { Id = 900, VehicleCbid = vehicleCbid, WeaponFrontCbid = weaponCbid, BaseHp = 4000 },
+            new VehicleTemplate { Id = 400, VehicleCbid = vehicleCbid, WeaponFrontCbid = weaponCbid, BaseHp = 465 },
         });
 
         var template = new SpawnPointTemplate { COID = 14_622 };
@@ -335,7 +351,58 @@ public class SpawnPointTemplateSpawnTests
         Assert.IsTrue(spawnPoint.Spawn());
 
         var vehicle = map.Objects.Values.OfType<Vehicle>().Single();
-        Assert.AreEqual(400, vehicle.TemplateId, "multiple chassis rows must resolve deterministically (lowest Id)");
+        Assert.AreEqual(-1, vehicle.TemplateId,
+            "an ambiguous chassis must keep the legacy raw path rather than guess a variant");
+        Assert.AreNotEqual(4000, vehicle.GetMaximumHP(), "must not adopt an arbitrary variant's HP");
+        Assert.AreNotEqual(465, vehicle.GetMaximumHP(), "must not adopt an arbitrary variant's HP");
+        Assert.IsNull(vehicle.WeaponFront, "an unresolved chassis stays weaponless rather than guessing");
+        Assert.AreEqual(template.COID, vehicle.SpawnOwnerCoid, "raw path still sets despawn ownership");
+    }
+
+    [TestMethod]
+    public void TryGetVehicleTemplateByVehicleCbid_GuardsAndAmbiguity()
+    {
+        const int uniqueCbid = 660_030;
+        const int ambiguousCbid = 660_031;
+        AssetManager.Instance.SetTestVehicleTemplates(new[]
+        {
+            new VehicleTemplate { Id = 10, VehicleCbid = uniqueCbid },
+            new VehicleTemplate { Id = 20, VehicleCbid = ambiguousCbid },
+            new VehicleTemplate { Id = 30, VehicleCbid = ambiguousCbid },
+            new VehicleTemplate { Id = 40, VehicleCbid = 0 }, // unusable row must never index
+        });
+
+        Assert.IsFalse(AssetManager.Instance.TryGetVehicleTemplateByVehicleCbid(0, out _), "cbid 0 guard");
+        Assert.IsFalse(AssetManager.Instance.TryGetVehicleTemplateByVehicleCbid(-1, out _), "negative cbid guard");
+        Assert.IsFalse(AssetManager.Instance.TryGetVehicleTemplateByVehicleCbid(999_999, out _), "miss");
+        Assert.IsFalse(AssetManager.Instance.TryGetVehicleTemplateByVehicleCbid(ambiguousCbid, out _),
+            "ambiguous chassis must not resolve to a guessed variant");
+
+        Assert.IsTrue(AssetManager.Instance.TryGetVehicleTemplateByVehicleCbid(uniqueCbid, out var unique));
+        Assert.AreEqual(10, unique.Id);
+
+        // Cache must be invalidated when test templates change.
+        const int lateCbid = 660_039;
+        AssetManager.Instance.SetTestVehicleTemplates(new[]
+        {
+            new VehicleTemplate { Id = 11, VehicleCbid = lateCbid },
+        });
+        Assert.IsTrue(AssetManager.Instance.TryGetVehicleTemplateByVehicleCbid(lateCbid, out var added),
+            "a later SetTestVehicleTemplates must invalidate the reverse index");
+        Assert.AreEqual(11, added.Id);
+    }
+
+    [TestMethod]
+    public void SetTestVehicleTemplates_NullRows_AreSkipped()
+    {
+        AssetManager.Instance.SetTestVehicleTemplates(new VehicleTemplate[]
+        {
+            null,
+            new VehicleTemplate { Id = 55, VehicleCbid = 660_040 },
+        });
+
+        Assert.IsTrue(AssetManager.Instance.TryGetVehicleTemplateByVehicleCbid(660_040, out var found));
+        Assert.AreEqual(55, found.Id);
     }
 
     [TestMethod]
@@ -680,6 +747,27 @@ public class SpawnPointTemplateSpawnTests
         var vehicle = map.Objects.Values.OfType<Vehicle>().Single();
         Assert.AreEqual(10, vehicle.GetIDFaction(),
             "unauthored FactionDirty 0 must keep the driver's clonebase faction on the owner chain");
+    }
+
+    /// <summary>
+    /// SS-48: −1 is ClonedObjectBase's "unset" sentinel. The first two resolver branches guard it
+    /// but the OriginalFaction branch did not, so an unauthored −1 was stamped onto the NPC. A
+    /// −1-faction attacker fails closed in the gate (IsFactionEligible denies negative attackers),
+    /// so that NPC is hittable but can never damage anything — the same defect class SS-41 fixed
+    /// for 0.
+    /// </summary>
+    [TestMethod]
+    public void ResolveFactionDirtyOverride_UnsetOriginalFaction_IsNotAnOverride()
+    {
+        Assert.IsNull(MakeSpawn(live: 0, template: 0, original: -1).ResolveFactionDirtyOverride(),
+            "an OriginalFaction of -1 is 'unset', not an authored faction");
+    }
+
+    [TestMethod]
+    public void ResolveFactionDirtyOverride_NullTemplate_FallsBackToLiveFaction()
+    {
+        var spawnPoint = new SpawnPoint(null) { Faction = 22 };
+        Assert.AreEqual(22, spawnPoint.ResolveFactionDirtyOverride());
     }
 
     [TestMethod]
