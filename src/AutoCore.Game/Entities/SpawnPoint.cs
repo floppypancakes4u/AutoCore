@@ -714,26 +714,45 @@ public class SpawnPoint : ClonedObjectBase
         if (entity == null || Template == null || !Template.FactionDirty)
             return;
 
-        entity.Faction = ResolveFactionDirtyOverride();
+        var faction = ResolveFactionDirtyOverride();
+        if (faction == null)
+        {
+            // SS-41: unauthored 0 — keep the clonebase faction instead of stamping Human.
+            Logger.WriteLog(LogType.Debug,
+                "FactionDirty skip (SS-41): spawn coid={0} has no authored faction; keeping clonebase faction {1}",
+                ObjectId.Coid,
+                entity.Faction);
+            return;
+        }
+
+        entity.Faction = faction.Value;
     }
 
     /// <summary>
-    /// Resolves FactionDirty override: live spawnpoint Faction, else template Faction,
-    /// else fam <see cref="SpawnPointTemplate.OriginalFaction"/>.
+    /// Resolves FactionDirty override: live spawnpoint Faction, else template Faction, else fam
+    /// <see cref="SpawnPointTemplate.OriginalFaction"/>. SS-41: null (no override) when the
+    /// resolution bottoms out at unauthored 0 — 0 is both the C# default and retail Human, never
+    /// a sensible spawn-pipeline NPC faction, and stamping it made the NPC same-faction with
+    /// every Human player: unhittable through the SS-36 gate and ignored by aggro. The clonebase
+    /// faction from <see cref="SimpleObject.SetupCBFields"/> stays in that case.
     /// </summary>
-    internal int ResolveFactionDirtyOverride()
+    internal int? ResolveFactionDirtyOverride()
     {
         if (Template == null)
             return Faction;
 
-        // Neutral (-100) and positive mission factions are valid; -1 is ClonedObjectBase unset.
-        if (Faction != -1 && (Faction != 0 || Template.OriginalFaction == 0))
+        // Neutral (-100) and positive mission factions are valid; -1 is ClonedObjectBase unset,
+        // and 0 only counts when the fam actually authored it somewhere down the chain.
+        if (Faction != -1 && Faction != 0)
             return Faction;
 
-        if (Template.Faction != -1 && (Template.Faction != 0 || Template.OriginalFaction == 0))
+        if (Template.Faction != -1 && Template.Faction != 0)
             return Template.Faction;
 
-        return Template.OriginalFaction;
+        if (Template.OriginalFaction != 0)
+            return Template.OriginalFaction;
+
+        return null;
     }
 
     /// <summary>Copies the driver's wad.xml AI behavior onto the vehicle it owns, if any.</summary>

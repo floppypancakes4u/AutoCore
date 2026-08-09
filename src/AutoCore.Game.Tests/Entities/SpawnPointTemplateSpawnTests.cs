@@ -517,6 +517,101 @@ public class SpawnPointTemplateSpawnTests
         Assert.AreEqual(-100, vehicle.GetIDFaction(), "aggro chain must resolve to spawn Neutral override");
     }
 
+    // --- SS-41: FactionDirty must never stamp unauthored Human 0 onto an NPC ---
+
+    /// <summary>
+    /// SS-41 tripwire: a FactionDirty spawn whose resolution bottoms out at 0 with
+    /// OriginalFaction == 0 (the never-authored pattern — 0 is both the C# default and retail
+    /// Human) stamped faction 0 onto creature, chassis, and driver. Under the SS-36 gate a
+    /// faction-0 NPC is same-faction with every Human player: truly unhittable, and it never
+    /// aggros either — the "invulnerable NPC" that also ignores you.
+    /// </summary>
+    [TestMethod]
+    public void Spawn_Creature_FactionDirty_OriginalFactionZero_KeepsClonebaseFaction()
+    {
+        const int creatureCbid = 650_030;
+        var map = CreateTestMap(9123);
+        AssetManagerTestHelper.RegisterCreatureCloneBase(creatureCbid, faction: 21);
+
+        var template = new SpawnPointTemplate
+        {
+            COID = 14_610,
+            Faction = 0,
+            FactionDirty = true,
+            OriginalFaction = 0,
+        };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList { SpawnType = creatureCbid, IsTemplate = false });
+        var spawnPoint = new SpawnPoint(template) { Faction = 0 };
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var creature = map.Objects.Values.OfType<Creature>().Single(c => c.CBID == creatureCbid);
+        Assert.AreEqual(21, creature.Faction,
+            "unauthored FactionDirty 0 must keep the clonebase faction, never stamp Human 0");
+        Assert.AreEqual(21, creature.GetIDFaction());
+    }
+
+    [TestMethod]
+    public void Spawn_TemplateVehicle_FactionDirty_OriginalFactionZero_KeepsClonebaseFactions()
+    {
+        const int vehicleCbid = 650_031;
+        const int driverCbid = 650_032;
+        const int templateId = 650_033;
+        var map = CreateTestMap(9124);
+
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid, faction: 10);
+        AssetManagerTestHelper.RegisterCreatureCloneBase(driverCbid, faction: 10);
+        AssetManager.Instance.SetTestVehicleTemplates(new[]
+        {
+            new VehicleTemplate { Id = templateId, VehicleCbid = vehicleCbid, DriverCbid = driverCbid }
+        });
+
+        var template = new SpawnPointTemplate
+        {
+            COID = 14_611,
+            Faction = 0,
+            FactionDirty = true,
+            OriginalFaction = 0,
+        };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList { SpawnType = templateId, IsTemplate = true });
+        var spawnPoint = new SpawnPoint(template) { Faction = 0 };
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var vehicle = map.Objects.Values.OfType<Vehicle>().Single();
+        Assert.AreEqual(10, vehicle.GetIDFaction(),
+            "unauthored FactionDirty 0 must keep the driver's clonebase faction on the owner chain");
+    }
+
+    [TestMethod]
+    public void ResolveFactionDirtyOverride_TruthTable()
+    {
+        // Live spawnpoint faction wins when authored (incl. Neutral -100).
+        Assert.AreEqual(-100, MakeSpawn(live: -100, template: 0, original: 0).ResolveFactionDirtyOverride());
+        Assert.AreEqual(22, MakeSpawn(live: 22, template: 0, original: 0).ResolveFactionDirtyOverride());
+        // Template faction next, then fam OriginalFaction (Gunny 14138 → 22).
+        Assert.AreEqual(22, MakeSpawn(live: -1, template: 22, original: 22).ResolveFactionDirtyOverride());
+        Assert.AreEqual(22, MakeSpawn(live: 0, template: -1, original: 22).ResolveFactionDirtyOverride());
+        // SS-41: everything bottoming out at unauthored 0 → no override (null).
+        Assert.IsNull(MakeSpawn(live: 0, template: 0, original: 0).ResolveFactionDirtyOverride());
+        Assert.IsNull(MakeSpawn(live: -1, template: -1, original: 0).ResolveFactionDirtyOverride());
+    }
+
+    private static SpawnPoint MakeSpawn(int live, int template, int original)
+    {
+        var spawnTemplate = new SpawnPointTemplate
+        {
+            Faction = template,
+            FactionDirty = true,
+            OriginalFaction = original,
+        };
+        return new SpawnPoint(spawnTemplate) { Faction = live };
+    }
+
     /// <summary>
     /// Fam load stores OriginalFaction but historically left ObjectTemplate.Faction at 0.
     /// FactionDirty must promote OriginalFaction onto Faction (Gunny combat spawn 14138 → 22).
