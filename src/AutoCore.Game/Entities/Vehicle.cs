@@ -510,6 +510,9 @@ public class Vehicle : SimpleObject
     /// <summary>Per-vehicle hit/crit roll source (seeded once, independent across vehicles).</summary>
     internal Random CombatRng => _combatRng ??= new Random(Random.Shared.Next());
 
+    /// <summary>Test seam: deterministic hit/damage rolls (SS-37 ordering tests).</summary>
+    internal void SetCombatRngForTests(Random rng) => _combatRng = rng;
+
     // Retail floating numbers use EMSG_Sector_Damage (0x2023) → combat-event list (game+0xAA8).
     // Broadcast freeform floaters use a different list (game+0xAC0) and do not reliably render.
     // SS-33: keyed per (attacker, victim) TFID pair — attacker-only keying ate the floaters for
@@ -2091,6 +2094,14 @@ public class Vehicle : SimpleObject
         if (packet.Entries.Count > 0)
             TrySendDamagePacketMulti(attackerChar, packet, ObjectId, victimsHit);
 
+        // SS-37: deaths drain AFTER the damage flush so the removal packet never precedes the
+        // killing blow's floater on the ordered stream. IsCorpse dedupes repeated victims.
+        foreach (var victim in victimsHit)
+        {
+            if (victim.GetCurrentHP() <= 0 && !victim.IsCorpse)
+                victim.OnDeath(DeathType.Violent);
+        }
+
         void TryFireSlot(byte bit, Weapon weapon, float aimYaw, bool includeHardTarget, ref long lastFireMs)
         {
             if ((Firing & bit) == 0 || weapon?.CloneBaseWeapon == null)
@@ -2411,8 +2422,11 @@ public class Vehicle : SimpleObject
 
         if (target.GetCurrentHP() <= 0)
         {
+            // SS-37: stamp the murderer now (loot/XP read it in OnDeath) but DEFER OnDeath —
+            // its removal broadcast (InitCreateObject doDeath / DestroyObject) must not beat
+            // the volley's DamagePacket onto the wire, or the client tears the object down and
+            // drops the killing blow's floater. ProcessCombatInternal drains deaths post-flush.
             target.SetMurderer(this);
-            target.OnDeath(DeathType.Violent);
         }
     }
 
