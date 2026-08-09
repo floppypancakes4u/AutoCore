@@ -1020,6 +1020,36 @@ public class GhostVehicleWireRegressionTests
         Assert.AreEqual((uint)vehicle.GetCurrentHP(), stream.ReadInt(18));
     }
 
+    /// <summary>
+    /// SS-50: the pinned foreign-INITIAL layout tests all opt the health lever off, so no test
+    /// covered the layout production actually ships. This pins the initial pack at compiled
+    /// defaults (health on) so a future default flip cannot pass unnoticed.
+    /// </summary>
+    [TestMethod]
+    public void PackInitial_ForeignMinimal_CompiledDefaults_KeepsHealthDirtyForNextDelta()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_187);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_187, true);
+        vehicle.CreateGhost();
+
+        AutoCore.Game.Diagnostics.WireIsolationLevers.ResetToDefaults();
+        GhostVehicle.EnableMinimalForeignInitialProfile = true; // health lever left at its default
+        NetObject.PIsInitialUpdate = true;
+        try
+        {
+            var stream = new BitStream(new byte[8192], 8192);
+            var ret = vehicle.Ghost.PackUpdate(null, ulong.MaxValue, stream);
+            Assert.AreEqual(GhostObject.HealthMask | GhostObject.HealthMaxMask,
+                ret & (GhostObject.HealthMask | GhostObject.HealthMaxMask),
+                "under production defaults a foreign initial must pack health and keep it dirty " +
+                "for the post-materialize re-send");
+        }
+        finally
+        {
+            NetObject.PIsInitialUpdate = false;
+        }
+    }
+
     [TestMethod]
     public void PackDelta_ForeignMinimal_HealthLever_AdmitsHealthBits()
     {

@@ -114,17 +114,64 @@ public class WireIsolationLeversTests
     [TestMethod]
     public void ApplyFromJson_TrailingCommaAndComments_Accepted()
     {
+        // Both assertions below flip a lever AWAY from its compiled default, so they fail if the
+        // tolerant parse silently applied nothing.
         var applied = WireIsolationLevers.ApplyFromJson(
             """
             {
               // hand-edited config
               "EnableMinimalForeignInitialProfile": true,
-              "EnableMinimalForeignHealthBlock": true,
+              /* emergency rollback of the SS-38 default */
+              "EnableMinimalForeignHealthBlock": false,
             }
             """, out var error);
         Assert.IsTrue(applied, error);
-        Assert.IsTrue(GhostVehicle.EnableMinimalForeignInitialProfile);
-        Assert.IsTrue(GhostVehicle.EnableMinimalForeignHealthBlock);
+        Assert.IsTrue(GhostVehicle.EnableMinimalForeignInitialProfile, "default is false — proves the parse applied");
+        Assert.IsFalse(GhostVehicle.EnableMinimalForeignHealthBlock, "default is true — proves the parse applied");
+    }
+
+    /// <summary>
+    /// SS-50: a levers file silently rewrites wire behaviour, and a file that fails to parse (or
+    /// is picked up from an unexpected working directory) looks identical at startup to one that
+    /// loaded cleanly. The startup diff must name every lever that a configuration changed.
+    /// </summary>
+    [TestMethod]
+    public void GetLeversDifferingFromDefaults_NamesOnlyOverriddenLevers()
+    {
+        var defaults = WireIsolationLevers.CaptureDefaults();
+
+        Assert.AreEqual(0, WireIsolationLevers.GetLeversDifferingFromDefaults(defaults).Count,
+            "a freshly reset board differs from defaults in nothing");
+
+        Assert.IsTrue(WireIsolationLevers.ApplyFromJson(
+            """{"EnableMinimalForeignInitialProfile": true, "ScopeGlobalVehicleGhost": true}""", out var error),
+            error);
+
+        var overrides = WireIsolationLevers.GetLeversDifferingFromDefaults(defaults);
+        CollectionAssert.AreEquivalent(
+            new[] { "EnableMinimalForeignInitialProfile=true", "ScopeGlobalVehicleGhost=true" },
+            overrides.ToArray(),
+            "exactly the levers the file changed must be reported");
+    }
+
+    [TestMethod]
+    public void GetLeversDifferingFromDefaults_NullDefaults_IsEmpty()
+    {
+        Assert.AreEqual(0, WireIsolationLevers.GetLeversDifferingFromDefaults(null).Count);
+    }
+
+    [TestMethod]
+    public void CaptureDefaults_DoesNotDisturbCurrentLevers()
+    {
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        WireDiag.Enabled = true;
+
+        var defaults = WireIsolationLevers.CaptureDefaults();
+
+        Assert.IsTrue(GhostVehicle.EnableMinimalForeignInitialProfile, "live values must be restored");
+        Assert.IsTrue(WireDiag.Enabled, "live values must be restored");
+        Assert.IsFalse(defaults["EnableMinimalForeignInitialProfile"], "captured value is the compiled default");
+        Assert.IsTrue(defaults["EnableMinimalForeignHealthBlock"], "SS-38 compiled default");
     }
 
     [TestMethod]

@@ -70,6 +70,7 @@ public static class WireIsolationLevers
     public static void ApplyFromEnvironmentAndConfigFiles(string contentRoot = null)
     {
         ResetToDefaults();
+        var defaults = Snapshot().ToDictionary(s => s.Name, s => s.Value);
 
         var file = ResolveConfigPath(contentRoot);
         if (file != null && File.Exists(file))
@@ -87,6 +88,13 @@ public static class WireIsolationLevers
                 Logger.WriteException(LogType.Error, $"WireIsolationLevers: error reading {file}", ex);
             }
         }
+        else
+        {
+            // SS-50: silence here used to be indistinguishable from "loaded and everything matched".
+            Logger.WriteLog(LogType.Network,
+                "WireIsolationLevers: no levers file found (looked for {0}); using compiled defaults",
+                DefaultConfigFileName);
+        }
 
         ApplyFromEnvironmentVariables();
         // Standalone env aliases (same tokens as lever DIGs when set).
@@ -94,15 +102,53 @@ public static class WireIsolationLevers
         GhostObjectDiag.TryEnableFromEnvironment();
         Logger.WriteLog(LogType.Network, "WireIsolationLevers active:\n" + FormatStatus());
 
+        // SS-50: a levers file silently rewrites wire behaviour. Say exactly what it changed,
+        // at a level an operator will actually see — a file that fails to parse (or is picked up
+        // from an unexpected working directory) otherwise looks identical to one that loaded.
+        var overrides = GetLeversDifferingFromDefaults(defaults);
+        if (overrides.Count > 0)
+        {
+            Logger.WriteLog(LogType.Warning,
+                "WireIsolationLevers: {0} lever(s) differ from compiled defaults — {1}",
+                overrides.Count,
+                string.Join(", ", overrides));
+        }
+
         foreach (var warning in GetNpcCombatLeverWarnings())
             Logger.WriteLog(LogType.Error, "WireIsolationLevers: " + warning);
     }
 
     /// <summary>
+    /// SS-50: levers whose current value differs from the compiled defaults, formatted
+    /// <c>Name=value</c>. Exposed so the startup diff is testable without a log sink.
+    /// </summary>
+    public static IReadOnlyList<string> GetLeversDifferingFromDefaults(IReadOnlyDictionary<string, bool> defaults)
+    {
+        if (defaults == null)
+            return Array.Empty<string>();
+
+        return Snapshot()
+            .Where(s => defaults.TryGetValue(s.Name, out var d) && d != s.Value)
+            .Select(s => $"{s.Name}={(s.Value ? "true" : "false")}")
+            .ToList();
+    }
+
+    /// <summary>Compiled-default snapshot, for comparison against a loaded configuration.</summary>
+    public static IReadOnlyDictionary<string, bool> CaptureDefaults()
+    {
+        var current = Snapshot().ToDictionary(s => s.Name, s => s.Value);
+        ResetToDefaults();
+        var defaults = Snapshot().ToDictionary(s => s.Name, s => s.Value);
+        foreach (var entry in current)
+            TrySet(entry.Key, entry.Value, out _);
+        return defaults;
+    }
+
+    /// <summary>
     /// Warn when the minimal-foreign profile is on but health/owner admissions that NPC
-    /// target-frame HP needs are off. Incomplete lever JSON files (e.g. old Sector copies that
-    /// omit <c>EnableMinimalForeignHealthBlock</c>) leave code defaults after
-    /// <see cref="ResetToDefaults"/> and silently strip NPC Cur/Max.
+    /// target-frame HP needs are off. SS-38 flipped the health default to true, so an omitted key
+    /// no longer strips NPC Cur/Max — this now fires only when a levers file (or env var)
+    /// <b>explicitly</b> disables health, i.e. an emergency rollback that was left switched on.
     /// </summary>
     public static IReadOnlyList<string> GetNpcCombatLeverWarnings()
     {
