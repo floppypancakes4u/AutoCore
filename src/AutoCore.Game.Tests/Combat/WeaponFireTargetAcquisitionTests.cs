@@ -412,6 +412,60 @@ public class WeaponFireTargetAcquisitionTests
         Assert.AreEqual(73, hits[0].Coid);
     }
 
+    // --- SS-36: unified hostility rule (CombatEligibility.IsFactionEligible) ---
+
+    /// <summary>
+    /// SS-36 splash tripwire (RC2): the splash call site passed chassis Faction, which is
+    /// permanently −1 for player vehicles. Under the old raw inequality −1 matched no live
+    /// entity, so EVERY candidate in the radius was eligible — teammates included. A negative
+    /// shooter faction must fail closed and acquire nothing.
+    /// </summary>
+    [TestMethod]
+    public void AcquireExplosion_NegativeShooterFaction_AcquiresNothing()
+    {
+        var impact = new Vector3(0, 0, 10);
+        var teammate = Cand(2, 1, 10, faction: 0);
+        var enemy = Cand(3, 2, 10, faction: 2);
+        var hits = WeaponFireTargetAcquisition.AcquireExplosion(
+            impact, explosionRadius: 8f, shooterFaction: -1, shooterCoid: 99, ownerCoid: null,
+            new[] { teammate, enemy }, new HashSet<(long, bool)>());
+
+        Assert.AreEqual(0, hits.Count,
+            "a -1 (chassis/unset) shooter faction must acquire nothing, not everyone");
+    }
+
+    [TestMethod]
+    public void Acquire_NeutralFactionVictim_Excluded()
+    {
+        // Neutral (−100) town/quest NPCs: ram and the client's FindTargetToAttack already skip
+        // them; guns must agree (SS-36 unification).
+        var aim = TacArcGeometry.AimFromYaw(0f);
+        var neutral = Cand(80, 0, 10, faction: -100);
+        var hits = WeaponFireTargetAcquisition.Acquire(
+            new Vector3(0, 0, 0), aim, shooterFaction: 1, shooterCoid: 1, ownerCoid: null,
+            NarrowWeapon(),
+            new[] { neutral },
+            null, false);
+
+        Assert.AreEqual(0, hits.Count);
+    }
+
+    /// <summary>Regression pin: unset-faction (−1) live NPCs exist and must stay shootable.</summary>
+    [TestMethod]
+    public void Acquire_UnsetFactionVictim_StillEligible()
+    {
+        var aim = TacArcGeometry.AimFromYaw(0f);
+        var unset = Cand(81, 0, 10, faction: -1);
+        var hits = WeaponFireTargetAcquisition.Acquire(
+            new Vector3(0, 0, 0), aim, shooterFaction: 1, shooterCoid: 1, ownerCoid: null,
+            NarrowWeapon(),
+            new[] { unset },
+            null, false);
+
+        Assert.AreEqual(1, hits.Count);
+        Assert.AreEqual(81, hits[0].Coid);
+    }
+
     // --- SS-31: post-wipe COID collisions (global player vehicle vs authored local map object) ---
 
     [TestMethod]
