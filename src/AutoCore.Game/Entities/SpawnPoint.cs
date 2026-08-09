@@ -401,13 +401,35 @@ public class SpawnPoint : ClonedObjectBase
         npc.SetCoid(objectId.Coid, objectId.Global);
     }
 
+    /// <summary>Retail max level — docs/XP.md (intXPLevel through 80; tContinentObject intMaxLevel=80).</summary>
+    internal const int RetailMaxNpcLevel = 80;
+
+    // Warn-once per distinct authored (baseLevel, offset) pair — bounded by data variety.
+    private static readonly HashSet<(int BaseLevel, int Offset)> _warnedSpawnLevelClamps = new();
+
     /// <summary>
-    /// Clamps spawn level into the valid byte range (1..255).
+    /// Clamps spawn level to retail's [1, 80] (SS-40). fam <c>LevelOffset</c> is SIGNED —
+    /// reading it unsigned turned retail "−1" into +255: forced 0.95 hit chance vs players,
+    /// a flat DamageBonusPerLevel×255 on every shot, and 3.75× crits.
     /// </summary>
     internal static byte CalculateSpawnLevel(int baseLevel, int levelOffset)
     {
         var calculatedLevel = baseLevel + levelOffset;
-        return (byte)Math.Max(1, Math.Min(255, calculatedLevel));
+        var clamped = Math.Clamp(calculatedLevel, 1, RetailMaxNpcLevel);
+        if (calculatedLevel > RetailMaxNpcLevel)
+        {
+            bool firstTime;
+            lock (_warnedSpawnLevelClamps)
+                firstTime = _warnedSpawnLevelClamps.Add((baseLevel, levelOffset));
+            if (firstTime)
+            {
+                Logger.WriteLog(LogType.Warning,
+                    "SpawnLevel clamp (SS-40): baseLevel={0} offset={1} -> {2} (retail max {3}) — check authored spawn data",
+                    baseLevel, levelOffset, clamped, RetailMaxNpcLevel);
+            }
+        }
+
+        return (byte)clamped;
     }
 
     /// <summary>

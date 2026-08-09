@@ -80,7 +80,8 @@ public class SpawnPointMapNpcTests
         Assert.AreEqual(8, SpawnPoint.CalculateSpawnLevel(5, 3));
         Assert.AreEqual(1, SpawnPoint.CalculateSpawnLevel(0, 0));
         Assert.AreEqual(1, SpawnPoint.CalculateSpawnLevel(1, -10));
-        Assert.AreEqual(255, SpawnPoint.CalculateSpawnLevel(200, 100));
+        Assert.AreEqual(80, SpawnPoint.CalculateSpawnLevel(200, 100),
+            "SS-40: spawn levels clamp to retail's max 80, not the byte range");
     }
 
     [TestMethod]

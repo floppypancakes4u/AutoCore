@@ -45,7 +45,7 @@ public class EntityTemplateReadTests
                 writer.Write((byte)3); // Upper
                 writer.Write((short)0); // pad
                 writer.Write(i == 0 ? 500 : -1); // SpawnType
-                writer.Write((byte)2); // LevelOffset
+                writer.Write(unchecked((byte)-1)); // LevelOffset — signed on the wire (SS-40)
                 writer.Write(i == 0); // IsTemplate
                 writer.Write((short)0); // pad
             }
@@ -79,6 +79,8 @@ public class EntityTemplateReadTests
         Assert.IsTrue(template.Spawns[0].IsTemplate);
         Assert.AreEqual((byte)1, template.Spawns[0].LowerNumberOfSpawns);
         Assert.AreEqual((byte)3, template.Spawns[0].UpperNumberOfSpawns);
+        Assert.AreEqual((sbyte)-1, template.Spawns[0].LevelOffset,
+            "SS-40: fam LevelOffset is signed — 0xFF is retail -1, not +255 (level-255 NPCs)");
         Assert.AreEqual(9, template.Loot);
         Assert.AreEqual(0.75f, template.LootPercent);
         Assert.AreEqual(700L, template.MapPathCoid);

@@ -65,6 +65,47 @@ public class SpawnPointTemplateSpawnTests
         Assert.AreEqual(0, SpawnPoint.ResolveDriverCbid(0, 0));
     }
 
+    // --- SS-40: fam LevelOffset is signed; NPC levels clamp to retail 1..80 ---
+
+    /// <summary>
+    /// SS-40 tripwire: LevelOffset was read as an UNSIGNED byte, so retail's authored −1
+    /// became +255 — level-255 drivers forced 0.95 hit chance vs players, added a flat
+    /// DamageBonusPerLevel×255 to every shot, and crit at 3.75× (live log: level=255 spawns).
+    /// </summary>
+    [TestMethod]
+    public void CalculateSpawnLevel_ClampsToRetailMax80()
+    {
+        Assert.AreEqual((byte)80, SpawnPoint.CalculateSpawnLevel(60, 127),
+            "levels above retail's max 80 (docs/XP.md) must clamp");
+        Assert.AreEqual((byte)1, SpawnPoint.CalculateSpawnLevel(1, -5), "floor stays 1");
+        Assert.AreEqual((byte)4, SpawnPoint.CalculateSpawnLevel(5, -1), "signed offsets level DOWN");
+    }
+
+    /// <summary>End-to-end pin: a −1 offset produces baseLevel−1, not 255.</summary>
+    [TestMethod]
+    public void Spawn_Creature_NegativeLevelOffset_LevelsDown()
+    {
+        var map = CreateTestMap(9120);
+        const int creatureCbid = 640_001;
+        AssetManagerTestHelper.RegisterCreatureCloneBase(creatureCbid, baseLevel: 5);
+
+        var template = new SpawnPointTemplate { COID = 14_540 };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList
+        {
+            SpawnType = creatureCbid,
+            IsTemplate = false,
+            LevelOffset = -1,
+        });
+        var spawnPoint = new SpawnPoint(template);
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var creature = map.Objects.Values.OfType<Creature>().Single(c => c is not Character);
+        Assert.AreEqual((byte)4, creature.Level, "baseLevel 5 with signed offset -1 must spawn at 4");
+    }
+
     [TestMethod]
     public void Spawn_TemplateMissing_ReturnsFalse()
     {
