@@ -142,6 +142,86 @@ public class NpcFleeAndHelpTests
         Assert.AreEqual(95f, npc.Position.X, 0.01f, "still running home while below the re-engage threshold");
     }
 
+    // ----- SS-44: percent-authored bands + engage-commit cap --------------------------------
+
+    /// <summary>
+    /// SS-44 tripwire: AIID-23-shaped row ("Flee, NoFlee 50", val2=50, val3=1). Consumed raw,
+    /// threshold 50 ≥ HpRatio 1.0 → the NPC fled at FULL HP on its first Combat tick and never
+    /// fired a shot. Percent normalization + the 0.99 clamp keep an undamaged NPC fighting.
+    /// </summary>
+    [TestMethod]
+    public void FullHpNpc_PercentAuthoredFleeBand_DoesNotFlee_AndFires()
+    {
+        var map = CreateFieldMap();
+        var npc = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: 3, visionRange: 60f);
+        EquipFrontWeapon(npc, rangeMax: 50f);
+        npc.CreateGhost();
+        var vals = npc.NpcAi.Profile.Vals;
+        vals[0] = 5000f; // val1 timer
+        vals[1] = 50f;   // val2 — percent-authored "NoFlee 50"
+        vals[2] = 1f;    // val3 — authored 1.0
+        vals[3] = 1f;    // val4
+        SetHp(npc, maxHp: 100, currentHp: 100);
+
+        var (player, _) = PlacePlayerVehicle(map, new Vector3(5f, 0f, 0f), faction: 0);
+        player.ApplyTemplateBaseHp(100_000);
+        npc.SetTargetObject(player);
+        npc.NpcAi.CombatState = HBAICombatState.Combat;
+
+        NpcCombatAi.Tick(map, npc, nowMs: 100_000, dt: 0.1f);
+
+        Assert.AreEqual(HBAICombatState.Combat, npc.NpcAi.CombatState,
+            "a full-HP NPC must never flee, whatever the authored band convention");
+        Assert.AreEqual(0L, npc.NpcAi.FleeUntilMs);
+        Assert.AreEqual((byte)1, npc.Firing, "the NPC must actually open fire");
+    }
+
+    /// <summary>SS-44: percent val4 (AIID 48 = 40) re-extended the flee latch forever.</summary>
+    [TestMethod]
+    public void Reengage_PercentVal4_EventuallyReengages()
+    {
+        var map = CreateFieldMap();
+        var npc = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: 3, visionRange: 60f);
+        EquipFrontWeapon(npc, rangeMax: 50f);
+        SetFleeVals(npc, timerMs: 5000f, fleeHp: 0.3f, reengage: 40f); // percent-authored 40%
+        SetHp(npc, maxHp: 100, currentHp: 50); // ratio 0.5 >= 40% → must re-engage
+
+        var (player, _) = PlacePlayerVehicle(map, new Vector3(5f, 0f, 0f), faction: 0);
+        npc.SetTargetObject(player);
+        npc.NpcAi.CombatState = HBAICombatState.Engage;
+        npc.NpcAi.FleeUntilMs = 99_999L; // expired
+
+        NpcCombatAi.Tick(map, npc, nowMs: 100_000, dt: 0.1f);
+
+        Assert.AreEqual(0L, npc.NpcAi.FleeUntilMs, "recovered above the normalized 40% must clear the latch");
+        Assert.AreEqual(HBAICombatState.Combat, npc.NpcAi.CombatState);
+    }
+
+    /// <summary>
+    /// SS-44: val1 doubles as engage-commit delay and flee duration. AIID 38 authors 3,000,000 ms
+    /// ("Never Stop" flee ≈ forever) — as a time-to-first-shot that is 50 minutes of an NPC
+    /// aiming without firing. The engage-commit use caps at 15 s; the flee latch keeps raw val1.
+    /// </summary>
+    [TestMethod]
+    public void EngageCommit_PathologicalTimer_CapsAt15Seconds()
+    {
+        var map = CreateFieldMap();
+        var npc = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: 3, visionRange: 60f);
+        EquipFrontWeapon(npc, rangeMax: 50f);
+        SetFleeVals(npc, timerMs: 3_000_000f, fleeHp: 0.25f, reengage: 0f);
+        SetHp(npc, maxHp: 100, currentHp: 100);
+
+        var (player, _) = PlacePlayerVehicle(map, new Vector3(5f, 0f, 0f), faction: 0);
+        npc.SetTargetObject(player);
+        npc.NpcAi.CombatState = HBAICombatState.Engage;
+        npc.NpcAi.EngageStartedMs = 100_000L - 16_000L; // 16 s into Engage
+
+        NpcCombatAi.Tick(map, npc, nowMs: 100_000, dt: 0.1f);
+
+        Assert.AreEqual(HBAICombatState.Combat, npc.NpcAi.CombatState,
+            "engage must commit to Combat within the 15 s cap, not the authored 50 minutes");
+    }
+
     // ----- call-for-help ------------------------------------------------------------------
 
     [TestMethod]

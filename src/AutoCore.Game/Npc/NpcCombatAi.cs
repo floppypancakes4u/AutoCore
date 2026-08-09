@@ -38,6 +38,12 @@ public static class NpcCombatAi
     /// <summary>Engage closes to this fraction of the weapon's max range before opening fire.</summary>
     private const float EngageCloseFactor = 0.8f;
 
+    /// <summary>
+    /// SS-44: cap on val1 when used as the Engage→Combat commit delay (authored non-pathological
+    /// range is 3–30 s; AIID 38's 3,000,000 ms is a flee duration, not a time-to-first-shot).
+    /// </summary>
+    internal const float EngageCommitCapMs = 15_000f;
+
     /// <summary>Distance (world units) at which a returning NPC is considered "home" and resumes patrol.</summary>
     private const float ResumePathRadius = 5f;
 
@@ -150,7 +156,10 @@ public static class NpcCombatAi
         CombatMove(entity, npcAi, target.Position, atRange: closed, dt);
 
         // After the profile's flee/engage timer, commit to Combat (where flee evaluation runs).
-        var timerMs = npcAi.Profile?.ValFleeOrEngageTimerMs ?? 0f;
+        // SS-44: val1 doubles as flee DURATION (AIID 38 authors 3,000,000 ms = "Never Stop"
+        // flee), which is absurd as a time-to-first-shot — cap only the engage-commit use here;
+        // the flee latch keeps raw val1.
+        var timerMs = Math.Min(npcAi.Profile?.ValFleeOrEngageTimerMs ?? 0f, EngageCommitCapMs);
         if (nowMs - npcAi.EngageStartedMs >= (long)timerMs)
             SetCombatState(entity, HBAICombatState.Combat);
     }
