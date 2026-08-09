@@ -17,6 +17,12 @@ public sealed class InventoryPersistence : IInventoryPersistence
 {
     public static InventoryPersistence Instance { get; } = new();
 
+    /// <summary>Context factory (tests inject InMemory).</summary>
+    internal static Func<CharContext> CreateContext { get; set; } = static () => new CharContext();
+
+    /// <summary>Restore the default context factory after tests.</summary>
+    internal static void ResetForTests() => CreateContext = static () => new CharContext();
+
     private const byte InventoryTypeCargo = 1;
     private const byte InventoryTypeLocker = 3;
 
@@ -28,7 +34,7 @@ public sealed class InventoryPersistence : IInventoryPersistence
 
     private static IReadOnlyList<CharacterInventoryItem> LoadByInventoryType(long characterCoid, byte inventoryType)
     {
-        using var context = new CharContext();
+        using var context = CreateContext();
         // Ensure optional columns exist before materializing (older DBs).
         context.EnsureInventorySchema();
         return context.CharacterInventories
@@ -63,7 +69,7 @@ public sealed class InventoryPersistence : IInventoryPersistence
         if (item == null)
             return;
 
-        using var context = new CharContext();
+        using var context = CreateContext();
         context.EnsureInventorySchema();
         var row = context.CharacterInventories.FirstOrDefault(i => i.ItemCoid == item.Coid);
         if (row == null)
@@ -112,7 +118,7 @@ public sealed class InventoryPersistence : IInventoryPersistence
         if (item == null)
             return;
 
-        using var context = new CharContext();
+        using var context = CreateContext();
         context.EnsureInventorySchema();
         var row = context.CharacterInventories.FirstOrDefault(i => i.ItemCoid == item.Coid);
         if (row == null)
@@ -140,7 +146,7 @@ public sealed class InventoryPersistence : IInventoryPersistence
         byte inventoryType,
         string operation)
     {
-        using var context = new CharContext();
+        using var context = CreateContext();
         context.EnsureInventorySchema();
         var rows = context.CharacterInventories
             .Where(i => i.CharacterCoid == characterCoid
@@ -156,7 +162,7 @@ public sealed class InventoryPersistence : IInventoryPersistence
 
     public void ClearCargo(long characterCoid)
     {
-        using var context = new CharContext();
+        using var context = CreateContext();
         context.EnsureInventorySchema();
         var rows = context.CharacterInventories
             .Where(i => i.CharacterCoid == characterCoid && i.InventoryType == InventoryTypeCargo)
@@ -170,14 +176,14 @@ public sealed class InventoryPersistence : IInventoryPersistence
 
     public void EnsureSimpleObject(long itemCoid, byte type, int cbid, int faction = 0, int teamFaction = 0)
     {
-        using var context = new CharContext();
+        using var context = CreateContext();
         EnsureSimpleObjectInternal(context, itemCoid, type, cbid, faction, teamFaction);
         Save(context, $"EnsureSimpleObject item={itemCoid}");
     }
 
     public void SaveVehicleEquipment(long vehicleCoid, VehicleEquipmentSnapshot snapshot)
     {
-        using var context = new CharContext();
+        using var context = CreateContext();
         var vehicle = context.Vehicles.FirstOrDefault(v => v.Coid == vehicleCoid);
         if (vehicle == null)
         {
@@ -199,7 +205,7 @@ public sealed class InventoryPersistence : IInventoryPersistence
 
     public void SaveCharacterCargoCapacity(long characterCoid, int width, int pageCount)
     {
-        using var context = new CharContext();
+        using var context = CreateContext();
         var character = context.Characters.FirstOrDefault(c => c.Coid == characterCoid);
         if (character == null)
         {
@@ -214,14 +220,14 @@ public sealed class InventoryPersistence : IInventoryPersistence
 
     public long LoadCredits(long characterCoid)
     {
-        using var context = new CharContext();
+        using var context = CreateContext();
         var character = context.Characters.AsNoTracking().FirstOrDefault(c => c.Coid == characterCoid);
         return character?.Credits ?? 0L;
     }
 
     public void SaveCredits(long characterCoid, long credits)
     {
-        using var context = new CharContext();
+        using var context = CreateContext();
         var character = context.Characters.FirstOrDefault(c => c.Coid == characterCoid);
         if (character == null)
         {
@@ -245,6 +251,18 @@ public sealed class InventoryPersistence : IInventoryPersistence
         var existing = context.SimpleObjects.FirstOrDefault(so => so.Coid == itemCoid);
         if (existing != null)
         {
+            // SS-31: never overwrite another object category's identity row. A character or
+            // vehicle row at this coid means an allocator minted a colliding id; overwriting
+            // corrupts that object (client AVs at character select). Refuse loudly instead.
+            if (existing.Type != type
+                && (existing.Type == (byte)CloneBaseObjectType.Character
+                    || existing.Type == (byte)CloneBaseObjectType.Vehicle))
+            {
+                throw new InvalidOperationException(
+                    $"EnsureSimpleObject: coid {itemCoid} already belongs to object type {existing.Type} " +
+                    $"(cbid {existing.CBID}); refusing to overwrite with type {type} (cbid {cbid}) — SS-31 coid collision.");
+            }
+
             existing.Type = type;
             existing.CBID = cbid;
             if (faction != 0)
