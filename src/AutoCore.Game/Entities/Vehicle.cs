@@ -520,7 +520,14 @@ public class Vehicle : SimpleObject
     // PendingAmount and fold into the next shipped packet — discarding them hid up to half the
     // real damage at 20 Hz fire ("health drains out of nowhere"). ConcurrentDictionary because
     // this is mutated from both the sector tick and packet-handler paths.
-    private readonly record struct CombatThrottleEntry(long LastSentMs, int PendingAmount);
+    // SS-47: PendingSinceMs ages the accumulator independently of the send stamp. Pending is only
+    // drained by a later packet for the same pair, so without an expiry a suppressed splash hit
+    // survived a disconnect / map change and folded onto a fresh hit minutes later (COIDs are
+    // stable across a relog), displaying more damage than was applied.
+    private readonly record struct CombatThrottleEntry(long LastSentMs, int PendingAmount, long PendingSinceMs);
+
+    /// <summary>How long a suppressed amount may wait for a packet to ride out on (SS-47).</summary>
+    private static long CombatPendingExpiryMs(int windowMs) => Math.Max(windowMs, 1) * 10L;
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<
         (long AttackerCoid, bool AttackerGlobal, long VictimCoid, bool VictimGlobal), CombatThrottleEntry>
@@ -614,6 +621,7 @@ public class Vehicle : SimpleObject
                 {
                     // SS-39: suppressed, not discarded — accumulate each entry's amount so the
                     // next shipped packet for the pair displays the true total.
+                    var expiryMs = CombatPendingExpiryMs(windowMs);
                     foreach (var hit in packet.Entries)
                     {
                         if (hit.Target == null)
@@ -622,13 +630,23 @@ public class Vehicle : SimpleObject
                         var amount = (int)hit.Amount;
                         _lastCombatMsgByAttackerVictimMs.AddOrUpdate(
                             pair,
-                            _ => new CombatThrottleEntry(now, amount),
-                            (_, entry) => entry with
+                            _ => new CombatThrottleEntry(now, amount, now),
+                            (_, entry) =>
                             {
-                                PendingAmount = Math.Clamp(
-                                    entry.PendingAmount + amount,
-                                    DamagePacket.MinDisplayAmount,
-                                    DamagePacket.MaxDisplayAmount),
+                                // SS-47: a pending amount older than the expiry belongs to a
+                                // finished fight — start a fresh accumulation instead of adding
+                                // to it, so nothing carries across a disconnect or map change.
+                                var stale = entry.PendingAmount != 0
+                                    && now - entry.PendingSinceMs >= expiryMs;
+                                var carried = stale ? 0 : entry.PendingAmount;
+                                return entry with
+                                {
+                                    PendingAmount = Math.Clamp(
+                                        carried + amount,
+                                        DamagePacket.MinDisplayAmount,
+                                        DamagePacket.MaxDisplayAmount),
+                                    PendingSinceMs = carried == 0 ? now : entry.PendingSinceMs,
+                                };
                             });
                     }
 
@@ -636,22 +654,39 @@ public class Vehicle : SimpleObject
                 }
 
                 // Shipping: fold any pending suppressed damage into the matching entries, then
-                // stamp every pair's window and zero its pending.
+                // stamp every pair's window and zero its pending. SS-47: the fold is atomic — the
+                // read-modify-write below used to be able to lose a concurrent accumulation.
+                var foldExpiryMs = CombatPendingExpiryMs(windowMs);
                 foreach (var hit in packet.Entries)
                 {
                     if (hit.Target == null)
                         continue;
                     var pair = (source.Coid, source.Global, hit.Target.Coid, hit.Target.Global);
-                    if (_lastCombatMsgByAttackerVictimMs.TryGetValue(pair, out var entry)
-                        && entry.PendingAmount != 0)
+                    var folded = 0;
+                    _lastCombatMsgByAttackerVictimMs.AddOrUpdate(
+                        pair,
+                        _ => new CombatThrottleEntry(now, 0, 0),
+                        (_, entry) =>
+                        {
+                            if (entry.PendingAmount != 0 && now - entry.PendingSinceMs < foldExpiryMs)
+                                folded = entry.PendingAmount;
+                            else if (entry.PendingAmount != 0)
+                            {
+                                Logger.WriteLog(LogType.Debug,
+                                    "Combat floater: dropped {0} stale pending damage for attacker={1} victim={2} (SS-47)",
+                                    entry.PendingAmount, pair.Item1, pair.Item3);
+                            }
+
+                            return new CombatThrottleEntry(now, 0, 0);
+                        });
+
+                    if (folded != 0)
                     {
                         hit.Amount = (short)Math.Clamp(
-                            hit.Amount + entry.PendingAmount,
+                            hit.Amount + folded,
                             DamagePacket.MinDisplayAmount,
                             DamagePacket.MaxDisplayAmount);
                     }
-
-                    _lastCombatMsgByAttackerVictimMs[pair] = new CombatThrottleEntry(now, 0);
                 }
 
                 // Bounded state: prune stale pairs so a long-lived sector cannot grow unboundedly.
@@ -659,8 +694,20 @@ public class Vehicle : SimpleObject
                 {
                     foreach (var kvp in _lastCombatMsgByAttackerVictimMs)
                     {
-                        if (now - kvp.Value.LastSentMs >= windowMs * 10L)
-                            _lastCombatMsgByAttackerVictimMs.TryRemove(kvp.Key, out _);
+                        if (now - kvp.Value.LastSentMs < CombatPendingExpiryMs(windowMs))
+                            continue;
+
+                        // SS-47: evicting a pair that still owes a floater loses that damage from
+                        // the display. It is already past its expiry, but say so rather than
+                        // silently reintroducing "health drains out of nowhere".
+                        if (kvp.Value.PendingAmount != 0)
+                        {
+                            Logger.WriteLog(LogType.Debug,
+                                "Combat floater: pruned {0} unsent pending damage for attacker={1} victim={2} (SS-47)",
+                                kvp.Value.PendingAmount, kvp.Key.AttackerCoid, kvp.Key.VictimCoid);
+                        }
+
+                        _lastCombatMsgByAttackerVictimMs.TryRemove(kvp.Key, out _);
                     }
                 }
             }

@@ -180,6 +180,49 @@ public class DamagePacketThrottleTests
             "a volley containing a killing blow must never be throttled away");
     }
 
+    /// <summary>
+    /// SS-47 tripwire: pending damage was drained only by a later packet for the SAME pair, with
+    /// no expiry. A splash hit suppressed inside the window, then a disconnect / map change /
+    /// break in contact, left the amount parked forever — and the next time that same attacker
+    /// and victim met (COIDs are stable across a relog) it folded a ten-minute-old number onto a
+    /// fresh hit. Displayed damage must never exceed what was just applied.
+    /// </summary>
+    [TestMethod]
+    public void StalePending_FromAnEarlierFight_IsNotFoldedIntoALaterOne()
+    {
+        var clock = 1_000L;
+        Vehicle.CombatThrottleClock = () => clock;
+        var victim = Victim(96220);
+
+        SendAmount(96101, 5, victim);    // ships, stamps the window
+        SendAmount(96101, 40, victim);   // suppressed → 40 pending
+        clock += ServerConfig.DamagePacketThrottleMs * 100; // contact broken; much later
+
+        SendAmount(96101, 5, victim);    // a fresh fight
+
+        var last = _sent.OfType<DamagePacket>().Last().Entries.Single();
+        Assert.AreEqual(5, (int)last.Amount,
+            "a stale pending amount must expire, not inflate an unrelated later hit");
+    }
+
+    /// <summary>SS-47: pending that is still within its window must fold normally (boundary pin).</summary>
+    [TestMethod]
+    public void RecentPending_StillFolds()
+    {
+        var clock = 1_000L;
+        Vehicle.CombatThrottleClock = () => clock;
+        var victim = Victim(96221);
+
+        SendAmount(96101, 5, victim);
+        SendAmount(96101, 40, victim);   // suppressed → pending
+        clock += ServerConfig.DamagePacketThrottleMs + 10; // just past the window, well inside expiry
+
+        SendAmount(96101, 5, victim);
+
+        var last = _sent.OfType<DamagePacket>().Last().Entries.Single();
+        Assert.AreEqual(45, (int)last.Amount, "pending inside the expiry horizon must still fold");
+    }
+
     [TestMethod]
     public void FoldedAmount_ClampsToDisplayMax()
     {
