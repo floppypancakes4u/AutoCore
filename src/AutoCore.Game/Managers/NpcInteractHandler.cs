@@ -2453,7 +2453,11 @@ public static class NpcInteractHandler
         return false;
     }
 
-    private static bool TryGetWorldPosition(SectorMap map, long coid, out Vector3 position)
+    /// <summary>
+    /// Resolve a mission pad / template / VisualWaypoint COID to a world position on <paramref name="map"/>.
+    /// Shared by AutoPatrol range checks and GM <c>/tptowaypoint</c>.
+    /// </summary>
+    internal static bool TryGetWorldPosition(SectorMap map, long coid, out Vector3 position)
     {
         if (map == null || coid <= 0)
         {

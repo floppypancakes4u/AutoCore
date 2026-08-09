@@ -108,7 +108,13 @@ public class MissionObjective
     }
 
     /// <summary>Unit-test factory.</summary>
-    internal static MissionObjective CreateForTests(int objectiveId, byte sequence, int questId, int completeCount = 1)
+    internal static MissionObjective CreateForTests(
+        int objectiveId,
+        byte sequence,
+        int questId,
+        int completeCount = 1,
+        int worldPosition = 0,
+        int continentObject = 0)
     {
         return new MissionObjective
         {
@@ -119,6 +125,8 @@ public class MissionObjective
             ObjectiveName = $"obj_{objectiveId}",
             MapName = string.Empty,
             Requirements = new List<ObjectiveRequirement>(),
+            WorldPosition = worldPosition,
+            ContinentObject = continentObject,
         };
     }
 }

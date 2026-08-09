@@ -4,9 +4,13 @@ using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Map;
+using AutoCore.Game.Mission;
+using AutoCore.Game.Mission.Requirements;
 using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Skills;
+using AutoCore.Game.Structures;
 
 namespace AutoCore.Game.Chat;
 
@@ -126,6 +130,11 @@ public sealed class ChatCommandService
             case "/completeMission":
             case "/completemission":
                 return CompleteMission(character, parts);
+
+            case "/tptowaypoint":
+            case "/tpToWaypoint":
+            case "/tpwaypoint":
+                return TpToWaypoint(character);
 
             case "/setHP":
             case "/sethp":
@@ -602,6 +611,259 @@ public sealed class ChatCommandService
         return new ChatCommandExecutionResult(
             true,
             $"Completed mission {missionId} (removed from active + client sync).");
+    }
+
+    /// <summary>
+    /// GM: teleport the caller to the HUD/GPS primary waypoint for their active mission
+    /// objective (map <see cref="VisualWaypoint"/>), with patrol-pad / WorldPosition / deliver
+    /// fallbacks. Client snap is <see cref="TeleportCharacterPacket"/> (0x8058 →
+    /// <c>CVOGReaction_TeleportTarget</c>); owner ghost pose is not motion authority.
+    /// Usage: <c>/tptowaypoint</c> (aliases: <c>/tpToWaypoint</c>, <c>/tpwaypoint</c>).
+    /// </summary>
+    private static ChatCommandExecutionResult TpToWaypoint(Character character)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        var vehicle = character.CurrentVehicle;
+        if (vehicle == null)
+            return new ChatCommandExecutionResult(true, "You are not in a vehicle!");
+
+        if (character.Map == null)
+            return new ChatCommandExecutionResult(true, "You are not in a map!");
+
+        if (character.CurrentQuests.Count == 0)
+            return new ChatCommandExecutionResult(true, "No active mission.");
+
+        // First active quest matches /showMissions ordering for "current".
+        var quest = character.CurrentQuests[0];
+        var mission = AssetManager.Instance.GetMission(quest.MissionId);
+        if (mission == null
+            || !mission.Objectives.TryGetValue(quest.ActiveObjectiveSequence, out var objective)
+            || objective == null)
+        {
+            return new ChatCommandExecutionResult(
+                true,
+                $"Active mission {quest.MissionId} has no objective at sequence {quest.ActiveObjectiveSequence}.");
+        }
+
+        if (!TryResolveMissionWaypoint(
+                character, quest, objective, out var targetCoid, out var position, out var source, out var detail))
+        {
+            return new ChatCommandExecutionResult(true, detail);
+        }
+
+        // Server pose (same discontinuous path as respawn / map transfer).
+        var rotation = vehicle.Rotation;
+        character.Position = position;
+        character.Rotation = rotation;
+        vehicle.ClearPhysicsInstance();
+        vehicle.SetPosition(position);
+        vehicle.Rotation = rotation;
+
+        // Living client snap: opcode 0x8058 TeleportCharacter → FUN_00808910 →
+        // CVOGReaction_TeleportTarget (same primitive as retail client /teleport).
+        // Ghost resync only flickers; SpecialEvent Respawn is death airlift only.
+        var teleport = new TeleportCharacterPacket { Position = position };
+
+        return new ChatCommandExecutionResult(
+            true,
+            $"Teleported to mission {quest.MissionId} GPS waypoint ({source} {targetCoid}) " +
+            $"({position.X:F1}, {position.Y:F1}, {position.Z:F1}).",
+            new BasePacket[] { teleport });
+    }
+
+    /// <summary>
+    /// Prefer map VisualWaypoint for the active objective (HUD/GPS marker), then next patrol pad,
+    /// objective WorldPosition COID, then a live deliver NPC.
+    /// </summary>
+    private static bool TryResolveMissionWaypoint(
+        Character character,
+        CharacterQuest quest,
+        MissionObjective objective,
+        out long targetCoid,
+        out Vector3 position,
+        out string source,
+        out string failureMessage)
+    {
+        targetCoid = 0;
+        position = default;
+        source = "waypoint";
+        failureMessage = "No mission waypoint on the active objective.";
+
+        var map = character.Map;
+        if (map == null)
+        {
+            failureMessage = "You are not in a map!";
+            return false;
+        }
+
+        // GPS / HUD primary marker: map VisualWaypoint rows tagged with this ObjectiveId.
+        if (TryResolveVisualWaypoint(map, objective.ObjectiveId, out targetCoid, out position))
+        {
+            source = "visual";
+            return true;
+        }
+
+        var patrol = objective.Requirements?.OfType<ObjectiveRequirementPatrol>().FirstOrDefault();
+        if (patrol != null && MissionPatrolProgress.CountListedTargets(patrol) > 0)
+        {
+            var progress = quest.ActiveObjectiveSequence < quest.ObjectiveProgress.Length
+                ? quest.ObjectiveProgress[quest.ActiveObjectiveSequence]
+                : 0;
+            targetCoid = ResolveNextPatrolTargetCoid(patrol, progress);
+            if (targetCoid > 0)
+            {
+                if (NpcInteractHandler.TryGetWorldPosition(map, targetCoid, out position))
+                {
+                    source = "patrol";
+                    return true;
+                }
+
+                failureMessage =
+                    $"Could not resolve world position for waypoint coid {targetCoid} on this map.";
+                return false;
+            }
+        }
+
+        if (objective.WorldPosition > 0)
+        {
+            targetCoid = objective.WorldPosition;
+            if (NpcInteractHandler.TryGetWorldPosition(map, targetCoid, out position))
+            {
+                source = "worldpos";
+                return true;
+            }
+
+            // WorldPosition may also be a VisualWaypoint id (not a live COID).
+            if (map.MapData?.VisualWaypoints != null
+                && map.MapData.VisualWaypoints.TryGetValue(objective.WorldPosition, out var byWorldPos))
+            {
+                targetCoid = byWorldPos.Id;
+                position = byWorldPos.Position;
+                source = "worldpos-visual";
+                return true;
+            }
+
+            failureMessage =
+                $"Could not resolve world position for waypoint coid {targetCoid} on this map.";
+            return false;
+        }
+
+        var deliver = objective.Requirements?.OfType<ObjectiveRequirementDeliver>()
+            .FirstOrDefault(d => d.NPCTargetCBID > 0);
+        if (deliver != null)
+        {
+            var cbid = deliver.NPCTargetCBID;
+            foreach (var obj in map.Objects.Values)
+            {
+                if (obj == null || obj.CBID != cbid)
+                    continue;
+
+                targetCoid = obj.ObjectId.Coid;
+                position = obj.Position;
+                source = "deliver";
+                return true;
+            }
+
+            failureMessage = $"Deliver NPC cbid {cbid} is not present on this map.";
+            return false;
+        }
+
+        failureMessage = "No mission waypoint on the active objective.";
+        return false;
+    }
+
+    /// <summary>
+    /// HUD GPS marker for an objective: first map VisualWaypoint whose Objectives list contains
+    /// <paramref name="objectiveId"/>. Position is the authored marker (what the compass points at).
+    /// </summary>
+    private static bool TryResolveVisualWaypoint(
+        SectorMap map,
+        int objectiveId,
+        out long targetCoid,
+        out Vector3 position)
+    {
+        targetCoid = 0;
+        position = default;
+        if (map?.MapData?.VisualWaypoints == null || objectiveId <= 0)
+            return false;
+
+        VisualWaypoint best = null;
+        foreach (var wp in map.MapData.VisualWaypoints.Values)
+        {
+            if (wp?.Objectives == null)
+                continue;
+
+            var hit = false;
+            for (var i = 0; i < wp.Objectives.Length; i++)
+            {
+                if (wp.Objectives[i] == objectiveId)
+                {
+                    hit = true;
+                    break;
+                }
+            }
+
+            if (!hit)
+                continue;
+
+            // Prefer lower id when multiple markers share an objective (stable primary).
+            if (best == null || wp.Id < best.Id)
+                best = wp;
+        }
+
+        if (best == null)
+            return false;
+
+        targetCoid = best.ObjectCoid > 0 ? best.ObjectCoid : best.Id;
+        position = best.Position;
+        return true;
+    }
+
+    /// <summary>
+    /// Next pad the player still needs for the active patrol (sequential index or first unvisited).
+    /// </summary>
+    private static long ResolveNextPatrolTargetCoid(ObjectiveRequirementPatrol patrol, int encodedProgress)
+    {
+        var targets = MissionPatrolProgress.CountListedTargets(patrol);
+        if (targets <= 0)
+            return 0;
+
+        var listed = new long[targets];
+        var n = 0;
+        var count = Math.Max(patrol.TargetCount, 0);
+        if (count == 0)
+            count = patrol.GenericTargets.Length;
+        for (var i = 0; i < count && i < patrol.GenericTargets.Length && n < targets; i++)
+        {
+            if (patrol.GenericTargets[i] > 0)
+                listed[n++] = patrol.GenericTargets[i];
+        }
+
+        if (n == 0)
+            return 0;
+
+        if (patrol.Sequential)
+        {
+            var progress = Math.Max(0, encodedProgress);
+            var needed = MissionPatrolProgress.NeededCount(patrol);
+            if (progress >= needed)
+                progress = Math.Max(0, needed - 1);
+            var index = progress % n;
+            return listed[index];
+        }
+
+        // Non-sequential: first pad not yet visited this lap.
+        var maskWidth = Math.Min(n, MissionPatrolProgress.MaxTrackableTargets);
+        var mask = encodedProgress & ((1 << maskWidth) - 1);
+        for (var i = 0; i < maskWidth; i++)
+        {
+            if ((mask & (1 << i)) == 0)
+                return listed[i];
+        }
+
+        return listed[0];
     }
 
     private static ChatCommandExecutionResult SetHP(Character character, string[] parts)

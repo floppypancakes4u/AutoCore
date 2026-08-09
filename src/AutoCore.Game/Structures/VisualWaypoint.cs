@@ -30,4 +30,26 @@ public class VisualWaypoint
 
         return wp;
     }
+
+    /// <summary>Unit-test factory for map GPS / HUD waypoint rows.</summary>
+    internal static VisualWaypoint CreateForTests(
+        int id,
+        Vector3 position,
+        int[] objectives = null,
+        long objectCoid = 0,
+        long reactionCoid = 0,
+        byte type = 0)
+    {
+        var objs = objectives ?? Array.Empty<int>();
+        return new VisualWaypoint
+        {
+            Id = id,
+            Type = type,
+            Position = position,
+            ObjectCoid = objectCoid,
+            ReactionCoid = reactionCoid,
+            ObjectiveCount = objs.Length,
+            Objectives = objs,
+        };
+    }
 }

@@ -292,6 +292,44 @@ public partial class TNLConnection
     }
 
     /// <summary>
+    /// Same-map owner teleport: tear down client ghosts and re-send local create packets so the
+    /// client re-materializes the vehicle/character at the server's current <see cref="ClonedObjectBase.Position"/>.
+    /// </summary>
+    /// <remarks>
+    /// Retail GM <c>/teleport</c> / <c>/waypoint</c> snap pose client-side via
+    /// <c>CVOGReaction_TeleportTarget</c> (no S2C). Owner vehicles ignore ghost
+    /// <see cref="GhostObject.PositionMask"/> as motion authority. SpecialEvent Respawn (0x20A9 type 0)
+    /// is the death INC airlift (<c>cptest.geo</c>) and cancels when setup fails — not a living GM snap.
+    /// Map-transfer style ResetGhosting + CreateVehicle/Character is the server-driven path that
+    /// actually places the local owner at create-packet pose.
+    /// </remarks>
+    public void ResyncLocalPlayerAtCurrentPose(Character character)
+    {
+        if (character == null)
+            throw new ArgumentNullException(nameof(character));
+        if (character.CurrentVehicle == null)
+            throw new InvalidOperationException("Cannot resync local player without a current vehicle.");
+
+        ResyncLocalPlayerAtCurrentPoseCallCountForTests++;
+
+        // Tell the client to drop local ghosts (same as map leave), then re-scope self/vehicle.
+        ResetGhosting();
+        EnsureGhostsAndScopeAfterMapTransfer(character);
+
+        if (SuppressCreatePacketsForTests)
+            return;
+
+        // Mid-session pose snap only — do not re-run full login restore (missions, XP, cargo).
+        SendLocalPlayerCreatePosePackets(character);
+    }
+
+    /// <summary>When true, <see cref="ResyncLocalPlayerAtCurrentPose"/> skips create packet I/O (unit tests).</summary>
+    public bool SuppressCreatePacketsForTests { get; set; }
+
+    /// <summary>How many times <see cref="ResyncLocalPlayerAtCurrentPose"/> ran (tests / diagnostics).</summary>
+    public int ResyncLocalPlayerAtCurrentPoseCallCountForTests { get; private set; }
+
+    /// <summary>
     /// Creates/reuses character+vehicle ghosts, restarts ghosting, and re-scopes them.
     /// Separated from create-packet send so ghosting restart can be regression-tested
     /// without full clonebase-backed WriteToPacket data.
@@ -336,6 +374,22 @@ public partial class TNLConnection
             return;
 
         ActivateGhosting();
+    }
+
+    /// <summary>
+    /// Vehicle + character create only, using current entity pose. Used for same-map owner resync
+    /// after GM teleport — avoids re-firing login mission/XP/cargo side effects.
+    /// </summary>
+    private void SendLocalPlayerCreatePosePackets(Character character)
+    {
+        var charPacket = new CreateCharacterExtendedPacket();
+        var vehiclePacket = new CreateVehicleExtendedPacket();
+
+        character.WriteToPacket(charPacket);
+        character.CurrentVehicle.WriteToPacket(vehiclePacket);
+
+        SendGamePacket(vehiclePacket);
+        SendGamePacket(charPacket);
     }
 
     private void SendLocalPlayerCreatePackets(Character character)

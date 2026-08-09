@@ -73,6 +73,7 @@ public static class ChatAdminGate
         "/loot",
         "/spawn",
         "/teleport", "/tp",
+        "/tptowaypoint", "/tpToWaypoint", "/tpwaypoint",
         "/getcbid",
         "/getnearbycbids",
 

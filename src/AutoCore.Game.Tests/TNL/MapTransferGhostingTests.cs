@@ -152,6 +152,42 @@ public class MapTransferGhostingTests
             "after ResetGhosting, sector entry must start a new ghosting sequence");
     }
 
+    [TestMethod]
+    public void ResyncLocalPlayerAtCurrentPose_ResetsAndRescopes_WithoutCreateWhenSuppressed()
+    {
+        var connection = CreateGhostingConnection();
+        connection.SuppressCreatePacketsForTests = true;
+        var character = CreateCharacterWithVehicle(connection);
+        connection.EnsureGhostsAndScopeAfterMapTransfer(character);
+        var seq = connection.GetGhostingSequence();
+
+        connection.ResyncLocalPlayerAtCurrentPose(character);
+
+        Assert.AreEqual(1, connection.ResyncLocalPlayerAtCurrentPoseCallCountForTests);
+        Assert.IsNotNull(character.Ghost);
+        Assert.IsNotNull(character.CurrentVehicle.Ghost);
+        Assert.AreSame(character.Ghost, connection.GetScopeObject());
+        Assert.IsTrue(connection.GetGhostingSequence() > seq,
+            "resync must ResetGhosting then start a new ghosting sequence");
+    }
+
+    [TestMethod]
+    public void ResyncLocalPlayerAtCurrentPose_NullCharacter_Throws()
+    {
+        var connection = CreateGhostingConnection();
+        Assert.ThrowsException<ArgumentNullException>(() => connection.ResyncLocalPlayerAtCurrentPose(null));
+    }
+
+    [TestMethod]
+    public void ResyncLocalPlayerAtCurrentPose_NoVehicle_Throws()
+    {
+        var connection = CreateGhostingConnection();
+        var character = new Character();
+        character.SetCoid(9, true);
+        Assert.ThrowsException<InvalidOperationException>(() =>
+            connection.ResyncLocalPlayerAtCurrentPose(character));
+    }
+
     private static TNLConnection CreateGhostingConnection()
     {
         var connection = new TNLConnection();
