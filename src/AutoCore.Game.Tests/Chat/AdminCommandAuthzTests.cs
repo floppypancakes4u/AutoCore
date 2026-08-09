@@ -95,6 +95,8 @@ public class AdminCommandAuthzTests
     [DataRow("/showMissions")]
     [DataRow("/cargoinfo")]
     [DataRow("/tptowaypoint")]
+    [DataRow("/portto Bobby")]
+    [DataRow("/porttome Bobby")]
     public void DiagnosticCommands_ViaService_GmLevel0_Denied(string command)
     {
         var (conn, character) = Create(gmLevel: 0, credits: 100);

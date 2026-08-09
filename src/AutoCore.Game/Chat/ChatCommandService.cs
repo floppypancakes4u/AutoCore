@@ -136,6 +136,14 @@ public sealed class ChatCommandService
             case "/tpwaypoint":
                 return TpToWaypoint(character);
 
+            case "/portto":
+            case "/portTo":
+                return PortTo(character, parts);
+
+            case "/porttome":
+            case "/portToMe":
+                return PortToMe(character, parts);
+
             case "/setHP":
             case "/sethp":
             case "/hp":
@@ -233,6 +241,28 @@ public sealed class ChatCommandService
     {
         var query = parts.Length >= 2 ? string.Join(' ', parts.Skip(1)) : null;
         return new ChatCommandExecutionResult(true, PlayerModerationService.Instance.Unban(query, character));
+    }
+
+    /// <summary>
+    /// GM: teleport the caller to a fuzzy-matched online player's map and location.
+    /// Usage: <c>/portto &lt;player&gt;</c> (alias: <c>/portTo</c>).
+    /// </summary>
+    private static ChatCommandExecutionResult PortTo(Character character, string[] parts)
+    {
+        var query = parts.Length >= 2 ? string.Join(' ', parts.Skip(1)) : null;
+        var result = PlayerPortService.Instance.PortTo(query, character);
+        return new ChatCommandExecutionResult(true, result.Message, result.Packets);
+    }
+
+    /// <summary>
+    /// GM: teleport a fuzzy-matched online player to the caller's map and location.
+    /// Usage: <c>/porttome &lt;player&gt;</c> (alias: <c>/portToMe</c>).
+    /// </summary>
+    private static ChatCommandExecutionResult PortToMe(Character character, string[] parts)
+    {
+        var query = parts.Length >= 2 ? string.Join(' ', parts.Skip(1)) : null;
+        var result = PlayerPortService.Instance.PortToMe(query, character);
+        return new ChatCommandExecutionResult(true, result.Message, result.Packets);
     }
 
     /// <summary>

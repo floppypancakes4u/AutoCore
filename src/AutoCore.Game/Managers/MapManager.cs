@@ -389,8 +389,6 @@ public class MapManager : Singleton<MapManager>
                 return false;
             }
 
-            var connection = character.OwningConnection;
-
             var map = ResolveMapForTests != null
                 ? ResolveMapForTests(continentId)
                 : GetMapForCharacter(continentId, character);
@@ -401,46 +399,11 @@ public class MapManager : Singleton<MapManager>
                 return false;
             }
 
-            var mapInfoPacket = new MapInfoPacket();
-            map.Fill(mapInfoPacket);
-
-            // Tear down old-map ghosts first so the client does not apply creature updates
-            // against objects from the previous sector while MapInfo loads the new one.
-            connection.ResetGhosting();
-
-            // Move server-side state onto the destination map before restarting ghosting,
-            // so scope queries (PerformScopeQuery) see the new continent's entities.
             // Spawn at the EnterPoint keyed by origin continent when present (Upside gate on
             // Back Range, etc.); otherwise the map header EntryPoint.
             var sourceContinentId = character.Map?.ContinentId ?? 0;
             MapTransferSpawn.TryResolve(map, sourceContinentId, out var spawnPos, out var spawnRot);
-
-            character.SetMap(map);
-            character.Position = spawnPos;
-            character.Rotation = spawnRot;
-
-            character.CurrentVehicle.SetMap(map);
-            // Map transfer teleport is discontinuous — drop stale physics so next Apply recreates.
-            character.CurrentVehicle.ClearPhysicsInstance();
-            character.CurrentVehicle.SetPosition(spawnPos);
-            character.CurrentVehicle.Rotation = spawnRot;
-
-            // Keep LastTownId + pose DBData current so logout/relogin resumes on this map.
-            character.CaptureWorldStateToDb();
-
-            connection.SendGamePacket(mapInfoPacket, skipOpcode: true);
-
-            // Restart ghosting, re-scope self/vehicle, and re-send create packets.
-            // ResetGhosting alone leaves Ghosting/Scoping off permanently until this runs.
-            connection.ReestablishGhostingAfterMapTransfer(
-                character,
-                sendCreatePackets: !SuppressCreatePacketsForTests);
-
-            Logger.WriteLog(LogType.Network,
-                $"Transferred character {character.ObjectId.Coid} to map {continentId} and re-established ghosting.");
-
-            transferOperation.Complete();
-            return true;
+            return TransferCharacterToMapCore(character, map, spawnPos, spawnRot, transferOperation);
         }
         catch (Exception ex)
         {
@@ -448,6 +411,106 @@ public class MapManager : Singleton<MapManager>
             Logger.WriteException(LogType.Error, $"Failed to transfer character to map {continentId}", ex);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Transfer onto a specific live <see cref="SectorMap"/> instance at an explicit pose.
+    /// Used by GM /portto and /porttome so the mover joins the anchor player's map copy
+    /// (including per-player instances) rather than minting a fresh continent via
+    /// <see cref="GetMapForCharacter"/>.
+    /// </summary>
+    public bool TransferCharacterToMap(Character character, SectorMap map, Vector3 spawnPos, Quaternion spawnRot)
+    {
+        var continentId = map?.ContinentId ?? 0;
+        var transferOperation = GameLog.Operation("MapTransfer",
+            ("CharacterId", character?.ObjectId.Coid),
+            ("FromMapId", character?.Map?.ContinentId),
+            ("ToMapId", continentId));
+
+        try
+        {
+            if (!MapTransferPreconditions.TryValidate(character, out var failure))
+            {
+                var detail = failure switch
+                {
+                    MapTransferPreconditions.Failure.NoConnection
+                        => $"TransferCharacterToMap: character {character.ObjectId.Coid} has no connection!",
+                    MapTransferPreconditions.Failure.NoVehicle
+                        => $"TransferCharacterToMap: character {character.ObjectId.Coid} has no vehicle!",
+                    _ => MapTransferPreconditions.Describe(failure)
+                };
+                Logger.WriteLog(LogType.Error, detail);
+                transferOperation.Fail(null, ("Reason", failure.ToString()));
+                return false;
+            }
+
+            if (map == null)
+            {
+                Logger.WriteLog(LogType.Error, "TransferCharacterToMap: destination map is null!");
+                transferOperation.Fail(null, ("Reason", "UnknownMap"));
+                return false;
+            }
+
+            return TransferCharacterToMapCore(character, map, spawnPos, spawnRot, transferOperation);
+        }
+        catch (Exception ex)
+        {
+            transferOperation.Fail(ex);
+            Logger.WriteException(LogType.Error, $"Failed to transfer character to map {continentId}", ex);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Shared body after preconditions + destination map are known. Completes or fails
+    /// <paramref name="transferOperation"/>; caller owns the try/catch for unexpected faults
+    /// only when it does not already wrap this call (core itself is fault-contained).
+    /// </summary>
+    private bool TransferCharacterToMapCore(
+        Character character,
+        SectorMap map,
+        Vector3 spawnPos,
+        Quaternion spawnRot,
+        OperationScope transferOperation)
+    {
+        var continentId = map.ContinentId;
+        var connection = character.OwningConnection;
+
+        var mapInfoPacket = new MapInfoPacket();
+        map.Fill(mapInfoPacket);
+
+        // Tear down old-map ghosts first so the client does not apply creature updates
+        // against objects from the previous sector while MapInfo loads the new one.
+        connection.ResetGhosting();
+
+        // Move server-side state onto the destination map before restarting ghosting,
+        // so scope queries (PerformScopeQuery) see the new continent's entities.
+        character.SetMap(map);
+        character.Position = spawnPos;
+        character.Rotation = spawnRot;
+
+        character.CurrentVehicle.SetMap(map);
+        // Map transfer teleport is discontinuous — drop stale physics so next Apply recreates.
+        character.CurrentVehicle.ClearPhysicsInstance();
+        character.CurrentVehicle.SetPosition(spawnPos);
+        character.CurrentVehicle.Rotation = spawnRot;
+
+        // Keep LastTownId + pose DBData current so logout/relogin resumes on this map.
+        character.CaptureWorldStateToDb();
+
+        connection.SendGamePacket(mapInfoPacket, skipOpcode: true);
+
+        // Restart ghosting, re-scope self/vehicle, and re-send create packets.
+        // ResetGhosting alone leaves Ghosting/Scoping off permanently until this runs.
+        connection.ReestablishGhostingAfterMapTransfer(
+            character,
+            sendCreatePackets: !SuppressCreatePacketsForTests);
+
+        Logger.WriteLog(LogType.Network,
+            $"Transferred character {character.ObjectId.Coid} to map {continentId} and re-established ghosting.");
+
+        transferOperation.Complete();
+        return true;
     }
 
     public void HandleTransferRequestPacket(Character character, BinaryReader reader)
