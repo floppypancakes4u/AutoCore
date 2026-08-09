@@ -146,8 +146,11 @@ public static class NpcCombatAi
             return;
 
         var target = entity.Target;
-        var (_, weapon) = SelectFiringWeapon(entity, target);
-        var rangeMax = WeaponRangeMax(weapon);
+        // SS-49: approach distance must come from the vehicle's BEST equipped range, not the
+        // slot that happens to bear this tick — arc-aware selection can alternate between a long
+        // front gun and a short turret as the target crosses the cone edge, which made the NPC
+        // alternate between closing and holding on successive ticks.
+        var rangeMax = EngageApproachRange(entity);
         var desired = rangeMax > 0f ? rangeMax * EngageCloseFactor : 0f;
         var closed = entity.Position.Dist(target.Position) <= desired;
 
@@ -549,19 +552,27 @@ public static class NpcCombatAi
             var yaw = TacArcGeometry.YawFromQuaternion(
                 vehicle.Rotation.X, vehicle.Rotation.Y, vehicle.Rotation.Z, vehicle.Rotation.W);
 
-            if (vehicle.WeaponFront != null
-                && BearsOnTarget(vehicle, target, vehicle.WeaponFront, yaw))
+            if (BearsOnTarget(vehicle, target, vehicle.WeaponFront, yaw))
                 return (1, vehicle.WeaponFront);
 
-            if (vehicle.WeaponTurret != null)
+            // The turret tracks the target every tick, so it always bears when it can fire.
+            if (IsFirable(vehicle.WeaponTurret))
                 return (2, vehicle.WeaponTurret);
 
-            if (vehicle.WeaponRear != null
-                && BearsOnTarget(vehicle, target, vehicle.WeaponRear, yaw + MathF.PI))
+            if (BearsOnTarget(vehicle, target, vehicle.WeaponRear, yaw + MathF.PI))
                 return (4, vehicle.WeaponRear);
         }
 
-        // Fallback / no target: original priority (range resolution + degrade to prior behavior).
+        // Fallback: nothing bears (or no target). Prefer a firable slot so range resolution and
+        // the wire state describe a weapon that could actually shoot (SS-49).
+        if (IsFirable(vehicle.WeaponFront))
+            return (1, vehicle.WeaponFront);
+        if (IsFirable(vehicle.WeaponTurret))
+            return (2, vehicle.WeaponTurret);
+        if (IsFirable(vehicle.WeaponRear))
+            return (4, vehicle.WeaponRear);
+
+        // Nothing firable: degrade to the equipped slot so out-of-range/aim behavior is unchanged.
         if (vehicle.WeaponFront != null)
             return (1, vehicle.WeaponFront);
         if (vehicle.WeaponTurret != null)
@@ -572,16 +583,39 @@ public static class NpcCombatAi
         return (0, null);
     }
 
+    /// <summary>
+    /// A slot only "bears" if it could actually fire. SS-49: a weapon whose clonebase never
+    /// resolved is refused by <c>Vehicle.TryFireSlot</c>, so selecting it raises a firing bit that
+    /// produces nothing AND shadows a working slot — the dead-letter SS-45 exists to remove.
+    /// </summary>
     private static bool BearsOnTarget(Vehicle vehicle, ClonedObjectBase target, Weapon weapon, float aimYaw)
     {
-        var validArc = weapon?.CloneBaseWeapon?.WeaponSpecific.ValidArc ?? 0f;
+        var cloneBase = weapon?.CloneBaseWeapon;
+        if (cloneBase == null)
+            return false;
+
         return TacArcGeometry.IsInArc(
-            vehicle.Position, TacArcGeometry.AimFromYaw(aimYaw), target.Position, validArc);
+            vehicle.Position,
+            TacArcGeometry.AimFromYaw(aimYaw),
+            target.Position,
+            cloneBase.WeaponSpecific.ValidArc);
     }
+
+    /// <summary>Equipped and actually firable (clonebase resolved) — see <see cref="BearsOnTarget"/>.</summary>
+    private static bool IsFirable(Weapon weapon) => weapon?.CloneBaseWeapon != null;
 
     private static float WeaponRangeMax(Weapon weapon)
     {
         return weapon?.CloneBaseWeapon?.WeaponSpecific.RangeMax ?? 0f;
+    }
+
+    /// <summary>
+    /// Stable approach range for Engage (SS-49): the best equipped weapon range, independent of
+    /// which slot bears on the target this tick.
+    /// </summary>
+    private static float EngageApproachRange(ClonedObjectBase entity)
+    {
+        return entity is Vehicle vehicle ? vehicle.GetMaxEquippedWeaponRange() : 0f;
     }
 
     private static float GetPatrolDistance(ClonedObjectBase entity) => entity switch

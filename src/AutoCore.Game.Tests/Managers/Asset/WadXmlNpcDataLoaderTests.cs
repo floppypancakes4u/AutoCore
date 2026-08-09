@@ -162,8 +162,9 @@ public class WadXmlNpcDataLoaderTests
         var driver = profiles[4];
         Assert.AreEqual(HBAICode.Driver, driver.AiCode);
         Assert.AreEqual(0.60000002f, driver.ValFleeHpSecondary);
-        Assert.AreEqual(0.99f, driver.ValReengageThreshold,
-            "SS-44: authored 1.0 clamps to 0.99 (a full-HP NPC must always fight until first damage)");
+        Assert.AreEqual(1f, driver.ValReengageThreshold,
+            "SS-49: re-engage keeps a ceiling of 1.0 — sharing the flee band's 0.99 made an NPC " +
+            "oscillate between fleeing and fighting at exactly 99% HP");
         Assert.AreEqual(1f, driver.Vals[3], "raw val4 stays as loaded — normalization lives in the accessor");
     }
 

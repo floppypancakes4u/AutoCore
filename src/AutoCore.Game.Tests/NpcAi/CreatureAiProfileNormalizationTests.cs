@@ -41,6 +41,62 @@ public class CreatureAiProfileNormalizationTests
         Assert.AreEqual(0.99f, Profile(val2: 1.1f).ValFleeHpSecondary, 0.0001f, "AIID 38 val2=1.1");
     }
 
+    /// <summary>
+    /// SS-49 tripwire: Math.Clamp(NaN, ...) returns NaN (both comparisons are false for NaN), and
+    /// NaN >= 2f is false so the percent branch is skipped too. A NaN band therefore reached the
+    /// AI: `HpRatio &lt;= NaN` is always false (NPC can never flee) and, worse, `HpRatio &gt;= NaN`
+    /// is always false, so an NPC that entered flee via a sane band could NEVER clear the latch —
+    /// it re-extends forever, parked at its anchor with guns silent. Non-finite data must resolve
+    /// to a safe, inert value.
+    /// </summary>
+    [TestMethod]
+    public void HpBands_NonFiniteValues_AreNeutralized()
+    {
+        Assert.AreEqual(0f, CreatureAiProfile.NormalizeHpBand(float.NaN), "NaN must not poison the comparisons");
+        Assert.AreEqual(0f, CreatureAiProfile.NormalizeHpBand(float.PositiveInfinity));
+        Assert.AreEqual(0f, CreatureAiProfile.NormalizeHpBand(float.NegativeInfinity));
+        Assert.AreEqual(0f, Profile(val3: float.NaN).ValFleeHpOrChance, "accessor must be safe too");
+    }
+
+    [TestMethod]
+    public void HpBands_NegativeValues_ClampToZero()
+    {
+        Assert.AreEqual(0f, CreatureAiProfile.NormalizeHpBand(-0.5f));
+        Assert.AreEqual(0f, Profile(val2: -3f).ValFleeHpSecondary);
+    }
+
+    [TestMethod]
+    public void HpBands_PercentBoundary_IsExactlyTwo()
+    {
+        Assert.AreEqual(0.02f, CreatureAiProfile.NormalizeHpBand(2f), 0.0001f, "2 is percent → 0.02");
+        Assert.AreEqual(0.99f, CreatureAiProfile.NormalizeHpBand(1.999f), 0.0001f, "just under 2 is a ratio → clamped");
+    }
+
+    /// <summary>
+    /// SS-49: the flee band clamps to 0.99 so an undamaged NPC always fights. Applying the same
+    /// ceiling to the RE-ENGAGE threshold made both comparisons true at exactly 99% HP — an
+    /// ordinary integer-HP state (99/100, 495/500) — so the NPC flipped Combat→flee→Combat every
+    /// val1 ms, rewriting its wire state each time. Re-engage keeps its own ceiling of 1.0, which
+    /// also preserves the authored "only re-engage at full HP" intent of the many val4=1.0 rows.
+    /// </summary>
+    [TestMethod]
+    public void ReengageThreshold_KeepsFullHpCeiling_NoOscillationWithFleeBand()
+    {
+        var p = Profile(val3: 1.0f, val4: 1.0f);
+        Assert.AreEqual(0.99f, p.ValFleeHpOrChance, 0.0001f, "flee band still clamps below full HP");
+        Assert.AreEqual(1.0f, p.ValReengageThreshold, 0.0001f,
+            "re-engage may require full HP; sharing the 0.99 ceiling caused a flee/re-engage flip-flop");
+        Assert.IsTrue(p.ValReengageThreshold > p.ValFleeHpOrChance,
+            "the two thresholds must never coincide, or an NPC oscillates at that exact HP");
+    }
+
+    [TestMethod]
+    public void ReengageThreshold_StillNormalizesPercentAndNonFinite()
+    {
+        Assert.AreEqual(0.4f, Profile(val4: 40f).ValReengageThreshold, 0.0001f, "AIID 48 percent authoring");
+        Assert.AreEqual(0f, Profile(val4: float.NaN).ValReengageThreshold);
+    }
+
     [TestMethod]
     public void HpBands_RatioValues_PassThroughUnchanged()
     {
