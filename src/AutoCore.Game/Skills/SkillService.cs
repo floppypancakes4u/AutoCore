@@ -92,6 +92,28 @@ public static class SkillService
             return false;
         }
 
+        // SS-36: unified hostility gate. Hostile intent = damage element, or a Heal element that
+        // evaluates negative ("Damage 50%" style). Sits before range/cooldown/power so a denied
+        // cast burns nothing. Positive heals stay ungated (B1 scope). Corpse/invincible targets
+        // skip the gate so the later damage path keeps replying SkillResponse.Corpse.
+        var hostileIntent = hasDamage
+            || (hasHealElement
+                && TryGetHealSignedAmount(skill, level, target.GetMaximumHP(), out var healProbe)
+                && healProbe < 0);
+        if (hostileIntent
+            && !target.IsCorpse
+            && !target.IsInvincible
+            && !CombatEligibility.CanDamage(caster, target, DamageContext.Skill))
+        {
+            response = SkillResponse.WrongTarget;
+            Logger.WriteLog(LogType.Debug,
+                "Skill cast rejected: source=Player skillId={0} reason=hostility-gate caster={1} target={2}",
+                skillId,
+                caster.ObjectId.Coid,
+                target.ObjectId.Coid);
+            return false;
+        }
+
         var range = GetScalarElement(skill, SkillElementTypes.Range, level);
         if (range > 0f)
         {

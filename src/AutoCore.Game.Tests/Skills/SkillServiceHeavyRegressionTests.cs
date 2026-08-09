@@ -204,6 +204,7 @@ public class SkillServiceHeavyRegressionTests
         });
         var (attacker, attackerVeh, map) = CreatePlayer(characterCoid: 940, vehicleCoid: 941);
         var (victim, victimVeh, _) = CreatePlayerOnMap(map, characterCoid: 942, vehicleCoid: 943);
+        victim.Faction = 1; // SS-36: cross-race — same-race players are no longer valid victims
         victimVeh.SetMaximumHP(200, triggerGhostUpdate: false);
         victimVeh.SetHPForTests(200);
         attackerVeh.Position = victimVeh.Position;
@@ -293,6 +294,7 @@ public class SkillServiceHeavyRegressionTests
         var victimPackets = new List<BasePacket>();
         var (attacker, aVeh, map) = CreatePlayer(characterCoid: 970, vehicleCoid: 971);
         var (victim, vVeh, _) = CreatePlayerOnMap(map, 972, 973);
+        victim.Faction = 1; // SS-36: cross-race — same-race players are no longer valid victims
         // Separate sink: both connections share TestPacketSink globally — still counts.
         vVeh.SetMaximumHP(100, triggerGhostUpdate: false);
         vVeh.SetHPForTests(100);
@@ -356,6 +358,7 @@ public class SkillServiceHeavyRegressionTests
         connection.SetGhostTo(false);
         var character = new Character();
         character.SetCoid(characterCoid, true);
+        character.Faction = 0; // SS-36: the gate computes the caster's effective faction (Human)
         character.SetOwningConnection(connection);
         connection.CurrentCharacter = character;
         var vehicle = new Vehicle { Position = new Vector3(0, 0, 0) };

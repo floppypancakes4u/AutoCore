@@ -379,6 +379,187 @@ public class PlayerSkillCastTests
         Assert.AreEqual(10, CharacterLevelManager.Instance.GetCurrentMana(character.ObjectId.Coid));
     }
 
+    // --- SS-36: unified hostility gate (CombatEligibility.CanDamage) on hostile casts ---
+
+    /// <summary>SS-36 tripwire (RC1): a damage skill aimed at the caster's own vehicle applied.</summary>
+    [TestMethod]
+    public void TryCastPlayer_DamageSkill_OwnVehicleTarget_Rejected()
+    {
+        RegisterDamageSkill(id: 2103, min: 20, max: 20, pen: 0, range: 100, cooldownMs: 14000, cost: 5);
+        var (character, vehicle, _) = CreatePlayer(characterCoid: 1000, vehicleCoid: 1001);
+        vehicle.SetMaximumHP(100, triggerGhostUpdate: false);
+        vehicle.SetHPForTests(100);
+
+        Assert.IsFalse(SkillService.TryCastPlayer(
+            character, 2103, 1, vehicle.ObjectId, vehicle.Position, out var response));
+        Assert.AreEqual(SkillResponse.WrongTarget, response);
+        Assert.AreEqual(100, vehicle.GetCurrentHP(), "self-damage via skills must be refused");
+        Assert.AreEqual(10, CharacterLevelManager.Instance.GetCurrentMana(character.ObjectId.Coid),
+            "a denied cast must not spend power");
+    }
+
+    /// <summary>A denied hostile cast must not burn the cooldown either (gate sits before it).</summary>
+    [TestMethod]
+    public void TryCastPlayer_DeniedCast_DoesNotBurnCooldown()
+    {
+        RegisterDamageSkill(id: 2103, min: 5, max: 5, pen: 0, range: 100, cooldownMs: 14000, cost: 0);
+        var (character, vehicle, map) = CreatePlayer(characterCoid: 1010, vehicleCoid: 1011);
+        var enemy = CreateEnemyTarget(map, coid: 1013, hp: 100, faction: 1);
+        vehicle.Position = new Vector3(0, 0, 0);
+        enemy.Position = new Vector3(5, 0, 0);
+
+        Assert.IsFalse(SkillService.TryCastPlayer(
+            character, 2103, 1, vehicle.ObjectId, vehicle.Position), "self-cast must be denied");
+        Assert.IsTrue(SkillService.TryCastPlayer(
+            character, 2103, 1, enemy.ObjectId, enemy.Position),
+            "the denied self-cast must not have reserved the cooldown");
+        Assert.AreEqual(95, enemy.GetCurrentHP());
+    }
+
+    [TestMethod]
+    public void TryCastPlayer_DamageSkill_SameFactionPlayer_Rejected()
+    {
+        RegisterDamageSkill(id: 2103, min: 20, max: 20, pen: 0, range: 100, cooldownMs: 0, cost: 0);
+        var (character, vehicle, map) = CreatePlayer(characterCoid: 1020, vehicleCoid: 1021);
+        var teammate = CreateEnemyTarget(map, coid: 1023, hp: 100, faction: 0); // same race as caster
+        vehicle.Position = new Vector3(0, 0, 0);
+        teammate.Position = new Vector3(5, 0, 0);
+
+        Assert.IsFalse(SkillService.TryCastPlayer(
+            character, 2103, 1, teammate.ObjectId, teammate.Position, out var response));
+        Assert.AreEqual(SkillResponse.WrongTarget, response);
+        Assert.AreEqual(100, teammate.GetCurrentHP(), "same-faction skill damage must be refused");
+    }
+
+    [TestMethod]
+    public void TryCastPlayer_NegativeHealSkill_SameFactionPlayer_Rejected()
+    {
+        // 10:1:-0.5 family — "Damage 50%" style negative heal (hostile despite the Heal element).
+        AssetManager.Instance.SetTestSkill(new Skill
+        {
+            Id = 2567,
+            Name = "Damage 50%",
+            Elements = new List<SkillElement>
+            {
+                new() { ElementType = 10, EquationType = 1, ValueBase = -0.5f },
+                new() { ElementType = 7, ValueBase = 100 },
+            }
+        });
+        var (character, vehicle, map) = CreatePlayer(characterCoid: 1030, vehicleCoid: 1031);
+        var teammate = CreateEnemyTarget(map, coid: 1033, hp: 100, faction: 0);
+        vehicle.Position = new Vector3(0, 0, 0);
+        teammate.Position = new Vector3(5, 0, 0);
+
+        Assert.IsFalse(SkillService.TryCastPlayer(
+            character, 2567, 1, teammate.ObjectId, teammate.Position));
+        Assert.AreEqual(100, teammate.GetCurrentHP(),
+            "negative-heal damage must pass the same hostility gate as damage elements");
+    }
+
+    /// <summary>
+    /// SS-36 tripwire: the empty-target self-cast fallback keys on Heal element PRESENCE, not
+    /// sign, so a negative-heal-only skill (e.g. 2567) nuked the caster's own vehicle.
+    /// </summary>
+    [TestMethod]
+    public void TryCastPlayer_NegativeHealSkill_EmptyTarget_DoesNotDamageCaster()
+    {
+        AssetManager.Instance.SetTestSkill(new Skill
+        {
+            Id = 2567,
+            Name = "Damage 50%",
+            Elements = new List<SkillElement>
+            {
+                new() { ElementType = 10, EquationType = 1, ValueBase = -0.5f },
+            }
+        });
+        var (character, vehicle, _) = CreatePlayer(characterCoid: 1040, vehicleCoid: 1041);
+        vehicle.SetMaximumHP(100, triggerGhostUpdate: false);
+        vehicle.SetHPForTests(100);
+
+        Assert.IsFalse(SkillService.TryCastPlayer(
+            character, 2567, 1, new TFID(), vehicle.Position));
+        Assert.AreEqual(100, vehicle.GetCurrentHP(),
+            "the self-cast fallback must never apply hostile damage to the caster");
+    }
+
+    /// <summary>SS-36 tripwire (RC1 amplifier): the global-registry fallback reached other maps.</summary>
+    [TestMethod]
+    public void TryCastPlayer_DamageSkill_CrossMapTarget_Rejected()
+    {
+        RegisterDamageSkill(id: 2103, min: 20, max: 20, pen: 0, range: 0, cooldownMs: 0, cost: 0);
+        var (character, vehicle, _) = CreatePlayer(characterCoid: 1050, vehicleCoid: 1051);
+        var otherMap = AutoCore.Game.Map.SectorMap.CreateForTests(new ContinentObject
+        {
+            Id = 1988,
+            MapFileName = "tm_player_skill_other",
+            DisplayName = "test",
+        }, new Vector4());
+        var victim = CreateEnemyTarget(otherMap, coid: 1053, hp: 100, faction: 1);
+        Assert.IsTrue(ObjectManager.Instance.Add(victim), "victim must be reachable via the global registry");
+        try
+        {
+            Assert.IsFalse(SkillService.TryCastPlayer(
+                character, 2103, 1, victim.ObjectId, victim.Position, out var response));
+            Assert.AreEqual(SkillResponse.WrongTarget, response);
+            Assert.AreEqual(100, victim.GetCurrentHP(),
+                "a target on another map/instance must be unreachable by hostile casts");
+        }
+        finally
+        {
+            ObjectManager.Instance.Remove(victim.ObjectId.Coid);
+        }
+    }
+
+    /// <summary>Retail-policy pin: cross-race players are mutually hostile — damage lands.</summary>
+    [TestMethod]
+    public void TryCastPlayer_DamageSkill_CrossRacePlayer_Allowed()
+    {
+        RegisterDamageSkill(id: 2103, min: 20, max: 20, pen: 0, range: 100, cooldownMs: 0, cost: 0);
+        var (character, vehicle, map) = CreatePlayer(characterCoid: 1060, vehicleCoid: 1061);
+        var mutant = CreateEnemyTarget(map, coid: 1063, hp: 100, faction: 1);
+        vehicle.Position = new Vector3(0, 0, 0);
+        mutant.Position = new Vector3(5, 0, 0);
+
+        Assert.IsTrue(SkillService.TryCastPlayer(
+            character, 2103, 1, mutant.ObjectId, mutant.Position));
+        Assert.AreEqual(80, mutant.GetCurrentHP());
+    }
+
+    /// <summary>B1-scope pin: positive heals stay ungated (self-heal keeps working).</summary>
+    [TestMethod]
+    public void TryCastPlayer_PositiveHealOnSelf_StillWorks()
+    {
+        AssetManager.Instance.SetTestSkill(new Skill
+        {
+            Id = 667,
+            Name = "Repair",
+            Elements = new List<SkillElement>
+            {
+                new() { ElementType = 10, EquationType = 0, ValueBase = 40 },
+            }
+        });
+        var (character, vehicle, _) = CreatePlayer(characterCoid: 1070, vehicleCoid: 1071);
+        vehicle.SetMaximumHP(200, triggerGhostUpdate: false);
+        vehicle.SetHPForTests(50);
+
+        Assert.IsTrue(SkillService.TryCastPlayer(
+            character, 667, 1, vehicle.ObjectId, vehicle.Position));
+        Assert.AreEqual(90, vehicle.GetCurrentHP());
+    }
+
+    /// <summary>Victim vehicle owned by a character of the given faction (owner-chain root).</summary>
+    private static Vehicle CreateEnemyTarget(AutoCore.Game.Map.SectorMap map, long coid, int hp, int faction)
+    {
+        var owner = new Character();
+        owner.SetCoid(coid - 1, true);
+        owner.Faction = faction;
+        owner.SetMap(map);
+        var target = CreateTarget(map, coid, hp, hp);
+        target.SetOwner(owner);
+        owner.SetCurrentVehicleForTests(target);
+        return target;
+    }
+
     private static void RegisterDamageSkill(
         int id, float min, float max, float pen, float range, float cooldownMs, float cost,
         float chargeMs = 0, float costPerLevel = 0)
@@ -418,6 +599,7 @@ public class PlayerSkillCastTests
         var connection = new TNLConnection();
         var character = new Character();
         character.SetCoid(characterCoid, true);
+        character.Faction = 0; // SS-36: the gate computes the caster's effective faction (Human)
         character.SetOwningConnection(connection);
         connection.CurrentCharacter = character;
         var vehicle = new Vehicle();
