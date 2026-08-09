@@ -3,6 +3,7 @@ namespace AutoCore.Game.Npc;
 using System.Collections.Generic;
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.CloneBases.Specifics;
+using AutoCore.Game.Combat;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Map;
@@ -145,7 +146,7 @@ public static class NpcCombatAi
             return;
 
         var target = entity.Target;
-        var (_, weapon) = SelectFiringWeapon(entity);
+        var (_, weapon) = SelectFiringWeapon(entity, target);
         var rangeMax = WeaponRangeMax(weapon);
         var desired = rangeMax > 0f ? rangeMax * EngageCloseFactor : 0f;
         var closed = entity.Position.Dist(target.Position) <= desired;
@@ -177,7 +178,7 @@ public static class NpcCombatAi
         }
 
         var target = entity.Target;
-        var (bit, weapon) = SelectFiringWeapon(entity);
+        var (bit, weapon) = SelectFiringWeapon(entity, target);
         var rangeMax = WeaponRangeMax(weapon);
         var inRange = rangeMax <= 0f || entity.Position.Dist(target.Position) <= rangeMax;
 
@@ -530,12 +531,37 @@ public static class NpcCombatAi
         return (source?.CloneBaseObject as CloneBaseCreature)?.CreatureSpecific;
     }
 
-    /// <summary>Firing bit + weapon for the highest-priority equipped slot (front, then turret, then rear).</summary>
-    private static (byte Bit, Weapon Weapon) SelectFiringWeapon(ClonedObjectBase entity)
+    /// <summary>
+    /// Firing bit + weapon for the best-bearing equipped slot (SS-45). The front/rear slots aim
+    /// chassis-relative and pathed NPCs never rotate toward the target, so a fixed front-first
+    /// preference dead-lettered the turret on the 447/865 dual-armed templates. Prefer the front
+    /// only when the target is inside its arc; otherwise the turret (which tracks the target and
+    /// always bears); then a rear slot whose arc bears; else fall back to the old front→turret→
+    /// rear priority so single-weapon and un-aimable loadouts behave exactly as before.
+    /// </summary>
+    private static (byte Bit, Weapon Weapon) SelectFiringWeapon(ClonedObjectBase entity, ClonedObjectBase target)
     {
         if (entity is not Vehicle vehicle)
             return (0, null);
 
+        if (target != null)
+        {
+            var yaw = TacArcGeometry.YawFromQuaternion(
+                vehicle.Rotation.X, vehicle.Rotation.Y, vehicle.Rotation.Z, vehicle.Rotation.W);
+
+            if (vehicle.WeaponFront != null
+                && BearsOnTarget(vehicle, target, vehicle.WeaponFront, yaw))
+                return (1, vehicle.WeaponFront);
+
+            if (vehicle.WeaponTurret != null)
+                return (2, vehicle.WeaponTurret);
+
+            if (vehicle.WeaponRear != null
+                && BearsOnTarget(vehicle, target, vehicle.WeaponRear, yaw + MathF.PI))
+                return (4, vehicle.WeaponRear);
+        }
+
+        // Fallback / no target: original priority (range resolution + degrade to prior behavior).
         if (vehicle.WeaponFront != null)
             return (1, vehicle.WeaponFront);
         if (vehicle.WeaponTurret != null)
@@ -544,6 +570,13 @@ public static class NpcCombatAi
             return (4, vehicle.WeaponRear);
 
         return (0, null);
+    }
+
+    private static bool BearsOnTarget(Vehicle vehicle, ClonedObjectBase target, Weapon weapon, float aimYaw)
+    {
+        var validArc = weapon?.CloneBaseWeapon?.WeaponSpecific.ValidArc ?? 0f;
+        return TacArcGeometry.IsInArc(
+            vehicle.Position, TacArcGeometry.AimFromYaw(aimYaw), target.Position, validArc);
     }
 
     private static float WeaponRangeMax(Weapon weapon)
