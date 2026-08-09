@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <Include>
+            [AutoCore.Game]AutoCore.Game.Combat.*|[AutoCore.Game]AutoCore.Game.Structures.CreatureAiProfile|[AutoCore.Game]AutoCore.Game.Diagnostics.WireIsolationLevers|[AutoCore.Game]AutoCore.Game.Npc.NpcCombatAi|[AutoCore.Game]AutoCore.Game.Entities.SpawnPoint|[AutoCore.Game]AutoCore.Game.Entities.Vehicle|[AutoCore.Game]AutoCore.Game.Managers.AssetManager|[AutoCore.Game]AutoCore.Game.Skills.SkillService|[AutoCore.Game]AutoCore.Game.EntityTemplates.SpawnPointTemplate*
+          </Include>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

@@ -542,7 +542,7 @@ public static class NpcCombatAi
     /// always bears); then a rear slot whose arc bears; else fall back to the old front→turret→
     /// rear priority so single-weapon and un-aimable loadouts behave exactly as before.
     /// </summary>
-    private static (byte Bit, Weapon Weapon) SelectFiringWeapon(ClonedObjectBase entity, ClonedObjectBase target)
+    internal static (byte Bit, Weapon Weapon) SelectFiringWeapon(ClonedObjectBase entity, ClonedObjectBase target)
     {
         if (entity is not Vehicle vehicle)
             return (0, null);

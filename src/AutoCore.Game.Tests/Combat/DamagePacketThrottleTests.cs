@@ -223,6 +223,113 @@ public class DamagePacketThrottleTests
         Assert.AreEqual(45, (int)last.Amount, "pending inside the expiry horizon must still fold");
     }
 
+    // --- guards and bookkeeping ---
+
+    [TestMethod]
+    public void NullOrEmptyPacket_IsANoOp()
+    {
+        var victim = Victim(96230);
+        Vehicle.TrySendDamagePacketMulti(_attacker, null, new TFID(96101, true), new[] { victim });
+        Vehicle.TrySendDamagePacketMulti(
+            _attacker, new DamagePacket { Source = new TFID(96101, true) }, new TFID(96101, true), new[] { victim });
+
+        Assert.AreEqual(0, _sent.OfType<DamagePacket>().Count());
+    }
+
+    [TestMethod]
+    public void NoRecipients_IsANoOp()
+    {
+        var victim = Victim(96231);
+        var packet = new DamagePacket { Source = new TFID(96101, true) };
+        packet.AddHit(victim.ObjectId, 5);
+
+        // No attacker character and a victim with no owning connection: nobody to deliver to.
+        Vehicle.TrySendDamagePacketMulti(null, packet, new TFID(96101, true), new[] { victim });
+
+        Assert.AreEqual(0, _sent.OfType<DamagePacket>().Count());
+    }
+
+    [TestMethod]
+    public void NullVictimEntries_AreSkipped()
+    {
+        var victim = Victim(96232);
+        var packet = new DamagePacket { Source = new TFID(96101, true) };
+        packet.AddHit(victim.ObjectId, 7);
+
+        Vehicle.TrySendDamagePacketMulti(
+            _attacker, packet, new TFID(96101, true), new GraphicsObject[] { null, victim });
+
+        Assert.AreEqual(1, _sent.OfType<DamagePacket>().Count(), "a null victim must not abort the send");
+    }
+
+    [TestMethod]
+    public void NullTargetOnAnEntry_IsSkippedOnBothThrottlePaths()
+    {
+        var clock = 1_000L;
+        Vehicle.CombatThrottleClock = () => clock;
+        var victim = Victim(96233);
+
+        // Ship path: entry with no target rides along with a real one.
+        var first = new DamagePacket { Source = new TFID(96101, true) };
+        first.Entries.Add(new DamagePacket.DamageEntry { Target = null, Amount = 3 });
+        first.AddHit(victim.ObjectId, 5);
+        Vehicle.TrySendDamagePacketMulti(_attacker, first, new TFID(96101, true), new[] { victim });
+
+        // Suppress path: same pair inside the window, again carrying a target-less entry.
+        var second = new DamagePacket { Source = new TFID(96101, true) };
+        second.Entries.Add(new DamagePacket.DamageEntry { Target = null, Amount = 3 });
+        second.AddHit(victim.ObjectId, 5);
+        Vehicle.TrySendDamagePacketMulti(_attacker, second, new TFID(96101, true), new[] { victim });
+
+        Assert.AreEqual(1, _sent.OfType<DamagePacket>().Count(), "second volley is throttled, not crashed");
+    }
+
+    /// <summary>An entry whose victim is absent from the victims list starts its own accumulation.</summary>
+    [TestMethod]
+    public void SuppressedEntry_ForAVictimNotInTheVictimsList_StartsFreshAccumulation()
+    {
+        var clock = 1_000L;
+        Vehicle.CombatThrottleClock = () => clock;
+        var tracked = Victim(96234);
+        var bystander = Victim(96235);
+
+        SendAmount(96101, 5, tracked);                     // ships, stamps `tracked`
+        var second = new DamagePacket { Source = new TFID(96101, true) };
+        second.AddHit(tracked.ObjectId, 5);
+        second.AddHit(bystander.ObjectId, 9);              // never seen before, not in `victims`
+        Vehicle.TrySendDamagePacketMulti(_attacker, second, new TFID(96101, true), new[] { tracked });
+
+        Assert.AreEqual(1, _sent.OfType<DamagePacket>().Count(), "suppressed inside the window");
+
+        clock += ServerConfig.DamagePacketThrottleMs + 10;
+        SendAmount(96101, 1, bystander);
+
+        Assert.AreEqual(10, ShippedTotalFor(96235),
+            "the bystander's suppressed 9 must fold into its own next packet");
+    }
+
+    [TestMethod]
+    public void Prune_EvictsExpiredPairsOnceOverThreshold()
+    {
+        var clock = 1_000L;
+        Vehicle.CombatThrottleClock = () => clock;
+
+        // Fill past the prune threshold with distinct victims.
+        for (var i = 0; i < 4_200; i++)
+            SendAmount(96101, 1, Victim(200_000 + i));
+
+        var before = _sent.OfType<DamagePacket>().Count();
+        clock += ServerConfig.DamagePacketThrottleMs * 100; // everything is now expired
+        SendAmount(96101, 1, Victim(300_001));              // triggers the prune sweep
+
+        Assert.AreEqual(before + 1, _sent.OfType<DamagePacket>().Count());
+
+        // A previously-stamped pair must be gone, so its next hit ships immediately.
+        SendAmount(96101, 1, Victim(200_000));
+        Assert.AreEqual(before + 2, _sent.OfType<DamagePacket>().Count(),
+            "an evicted pair has no window left to throttle against");
+    }
+
     [TestMethod]
     public void FoldedAmount_ClampsToDisplayMax()
     {
