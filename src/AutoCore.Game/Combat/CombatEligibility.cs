@@ -38,16 +38,19 @@ public static class CombatEligibility
         if (attacker == null || victim == null)
             return false;
 
+        // On-foot player bodies are never third-party combat victims — SS-46: this sits ABOVE the
+        // Admin bypass because killing a Character runs OnDeath → SetMap(null), which strands the
+        // body off-map, freezes its ticks and breaks /warp (F3). Even a GM must kill the vehicle.
+        // The one exception is authored self-damage: TriggerManager resolves the Character (not the
+        // vehicle) as the activator on town maps, so pain pads must still reach their own body.
+        if (victim is Character)
+            return context == DamageContext.Reaction && ReferenceEquals(GetRoot(attacker), GetRoot(victim));
+
         // /kill and friends: GM-gated upstream (SS-28); the victim's own TakeDamage guards still run.
         if (context == DamageContext.Admin)
             return true;
 
         if (victim.IsCorpse || victim.IsInvincible)
-            return false;
-
-        // On-foot player bodies are never combat victims (weapons and skills already remap to the
-        // vehicle; Character : Creature made ram a latent one-hit kill — F3).
-        if (victim is Character)
             return false;
 
         // Self/owner exclusion by owner-chain root: a character, their vehicle, and anything the
@@ -72,18 +75,25 @@ public static class CombatEligibility
     }
 
     /// <summary>
-    /// Retail effective faction: owner-chain root's TeamFaction when nonzero, else the root's
-    /// Faction. Identical to <see cref="ClonedObjectBase.GetIDFaction"/> today (TeamFaction is a
-    /// dormant mirror); the TeamFaction branch is the Arena/PvP-side lever.
+    /// Effective combat faction: the owner-chain root's faction, i.e. exactly
+    /// <see cref="ClonedObjectBase.GetIDFaction"/>.
+    /// <para>
+    /// SS-46: this deliberately does NOT consult the dormant retail <c>TeamFaction</c> lever.
+    /// Weapon acquisition keys candidates on <c>GetIDFaction</c>; if the gate keyed on a
+    /// TeamFaction-aware value the two could disagree the moment anything rewrote
+    /// <c>Faction</c> without <c>TeamFaction</c> (reaction 22 <c>SetFactionFromVar</c> does
+    /// exactly that), and the player would acquire a target, roll hits, and see nothing land.
+    /// When the Arena/PvP side lever is revived it must be introduced in acquisition and here in
+    /// the same change — pinned by
+    /// <c>CombatEligibilityTests.GetEffectiveFaction_AgreesWithGetIDFaction_WhenTeamFactionIsStale</c>.
+    /// </para>
     /// </summary>
     public static int GetEffectiveFaction(ClonedObjectBase entity)
     {
         if (entity == null)
             return UnsetFaction;
 
-        var root = GetRoot(entity);
-        var team = root.GetBareTeamFaction();
-        return team != 0 ? team : root.Faction;
+        return GetRoot(entity).Faction;
     }
 
     /// <summary>

@@ -592,7 +592,11 @@ public class ChatManager : Singleton<ChatManager>
                     break;
                 }
 
-                var target = vehicle.Target;
+                // SS-46: the client can latch a Character TFID. Kill the body and OnDeath
+                // SetMap(null)s it (F3) — remap to the vehicle exactly like weapons and skills do.
+                var target = vehicle.Target is Character targetChar && targetChar.CurrentVehicle != null
+                    ? targetChar.CurrentVehicle
+                    : vehicle.Target;
                 if (target.IsCorpse || target.IsInvincible)
                 {
                     respPacket.Message = "Cannot damage target (corpse or invincible)!";

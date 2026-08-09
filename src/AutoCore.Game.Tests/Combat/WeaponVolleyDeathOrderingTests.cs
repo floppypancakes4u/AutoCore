@@ -126,7 +126,56 @@ public class WeaponVolleyDeathOrderingTests
         Assert.AreEqual(1, entries, "a dead-but-pending victim must not be re-hit in the volley");
     }
 
+    /// <summary>
+    /// SS-46 tripwire: the SS-37 drain was a bare foreach, so one victim's OnDeath throwing
+    /// (loot rolls, mission credit, spawn-point trigger events, SetMap — all arbitrary authored
+    /// work) aborted the loop. Remaining dead victims never got OnDeath and became permanent
+    /// 0-HP zombies: never re-acquired (candidates require HP > 0), never re-killable
+    /// (TakeDamage returns 0 at 0 HP), never despawned, and their spawn wave never respawned.
+    /// Each victim's death must be isolated.
+    /// </summary>
+    [TestMethod]
+    public void LethalVolley_OneVictimDeathThrows_OtherVictimStillDies()
+    {
+        var (shooter, map) = CreateShooter();
+        shooter.SetCombatRngForTests(new AlwaysHitRandom());
+
+        // Nearer victim throws in OnDeath; acquisition orders soft targets by ascending distance,
+        // so the thrower is drained first and would abort the loop before the second victim.
+        var thrower = new ThrowingCreature();
+        thrower.SetCoid(77041, false);
+        thrower.InitializeHealthForTests(1);
+        thrower.Faction = 21;
+        thrower.Position = new Vector3(0f, 0f, 5f);
+        thrower.SetMap(map);
+
+        var survivorVictim = new Creature();
+        survivorVictim.SetCoid(77043, false);
+        survivorVictim.InitializeHealthForTests(1);
+        survivorVictim.Faction = 21;
+        survivorVictim.Position = new Vector3(0f, 0f, 10f);
+        survivorVictim.SetMap(map);
+
+        shooter.ProcessCombatIfFiring();
+
+        Assert.IsTrue(thrower.DeathAttempted, "precondition: the throwing victim's OnDeath ran");
+        Assert.IsTrue(survivorVictim.IsCorpse,
+            "a throwing OnDeath must not strand later victims at 0 HP with IsCorpse false (SS-46)");
+    }
+
     // ----- helpers -------------------------------------------------------------------------
+
+    /// <summary>Creature whose death processing fails, standing in for authored loot/trigger faults.</summary>
+    private sealed class ThrowingCreature : Creature
+    {
+        public bool DeathAttempted { get; private set; }
+
+        public override void OnDeath(DeathType deathType)
+        {
+            DeathAttempted = true;
+            throw new InvalidOperationException("simulated authored death-processing fault");
+        }
+    }
 
     private static (Vehicle Shooter, SectorMap Map) CreateShooter()
     {
@@ -158,7 +207,9 @@ public class WeaponVolleyDeathOrderingTests
         character.SetMap(map);
         shooter.SetMap(map);
 
-        EquipFrontWeapon(shooter, rangeMax: 50f);
+        // Flags 0x03 = spray mode (0x01) + front hardpoint (0x02), the retail dual-bit pattern.
+        // Multi-victim volleys are what the SS-37 drain and SS-46 isolation cover.
+        EquipFrontWeapon(shooter, rangeMax: 50f, flags: 0x03, spray: 3);
         shooter.CreateGhost(); // ProcessCombatIfFiring requires a ghost
         shooter.Firing = 1;
         return (shooter, map);
@@ -191,7 +242,7 @@ public class WeaponVolleyDeathOrderingTests
         return victim;
     }
 
-    private static void EquipFrontWeapon(Vehicle vehicle, float rangeMax)
+    private static void EquipFrontWeapon(Vehicle vehicle, float rangeMax, byte flags = 0, byte spray = 0)
     {
         var spec = new WeaponSpecific
         {
@@ -201,6 +252,8 @@ public class WeaponVolleyDeathOrderingTests
             DamageScalar = 1f,
             DmgMinMin = 1,
             DmgMaxMax = 2,
+            Flags = flags,
+            SprayTargets = spray,
             MinMin = DamageSpecific.CreateEmpty(),
             MaxMax = DamageSpecific.CreateEmpty(),
         };

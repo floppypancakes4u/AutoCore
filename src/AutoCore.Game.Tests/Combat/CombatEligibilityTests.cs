@@ -121,18 +121,21 @@ public class CombatEligibilityTests
     }
 
     /// <summary>
-    /// Retail lever: nonzero TeamFaction (Arena / reaction 53-55 team sides) overrides the root
-    /// race faction. Dormant today — Character mirrors TeamFaction = Faction at load — but the
-    /// helper must already honor it so Arena revival needs no combat change.
+    /// SS-46: the dormant retail TeamFaction lever is deliberately NOT consulted. Acquisition
+    /// keys candidates on GetIDFaction, so a TeamFaction-aware gate could disagree the moment
+    /// anything rewrote Faction alone (reaction 22 SetFactionFromVar) — the player would acquire,
+    /// roll hits, and see nothing land. Arena revival must change acquisition and the gate together.
     /// </summary>
     [TestMethod]
-    public void GetEffectiveFaction_NonzeroTeamFaction_Wins()
+    public void GetEffectiveFaction_IgnoresDormantTeamFactionLever()
     {
         var creature = new TeamFactionCreature { Team = 5 };
         creature.SetCoid(8103, false);
         creature.Faction = Mutant;
 
-        Assert.AreEqual(5, CombatEligibility.GetEffectiveFaction(creature));
+        Assert.AreEqual(Mutant, CombatEligibility.GetEffectiveFaction(creature),
+            "effective faction is the owner-chain root's Faction — identical to GetIDFaction");
+        Assert.AreEqual(creature.GetIDFaction(), CombatEligibility.GetEffectiveFaction(creature));
     }
 
     #endregion
@@ -201,6 +204,98 @@ public class CombatEligibilityTests
             Assert.IsFalse(CombatEligibility.CanDamage(attacker, onFoot, context),
                 $"on-foot Character must never be damageable via {context}");
         }
+    }
+
+    /// <summary>
+    /// SS-46 tripwire: the Character refusal sat ABOVE the self/owner rule, so it also blocked
+    /// authored self-damage reactions whose activator is the on-foot body. TriggerManager resolves
+    /// the Character (not the vehicle) as activator on town maps and whenever the player has no
+    /// vehicle — so every damage pain-pad in a town silently stopped working, while repair pads
+    /// (positive heal, ungated) kept working.
+    /// </summary>
+    [TestMethod]
+    public void CanDamage_ReactionSelfDamage_OnFootCharacter_Allowed()
+    {
+        var map = CreateTestMap();
+        var onFoot = new Character();
+        onFoot.SetCoid(8321, true);
+        onFoot.Faction = Human;
+        onFoot.SetMap(map);
+
+        Assert.IsTrue(CombatEligibility.CanDamage(onFoot, onFoot, DamageContext.Reaction),
+            "an authored pain pad must still damage an on-foot activator (self, Reaction context)");
+    }
+
+    /// <summary>
+    /// SS-46 tripwire: Admin returned true before the Character refusal, so a GM /kill on a
+    /// player's on-foot body reached TakeDamage → OnDeath → SetMap(null) — the exact F3
+    /// catastrophe (body off-map, ticks frozen, /warp broken) SS-36 claims to close.
+    /// </summary>
+    [TestMethod]
+    public void CanDamage_AdminContext_StillRefusesCharacterBody()
+    {
+        var map = CreateTestMap();
+        var (gmVehicle, _) = CreatePlayerVehicle(map, 8331, Human);
+        var victimBody = new Character();
+        victimBody.SetCoid(8333, true);
+        victimBody.Faction = Mutant;
+        victimBody.SetMap(map);
+
+        Assert.IsFalse(CombatEligibility.CanDamage(gmVehicle, victimBody, DamageContext.Admin),
+            "not even Admin may damage a player's Character body — kill the vehicle instead (F3)");
+    }
+
+    /// <summary>
+    /// SS-46: weapon acquisition keys on the candidate faction while the gate keys on the
+    /// effective faction. If those two ever disagree the player fires, the client predicts hits,
+    /// and nothing lands. They must be the same function for every entity shape.
+    /// </summary>
+    [TestMethod]
+    public void GetEffectiveFaction_AgreesWithGetIDFaction_WhenTeamFactionIsStale()
+    {
+        var map = CreateTestMap();
+        // Retail lever shape: TeamFaction was seeded at load, then a reaction rewrote Faction.
+        var creature = new TeamFactionCreature { Team = Mutant };
+        creature.SetCoid(8341, false);
+        creature.Faction = 3;
+        creature.SetMap(map);
+
+        Assert.AreEqual(
+            creature.GetIDFaction(),
+            CombatEligibility.GetEffectiveFaction(creature),
+            "acquisition (GetIDFaction) and the gate (GetEffectiveFaction) must never disagree — " +
+            "a divergence makes shots acquire but never land");
+    }
+
+    [TestMethod]
+    public void GetEffectiveFaction_NullEntity_ReturnsUnset()
+    {
+        Assert.AreEqual(CombatEligibility.UnsetFaction, CombatEligibility.GetEffectiveFaction(null));
+    }
+
+    [TestMethod]
+    public void CanDamage_AttackerWithNoMap_Denied()
+    {
+        var map = CreateTestMap();
+        var victim = CreateCreature(map, 8353, HostileNpc);
+        var orphan = new Vehicle();
+        orphan.SetCoid(8351, false);
+        orphan.InitializeHealthForTests(100);
+
+        Assert.IsFalse(CombatEligibility.CanDamage(orphan, victim, DamageContext.WeaponFire),
+            "an attacker that is not on a map must fail closed");
+    }
+
+    /// <summary>Negative pin: Vehicle/Creature subclass GraphicsObject but must NOT take the scenery path.</summary>
+    [TestMethod]
+    public void CanDamage_VehicleVictim_DoesNotTakeSceneryAllowance()
+    {
+        var map = CreateTestMap();
+        var (a, _) = CreatePlayerVehicle(map, 8361, Human);
+        var (b, _) = CreatePlayerVehicle(map, 8363, Human);
+
+        Assert.IsFalse(CombatEligibility.CanDamage(a, b, DamageContext.WeaponFire),
+            "scenery uses exact-type GraphicsObject; a Vehicle must still face the faction rules");
     }
 
     [TestMethod]

@@ -2149,11 +2149,19 @@ public class Vehicle : SimpleObject
 
         // SS-37: deaths drain AFTER the damage flush so the removal packet never precedes the
         // killing blow's floater on the ordered stream. IsCorpse dedupes repeated victims.
-        foreach (var victim in victimsHit)
-        {
-            if (victim.GetCurrentHP() <= 0 && !victim.IsCorpse)
-                victim.OnDeath(DeathType.Violent);
-        }
+        // SS-46: isolate each death — OnDeath runs authored work (loot, mission credit, spawn
+        // trigger events, SetMap). One throwing victim must not strand the rest of the volley's
+        // dead at 0 HP with IsCorpse false: such an entity is never re-acquired (candidates need
+        // HP > 0), never re-killable (TakeDamage returns 0 at 0 HP) and never respawns.
+        Guard.ForEach(
+            victimsHit,
+            "SS-37 volley death drain",
+            victim =>
+            {
+                if (victim.GetCurrentHP() <= 0 && !victim.IsCorpse)
+                    victim.OnDeath(DeathType.Violent);
+            },
+            describe: victim => $"coid={victim?.ObjectId?.Coid}");
 
         void TryFireSlot(byte bit, Weapon weapon, float aimYaw, bool includeHardTarget, ref long lastFireMs)
         {
