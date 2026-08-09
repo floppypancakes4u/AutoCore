@@ -243,6 +243,101 @@ public class SpawnPointTemplateSpawnTests
         Assert.IsFalse(MapNpcIdentity.IsUnsafeLocalSpawnCoid(vehicle.ObjectId, mapHighestCoid: 0));
     }
 
+    // --- SS-43: raw-CBID vehicle spawns resolve a template loadout ---
+
+    /// <summary>
+    /// SS-43 tripwire: the raw-CBID SpawnVehicle path equipped no weapons and set no
+    /// SpawnOwnerCoid, so those NPCs chased the player and never fired (SelectFiringWeapon
+    /// returns null) and leaked past DespawnOwnedEntities. When a tVehicleTemplate row exists for
+    /// the chassis CBID, the spawn now delegates to the template path (weapons, BaseHp,
+    /// SpawnOwnerCoid, driver).
+    /// </summary>
+    [TestMethod]
+    public void Spawn_RawVehicleCbid_WithMatchingTemplate_EquipsWeaponsHpAndOwner()
+    {
+        const int vehicleCbid = 660_001;
+        const int weaponCbid = 660_002;
+        const int driverCbid = 660_003;
+        const int templateId = 660_004;
+        var map = CreateTestMap(9130);
+
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid);
+        AssetManagerTestHelper.RegisterWeaponCloneBase(weaponCbid);
+        AssetManagerTestHelper.RegisterCreatureCloneBase(driverCbid, baseLevel: 5);
+        AssetManager.Instance.SetTestVehicleTemplates(new[]
+        {
+            new VehicleTemplate
+            {
+                Id = templateId,
+                VehicleCbid = vehicleCbid,
+                WeaponFrontCbid = weaponCbid,
+                DriverCbid = driverCbid,
+                BaseHp = 150,
+            }
+        });
+
+        var template = new SpawnPointTemplate { COID = 14_620 };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList { SpawnType = vehicleCbid, IsTemplate = false });
+        var spawnPoint = new SpawnPoint(template);
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var vehicle = map.Objects.Values.OfType<Vehicle>().Single();
+        Assert.IsNotNull(vehicle.WeaponFront, "raw spawn with a matching template must equip its weapon");
+        Assert.AreEqual(150, vehicle.GetMaximumHP(), "template BaseHp must apply");
+        Assert.AreEqual(template.COID, vehicle.SpawnOwnerCoid, "SpawnOwnerCoid must be set for despawn ownership");
+        Assert.AreEqual(templateId, vehicle.TemplateId);
+    }
+
+    /// <summary>SS-43: even without a template row, the raw path must set SpawnOwnerCoid.</summary>
+    [TestMethod]
+    public void Spawn_RawVehicleCbid_NoTemplate_StillSetsSpawnOwnerCoid()
+    {
+        const int vehicleCbid = 660_010;
+        var map = CreateTestMap(9131);
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid);
+
+        var template = new SpawnPointTemplate { COID = 14_621 };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList { SpawnType = vehicleCbid, IsTemplate = false });
+        var spawnPoint = new SpawnPoint(template);
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var vehicle = map.Objects.Values.OfType<Vehicle>().Single();
+        Assert.AreEqual(template.COID, vehicle.SpawnOwnerCoid,
+            "raw spawns must be owned by their spawn point so DespawnOwnedEntities can clean them up");
+    }
+
+    [TestMethod]
+    public void Spawn_RawVehicleCbid_MultipleTemplateRows_PicksLowestId()
+    {
+        const int vehicleCbid = 660_020;
+        const int weaponCbid = 660_021;
+        var map = CreateTestMap(9132);
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehicleCbid);
+        AssetManagerTestHelper.RegisterWeaponCloneBase(weaponCbid);
+        AssetManager.Instance.SetTestVehicleTemplates(new[]
+        {
+            new VehicleTemplate { Id = 900, VehicleCbid = vehicleCbid, WeaponFrontCbid = weaponCbid, BaseHp = 200 },
+            new VehicleTemplate { Id = 400, VehicleCbid = vehicleCbid, WeaponFrontCbid = weaponCbid, BaseHp = 100 },
+        });
+
+        var template = new SpawnPointTemplate { COID = 14_622 };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList { SpawnType = vehicleCbid, IsTemplate = false });
+        var spawnPoint = new SpawnPoint(template);
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var vehicle = map.Objects.Values.OfType<Vehicle>().Single();
+        Assert.AreEqual(400, vehicle.TemplateId, "multiple chassis rows must resolve deterministically (lowest Id)");
+    }
+
     [TestMethod]
     public void Spawn_RawVehicleWithDefaultWheelset_EquipsWheelsetForCreateVehicle()
     {

@@ -738,6 +738,47 @@ public class AssetManager : Singleton<AssetManager>
         return null;
     }
 
+    // SS-43: reverse index chassis CBID → the tVehicleTemplate row that supplies its loadout.
+    // Lowest Id wins when several rows share a chassis (deterministic; any row beats no weapons).
+    private Dictionary<int, VehicleTemplate> _vehicleTemplateByVehicleCbid;
+
+    /// <summary>
+    /// SS-43: resolves a <see cref="VehicleTemplate"/> from a raw chassis CBID so raw-CBID spawn
+    /// lists (which carry no template id) can still equip weapons/armor and set BaseHp. Prefers
+    /// the lowest template Id when a chassis has multiple loadouts.
+    /// </summary>
+    public bool TryGetVehicleTemplateByVehicleCbid(int vehicleCbid, out VehicleTemplate template)
+    {
+        template = null;
+        if (vehicleCbid <= 0)
+            return false;
+
+        var index = _vehicleTemplateByVehicleCbid ??= BuildVehicleTemplateByCbidIndex();
+        return index.TryGetValue(vehicleCbid, out template);
+    }
+
+    private Dictionary<int, VehicleTemplate> BuildVehicleTemplateByCbidIndex()
+    {
+        var index = new Dictionary<int, VehicleTemplate>();
+
+        void Consider(IEnumerable<VehicleTemplate> rows)
+        {
+            if (rows == null)
+                return;
+            foreach (var row in rows)
+            {
+                if (row == null || row.VehicleCbid <= 0)
+                    continue;
+                if (!index.TryGetValue(row.VehicleCbid, out var existing) || row.Id < existing.Id)
+                    index[row.VehicleCbid] = row;
+            }
+        }
+
+        Consider(WorldDBLoader.VehicleTemplates?.Values);
+        Consider(_testVehicleTemplates?.Values); // tests override / augment the loaded set
+        return index;
+    }
+
     public CreatureAiProfile GetCreatureAiProfile(int aiId)
     {
         if (_testCreatureAiProfiles != null && _testCreatureAiProfiles.TryGetValue(aiId, out var testProfile))
@@ -759,6 +800,7 @@ public class AssetManager : Singleton<AssetManager>
         _testVehicleTemplates ??= new Dictionary<int, VehicleTemplate>();
         foreach (var template in templates)
             _testVehicleTemplates[template.Id] = template;
+        _vehicleTemplateByVehicleCbid = null; // SS-43: rebuild the reverse index on next use
     }
 
     internal void SetTestCreatureAiProfiles(IEnumerable<CreatureAiProfile> profiles)
@@ -805,6 +847,7 @@ public class AssetManager : Singleton<AssetManager>
     internal void ClearTestNpcData()
     {
         _testVehicleTemplates = null;
+        _vehicleTemplateByVehicleCbid = null; // SS-43
         _testCreatureAiProfiles = null;
         _testLootTables = null;
         _testLootWeights = null;

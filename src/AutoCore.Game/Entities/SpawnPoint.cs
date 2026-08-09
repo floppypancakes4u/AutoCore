@@ -179,7 +179,13 @@ public class SpawnPoint : ClonedObjectBase
 
         if (cloneBase.Type == CloneBaseObjectType.Vehicle)
         {
-            var vehicle = SpawnVehicle(cloneBase.CloneBaseSpecific.CloneBaseId, spawnList);
+            // SS-43: a raw-CBID spawn list carries no template, so SpawnVehicle equips no weapons
+            // and the NPC chases but never fires. When a tVehicleTemplate row exists for this
+            // chassis, delegate to the template path (weapons, BaseHp, SpawnOwnerCoid, driver).
+            var chassisCbid = cloneBase.CloneBaseSpecific.CloneBaseId;
+            var vehicle = AssetManager.Instance.TryGetVehicleTemplateByVehicleCbid(chassisCbid, out var resolved)
+                ? SpawnTemplateVehicle(resolved, spawnList)
+                : SpawnVehicle(chassisCbid, spawnList);
             if (vehicle == null)
                 return false;
 
@@ -594,6 +600,9 @@ public class SpawnPoint : ClonedObjectBase
         vehicle.LoadCloneBase(cbid);
         vehicle.SetupCBFields();
         ApplySpawnFactionOverride(vehicle);
+        // SS-43: own the vehicle so DespawnOwnedEntities can clean it up (the template path sets
+        // this too). This branch only runs when no tVehicleTemplate row exists for the chassis.
+        vehicle.SpawnOwnerCoid = ObjectId.Coid;
         vehicle.Layer = Layer;
         // Pure terrain when heightfield present (CreateTemplateVehicle cast).
         vehicle.Position = NpcTicker.SnapToTerrain(Map, Position);
@@ -602,10 +611,18 @@ public class SpawnPoint : ClonedObjectBase
         vehicle.SetInvincible(false);
 
         // Raw-CBID spawn lists have no VehicleTemplate row, so the driver can only come from
-        // the vehicle clonebase's own VehicleSpecific.DefaultDriver.
+        // the vehicle clonebase's own VehicleSpecific.DefaultDriver, and there are no weapons to
+        // equip — SS-43 delegates to the template path when a matching row exists, so a raw
+        // spawn reaching here is genuinely weaponless.
         var cloneBaseVehicle = vehicle.CloneBaseObject as CloneBaseVehicle;
         EquipDefaultWheelSet(vehicle, cloneBaseVehicle);
         var defaultDriverCbid = cloneBaseVehicle?.VehicleSpecific.DefaultDriver ?? 0;
+        if (defaultDriverCbid <= 0)
+        {
+            Logger.WriteLog(LogType.Warning,
+                "SpawnPoint {0}: raw-CBID vehicle {1} has no template row and no default driver — it will not attack",
+                Template.COID, cbid);
+        }
         var driver = BuildDriver(0, defaultDriverCbid, spawnList.LevelOffset);
         if (driver != null)
         {

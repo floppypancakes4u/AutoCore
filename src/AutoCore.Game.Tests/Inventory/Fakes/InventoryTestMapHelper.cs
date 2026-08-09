@@ -6,6 +6,7 @@ using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Managers.Asset;
 using AutoCore.Game.Map;
+using AutoCore.Game.Structures;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 
@@ -74,6 +75,27 @@ public static class AssetManagerTestHelper
             DefaultWheelset = defaultWheelsetCbid,
             ArmorAdd = armorAdd,
             InventorySlots = inventorySlots,
+        };
+        Registered[cbid] = clone;
+        GetCloneBasesDictionary()[cbid] = clone;
+    }
+
+    /// <summary>Registers a fake <see cref="CloneBaseWeapon"/> that equips on any ranged hardpoint (Flags 0).</summary>
+    public static void RegisterWeaponCloneBase(int cbid, float rangeMax = 50f)
+    {
+        var clone = (CloneBaseWeapon)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseWeapon));
+        clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.Weapon, CloneBaseId = cbid };
+        clone.SimpleObjectSpecific = new SimpleObjectSpecific { MaxHitPoint = 1 };
+        clone.WeaponSpecific = new WeaponSpecific
+        {
+            RangeMin = 0f,
+            RangeMax = rangeMax,
+            RechargeTime = 1,
+            DamageScalar = 1f,
+            DmgMinMin = 1,
+            DmgMaxMax = 2,
+            MinMin = DamageSpecific.CreateEmpty(),
+            MaxMax = DamageSpecific.CreateEmpty(),
         };
         Registered[cbid] = clone;
         GetCloneBasesDictionary()[cbid] = clone;
