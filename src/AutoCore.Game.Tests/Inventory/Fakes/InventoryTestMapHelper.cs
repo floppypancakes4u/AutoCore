@@ -119,7 +119,9 @@ public static class AssetManagerTestHelper
         int aiBehaviorId = 0,
         short baseLevel = 1,
         int faction = 0,
-        short maxHitPoint = 100)
+        short maxHitPoint = 100,
+        short flags = 0,
+        int isNpc = 0)
     {
         var clone = (CloneBaseCreature)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseCreature));
         clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.Creature, CloneBaseId = cbid };
@@ -127,8 +129,9 @@ public static class AssetManagerTestHelper
         {
             Faction = faction,
             MaxHitPoint = maxHitPoint,
+            Flags = flags,
         };
-        clone.CreatureSpecific = new CreatureSpecific { AIBehavior = aiBehaviorId, BaseLevel = baseLevel };
+        clone.CreatureSpecific = new CreatureSpecific { AIBehavior = aiBehaviorId, BaseLevel = baseLevel, IsNPC = isNpc };
         Registered[cbid] = clone;
         GetCloneBasesDictionary()[cbid] = clone;
     }

@@ -106,6 +106,55 @@ public class SpawnPointTemplateSpawnTests
         Assert.AreEqual((byte)4, creature.Level, "baseLevel 5 with signed offset -1 must spawn at 4");
     }
 
+    // --- SS-42: combat creatures must clear the clonebase invincible flag ---
+
+    /// <summary>
+    /// SS-42 tripwire: clonebase Flags bit 12 sets IsInvincible in LoadCloneBase. Both vehicle
+    /// spawn paths clear it ("client MakeNotInvincible is not always authored"), but
+    /// SpawnCreature never did — bipeds/animals with the authored bit spawned permanently
+    /// invincible: unhittable, unrammable, and skipped by NPC aggro ("invulnerable NPC").
+    /// </summary>
+    [TestMethod]
+    public void Spawn_CombatCreature_ClonebaseInvincibleFlag_IsCleared()
+    {
+        var map = CreateTestMap(9121);
+        const int creatureCbid = 640_010;
+        AssetManagerTestHelper.RegisterCreatureCloneBase(creatureCbid, flags: 1 << 12, isNpc: 0);
+
+        var template = new SpawnPointTemplate { COID = 14_550 };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList { SpawnType = creatureCbid, IsTemplate = false });
+        var spawnPoint = new SpawnPoint(template);
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var creature = map.Objects.Values.OfType<Creature>().Single(c => c is not Character);
+        Assert.IsFalse(creature.IsInvincible,
+            "combat creatures (IsNPC == 0) must clear the clonebase invincible bit like vehicles do");
+    }
+
+    /// <summary>Semantic boundary pin: interactive NPCs (mission givers) keep the authored bit.</summary>
+    [TestMethod]
+    public void Spawn_InteractiveNpc_ClonebaseInvincibleFlag_IsKept()
+    {
+        var map = CreateTestMap(9122);
+        const int creatureCbid = 640_011;
+        AssetManagerTestHelper.RegisterCreatureCloneBase(creatureCbid, flags: 1 << 12, isNpc: 1);
+
+        var template = new SpawnPointTemplate { COID = 14_551 };
+        template.Spawns.Add(new SpawnPointTemplate.SpawnList { SpawnType = creatureCbid, IsTemplate = false });
+        var spawnPoint = new SpawnPoint(template);
+        spawnPoint.SetCoid(template.COID, false);
+        spawnPoint.SetMap(map);
+
+        Assert.IsTrue(spawnPoint.Spawn());
+
+        var creature = map.Objects.Values.OfType<Creature>().Single(c => c is not Character);
+        Assert.IsTrue(creature.IsInvincible,
+            "interactive NPCs keep the authored protection; reaction 7 (MakeNotInvincible) can still clear it");
+    }
+
     [TestMethod]
     public void Spawn_TemplateMissing_ReturnsFalse()
     {

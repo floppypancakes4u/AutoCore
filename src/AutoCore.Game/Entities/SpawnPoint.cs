@@ -570,6 +570,11 @@ public class SpawnPoint : ClonedObjectBase
         // Static/interactive NPCs (IsNPC != 0) don't patrol or run combat AI; combat creatures do.
         if (cloneBaseCreature != null && cloneBaseCreature.CreatureSpecific.IsNPC == 0)
         {
+            // SS-42: clonebase may flag combat creatures invincible (Flags bit 12) and the
+            // client MakeNotInvincible reaction is not always authored — clear here, mirroring
+            // both vehicle spawn paths. Interactive NPCs (IsNPC != 0, mission givers) keep the
+            // authored protection; reaction 7 can still clear them.
+            creature.SetInvincible(false);
             ApplySpawnPath(creature, Template, ResolveTemplatePath());
             creature.NpcAi = BuildNpcAi(cloneBaseCreature.CreatureSpecific.AIBehavior, creature.Position);
         }
