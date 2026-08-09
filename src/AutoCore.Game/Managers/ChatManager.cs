@@ -602,6 +602,14 @@ public class ChatManager : Singleton<ChatManager>
                 // Deal 10000 damage (attacker-attributed so combat AI + /reportbug fire)
                 const int killDamage = 10000;
                 var attacker = character.CurrentVehicle ?? (ClonedObjectBase)character;
+                // SS-36: /kill runs under DamageContext.Admin — the unified gate waives
+                // hostility for GM-gated commands but keeps the route on the choke point.
+                if (!CombatEligibility.CanDamage(attacker, target, DamageContext.Admin))
+                {
+                    respPacket.Message = "Cannot damage target!";
+                    break;
+                }
+
                 var actualDamage = target.TakeDamage(killDamage, attacker);
 
                 try

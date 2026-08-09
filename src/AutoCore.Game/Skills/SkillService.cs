@@ -360,6 +360,16 @@ public static class SkillService
                 return false;
             }
 
+            // SS-36: reactions are self-damage by construction — the unified gate's Reaction
+            // context waives self-exclusion (and only that; different roots stay denied).
+            if (!CombatEligibility.CanDamage(activator, activator, DamageContext.Reaction))
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "Skill cast rejected: source=Reaction skillId={0} reason=hostility-gate",
+                    skill.Id);
+                return false;
+            }
+
             damageDealt = activator.TakeDamage(-healSigned, activator);
             powerDelta = damageDealt;
             if (damageDealt <= 0)
