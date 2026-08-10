@@ -294,6 +294,18 @@ engineers to treat bare COIDs as ambiguous.
 
 ---
 
+## 5.4 Not a COID collision at all — see SS-51
+
+The 2026-08-10 "broken map transfer" reports (incomplete vehicle, wrong position, dead controls)
+were initially attributed to face C and then to the SS-31 hardening merge. **Both were wrong.**
+A fresh character created above the 0x0800_0000 floor still reproduced it. Root cause was
+`SectorMap.EnterMap` firing mission-phase trigger re-eval before the client's create stream, plus
+out-of-volume collision-gate firing — recorded as **SS-51** in
+[exception-safety-audit.md](exception-safety-audit.md). Face C below remains a real, separately
+remediated hazard; it was simply not the cause of that incident.
+
+---
+
 ## 5.5 Face C — client-side bare-COID keying (map-transfer corruption)
 
 **Live incident date:** 2026-08-10 (account `floppy`, warps into Ground Zero
