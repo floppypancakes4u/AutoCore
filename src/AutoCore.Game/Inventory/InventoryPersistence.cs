@@ -21,7 +21,16 @@ public sealed class InventoryPersistence : IInventoryPersistence
     internal static Func<CharContext> CreateContext { get; set; } = static () => new CharContext();
 
     /// <summary>Restore the default context factory after tests.</summary>
-    internal static void ResetForTests() => CreateContext = static () => new CharContext();
+    internal static void ResetForTests()
+    {
+        CreateContext = static () => new CharContext();
+        Interlocked.Exchange(ref _ss31OverwriteRefusedCount, 0);
+    }
+
+    private static long _ss31OverwriteRefusedCount;
+
+    /// <summary>Times EnsureSimpleObject refused a cross-category coid overwrite (SS-31).</summary>
+    public static long Ss31OverwriteRefusedCount => Interlocked.Read(ref _ss31OverwriteRefusedCount);
 
     private const byte InventoryTypeCargo = 1;
     private const byte InventoryTypeLocker = 3;
@@ -259,6 +268,7 @@ public sealed class InventoryPersistence : IInventoryPersistence
             var isSameIdentity = existing.Type == type && existing.CBID == cbid;
             if (!isPlaceholder && !isSameIdentity)
             {
+                Interlocked.Increment(ref _ss31OverwriteRefusedCount);
                 throw new InvalidOperationException(
                     $"EnsureSimpleObject: coid {itemCoid} already belongs to object type {existing.Type} " +
                     $"(cbid {existing.CBID}); refusing to overwrite with type {type} (cbid {cbid}) — SS-31 coid collision.");

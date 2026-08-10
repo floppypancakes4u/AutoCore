@@ -23,7 +23,16 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
     internal static Func<CharContext> CreateContext { get; set; } = DefaultCreateContext;
 
     /// <summary>Restores the production CharContext factory.</summary>
-    internal static void ResetForTests() => CreateContext = DefaultCreateContext;
+    internal static void ResetForTests()
+    {
+        CreateContext = DefaultCreateContext;
+        Interlocked.Exchange(ref _corruptIdentitySkipCount, 0);
+    }
+
+    private static long _corruptIdentitySkipCount;
+
+    /// <summary>Times SendCharacter skipped a row due to missing/corrupt identity (SS-31).</summary>
+    public static long CorruptIdentitySkipCount => Interlocked.Read(ref _corruptIdentitySkipCount);
 
     /// <summary>Chassis <c>InventorySlots</c> → retail cargo UI page count (min 1).</summary>
     internal static int ResolveChassisCargoPages(int vehicleCbid)
@@ -384,6 +393,7 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
             // LoadFromDB returns null on missing/corrupt simple_object identity (SS-31). Skipping
             // keeps the rest of the account's character list playable instead of shipping a
             // poison CreateCharacter/CreateVehicle that AVs the retail client at 0x0080A62A.
+            Interlocked.Increment(ref _corruptIdentitySkipCount);
             AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
                 "SendCharacter: skipped coid={0} account={1} — LoadCharacterForSelection failed " +
                 "(missing vehicle or simple_object type/cbid corruption)",
