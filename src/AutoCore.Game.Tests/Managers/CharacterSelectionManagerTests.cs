@@ -110,6 +110,85 @@ public class CharacterSelectionManagerTests
     }
 
     [TestMethod]
+    public void SendCharacterList_Ss31CorruptedCharacterIdentity_SkipsWithoutCreatePackets()
+    {
+        // Live SS-31 incident: item coid collided with character coid and EnsureSimpleObject
+        // overwrote simple_object.Type/CBID to Item. Character.LoadFromDB must refuse so
+        // SendCharacter never ships a poison CreateCharacter (client AV 0x0080A62A).
+        const uint accountId = 13;
+        const long coid = 18274;
+
+        using (var seed = CreateContext())
+        {
+            seed.SimpleObjects.Add(new SimpleObjectData
+            {
+                Coid = coid,
+                Type = (byte)CloneBaseObjectType.Item,
+                CBID = 17774
+            });
+            seed.Characters.Add(new CharacterData
+            {
+                Coid = coid,
+                AccountId = accountId,
+                Name = "Corrupted",
+                Deleted = false,
+                ActiveVehicleCoid = coid + 1
+            });
+            seed.SaveChanges();
+        }
+
+        var client = CreateClient(accountId);
+        CharacterSelectionManager.SendCharacterList(client);
+        Assert.AreEqual(0, _sent.Count, "corrupt character identity must not reach the client wire");
+    }
+
+    [TestMethod]
+    public void SendCharacterList_Ss31CorruptedVehicleIdentity_SkipsWithoutCreatePackets()
+    {
+        // Character simple_object is fine, but the active vehicle row was clobbered to Weapon.
+        const uint accountId = 14;
+        const long charCoid = 19001;
+        const long vehCoid = 19002;
+        const int charCbid = 42_201;
+
+        AssetManagerTestHelper.RegisterCharacterCloneBase(charCbid);
+
+        using (var seed = CreateContext())
+        {
+            seed.SimpleObjects.Add(new SimpleObjectData
+            {
+                Coid = charCoid,
+                Type = (byte)CloneBaseObjectType.Character,
+                CBID = charCbid
+            });
+            seed.SimpleObjects.Add(new SimpleObjectData
+            {
+                Coid = vehCoid,
+                Type = (byte)CloneBaseObjectType.Weapon,
+                CBID = 1552
+            });
+            seed.Characters.Add(new CharacterData
+            {
+                Coid = charCoid,
+                AccountId = accountId,
+                Name = "VehBroken",
+                Deleted = false,
+                ActiveVehicleCoid = vehCoid
+            });
+            seed.Vehicles.Add(new VehicleData
+            {
+                Coid = vehCoid,
+                CharacterCoid = charCoid
+            });
+            seed.SaveChanges();
+        }
+
+        var client = CreateClient(accountId);
+        CharacterSelectionManager.SendCharacterList(client);
+        Assert.AreEqual(0, _sent.Count, "corrupt vehicle identity must not reach the client wire");
+    }
+
+    [TestMethod]
     public void DeleteCharacter_MarksOwnedCharacterDeleted()
     {
         const uint accountId = 12;

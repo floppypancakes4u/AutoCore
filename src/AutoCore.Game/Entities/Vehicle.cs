@@ -1623,6 +1623,27 @@ public class Vehicle : SimpleObject
         if (DBData == null)
             return false;
 
+        // SS-31 residual: same identity overwrite as Character — refuse vehicle rows whose
+        // simple_object was clobbered to item/weapon/etc. before CreateVehicle hits the wire.
+        if (DBData.SimpleObjectBase == null)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Vehicle.LoadFromDB: coid={0} has no simple_object row — skipping (SS-31)",
+                coid);
+            return false;
+        }
+
+        if (DBData.SimpleObjectBase.Type != 0
+            && DBData.SimpleObjectBase.Type != (byte)CloneBaseObjectType.Vehicle)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Vehicle.LoadFromDB: coid={0} simple_object.Type={1} cbid={2} (expected Vehicle={3}) — " +
+                "skipping corrupt identity (SS-31; client would AV at 0x0080A62A)",
+                coid, DBData.SimpleObjectBase.Type, DBData.SimpleObjectBase.CBID,
+                (byte)CloneBaseObjectType.Vehicle);
+            return false;
+        }
+
         LoadCloneBase(DBData.SimpleObjectBase.CBID);
 
         Position = new(DBData.PositionX, DBData.PositionY, DBData.PositionZ);

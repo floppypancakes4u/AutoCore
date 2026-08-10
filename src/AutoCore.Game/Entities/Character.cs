@@ -6,6 +6,7 @@ namespace AutoCore.Game.Entities;
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.CloneBases;
+using AutoCore.Game.Constants;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
@@ -347,6 +348,28 @@ public partial class Character : Creature
         DBData = context.Characters.Include(c => c.SimpleObjectBase).FirstOrDefault(c => c.Coid == coid);
         if (DBData == null)
             return false;
+
+        // SS-31 residual: item coid collisions used to overwrite simple_object.Type/CBID for
+        // character rows. Loading the wrong clonebase then shipping CreateCharacter AVs the
+        // retail client at character select (autoassault!0x0080A62A). Fail closed.
+        if (DBData.SimpleObjectBase == null)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Character.LoadFromDB: coid={0} has no simple_object row — skipping (SS-31)",
+                coid);
+            return false;
+        }
+
+        if (DBData.SimpleObjectBase.Type != 0
+            && DBData.SimpleObjectBase.Type != (byte)CloneBaseObjectType.Character)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Character.LoadFromDB: coid={0} simple_object.Type={1} cbid={2} (expected Character={3}) — " +
+                "skipping corrupt identity (SS-31; client would AV at 0x0080A62A)",
+                coid, DBData.SimpleObjectBase.Type, DBData.SimpleObjectBase.CBID,
+                (byte)CloneBaseObjectType.Character);
+            return false;
+        }
 
         AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Network, $"Character.LoadFromDB: Loaded character Coid {coid}, Name from DB: '{DBData.Name}' (Length: {DBData.Name?.Length ?? 0})");
 

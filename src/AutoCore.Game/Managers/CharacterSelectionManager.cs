@@ -380,7 +380,16 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
     {
         var character = ObjectManager.LoadCharacterForSelection(coid, context);
         if (character == null)
+        {
+            // LoadFromDB returns null on missing/corrupt simple_object identity (SS-31). Skipping
+            // keeps the rest of the account's character list playable instead of shipping a
+            // poison CreateCharacter/CreateVehicle that AVs the retail client at 0x0080A62A.
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "SendCharacter: skipped coid={0} account={1} — LoadCharacterForSelection failed " +
+                "(missing vehicle or simple_object type/cbid corruption)",
+                coid, client.Account?.Id);
             return;
+        }
 
         var createCharPacket = new CreateCharacterPacket();
         var createVehiclePacket = new CreateVehiclePacket();
