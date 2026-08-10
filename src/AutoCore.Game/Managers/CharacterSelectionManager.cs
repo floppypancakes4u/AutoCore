@@ -31,7 +31,13 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
 
     private static long _corruptIdentitySkipCount;
 
-    /// <summary>Times SendCharacter skipped a row due to missing/corrupt identity (SS-31).</summary>
+    /// <summary>
+    /// Times SendCharacter skipped a character-select row because
+    /// <see cref="ObjectManager.LoadCharacterForSelection"/> returned null. This counts every
+    /// skip on that path — a plain missing vehicle row as well as SS-31 simple_object
+    /// type/cbid corruption — not only SS-31 corruption specifically; the log line at each
+    /// skip carries the actual reason.
+    /// </summary>
     public static long CorruptIdentitySkipCount => Interlocked.Read(ref _corruptIdentitySkipCount);
 
     /// <summary>Chassis <c>InventorySlots</c> → retail cargo UI page count (min 1).</summary>
@@ -390,9 +396,12 @@ public class CharacterSelectionManager : Singleton<CharacterSelectionManager>
         var character = ObjectManager.LoadCharacterForSelection(coid, context);
         if (character == null)
         {
-            // LoadFromDB returns null on missing/corrupt simple_object identity (SS-31). Skipping
-            // keeps the rest of the account's character list playable instead of shipping a
-            // poison CreateCharacter/CreateVehicle that AVs the retail client at 0x0080A62A.
+            // LoadCharacterForSelection returns null both for a plain missing vehicle row and for
+            // SS-31 simple_object type/cbid corruption; _corruptIdentitySkipCount counts either
+            // case (it is a superset of SS-31 corruption, not SS-31-only — see the log line below
+            // for the actual reason). Skipping keeps the rest of the account's character list
+            // playable instead of shipping a poison CreateCharacter/CreateVehicle that AVs the
+            // retail client at 0x0080A62A.
             Interlocked.Increment(ref _corruptIdentitySkipCount);
             AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
                 "SendCharacter: skipped coid={0} account={1} — LoadCharacterForSelection failed " +
