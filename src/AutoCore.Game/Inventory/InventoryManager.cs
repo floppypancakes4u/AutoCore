@@ -702,9 +702,11 @@ public sealed class InventoryManager
                 if (updates.Count == 0 && plannedAdds.Count == 0)
                 {
                     // SS-31: firstCoid was reserved (placeholder simple_object row) but never
-                    // consumed into an item — release it instead of orphaning it.
+                    // consumed into an item — release it instead of orphaning it. Best-effort
+                    // only: a persistence failure here (e.g. DB unreachable) must not mask the
+                    // real item-creation error being returned to the caller.
                     if (nextCoid == firstCoid)
-                        _persistence?.ReleaseUnusedPlaceholder(firstCoid);
+                        TryReleaseUnusedPlaceholder(firstCoid);
                     return new InventoryCommandResult($"Cannot add CBID {entry.Cbid}: {create.Error}", remainingQuantity: quantity);
                 }
                 break;
@@ -725,8 +727,9 @@ public sealed class InventoryManager
             // SS-31: firstCoid was reserved (placeholder simple_object row) up front by the
             // caller, but the placement loop above never placed it as an item — either the
             // merge pass fully absorbed the requested quantity, or the grid had no free slot
-            // left after merging. Release the placeholder instead of orphaning it.
-            _persistence?.ReleaseUnusedPlaceholder(firstCoid);
+            // left after merging. Release the placeholder instead of orphaning it. Best-effort
+            // only: a persistence failure here must not strand an otherwise-successful merge.
+            TryReleaseUnusedPlaceholder(firstCoid);
         }
 
         var packets = new List<BasePacket>();
@@ -2349,6 +2352,25 @@ public sealed class InventoryManager
     // SS-31: throw-safe wrapper around the equip persistence calls. A guard throw here
     // (e.g. a coid collision inside EnsureSimpleObject) must not strand the item after
     // the caller has already deleted its cargo row — the caller rolls back on false.
+    // SS-31: releasing an unused placeholder is best-effort cleanup, not a correctness
+    // requirement — the row is inert (Type=0, CBID=0) until claimed, so a failure here (e.g.
+    // the DB is unreachable) must never propagate and mask/replace the real result of the
+    // add-item attempt that triggered the release.
+    private void TryReleaseUnusedPlaceholder(long coid)
+    {
+        if (_persistence == null)
+            return;
+
+        try
+        {
+            _persistence.ReleaseUnusedPlaceholder(coid);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteException(LogType.Error, "ReleaseUnusedPlaceholder", ex);
+        }
+    }
+
     private bool TryPersistEquip(long characterCoid, Vehicle vehicle, SimpleObject equippedItem)
     {
         if (vehicle == null)

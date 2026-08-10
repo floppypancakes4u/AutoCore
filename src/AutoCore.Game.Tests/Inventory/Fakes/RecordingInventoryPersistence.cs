@@ -20,6 +20,10 @@ public sealed class RecordingInventoryPersistence : IInventoryPersistence
     // so the equip-persist rollback path can be exercised.
     public Func<long, Exception>? EnsureSimpleObjectFailure { get; set; }
 
+    // SS-31: lets tests simulate a persistence failure (e.g. DB unavailable) inside
+    // ReleaseUnusedPlaceholder so the best-effort-cleanup exception guard can be exercised.
+    public Func<long, Exception>? ReleaseUnusedPlaceholderFailure { get; set; }
+
     public List<CharacterInventoryItem> CargoToLoad { get; } = new();
     public List<CharacterInventoryItem> LockerToLoad { get; } = new();
     public long CreditsToLoad { get; set; }
@@ -60,8 +64,14 @@ public sealed class RecordingInventoryPersistence : IInventoryPersistence
         EnsuredSimpleObjects.Add((itemCoid, type, cbid));
     }
 
-    public void ReleaseUnusedPlaceholder(long coid) =>
+    public void ReleaseUnusedPlaceholder(long coid)
+    {
+        var failure = ReleaseUnusedPlaceholderFailure?.Invoke(coid);
+        if (failure != null)
+            throw failure;
+
         ReleasedPlaceholders.Add(coid);
+    }
 
     public void SaveVehicleEquipment(long vehicleCoid, VehicleEquipmentSnapshot snapshot) =>
         EquipmentSaves.Add((vehicleCoid, snapshot));

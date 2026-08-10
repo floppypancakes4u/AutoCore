@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.CompilerServices;
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.CloneBases.Specifics;
@@ -104,6 +105,39 @@ public class InventoryPlaceholderLeakTests
         Assert.IsNull(inventory.FindByCoid(firstCoid), "the pre-allocated coid was never placed as an item");
         Assert.IsTrue(persistence.ReleasedPlaceholders.Contains(firstCoid),
             "merge-only accepts must release the unused firstCoid placeholder row instead of orphaning it");
+    }
+
+    [TestMethod]
+    public void AddItem_ReleaseUnusedPlaceholderThrows_DoesNotPropagateAndStillReturnsResult()
+    {
+        // SS-31 regression: ReleaseUnusedPlaceholder is a best-effort cleanup call. When the
+        // caller's real IInventoryPersistence is DB-backed (e.g. a Character built without a
+        // fake persistence, as in mission-flow tests) and the DB is unreachable, a throw here
+        // must not propagate out of AddItemInternal and crash an otherwise-normal merge-accept
+        // or item-creation-failed path. This mirrors the try/catch discipline already used by
+        // TryPersistEquip for the same reason (see docs/exception-safety-audit.md).
+        var persistence = new RecordingInventoryPersistence
+        {
+            ReleaseUnusedPlaceholderFailure = _ => new InvalidOperationException("DB unreachable (test)")
+        };
+        var clones = new FakeCloneBaseLookup();
+        clones.Register(31, StackableClone(31, stackSize: 10));
+        var inventory = new InventoryManager(persistence, clones);
+        inventory.SetCapacity(1, 13);
+        var coid = 1000L;
+        for (var row = 0; row < 12; row++)
+        {
+            inventory.TryAdd(new CharacterInventoryItem(99, CloneBaseObjectType.Item, "Filler", coid, 0, (byte)row, 1));
+            coid++;
+        }
+        inventory.TryAdd(new CharacterInventoryItem(31, CloneBaseObjectType.Item, "Parts", coid, 0, 12, 1));
+
+        const long firstCoid = 5000L;
+        var result = inventory.AddItem(Entry(31), new TestItemCreator(), coid: firstCoid, quantity: 1);
+
+        Assert.AreEqual(1, result.AcceptedQuantity,
+            "a merge-only accept must still succeed even when the best-effort placeholder release fails");
+        Assert.IsNull(inventory.FindByCoid(firstCoid), "the pre-allocated coid was still never placed as an item");
     }
 
     [TestMethod]
