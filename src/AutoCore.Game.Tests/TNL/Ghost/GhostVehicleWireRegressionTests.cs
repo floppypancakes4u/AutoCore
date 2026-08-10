@@ -47,7 +47,7 @@ public class GhostVehicleWireRegressionTests
         GhostVehicle.EnableMinimalForeignPathBlock = false;
         GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = false;
         GhostVehicle.EnableMinimalForeignOwnerBlock = false;
-        GhostVehicle.EnableMinimalForeignHealthBlock = true; // SS-38 compiled default
+        GhostVehicle.EnableMinimalForeignHealthBlock = false; // compiled default (master)
         GhostVehicle.HealthResendWindowMs = GhostVehicle.DefaultHealthResendWindowMs;
         GhostVehicle.EnableInitialHardpointPack = false;
         GhostVehicle.EnableDeferredForeignPose = false;
@@ -994,18 +994,18 @@ public class GhostVehicleWireRegressionTests
     }
 
     /// <summary>
-    /// SS-38: with the minimal foreign profile on (as the deployed levers JSON sets it) and the
-    /// health lever left at its COMPILED DEFAULT, health bits must still pack. A stale or
-    /// unparseable JSON must not strip NPC HP into a frozen green bar.
+    /// When minimal foreign profile is on AND health is explicitly admitted, health bits pack.
+    /// Health is opt-in (compiled default false) — enabling it only via a valid levers key.
     /// </summary>
     [TestMethod]
-    public void PackDelta_ForeignMinimal_CompiledDefaults_PacksHealthBits()
+    public void PackDelta_ForeignMinimal_WithHealthLeverOn_PacksHealthBits()
     {
         var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_186);
         vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_186, true);
 
         AutoCore.Game.Diagnostics.WireIsolationLevers.ResetToDefaults();
-        GhostVehicle.EnableMinimalForeignInitialProfile = true; // profile on, health lever untouched
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = true; // explicit opt-in
         var stream = PackUpdateNonInitial(vehicle, GhostObject.HealthMask | GhostObject.HealthMaxMask);
 
         Assert.IsFalse(stream.ReadFlag()); // Skills
@@ -1016,7 +1016,7 @@ public class GhostVehicleWireRegressionTests
         Assert.IsFalse(stream.ReadFlag()); // pet
         Assert.IsFalse(stream.ReadFlag()); // murderer
         Assert.IsTrue(stream.ReadFlag(),
-            "SS-38: health must pack under the minimal foreign profile with compiled defaults");
+            "health must pack when minimal foreign profile admits HealthMask");
         Assert.AreEqual((uint)vehicle.GetCurrentHP(), stream.ReadInt(18));
     }
 
@@ -1033,7 +1033,8 @@ public class GhostVehicleWireRegressionTests
         vehicle.CreateGhost();
 
         AutoCore.Game.Diagnostics.WireIsolationLevers.ResetToDefaults();
-        GhostVehicle.EnableMinimalForeignInitialProfile = true; // health lever left at its default
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = true; // explicit opt-in for this layout pin
         NetObject.PIsInitialUpdate = true;
         try
         {

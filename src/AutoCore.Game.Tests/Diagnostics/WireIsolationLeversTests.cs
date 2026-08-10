@@ -52,10 +52,9 @@ public class WireIsolationLeversTests
             "vehicle drive controller is opt-in — default preserves legacy path motion");
         Assert.IsFalse(GhostVehicle.EnableClientSidePathVisual,
             "client-side path visual freezes server pose authority when misused");
-        Assert.IsTrue(GhostVehicle.EnableMinimalForeignHealthBlock,
-            "SS-38: foreign NPC health must ship by DEFAULT — a stale/missing/unparseable levers " +
-            "JSON that enables the minimal profile but can't supply this key must not strip NPC " +
-            "HP (frozen green bar reads as 'invulnerable')");
+        Assert.IsFalse(GhostVehicle.EnableMinimalForeignHealthBlock,
+            "compiled default keeps foreign health OFF — the levers JSON is what enables it, " +
+            "and a trailing-comma JSON must FAIL parse so we stay on safe defaults (login AV)");
         Assert.IsFalse(WireDiag.Enabled);
         Assert.IsFalse(GhostObjectDiag.Enabled);
     }
@@ -107,27 +106,28 @@ public class WireIsolationLeversTests
     }
 
     /// <summary>
-    /// SS-38: the deployed Launcher wire-isolation.levers.json shipped with a trailing comma and
-    /// was silently rejected wholesale, reverting every lever to compiled defaults. Hand-edited
-    /// config must tolerate trailing commas and comments.
+    /// Production wire-isolation.levers.json historically shipped with a trailing comma and was
+    /// rejected wholesale — leaving compiled defaults. That accidental fail-closed behaviour is
+    /// load-bearing: accepting trailing commas made the full minimal-foreign profile go live and
+    /// crashed the retail client at login (AV 0x0080A62A). Keep strict JSON parse.
     /// </summary>
     [TestMethod]
-    public void ApplyFromJson_TrailingCommaAndComments_Accepted()
+    public void ApplyFromJson_TrailingComma_Rejected_LeavesCompiledDefaults()
     {
-        // Both assertions below flip a lever AWAY from its compiled default, so they fail if the
-        // tolerant parse silently applied nothing.
+        GhostVehicle.EnableMinimalForeignInitialProfile = false;
+        GhostVehicle.EnableMinimalForeignHealthBlock = false;
+
         var applied = WireIsolationLevers.ApplyFromJson(
             """
             {
-              // hand-edited config
               "EnableMinimalForeignInitialProfile": true,
-              /* emergency rollback of the SS-38 default */
-              "EnableMinimalForeignHealthBlock": false,
+              "EnableMinimalForeignHealthBlock": true,
             }
             """, out var error);
-        Assert.IsTrue(applied, error);
-        Assert.IsTrue(GhostVehicle.EnableMinimalForeignInitialProfile, "default is false — proves the parse applied");
-        Assert.IsFalse(GhostVehicle.EnableMinimalForeignHealthBlock, "default is true — proves the parse applied");
+        Assert.IsFalse(applied, "trailing comma must fail parse: " + error);
+        Assert.IsFalse(GhostVehicle.EnableMinimalForeignInitialProfile,
+            "failed parse must not partially apply — stay on compiled defaults");
+        Assert.IsFalse(GhostVehicle.EnableMinimalForeignHealthBlock);
     }
 
     /// <summary>
@@ -171,7 +171,7 @@ public class WireIsolationLeversTests
         Assert.IsTrue(GhostVehicle.EnableMinimalForeignInitialProfile, "live values must be restored");
         Assert.IsTrue(WireDiag.Enabled, "live values must be restored");
         Assert.IsFalse(defaults["EnableMinimalForeignInitialProfile"], "captured value is the compiled default");
-        Assert.IsTrue(defaults["EnableMinimalForeignHealthBlock"], "SS-38 compiled default");
+        Assert.IsFalse(defaults["EnableMinimalForeignHealthBlock"], "compiled default keeps health off");
     }
 
     [TestMethod]

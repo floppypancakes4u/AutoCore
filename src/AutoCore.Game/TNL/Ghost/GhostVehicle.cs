@@ -56,7 +56,7 @@ public class GhostVehicle : GhostObject
     /// unparseable levers JSON must not strip NPC HP (frozen green bar reads as invulnerable);
     /// the lever remains available for emergency rollback.
     /// </summary>
-    public static bool EnableMinimalForeignHealthBlock = true;
+    public static bool EnableMinimalForeignHealthBlock = false;
 
     /// <summary>Default for <see cref="HealthResendWindowMs"/>.</summary>
     public const int DefaultHealthResendWindowMs = 5000;
