@@ -430,7 +430,6 @@ public partial class TNLConnection
         character.WriteToPacket(charPacket);
         character.CurrentVehicle.WriteToPacket(vehiclePacket);
 
-        InventoryCoidCounter.SyncFromCargo(character);
         SendInventoryLoginObjectPackets(character);
         SendGamePacket(vehiclePacket);
         SendGamePacket(charPacket);
