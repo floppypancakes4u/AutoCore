@@ -189,6 +189,248 @@ public class CharacterSelectionManagerTests
     }
 
     [TestMethod]
+    public void SendCharacterList_Ss31PlaceholderIdentityRow_SkipsInsteadOfThrowing()
+    {
+        // Live SS-31 crash: a {Type=0, CBID=0} simple_object placeholder row reaches
+        // LoadCloneBase(0), which throws InvalidOperationException out of SendCharacterList
+        // (LoadCharacterForSelection has no catch). Character.LoadFromDB must refuse cbid<=0.
+        const uint accountId = 15;
+        const long coid = 20001;
+
+        using (var seed = CreateContext())
+        {
+            seed.SimpleObjects.Add(new SimpleObjectData
+            {
+                Coid = coid,
+                Type = 0,
+                CBID = 0
+            });
+            seed.Characters.Add(new CharacterData
+            {
+                Coid = coid,
+                AccountId = accountId,
+                Name = "Placeholder",
+                Deleted = false,
+                ActiveVehicleCoid = coid + 1
+            });
+            seed.SaveChanges();
+        }
+
+        var client = CreateClient(accountId);
+        CharacterSelectionManager.SendCharacterList(client);
+        Assert.AreEqual(0, _sent.Count, "placeholder identity row must not throw or ship packets");
+    }
+
+    [TestMethod]
+    public void SendCharacterList_Ss31WrongCloneBaseKind_SkipsWithoutCreatePackets()
+    {
+        // simple_object.Type says Character, but the CBID it points at resolves to a Vehicle
+        // clonebase. LoadCloneBase succeeds (cbid is known), so the Type prefilter above cannot
+        // catch this — only comparing the loaded clonebase kind after LoadCloneBase can.
+        //
+        // The active vehicle is seeded fully healthy (own simple_object + wheelset row) so the
+        // skip below is provably caused by the character's kind mismatch, not by an unrelated
+        // LoadCurrentVehicle failure (e.g. a missing vehicle/wheelset row).
+        const uint accountId = 16;
+        const long coid = 20101;
+        const long vehCoid = 20102;
+        const long wheelsetCoid = 20103;
+        const int wrongKindCbid = 42_301;
+        const int vehCbid = 42_306;
+        const int wheelsetCbid = 42_307;
+
+        AssetManagerTestHelper.RegisterVehicleCloneBase(wrongKindCbid);
+        AssetManagerTestHelper.RegisterVehicleCloneBase(vehCbid);
+        AssetManagerTestHelper.RegisterWheelSetCloneBase(wheelsetCbid);
+
+        using (var seed = CreateContext())
+        {
+            seed.SimpleObjects.Add(new SimpleObjectData
+            {
+                Coid = coid,
+                Type = (byte)CloneBaseObjectType.Character,
+                CBID = wrongKindCbid
+            });
+            seed.SimpleObjects.Add(new SimpleObjectData
+            {
+                Coid = vehCoid,
+                Type = (byte)CloneBaseObjectType.Vehicle,
+                CBID = vehCbid
+            });
+            seed.SimpleObjects.Add(new SimpleObjectData
+            {
+                Coid = wheelsetCoid,
+                Type = (byte)CloneBaseObjectType.WheelSet,
+                CBID = wheelsetCbid
+            });
+            seed.Characters.Add(new CharacterData
+            {
+                Coid = coid,
+                AccountId = accountId,
+                Name = "WrongKind",
+                Deleted = false,
+                ActiveVehicleCoid = vehCoid
+            });
+            seed.Vehicles.Add(new VehicleData
+            {
+                Coid = vehCoid,
+                CharacterCoid = coid,
+                Wheelset = wheelsetCoid
+            });
+            seed.SaveChanges();
+        }
+
+        var client = CreateClient(accountId);
+        CharacterSelectionManager.SendCharacterList(client);
+        Assert.AreEqual(0, _sent.Count, "clonebase-kind mismatch must not reach the client wire");
+    }
+
+    [TestMethod]
+    public void SendCharacterList_Ss31VehiclePlaceholderIdentityRow_SkipsInsteadOfThrowing()
+    {
+        // Character row is healthy; the active vehicle row is the {Type=0, CBID=0} placeholder.
+        const uint accountId = 17;
+        const long charCoid = 20201;
+        const long vehCoid = 20202;
+        const int charCbid = 42_302;
+
+        AssetManagerTestHelper.RegisterCharacterCloneBase(charCbid);
+
+        using (var seed = CreateContext())
+        {
+            seed.SimpleObjects.Add(new SimpleObjectData
+            {
+                Coid = charCoid,
+                Type = (byte)CloneBaseObjectType.Character,
+                CBID = charCbid
+            });
+            seed.SimpleObjects.Add(new SimpleObjectData
+            {
+                Coid = vehCoid,
+                Type = 0,
+                CBID = 0
+            });
+            seed.Characters.Add(new CharacterData
+            {
+                Coid = charCoid,
+                AccountId = accountId,
+                Name = "VehPlaceholder",
+                Deleted = false,
+                ActiveVehicleCoid = vehCoid
+            });
+            seed.Vehicles.Add(new VehicleData
+            {
+                Coid = vehCoid,
+                CharacterCoid = charCoid
+            });
+            seed.SaveChanges();
+        }
+
+        var client = CreateClient(accountId);
+        CharacterSelectionManager.SendCharacterList(client);
+        Assert.AreEqual(0, _sent.Count, "placeholder vehicle identity must not throw or ship packets");
+    }
+
+    [TestMethod]
+    public void SendCharacterList_Ss31VehicleWrongCloneBaseKind_SkipsWithoutCreatePackets()
+    {
+        // Character row is healthy; the active vehicle row's simple_object.Type says Vehicle,
+        // but its CBID resolves to a Character clonebase.
+        //
+        // The vehicle's wheelset is seeded fully healthy (own simple_object row with a
+        // registered WheelSet clonebase) so the skip below is provably caused by the vehicle's
+        // own kind mismatch, not by the unconditional WheelSet.LoadFromDB call that runs right
+        // after LoadCloneBase in Vehicle.LoadFromDB.
+        const uint accountId = 18;
+        const long charCoid = 20301;
+        const long vehCoid = 20302;
+        const long wheelsetCoid = 20303;
+        const int charCbid = 42_303;
+        const int wrongKindCbid = 42_304;
+        const int wheelsetCbid = 42_308;
+
+        AssetManagerTestHelper.RegisterCharacterCloneBase(charCbid);
+        AssetManagerTestHelper.RegisterCharacterCloneBase(wrongKindCbid);
+        AssetManagerTestHelper.RegisterWheelSetCloneBase(wheelsetCbid);
+
+        using (var seed = CreateContext())
+        {
+            seed.SimpleObjects.Add(new SimpleObjectData
+            {
+                Coid = charCoid,
+                Type = (byte)CloneBaseObjectType.Character,
+                CBID = charCbid
+            });
+            seed.SimpleObjects.Add(new SimpleObjectData
+            {
+                Coid = vehCoid,
+                Type = (byte)CloneBaseObjectType.Vehicle,
+                CBID = wrongKindCbid
+            });
+            seed.SimpleObjects.Add(new SimpleObjectData
+            {
+                Coid = wheelsetCoid,
+                Type = (byte)CloneBaseObjectType.WheelSet,
+                CBID = wheelsetCbid
+            });
+            seed.Characters.Add(new CharacterData
+            {
+                Coid = charCoid,
+                AccountId = accountId,
+                Name = "VehWrongKind",
+                Deleted = false,
+                ActiveVehicleCoid = vehCoid
+            });
+            seed.Vehicles.Add(new VehicleData
+            {
+                Coid = vehCoid,
+                CharacterCoid = charCoid,
+                Wheelset = wheelsetCoid
+            });
+            seed.SaveChanges();
+        }
+
+        var client = CreateClient(accountId);
+        CharacterSelectionManager.SendCharacterList(client);
+        Assert.AreEqual(0, _sent.Count, "vehicle clonebase-kind mismatch must not reach the client wire");
+    }
+
+    [TestMethod]
+    public void LoadFromDB_LegacyTypeZeroWithValidCbid_StillLoads()
+    {
+        // Pins the legacy-tolerance decision: Type==0 (never migrated) with a valid, positive
+        // CBID must still load — only CBID<=0 and clonebase-kind mismatches are refused.
+        const long coid = 20401;
+        const int cbid = 42_305;
+
+        AssetManagerTestHelper.RegisterCharacterCloneBase(cbid);
+
+        using (var seed = CreateContext())
+        {
+            seed.SimpleObjects.Add(new SimpleObjectData
+            {
+                Coid = coid,
+                Type = 0,
+                CBID = cbid
+            });
+            seed.Characters.Add(new CharacterData
+            {
+                Coid = coid,
+                AccountId = 19,
+                Name = "LegacyTypeZero",
+                Deleted = false
+            });
+            seed.SaveChanges();
+        }
+
+        using var context = CreateContext();
+        var character = new AutoCore.Game.Entities.Character();
+        var loaded = character.LoadFromDB(context, coid, isInCharacterSelection: true);
+
+        Assert.IsTrue(loaded, "legacy Type=0 rows with a valid CBID must still load");
+    }
+
+    [TestMethod]
     public void DeleteCharacter_MarksOwnedCharacterDeleted()
     {
         const uint accountId = 12;

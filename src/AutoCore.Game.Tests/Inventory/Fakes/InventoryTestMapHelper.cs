@@ -178,6 +178,27 @@ public static class AssetManagerTestHelper
         GetCloneBasesDictionary()[cbid] = clone;
     }
 
+    /// <summary>
+    /// Registers a fake <see cref="CloneBaseWheelSet"/> with a populated Friction array so
+    /// <see cref="Entities.WheelSet.WriteToPacket"/> can resolve WheelSetSpecific without a WAD.
+    /// </summary>
+    public static void RegisterWheelSetCloneBase(int cbid)
+    {
+        var clone = (CloneBaseWheelSet)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseWheelSet));
+        clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.WheelSet, CloneBaseId = cbid };
+        clone.SimpleObjectSpecific = new SimpleObjectSpecific();
+        clone.WheelSetSpecific = new WheelSetSpecific
+        {
+            Friction = new short[] { 1, 1, 1, 1, 1, 1 },
+            NumWheelsAxle = new byte[] { 2, 2 },
+            Wheel0Name = "",
+            Wheel1Name = "",
+            WheelSetType = 0,
+        };
+        Registered[cbid] = clone;
+        GetCloneBasesDictionary()[cbid] = clone;
+    }
+
     public static void ClearRegisteredCloneBases()
     {
         var dictionary = GetCloneBasesDictionary();
