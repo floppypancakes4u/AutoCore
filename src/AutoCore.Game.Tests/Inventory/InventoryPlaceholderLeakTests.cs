@@ -74,6 +74,69 @@ public class InventoryPlaceholderLeakTests
             inventory.Items.OrderBy(i => i.Coid).Select(i => i.Coid).ToArray());
     }
 
+    [TestMethod]
+    public void CanAcceptAnyOfCbid_FullCargoNoStack_ReturnsFalse()
+    {
+        // SS-31: cargo is completely full (no free 1x1 cell) and the cbid is non-stackable, so
+        // neither the merge path nor the first-fit path can accept a single unit. Callers must
+        // see false here BEFORE allocating firstCoid, or a placeholder row leaks for nothing.
+        var clones = new FakeCloneBaseLookup();
+        clones.Register(30, NonStackableClone(30));
+        var inventory = new InventoryManager(cloneBases: clones);
+        inventory.SetCapacity(1, 13);
+        FillAllSlots(inventory);
+
+        Assert.IsFalse(inventory.CanAcceptAnyOfCbid(30), "full cargo with a non-stackable cbid cannot accept any unit");
+    }
+
+    [TestMethod]
+    public void CanAcceptAnyOfCbid_FullCargoWithMergeSpace_ReturnsTrue()
+    {
+        // SS-31: cargo grid has no free cell, but an existing stack of the SAME cbid has room
+        // under maxStack. AddItemInternal's merge pass accepts this without ever touching the
+        // grid, so the helper must agree — otherwise a legitimate merge-only claim would be
+        // rejected before AddItemInternal even gets a chance to merge it.
+        var clones = new FakeCloneBaseLookup();
+        clones.Register(31, StackableClone(31, stackSize: 10));
+        var inventory = new InventoryManager(cloneBases: clones);
+        inventory.SetCapacity(1, 13);
+        // Fill 12 of 13 slots with unrelated filler, and the last slot with a partial stack of
+        // cbid 31 (quantity below maxStack) — the grid is completely full either way.
+        var coid = 1000L;
+        for (var row = 0; row < 12; row++)
+        {
+            inventory.TryAdd(new CharacterInventoryItem(99, CloneBaseObjectType.Item, "Filler", coid, 0, (byte)row, 1));
+            coid++;
+        }
+        inventory.TryAdd(new CharacterInventoryItem(31, CloneBaseObjectType.Item, "Parts", coid, 0, 12, 1));
+
+        Assert.IsTrue(inventory.CanAcceptAnyOfCbid(31), "a same-cbid stack with room under maxStack accepts a unit via merge even with a full grid");
+    }
+
+    [TestMethod]
+    public void CanAcceptAnyOfCbid_UnresolvableFootprint_ReturnsFalse()
+    {
+        // SS-31: clonebase exists but InvSizeX/Y is zero — AddItemInternal rejects the whole add
+        // in this case (footprint check runs before the merge pass), so the helper must return
+        // false too even though there is plenty of free cargo space.
+        var clones = new FakeCloneBaseLookup();
+        clones.Register(32, ZeroFootprintClone(32));
+        var inventory = new InventoryManager(cloneBases: clones);
+        inventory.SetCapacity(1, 13); // entirely empty — would otherwise accept easily
+
+        Assert.IsFalse(inventory.CanAcceptAnyOfCbid(32), "an unresolvable (zero) footprint is rejected outright, regardless of free space");
+    }
+
+    private static void FillAllSlots(InventoryManager inventory)
+    {
+        var coid = 1000L;
+        for (var row = 0; row < 13; row++)
+        {
+            inventory.TryAdd(new CharacterInventoryItem(99, CloneBaseObjectType.Item, "Filler", coid, 0, (byte)row, 1));
+            coid++;
+        }
+    }
+
     private static void FillAllButOneSlot(InventoryManager inventory, int freeRow)
     {
         var coid = 1000L;
@@ -98,6 +161,32 @@ public class InventoryPlaceholderLeakTests
             StackSize = 1,
             InvSizeX = 1,
             InvSizeY = 1
+        };
+        return clone;
+    }
+
+    private static CloneBaseObject StackableClone(int cbid, int stackSize)
+    {
+        var clone = (CloneBaseObject)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseObject));
+        clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.Item, CloneBaseId = cbid };
+        clone.SimpleObjectSpecific = new SimpleObjectSpecific
+        {
+            StackSize = (ushort)stackSize,
+            InvSizeX = 1,
+            InvSizeY = 1
+        };
+        return clone;
+    }
+
+    private static CloneBaseObject ZeroFootprintClone(int cbid)
+    {
+        var clone = (CloneBaseObject)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseObject));
+        clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.Item, CloneBaseId = cbid };
+        clone.SimpleObjectSpecific = new SimpleObjectSpecific
+        {
+            StackSize = 1,
+            InvSizeX = 0,
+            InvSizeY = 0
         };
         return clone;
     }

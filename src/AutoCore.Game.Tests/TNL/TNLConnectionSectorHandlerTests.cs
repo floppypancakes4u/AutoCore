@@ -9,6 +9,7 @@ using AutoCore.Game.Map;
 using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
+using AutoCore.Game.Tests.Inventory.Fakes;
 using AutoCore.Game.TNL;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -449,6 +450,53 @@ public class TNLConnectionSectorHandlerTests
         InvokeHandler(client, "HandleItemPickupPacket", BuildItemPickupBody(9302));
         Assert.AreEqual(0, _sent.Count);
         Assert.IsNotNull(map.GetObjectByCoid(9302));
+    }
+
+    [TestMethod]
+    public void HandleItemPickup_CargoFull_DoesNotAllocatePlaceholderCoid()
+    {
+        // SS-31 leak guard: cargo has no free 1x1 slot and the picked-up cbid is non-stackable
+        // (default footprint), so PickupWorldItem's claim would fail. The guard must reject
+        // before allocating the persistent coid, or a placeholder simple_object row leaks for
+        // an item that is never actually placed in cargo.
+        const int cbid = 8620;
+        AssetManagerTestHelper.ClearRegisteredCloneBases();
+        try
+        {
+            AssetManagerTestHelper.RegisterCloneBase(cbid, CloneBaseObjectType.Item);
+
+            var character = CreateCharacterOnMap(out var map);
+            character.AttachTestDataForTests("pickup-char");
+            character.Inventory.SetCapacity(1, 1);
+            character.Inventory.TryAdd(new CharacterInventoryItem(99, CloneBaseObjectType.Item, "Filler", 5000, 0, 0, 1));
+            var client = CreateClient(character);
+
+            var item = new SimpleObject(GraphicsObjectType.Graphics);
+            item.SetCoid(9410, false);
+            item.LoadCloneBase(cbid);
+            item.Position = new Vector3(0, 0, 0);
+            item.SetMap(map);
+
+            var saved = InventoryRuntime.AllocatePersistentCoid;
+            var allocations = 0;
+            try
+            {
+                InventoryRuntime.AllocatePersistentCoid = () => { allocations++; return 9500 + allocations; };
+                InvokeHandler(client, "HandleItemPickupPacket", BuildItemPickupBody(9410));
+            }
+            finally
+            {
+                InventoryRuntime.AllocatePersistentCoid = saved;
+            }
+
+            Assert.AreEqual(0, allocations, "cargo-full pickup must not allocate a persistent coid for an item that cannot be placed (SS-31 leak guard)");
+            Assert.AreEqual(0, _sent.Count, "no packets should be sent for a rejected pickup");
+            Assert.IsNotNull(map.GetObjectByCoid(9410), "item stays on the map when the pickup is rejected");
+        }
+        finally
+        {
+            AssetManagerTestHelper.ClearRegisteredCloneBases();
+        }
     }
 
     private static byte[] BuildItemPickupBody(long coid)
