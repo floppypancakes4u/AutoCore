@@ -127,6 +127,29 @@ public class SimpleObjectOverwriteGuardTests
     }
 
     [TestMethod]
+    public void EnsureSimpleObject_GuardThrow_IncrementsOverwriteRefusedCounter()
+    {
+        using (var seed = new CharContext(_options))
+        {
+            seed.SimpleObjects.Add(new SimpleObjectData
+            {
+                Coid = 603,
+                Type = (byte)CloneBaseObjectType.Character,
+                CBID = 34
+            });
+            seed.SaveChanges();
+        }
+
+        var before = InventoryPersistence.Ss31OverwriteRefusedCount;
+
+        Assert.ThrowsException<InvalidOperationException>(() =>
+            InventoryPersistence.Instance.EnsureSimpleObject(603, (byte)CloneBaseObjectType.Item, 17774));
+
+        var after = InventoryPersistence.Ss31OverwriteRefusedCount;
+        Assert.AreEqual(1, after - before, "guard throw must increment the counter by exactly one");
+    }
+
+    [TestMethod]
     public void EnsureSimpleObject_SameTypeSameCbid_Resave_Succeeds()
     {
         using (var seed = new CharContext(_options))

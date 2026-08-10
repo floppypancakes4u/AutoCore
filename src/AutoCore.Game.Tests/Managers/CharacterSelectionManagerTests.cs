@@ -631,6 +631,43 @@ public class CharacterSelectionManagerTests
     }
 
     [TestMethod]
+    public void SendCharacterList_Ss31Skip_IncrementsCorruptIdentitySkipCounter()
+    {
+        // Reuses the SS-31 corrupted-character-identity seed above; asserts the skip site
+        // increments the operator-visible counter by exactly 1 (other tests share the process
+        // counter, so assert delta rather than an absolute value).
+        const uint accountId = 21;
+        const long coid = 20501;
+
+        using (var seed = CreateContext())
+        {
+            seed.SimpleObjects.Add(new SimpleObjectData
+            {
+                Coid = coid,
+                Type = (byte)CloneBaseObjectType.Item,
+                CBID = 17774
+            });
+            seed.Characters.Add(new CharacterData
+            {
+                Coid = coid,
+                AccountId = accountId,
+                Name = "CounterCorrupted",
+                Deleted = false,
+                ActiveVehicleCoid = coid + 1
+            });
+            seed.SaveChanges();
+        }
+
+        var before = CharacterSelectionManager.CorruptIdentitySkipCount;
+
+        var client = CreateClient(accountId);
+        CharacterSelectionManager.SendCharacterList(client);
+
+        var after = CharacterSelectionManager.CorruptIdentitySkipCount;
+        Assert.AreEqual(1, after - before, "corrupt identity skip must increment the counter by exactly one");
+    }
+
+    [TestMethod]
     public void SendCharacterList_DeletedCharacters_AreSkipped()
     {
         using (var seed = CreateContext())
