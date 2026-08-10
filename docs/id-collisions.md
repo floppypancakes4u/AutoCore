@@ -294,6 +294,53 @@ engineers to treat bare COIDs as ambiguous.
 
 ---
 
+## 5.5 Face C — client-side bare-COID keying (map-transfer corruption)
+
+**Live incident date:** 2026-08-10 (account `floppy`, warps into Ground Zero
+661 and Hestia maps). **Symptom:** on map transfer the client arrives broken —
+incomplete vehicle, wrong position, unresponsive controls — plus phantom
+"pickable" cargo (client spams `ItemPickup` for its own cargo coid; server
+logs `HandleItemPickupPacket: Item <coid> is not a SimpleObject`).
+
+### Mechanism
+
+The server resolves targets TFID-exact (face B fix), but the **retail client
+keys parts of its object table by bare COID**. When a persistent global the
+client must bind at transfer time — the character, the vehicle, its equipped
+items, or cargo/locker items — has a coid that numerically equals an
+**authored local object** on the destination map, the create-stream corrupts
+the client's bindings. The server cannot patch this; the only defense is
+keeping persistent coids numerically disjoint from authored map coids.
+
+Post-wipe, the `simple_object` sequence started at 1, so characters (coid 1),
+vehicles (2), equipment (3–7), and — after the face-A shared allocator —
+every new item (~18.1k–19k band) all landed inside the authored map-object
+range (observed ~1..45k). Evidence trail: cargo item 18942 vs an authored
+non-SimpleObject object with coid 18942 on map 661 (pickup spam since
+2026-08-09 19:05, pre-dating the hardening merge); repeated broken 707↔661
+warps on both pre- and post-merge builds.
+
+### Remediation (2026-08-10)
+
+**Re-base the persistent coid sequence out of the authored band**:
+`simple_object AUTO_INCREMENT = 134217728` (0x0800_0000). The full numeric
+map is now:
+
+| Range | Owner |
+|-------|-------|
+| ~1 .. ~65k | Authored map objects (local) + legacy pre-rebase globals |
+| 0x0800_0000 + | Persistent globals (`simple_object` sequence) |
+| 0x5000_0000 + | `MapNpcIdentity` (NPC/wheelset wire TFIDs) |
+| 0x6000_0000 + | `StoreSlotIdentity` (vendor display slots) |
+
+`scripts/wipeplayers.ps1` now applies this rebase after truncation (TRUNCATE
+resets AUTO_INCREMENT to 1) and hard-fails if the sequence is below the base.
+Existing sub-base rows were removed by the 2026-08-10 wipe (accounts kept).
+**Any future wipe or restore that leaves the sequence low reintroduces this
+face** — `scripts/check-id-collisions.ps1` checks the sequence floor.
+
+---
+
 ## 6. Diagnostics
 
 ### 6.1 Logs to grep
@@ -551,7 +598,8 @@ resend handlers, `SkillService.ResolveTarget` — see exception-safety audit.
 
 | Question | Answer |
 |----------|--------|
-| Is the Donuts / select-AV class fixed? | **Yes**, with shared DB allocation, a type-agnostic overwrite refusal, fail-closed load guards (including clonebase-kind), leak pre-validation, `TryPersistEquip` rollback, and retirement of `SyncFromCargo`/`InventoryCoidCounter` — deployed on this pass. A **second, un-triaged** incident (Shadow0712, 2026-08-10) is recorded in §3.2 and not yet folded into this "fixed" claim pending investigation. |
+| Is the Donuts / select-AV class fixed? | **Yes**, with shared DB allocation, a type-agnostic overwrite refusal, fail-closed load guards (including clonebase-kind), leak pre-validation, `TryPersistEquip` rollback, and retirement of `SyncFromCargo`/`InventoryCoidCounter` — deployed on this pass. The second incident (Shadow0712, §3.2) was resolved by the 2026-08-10 player wipe (face C remediation) — its corrupt rows no longer exist. |
+| Is the map-transfer client corruption fixed (face C)? | **Yes for all post-wipe data**: the 2026-08-10 wipe removed every sub-floor persistent coid and re-based the `simple_object` sequence to 0x0800_0000, so persistent globals can no longer numerically collide with authored map objects (§5.5). `wipeplayers.ps1` enforces the rebase on every future wipe; `check-id-collisions.ps1` queries 5–6 detect regression. |
 | Are character and inventory IDs separate? | **No.** One `simple_object` sequence. Design intent of the fix is single minting authority, not dual namespaces — range-split namespaces were considered and declined (§7, "Considered, declined") as too disruptive to client-visible COIDs. |
 | Can it happen again? | Not via the known pickup/vendor/mission/addItem/equip paths. A **new** bypass of the allocator is now caught at review/CI time by `CoidAllocationArchitectureTests` (§7.1 item 1), and any cross-type overwrite that did slip through is refused by `EnsureSimpleObjectInternal` (§7.2 item 4) rather than silently corrupting the row. |
 | Must we implement §7? | **Partially done.** 5 of 13 items are implemented (1, 4, 7, 10, 12 — architecture tripwire, placeholder-only overwrite guard, clonebase-kind load check, `Ss31SelectSkips`/`Ss31OverwriteRefusals` metrics, end-to-end integration pin). The remaining 8 are optional defense-in-depth (post-allocate assert, `ObjectManager` claim check, explicit insert/update split, DB constraints, char create self-test, scheduled scan/alerting, one-shot cleanup tool) — not required for playability, useful for faster detection of the next foot-gun. |
