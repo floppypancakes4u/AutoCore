@@ -155,8 +155,35 @@ cargo after the clobber). Account 8 left with **Floppy** (1) and **NotBrolic**
 
 Sibling observation the same night: world loot was also **spawned** on COIDs
 that matched character ids (e.g. armor spawn at 18950, weapon spawn at 18943).
-Spawn collision is face-B-adjacent; the fatal step was **persisting** cargo
-under the colliding COID.
+This was a `InventoryCoidCounter.SyncFromCargo` consequence, not a separate
+bug: on login, `SyncFromCargo` re-seeded `Map.LocalCoidCounter` from the
+character's **maximum cargo COID**, which could itself already sit past the
+live `simple_object` high-water mark — so the very next map-local spawn landed
+on a COID the DB sequence considered live. `SyncFromCargo` and
+`InventoryCoidCounter` are **retired** as of this pass (deleted outright — see
+§4.1 and §8); map-local spawn now only ever advances from
+`MapData.HighestCoid`, never from a character's cargo contents.
+
+**18274/18275 vs 18950/18951 — two different pairs, don't conflate them.**
+`18950` (Donuts) / `18951` (her vehicle) are the **live** Donuts-incident
+COIDs above — the actual corrupted rows recovered from `log-sector.txt` and
+the production DB. `18274` (character) / `18275` (vehicle) are a **synthetic**
+canonical example pair that exists only in test code and doc comments (see
+`InventoryRuntime.AllocateItemCoid`'s doc comment, `Ss31CollisionIntegrationTests`,
+`SimpleObjectOverwriteGuardTests`, `CharacterSelectionManagerTests`) — chosen to
+pin the same collision *shape* (a character/vehicle pair at N/N+1, then a
+Weapon at CBID 12853 — the same weapon CBID as the real incident — landing on
+the character COID) without depending on live-incident-specific data. If a
+test failure references 18274/18275, it is the guard/regression pin, not a
+second real incident.
+
+**Shadow0712 (2026-08-10) — second live face-A incident, un-triaged.** A
+second character (`Shadow0712`) hit the same character-select AV symptom the
+following day. Unlike Donuts, this incident has not yet been walked through
+`log-sector.txt` / DB inspection to confirm the exact `simple_object` row
+corruption, or whether it predates or postdates this pass's fixes landing on
+the server the account was on. Recorded here as an open item — it is **not**
+folded into the "fixed" claims in §10 until triaged.
 
 ### 3.3 Why “character IDs and inventory IDs should be different” feels right
 
@@ -230,7 +257,7 @@ Operators should treat skip logs as **data damage**, not “ignore forever.”
 | Use | Why local is OK |
 |-----|-----------------|
 | World loot **spawn** on the ground | Ephemeral map object; pickup allocates a **new** persistent COID |
-| Vendor browse **display** slot COIDs | UI-only session map; buy path uses `AllocateItemCoid` |
+| Vendor browse **display** slot COIDs | `StoreSlotIdentity` mints from a dedicated offset range (`CoidBase = 0x6000_0000`, always `Global=true`) — clear of low-positive player/vehicle `simple_object` COIDs and of `MapNpcIdentity`'s `0x5000_0000+` range; the buy path still allocates a fresh persistent COID via `AllocateItemCoid` |
 | NPC / prop / reaction local spawns | Map-local TFIDs (`Global=false`) |
 
 **Rule of thumb:** if the COID will be written to `simple_object` or
@@ -318,6 +345,29 @@ JOIN simple_object s ON s.Coid = i.ItemCoid
 WHERE s.Type IN (20, 14);
 ```
 
+Orphan placeholder rows (`Type=0` rows the allocator reserved but that were
+never filled in by a persist — i.e. a leaked reservation, not referenced by
+any character, vehicle, inventory item, or vehicle equip slot):
+
+```sql
+SELECT s.Coid
+FROM simple_object s
+WHERE s.Type = 0
+  AND NOT EXISTS (SELECT 1 FROM `character` c WHERE c.Coid = s.Coid)
+  AND NOT EXISTS (SELECT 1 FROM vehicle v WHERE v.Coid = s.Coid)
+  AND NOT EXISTS (SELECT 1 FROM character_inventory i WHERE i.ItemCoid = s.Coid)
+  AND NOT EXISTS (
+        SELECT 1 FROM vehicle v2
+        WHERE s.Coid IN (v2.Wheelset, v2.Armor, v2.PrimaryWeapon, v2.SecondaryWeapon,
+                          v2.TertiaryWeapon, v2.QuaternaryWeapon, v2.Utility1, v2.Utility2,
+                          v2.Utility3));
+```
+
+This is the same query family `scripts/check-id-collisions.ps1` runs (see
+§7.4 / SCRIPTS.md) — a leaked placeholder is harmless to gameplay (nothing
+points at it) but signals a code path that allocates a persistent COID and
+then fails to persist without cleaning up the reservation.
+
 ### 6.3 Client crash fingerprint
 
 | Field | Face A select crash |
@@ -343,56 +393,112 @@ paths instead — not this doc’s primary incident.
 
 ## 7. Suggested stricter guards (not all implemented)
 
-Current stack is **sufficient** for the Donuts class under normal play.
-Hardening below is defense-in-depth and regression insurance.
+Current stack has moved well past the Donuts-class minimum since this pass:
+5 of the 13 items below are now **implemented**. What remains is genuine
+defense-in-depth and regression insurance, not a gap that leaves the known
+incident class open.
 
 ### 7.1 Allocator / architecture
 
-1. **Single choke point enforcement** — CI / architecture test: no
-   `LocalCoidCounter++` (or raw `new SimpleObjectData` with caller-chosen
-   COID) on any path that reaches `EnsureSimpleObject` or inserts
-   `character_inventory`. Allowlist map-spawn and vendor-display only.
+1. **IMPLEMENTED** — Single choke point enforcement: `CoidAllocationArchitectureTests`
+   (`src/AutoCore.Game.Tests/Architecture/CoidAllocationArchitectureTests.cs`)
+   source-scans every `.cs` file under `src/` and fails if `LocalCoidCounter`
+   appears outside a 10-entry allowlist (map-spawn, vendor-display-slot
+   instance, and comment-only mentions), or if `SyncFromCargo` /
+   `InventoryCoidCounter` appear anywhere in production source at all — this
+   is a permanent tripwire, not a one-time grep.
 2. **Post-allocate assert** — after minting a persistent COID, assert it is
    not already a `character` or `vehicle` PK (should be impossible with
-   placeholder insert; tripwire if someone bypasses the API).
+   placeholder insert; tripwire if someone bypasses the API). *Not done —
+   the placeholder-insert allocator (item 4) already makes this structurally
+   unreachable; would only catch a bypass of the allocator itself, which
+   item 1's arch test already prevents at review time.*
 3. **ObjectManager check on claim** — if a newly allocated cargo COID is
    already a live global in `ObjectManager`, abort claim and log fatal-class
-   error.
+   error. *Not done.*
 
 ### 7.2 Persist layer
 
-4. **No cross-type rewrite except placeholder** — refuse any
+4. **IMPLEMENTED** — No cross-type rewrite except placeholder:
+   `InventoryPersistence.EnsureSimpleObjectInternal` now refuses any
    `existing.Type != requestedType` unless `existing.Type == 0` (allocator
-   placeholder). Today only Character/Vehicle are blocked; a Weapon→Armor
-   clobber is still possible if two item paths share a COID.
+   placeholder) **or** it is a same-Type/CBID identity refresh, throwing
+   `InvalidOperationException` otherwise. This is no longer Character/Vehicle-
+   specific — the guard is type-agnostic, so a Weapon→Armor clobber between
+   two item paths is refused the same way a Weapon→Character clobber is.
 5. **Explicit insert vs update** — placeholder fill is UPDATE; true new items
-   never UPDATE an unknown pre-existing row.
+   never UPDATE an unknown pre-existing row. *Not done as a separate
+   mechanism — item 4's guard achieves the same outcome by refusing the
+   unknown-row case outright rather than by insert/update code-path
+   separation.*
 6. **DB constraints (heavy)** — optional trigger or app-level check that
-   `character.Coid` implies `simple_object.Type IN (0,20)`, etc.
+   `character.Coid` implies `simple_object.Type IN (0,20)`, etc. *Considered,
+   declined — see below.*
 
 ### 7.3 Load / wire
 
-7. **Clonebase kind check** — after `LoadCloneBase`, verify clonebase
-   `CloneBaseSpecific.Type` matches entity class before any Create* packet.
+7. **IMPLEMENTED** — Clonebase kind check: `Character.LoadFromDB` and
+   `Vehicle.LoadFromDB` verify, immediately after `LoadCloneBase`, that the
+   clonebase's kind matches the entity class being loaded, in addition to the
+   pre-existing null-simple-object / wrong-`Type` / `CBID <= 0` checks; all
+   four checks are fail-closed (skip the row, do not wire-poison the client).
+   `SimpleObject.LoadFromDB` carries the matching null/type/CBID checks
+   (clonebase-kind is Character/Vehicle-only, since plain simple objects have
+   no clonebase-kind distinction to check).
 8. **Char create self-test** — immediately after create, re-read SO type and
-   fail the create transaction if mismatched.
+   fail the create transaction if mismatched. *Not done.*
 
 ### 7.4 Operations
 
-9. **Scheduled SQL scan** (queries in §6.2) → Discord/log alert.  
-10. **Metric** — counter on SS-31 skip / EnsureSimpleObject throw.  
+9. **Scheduled SQL scan** (queries in §6.2) → Discord/log alert. *Deferred —
+   see "Considered, declined" below; `scripts/check-id-collisions.ps1`
+   already covers manual/on-demand detection of the same conditions.*
+10. **IMPLEMENTED** — Metric: `CharacterSelectionManager.CorruptIdentitySkipCount`
+    and `InventoryPersistence.Ss31OverwriteRefusedCount` are live counters,
+    surfaced in `SectorServer.CollectHealthMetrics` as `Ss31SelectSkips` and
+    `Ss31OverwriteRefusals` in the periodic health-summary log line.
 11. **One-shot cleanup tool** — soft-delete or quarantine characters failing
-    the type join.
+    the type join. *Not done — the Donuts cleanup in §3.2 was a manual
+    one-off; no repeatable tool exists yet.*
 
 ### 7.5 Tests
 
-12. Integration: create character COID N → force map counter to N → simulate
-    pickup → assert character SO row unchanged and/or throw.  
+12. **IMPLEMENTED** — Integration test: `Ss31CollisionIntegrationTests`
+    (`src/AutoCore.Game.Tests/Inventory/Ss31CollisionIntegrationTests.cs`)
+    seeds a character/vehicle pair at coids 18274/18275, forces the map-local
+    counter onto the character's own coid, and asserts the shared allocator
+    never returns that coid and the persist path never touches the character
+    row — plus a companion case asserting `EnsureSimpleObject` throws (rather
+    than clobbers) if something ever did try to write item data at the
+    character's coid.
 13. Red/green already present for overwrite guard and list skip; keep them
-    on the default CI filter.
+    on the default CI filter. *Ongoing practice, not a one-time item — see
+    the expanded test list in exception-safety-audit.md's SS-31 row.*
 
 **Highest value / lowest cost:** (4) placeholder-only type fill + (1) CI
-grep/arch rule on map-counter → inventory persist.
+grep/arch rule on map-counter → inventory persist — **both now implemented**.
+
+### Considered, declined
+
+- **Range-split COID namespaces** (e.g. characters in one numeric band,
+  inventory items in another) — would eliminate the collision class
+  structurally, but the ranges are **client-visible** (COIDs travel on the
+  wire as TFIDs) and every consumer of raw COID values, save data, and log
+  correlation across the existing live DB would need to be audited or
+  migrated. Too disruptive relative to the single-allocator fix already
+  landed; declined for this pass.
+- **DB constraints / triggers** (item 6) — a trigger enforcing
+  `character.Coid` ⇒ `simple_object.Type IN (0,20)` would catch violations
+  that bypass the C# layer entirely (e.g. a manual SQL fix-up), but adds
+  operational weight (trigger maintenance, migration risk, harder-to-debug
+  failures at the DB layer) for a case the application-layer guard (item 4)
+  and the architecture test (item 1) already close off from the code side.
+  Declined as heavy for the marginal coverage gained.
+- **Scheduled SQL scan + Discord/log alerting** (item 9) — deferred, not
+  declined outright. `scripts/check-id-collisions.ps1` (see §6.2, SCRIPTS.md)
+  already runs the same detection queries on demand; wiring it to a schedule
+  and an alert channel is straightforward follow-up work but out of scope
+  for this pass.
 
 ---
 
@@ -402,6 +508,8 @@ grep/arch rule on map-counter → inventory persist.
 |------|------|
 | Persistent allocate | `src/AutoCore.Game/Inventory/InventoryRuntime.cs` |
 | Persist + overwrite guard | `src/AutoCore.Game/Inventory/InventoryPersistence.cs` |
+| Leak pre-validation | `src/AutoCore.Game/Inventory/InventoryManager.cs` (`CanAcceptAnyOfCbid`, `TryPersistEquip`) |
+| Vendor display slot COID | `src/AutoCore.Game/Map/StoreSlotIdentity.cs` (dedicated `0x6000_0000+` range; replaces the retired `InventoryCoidCounter.SyncFromCargo` map-local resync) |
 | Pickup claim COID | `src/AutoCore.Game/TNL/TNLConnection.Sector.cs` (`HandleItemPickupPacket`) |
 | Loot inventory COID | `src/AutoCore.Game/Managers/LootManager.cs` |
 | Vendor buy COID | `src/AutoCore.Game/Managers/VendorStoreService.cs` |
@@ -409,8 +517,15 @@ grep/arch rule on map-counter → inventory persist.
 | Char/vehicle load guards | `src/AutoCore.Game/Entities/Character.cs`, `Vehicle.cs`, `SimpleObject.cs` |
 | Character list | `src/AutoCore.Game/Managers/CharacterSelectionManager.cs` |
 | Selection load entry | `src/AutoCore.Game/Managers/ObjectManager.cs` `LoadCharacterForSelection` |
+| Health metrics | `src/AutoCore.Sector/Network/SectorServer.cs` (`CollectHealthMetrics` → `Ss31SelectSkips`, `Ss31OverwriteRefusals`) |
+| Architecture tripwire | `src/AutoCore.Game.Tests/Architecture/CoidAllocationArchitectureTests.cs` |
 | Type enum | `src/AutoCore.Game/Constants/ClonebaseObjectType.cs` |
-| Tests | `SimpleObjectOverwriteGuardTests`, `InventoryRuntimeTests`, `CharacterSelectionManagerTests` |
+| Tests | `SimpleObjectOverwriteGuardTests`, `InventoryRuntimeTests`, `CharacterSelectionManagerTests`, `Ss31CollisionIntegrationTests`, `CoidAllocationArchitectureTests`, `VendorStoreSlotIdentityTests`, `InventoryPlaceholderLeakTests`, `InventoryEquipPersistRollbackTests` |
+
+**Retired this pass:** `InventoryCoidCounter` and its `SyncFromCargo` login
+resync were deleted outright — they were the mechanism behind the sibling
+world-spawn collisions in §3.2. Vendor display slots now mint from
+`StoreSlotIdentity` instead.
 
 Face B: `CombatTargetResolver`, `WeaponFireTargetAcquisition`, sector firing /
 resend handlers, `SkillService.ResolveTarget` — see exception-safety audit.
@@ -431,7 +546,7 @@ resend handlers, `SkillService.ResolveTarget` — see exception-safety audit.
 
 | Question | Answer |
 |----------|--------|
-| Is the Donuts / select-AV class fixed? | **Yes**, with shared DB allocation, overwrite refusal, load skip, and mission-path follow-up — **when those commits are deployed**. |
-| Are character and inventory IDs separate? | **No.** One `simple_object` sequence. Design intent of the fix is single minting authority, not dual namespaces. |
-| Can it happen again? | Not via the known pickup/vendor/mission/addItem paths if deployed. A **new** bypass of the allocator could still try; overwrite + load guards limit blast radius. |
-| Must we implement §7? | **No** for playability; **yes** if you want belt-and-suspenders and faster detection of the next foot-gun. |
+| Is the Donuts / select-AV class fixed? | **Yes**, with shared DB allocation, a type-agnostic overwrite refusal, fail-closed load guards (including clonebase-kind), leak pre-validation, `TryPersistEquip` rollback, and retirement of `SyncFromCargo`/`InventoryCoidCounter` — deployed on this pass. A **second, un-triaged** incident (Shadow0712, 2026-08-10) is recorded in §3.2 and not yet folded into this "fixed" claim pending investigation. |
+| Are character and inventory IDs separate? | **No.** One `simple_object` sequence. Design intent of the fix is single minting authority, not dual namespaces — range-split namespaces were considered and declined (§7, "Considered, declined") as too disruptive to client-visible COIDs. |
+| Can it happen again? | Not via the known pickup/vendor/mission/addItem/equip paths. A **new** bypass of the allocator is now caught at review/CI time by `CoidAllocationArchitectureTests` (§7.1 item 1), and any cross-type overwrite that did slip through is refused by `EnsureSimpleObjectInternal` (§7.2 item 4) rather than silently corrupting the row. |
+| Must we implement §7? | **Partially done.** 5 of 13 items are implemented (1, 4, 7, 10, 12 — architecture tripwire, placeholder-only overwrite guard, clonebase-kind load check, `Ss31SelectSkips`/`Ss31OverwriteRefusals` metrics, end-to-end integration pin). The remaining 8 are optional defense-in-depth (post-allocate assert, `ObjectManager` claim check, explicit insert/update split, DB constraints, char create self-test, scheduled scan/alerting, one-shot cleanup tool) — not required for playability, useful for faster detection of the next foot-gun. |
