@@ -390,6 +390,39 @@ public class VehicleMapPropRamTests
         return prop;
     }
 
+    /// <summary>
+    /// SS-36 rule-ordering pin: scenery is allowed BEFORE the fail-closed negative-attacker
+    /// faction rule, so owner-less server-driven vehicles (AutoCore.Sim NPC movers and /clone
+    /// fleets, root faction −1) keep destroying fences and rails.
+    /// </summary>
+    [TestMethod]
+    public void Process_OwnerlessVehicle_StillDestroysSceneryThroughGate()
+    {
+        const int propCbid = 9912;
+        RegisterPhysicsProp(propCbid, minHp: 1, maxHp: 10, collidable: true);
+
+        var continent = new ContinentObject
+        {
+            Id = 812,
+            MapFileName = "tm_prop_ram_ownerless",
+            DisplayName = "ram",
+            DropCommodities = true,
+        };
+        var map = SectorMap.CreateForTests(continent, new Vector4(0, 0, 0, 0));
+        var vehicle = new Vehicle();
+        vehicle.SetCoid(7102, false);
+        vehicle.InitializeHealthForTests(500);
+        vehicle.Position = new Vector3(10, 0, 10);
+        vehicle.SetVelocityForTests(new Vector3(30f, 0, 0));
+        vehicle.SetMap(map);
+        Assert.AreEqual(-1, vehicle.GetIDFaction(), "precondition: owner-less Sim-style vehicle");
+
+        var prop = CreatePropOnMap(map, coid: 88300, cbid: propCbid, maxHp: 10, position: vehicle.Position);
+
+        Assert.IsTrue(VehicleMapPropRam.Process(vehicle) >= 1);
+        Assert.IsTrue(prop.IsCorpse);
+    }
+
     private static (Vehicle Vehicle, SectorMap Map) CreateVehicleOnMap(float speed)
     {
         var continent = new ContinentObject

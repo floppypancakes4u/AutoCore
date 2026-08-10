@@ -119,8 +119,11 @@ public static class VehicleMapPropRam
         LastNearbyEligibleCount = nearby;
 
         var hits = 0;
+        // SS-36: scenery passes CanDamage via the map-prop allowance (which deliberately
+        // precedes the faction rules, so owner-less Sim/clone vehicles keep ramming fences).
         if (closest != null
             && MaxHitsPerProcess > 0
+            && CombatEligibility.CanDamage(vehicle, closest, DamageContext.Ram)
             && TryConsumeHitCooldown(map.InstanceSerial, vehicle.ObjectId.Coid, closest.ObjectId.Coid, now))
         {
             hits = ApplyRamHit(vehicle, closest, speed);
