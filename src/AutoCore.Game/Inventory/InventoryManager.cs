@@ -700,7 +700,13 @@ public sealed class InventoryManager
             if (!create.WasSuccessful)
             {
                 if (updates.Count == 0 && plannedAdds.Count == 0)
+                {
+                    // SS-31: firstCoid was reserved (placeholder simple_object row) but never
+                    // consumed into an item — release it instead of orphaning it.
+                    if (nextCoid == firstCoid)
+                        _persistence?.ReleaseUnusedPlaceholder(firstCoid);
                     return new InventoryCommandResult($"Cannot add CBID {entry.Cbid}: {create.Error}", remainingQuantity: quantity);
+                }
                 break;
             }
 
@@ -712,6 +718,15 @@ public sealed class InventoryManager
             foreach (var cell in InventoryGridPlacement.EnumerateCells(x, y, footprintX, footprintY))
                 occupiedCells.Add((cell.X, cell.Y));
             remaining -= stackQuantity;
+        }
+
+        if (plannedAdds.Count == 0)
+        {
+            // SS-31: firstCoid was reserved (placeholder simple_object row) up front by the
+            // caller, but the placement loop above never placed it as an item — either the
+            // merge pass fully absorbed the requested quantity, or the grid had no free slot
+            // left after merging. Release the placeholder instead of orphaning it.
+            _persistence?.ReleaseUnusedPlaceholder(firstCoid);
         }
 
         var packets = new List<BasePacket>();

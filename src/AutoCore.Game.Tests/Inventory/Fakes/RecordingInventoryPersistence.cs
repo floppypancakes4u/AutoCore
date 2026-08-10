@@ -14,6 +14,7 @@ public sealed class RecordingInventoryPersistence : IInventoryPersistence
     public List<(long CharacterCoid, int Width, int PageCount)> CapacitySaves { get; } = new();
     public List<(long CharacterCoid, long Credits)> CreditsSaves { get; } = new();
     public List<(long ItemCoid, byte Type, int Cbid)> EnsuredSimpleObjects { get; } = new();
+    public List<long> ReleasedPlaceholders { get; } = new();
 
     // SS-31: lets tests simulate a guard throw (e.g. coid collision) inside EnsureSimpleObject
     // so the equip-persist rollback path can be exercised.
@@ -58,6 +59,9 @@ public sealed class RecordingInventoryPersistence : IInventoryPersistence
 
         EnsuredSimpleObjects.Add((itemCoid, type, cbid));
     }
+
+    public void ReleaseUnusedPlaceholder(long coid) =>
+        ReleasedPlaceholders.Add(coid);
 
     public void SaveVehicleEquipment(long vehicleCoid, VehicleEquipmentSnapshot snapshot) =>
         EquipmentSaves.Add((vehicleCoid, snapshot));

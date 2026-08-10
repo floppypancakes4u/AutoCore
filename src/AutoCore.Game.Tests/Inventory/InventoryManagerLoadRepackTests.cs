@@ -172,6 +172,7 @@ public class InventoryManagerLoadRepackTests
         public void DeleteLocker(long characterCoid, long itemCoid) { }
         public void ClearCargo(long characterCoid) => throw new InvalidOperationException("db down");
         public void EnsureSimpleObject(long itemCoid, byte type, int cbid, int faction = 0, int teamFaction = 0) { }
+        public void ReleaseUnusedPlaceholder(long coid) { }
         public void SaveVehicleEquipment(long vehicleCoid, VehicleEquipmentSnapshot snapshot) { }
         public void SaveCharacterCargoCapacity(long characterCoid, int width, int pageCount) { }
         public long LoadCredits(long characterCoid) => 0;

@@ -190,6 +190,22 @@ public sealed class InventoryPersistence : IInventoryPersistence
         Save(context, $"EnsureSimpleObject item={itemCoid}");
     }
 
+    public void ReleaseUnusedPlaceholder(long coid)
+    {
+        using var context = CreateContext();
+        var existing = context.SimpleObjects.FirstOrDefault(so => so.Coid == coid);
+        if (existing == null)
+            return;
+
+        // Only ever remove a still-unfilled allocator placeholder. A row with a real identity
+        // (Type/CBID already set) must never be touched here — that would be a live object.
+        if (existing.Type != 0 || existing.CBID != 0)
+            return;
+
+        context.SimpleObjects.Remove(existing);
+        Save(context, $"ReleaseUnusedPlaceholder coid={coid}");
+    }
+
     public void SaveVehicleEquipment(long vehicleCoid, VehicleEquipmentSnapshot snapshot)
     {
         using var context = CreateContext();
