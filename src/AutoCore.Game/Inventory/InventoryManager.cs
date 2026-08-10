@@ -657,11 +657,18 @@ public sealed class InventoryManager
         // Account for quantity merges already applied in-memory only after loop — occupancy
         // of existing stacks is unchanged; new stack origins need free footprints.
         var nextCoid = firstCoid;
+        var isFirstStack = true;
         while (remaining > 0
                && InventoryGridPlacement.TryFindFirstFree(
                    Width, PageCount, VehicleCargoCapacity.RowsPerPage,
                    occupiedCells, footprintX, footprintY, out var x, out var y))
         {
+            // SS-31: allocate the additional-stack coid only after a free slot is confirmed —
+            // allocating before this point leaks an orphan simple_object placeholder row for
+            // every stack the loop never places.
+            if (!isFirstStack)
+                nextCoid = allocateAdditionalCoid?.Invoke() ?? 0;
+            isFirstStack = false;
             if (nextCoid <= 0 || !usedCoids.Add(nextCoid))
                 break;
 
@@ -682,8 +689,6 @@ public sealed class InventoryManager
             foreach (var cell in InventoryGridPlacement.EnumerateCells(x, y, footprintX, footprintY))
                 occupiedCells.Add((cell.X, cell.Y));
             remaining -= stackQuantity;
-            if (remaining > 0)
-                nextCoid = allocateAdditionalCoid?.Invoke() ?? 0;
         }
 
         var packets = new List<BasePacket>();
