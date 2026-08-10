@@ -33,6 +33,54 @@ public class GhostObject : NetObject
     public const ulong SkillsMask    = 0x080ul;
     public const ulong TokenMask     = 0x100ul;
 
+
+    /// <summary>
+    /// Test seam: zero this ghost's dirty mask without calling stock TNL
+    /// <see cref="NetObject.ClearMaskBits"/>, which has a head-unlink typo on public Blumster
+    /// TNL.NET (production never calls ClearMaskBits — the live path is SetMaskBits →
+    /// CollapseDirtyList). Uses reflection so we do not depend on a patched submodule.
+    /// </summary>
+    internal void ClearDirtyMaskBitsForTests()
+    {
+        var bitsField = typeof(NetObject).GetField(
+            "_dirtyMaskBits",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("NetObject._dirtyMaskBits missing.");
+        var listField = typeof(NetObject).GetField(
+            "_dirtyList",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("NetObject._dirtyList missing.");
+        var nextField = typeof(NetObject).GetField(
+            "_nextDirtyList",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("NetObject._nextDirtyList missing.");
+        var prevField = typeof(NetObject).GetField(
+            "_prevDirtyList",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("NetObject._prevDirtyList missing.");
+
+        var bits = (ulong)bitsField.GetValue(this)!;
+        if (bits == 0UL)
+            return;
+
+        bitsField.SetValue(this, 0UL);
+
+        var prev = (NetObject)prevField.GetValue(this);
+        var next = (NetObject)nextField.GetValue(this);
+
+        if (prev != null)
+            nextField.SetValue(prev, next);
+        else
+            listField.SetValue(null, next); // head promote — the line stock ClearMaskBits gets wrong
+
+        if (next != null)
+            prevField.SetValue(next, prev);
+
+        nextField.SetValue(this, null);
+        prevField.SetValue(this, null);
+    }
+
+
     protected ClonedObjectBase? Parent { get; set; }
 
     /// <summary>Viewer entity for priority math when <paramref name="scopeObject"/> is a <see cref="GhostObject"/>.</summary>

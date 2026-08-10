@@ -15,7 +15,7 @@ public class TNLInterfaceTests
     [TestMethod]
     public void ConstructWithoutBind_DefaultsVersionFieldsAndGhosting()
     {
-        // skipNetworkBind=true must not open a UDP listen port.
+        // skipNetworkBind=true swaps the ephemeral base(0) socket for an unbound TNLSocket (stock TNL).
         var iface = new TNLInterface(doGhosting: true, skipNetworkBind: true);
 
         Assert.IsTrue(iface.DoGhosting);

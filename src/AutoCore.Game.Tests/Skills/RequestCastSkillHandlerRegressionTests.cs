@@ -69,7 +69,7 @@ public class RequestCastSkillHandlerRegressionTests
         vehicle.SetCoid(18336, true);
         character.SetCurrentVehicleForTests(vehicle);
         vehicle.CreateGhost();
-        vehicle.Ghost.ClearMaskBits(ulong.MaxValue);
+        vehicle.Ghost.ClearDirtyMaskBitsForTests();
 
         InvokeHandler(connection, BuildRequestBody(
             new TFID(1342195395, true), skillId: 2103, new Vector3(10, 20, 30)));

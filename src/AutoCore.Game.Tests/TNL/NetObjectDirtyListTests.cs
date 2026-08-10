@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using TNL.Entities;
 
@@ -7,9 +7,10 @@ namespace AutoCore.Game.Tests.TNL;
 using AutoCore.Game.TNL.Ghost;
 
 /// <summary>
-/// Regression tests for the TNL NetObject dirty-list (setMaskBits / clearMaskBits / collapse).
-/// The C# port of clearMaskBits had a head-unlink typo that corrupts the static list and can
-/// contribute to NullReferenceException inside SetMaskBits under NPC pose-dirty load.
+/// Dirty-list behaviour we rely on. Stock public Blumster TNL.NET has a head-unlink typo in
+/// <see cref="NetObject.ClearMaskBits"/>; production never calls that API (live path is
+/// SetMaskBits → CollapseDirtyList). Tests that need a clean mask use
+/// <see cref="GhostObject.ClearDirtyMaskBitsForTests"/> instead of patching the submodule.
 /// </summary>
 [TestClass]
 public class NetObjectDirtyListTests
@@ -23,7 +24,7 @@ public class NetObjectDirtyListTests
     }
 
     [TestMethod]
-    public void ClearMaskBits_WhenHeadOfList_PromotesNextAsDirtyListHead()
+    public void ClearDirtyMaskBitsForTests_WhenHeadOfList_PromotesNextAsDirtyListHead()
     {
         var head = new GhostObject();
         var tail = new GhostObject();
@@ -35,11 +36,10 @@ public class NetObjectDirtyListTests
         Assert.AreSame(head, GetDirtyListHead(), "Most recently dirtied object should be list head.");
         Assert.AreSame(tail, GetNextDirty(head), "Earlier object should sit behind the head.");
 
-        // Clearing all bits on the head must unlink it and promote the next entry (Torque parity).
-        head.ClearMaskBits(ulong.MaxValue);
+        head.ClearDirtyMaskBitsForTests();
 
         Assert.AreSame(tail, GetDirtyListHead(),
-            "ClearMaskBits on the dirty-list head must set static _dirtyList to the former next node.");
+            "Clearing the dirty-list head must promote the former next node.");
         Assert.IsNull(GetPrevDirty(tail),
             "Promoted head must have a null prev link.");
         Assert.IsNull(GetNextDirty(head));
@@ -58,8 +58,8 @@ public class NetObjectDirtyListTests
         b.SetMaskBits(0x2UL);
         // List head is b → a
 
-        b.ClearMaskBits(ulong.MaxValue);
-        // Correct: head is a. Bug left static head as b (bits 0) and orphaned a.
+        b.ClearDirtyMaskBitsForTests();
+        // head is a
 
         // This is the ApplyServerMove / NPC tick path: dirties after prior list surgery.
         c.SetMaskBits(GhostObject.PositionMask);
@@ -86,6 +86,21 @@ public class NetObjectDirtyListTests
         Assert.AreSame(second, GetDirtyListHead());
         Assert.AreSame(first, GetNextDirty(second));
         Assert.AreSame(second, GetPrevDirty(first));
+    }
+
+    [TestMethod]
+    public void CollapseDirtyList_DrainsStaticList_WithoutThrowing()
+    {
+        var a = new GhostObject();
+        var b = new GhostObject();
+        a.SetMaskBits(0x1UL);
+        b.SetMaskBits(0x2UL);
+
+        NetObject.CollapseDirtyList();
+
+        Assert.IsNull(GetDirtyListHead());
+        Assert.AreEqual(0UL, GetDirtyMaskBits(a));
+        Assert.AreEqual(0UL, GetDirtyMaskBits(b));
     }
 
     private static FieldInfo DirtyListField { get; } =
