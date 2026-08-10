@@ -78,8 +78,13 @@ public class LogicVariableStore
     {
         var target = (ClonedObjectBase)_character.CurrentVehicle ?? _character;
         var max = target.GetMaximumHP();
+        // A zero/unpopulated max HP reads as FULL health (1.0), not empty. Retail client
+        // DoSpecialFetch @0x005afd40 case 7 initializes the health-percent accumulator to 1.0
+        // (0x3f800000) and, when GetMaximumHP()==0, branches straight to the store-and-return leaving
+        // it at 1.0. Returning False here strands a full-HP gate (e.g. a repair-pad condition
+        // health_percent == const_1) forever on a target whose max HP has not been initialized.
         if (max <= 0)
-            return False;
+            return True;
 
         var current = target.GetCurrentHP();
         if (current >= max)
