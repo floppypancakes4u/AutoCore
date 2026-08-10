@@ -1540,7 +1540,34 @@ public sealed class InventoryManager
             PersistCargoUpsert(character.ObjectId.Coid, swappedCargoItem);
         }
 
-        PersistEquip(vehicle, equipObject);
+        if (!TryPersistEquip(character.ObjectId.Coid, vehicle, equipObject))
+        {
+            // SS-31: roll back the equip — mirrors the cargo-full rollback above — so a
+            // persist throw never leaves the item stranded (deleted from cargo, equipped
+            // only in memory, nothing saved).
+            if (swappedCargoItem != null)
+            {
+                _items.Remove(swappedCargoItem);
+                PersistCargoDelete(character.ObjectId.Coid, swappedCargoItem.Coid);
+            }
+
+            if (previousItem != null)
+                vehicle.TryEquipItem(slot, previousItem, out _);
+            else
+                vehicle.TryUnequipItem(equipObject.ObjectId.Coid, out _, out _);
+
+            if (cargoItem != null)
+            {
+                _items.Add(cargoItem);
+                PersistCargoUpsert(character.ObjectId.Coid, cargoItem);
+            }
+            if (pending.HasValue)
+                _pendingEquippedItemDrags[packet.ItemCoid] = pending.Value;
+
+            return InventoryOperationResult.SinglePacket(
+                CreateDropFailure(packet),
+                $"HandleInventoryDropPacket: (SS-31) Equip persist failed for CBID {cbid} into slot {slot}; rolled back");
+        }
 
         // Always refresh cargo: item left cargo, and a swap may have added the previous hardpoint item.
         var packets = BuildHardpointEquipPackets(
@@ -2275,10 +2302,13 @@ public sealed class InventoryManager
         return $"Cannot add item to cargo slot {x},{y}. {DescribeCargoStatus()}";
     }
 
-    private void PersistEquip(Vehicle vehicle, SimpleObject equippedItem)
+    // SS-31: throw-safe wrapper around the equip persistence calls. A guard throw here
+    // (e.g. a coid collision inside EnsureSimpleObject) must not strand the item after
+    // the caller has already deleted its cargo row — the caller rolls back on false.
+    private bool TryPersistEquip(long characterCoid, Vehicle vehicle, SimpleObject equippedItem)
     {
         if (vehicle == null)
-            return;
+            return true;
 
         GameLog.Audit(
             "ItemEquipped",
@@ -2288,12 +2318,22 @@ public sealed class InventoryManager
             ("ItemCbid", equippedItem?.CBID));
 
         if (_persistence == null)
-            return;
+            return true;
 
-        if (equippedItem != null)
-            _persistence.EnsureSimpleObject(equippedItem.ObjectId.Coid, (byte)equippedItem.Type, equippedItem.CBID);
+        try
+        {
+            if (equippedItem != null)
+                _persistence.EnsureSimpleObject(equippedItem.ObjectId.Coid, (byte)equippedItem.Type, equippedItem.CBID);
 
-        _persistence.SaveVehicleEquipment(vehicle.ObjectId.Coid, vehicle.CreateEquipmentSnapshot());
+            _persistence.SaveVehicleEquipment(vehicle.ObjectId.Coid, vehicle.CreateEquipmentSnapshot());
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AuditPersistFailure("PersistEquip", characterCoid, equippedItem?.ObjectId.Coid ?? 0);
+            Logger.WriteException(LogType.Error, "PersistEquip", ex);
+            return false;
+        }
     }
 
     private void PersistUnequip(Vehicle vehicle)

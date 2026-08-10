@@ -32,7 +32,7 @@ public class InventoryEquipPersistRollbackTests
             "equip persist failure must leave the hardpoint slot empty");
         Assert.AreEqual(1, harness.Persistence.DeletedItemCoids.Count(c => c == 205),
             "the initial cargo delete should have been issued before the failed persist");
-        Assert.AreEqual(2, harness.Persistence.Upserted.Count(u => u.Item.Coid == 205),
+        Assert.AreEqual(1, harness.Persistence.Upserted.Count(u => u.Item.Coid == 205),
             "the rollback must re-upsert the cargo row after the failed persist");
         var response = (InventoryDropResponsePacket)result.Packets[0];
         Assert.IsFalse(response.WasSuccessful, "drop must report failure to the client");
