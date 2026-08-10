@@ -251,12 +251,13 @@ public sealed class InventoryPersistence : IInventoryPersistence
         var existing = context.SimpleObjects.FirstOrDefault(so => so.Coid == itemCoid);
         if (existing != null)
         {
-            // SS-31: never overwrite another object category's identity row. A character or
-            // vehicle row at this coid means an allocator minted a colliding id; overwriting
-            // corrupts that object (client AVs at character select). Refuse loudly instead.
-            if (existing.Type != type
-                && (existing.Type == (byte)CloneBaseObjectType.Character
-                    || existing.Type == (byte)CloneBaseObjectType.Vehicle))
+            // SS-31: only fill an allocator placeholder (Type == 0) or refresh the same identity
+            // (same Type and CBID) at this coid. No production path legitimately rewrites CBID
+            // or object category under an existing coid; an allocator that minted a colliding id
+            // would otherwise corrupt that row (client AVs at character select). Refuse loudly.
+            var isPlaceholder = existing.Type == 0;
+            var isSameIdentity = existing.Type == type && existing.CBID == cbid;
+            if (!isPlaceholder && !isSameIdentity)
             {
                 throw new InvalidOperationException(
                     $"EnsureSimpleObject: coid {itemCoid} already belongs to object type {existing.Type} " +
