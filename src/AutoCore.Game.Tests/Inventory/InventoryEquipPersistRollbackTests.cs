@@ -2,6 +2,8 @@ using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Packets.Sector;
+using AutoCore.Game.Tests.Fakes;
+using AutoCore.Utils.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Linq;
 
@@ -10,6 +12,24 @@ namespace AutoCore.Game.Tests.Inventory;
 [TestClass]
 public class InventoryEquipPersistRollbackTests
 {
+    private InMemoryLogSink _sink = null!;
+
+    [TestInitialize]
+    public void Init()
+    {
+        GameLog.ResetForTests();
+        LogContext.ClearForTests();
+        _sink = new InMemoryLogSink();
+        GameLog.SetSinkForTests(_sink);
+    }
+
+    [TestCleanup]
+    public void Cleanup()
+    {
+        GameLog.ResetForTests();
+        LogContext.ClearForTests();
+    }
+
     [TestMethod]
     public void EquipFromCargo_PersistEquipThrows_RestoresCargoRowAndSlot()
     {
@@ -36,6 +56,8 @@ public class InventoryEquipPersistRollbackTests
             "the rollback must re-upsert the cargo row after the failed persist");
         var response = (InventoryDropResponsePacket)result.Packets[0];
         Assert.IsFalse(response.WasSuccessful, "drop must report failure to the client");
+        Assert.IsFalse(_sink.Records.Any(r => r.EventName == "ItemEquipped"),
+            "SS-31: a rolled-back equip must not have emitted ItemEquipped");
     }
 
     [TestMethod]

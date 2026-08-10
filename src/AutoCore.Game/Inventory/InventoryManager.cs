@@ -2354,7 +2354,10 @@ public sealed class InventoryManager
         if (vehicle == null)
             return true;
 
-        GameLog.Audit(
+        // SS-31: audit only after the equip is actually committed. Emitting this before the
+        // persist attempt meant a rolled-back equip (guard throw inside EnsureSimpleObject,
+        // caller unwinds) still logged ItemEquipped even though the mutation never stuck.
+        void AuditEquipped() => GameLog.Audit(
             "ItemEquipped",
             ("Container", "Hardpoint"),
             ("VehicleCoid", vehicle.ObjectId.Coid),
@@ -2362,7 +2365,10 @@ public sealed class InventoryManager
             ("ItemCbid", equippedItem?.CBID));
 
         if (_persistence == null)
+        {
+            AuditEquipped();
             return true;
+        }
 
         try
         {
@@ -2370,6 +2376,7 @@ public sealed class InventoryManager
                 _persistence.EnsureSimpleObject(equippedItem.ObjectId.Coid, (byte)equippedItem.Type, equippedItem.CBID);
 
             _persistence.SaveVehicleEquipment(vehicle.ObjectId.Coid, vehicle.CreateEquipmentSnapshot());
+            AuditEquipped();
             return true;
         }
         catch (Exception ex)
