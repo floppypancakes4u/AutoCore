@@ -406,13 +406,10 @@ public static class MissionCargoService
 
     private static long AllocateInventoryCoid(Character character)
     {
-        if (character.Map != null)
-            return character.Map.LocalCoidCounter++;
-
-        // Offline / unit tests without a map: use a high ephemeral range.
-        return character.ObjectId.Coid > 0
-            ? character.ObjectId.Coid + 1_000_000 + character.Inventory.Items.Count + 1
-            : Environment.TickCount64 & 0x7FFFFFFF;
+        // SS-31: mission cargo is persisted into simple_object like any other item.
+        // Never mint from Map.LocalCoidCounter — that counter is for local map props and
+        // leapfrogs the DB sequence (Donuts/18950 was clobbered this way on pickup).
+        return InventoryRuntime.AllocatePersistentCoid();
     }
 
     private static CloneBaseObjectType ResolveItemType(int cbid)

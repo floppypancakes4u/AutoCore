@@ -229,9 +229,9 @@ public static class MissionUseItemProgress
         if (character.Inventory.CountByCbid(cbid) > 0)
             return;
 
-        var coid = character.Map != null
-            ? character.Map.LocalCoidCounter++
-            : character.ObjectId.Coid + 1_000_000 + character.Inventory.Items.Count + 1;
+        // SS-31: persisted mission grants share the simple_object coid sequence with
+        // characters/vehicles — never Map.LocalCoidCounter (see InventoryRuntime).
+        var coid = InventoryRuntime.AllocatePersistentCoid();
 
         var type = CloneBaseObjectType.Item;
         var cloneBase = AssetManager.Instance.GetCloneBase(cbid);
