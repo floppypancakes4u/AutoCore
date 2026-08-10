@@ -180,6 +180,11 @@ public class Logger
     {
         try
         {
+            // Debug lines always lead with map + character identity so multi-player
+            // playtest greps stay attributable without opening the NDJSON side channel.
+            if (type == LogType.Debug)
+                log = PrefixDebugIdentity(log);
+
             // Dual-write: mirror the raw line into the structured pipeline (enriched with
             // ambient LogContext) so legacy call sites stay session-traceable. ExportData
             // is a raw data channel, not a log line, and is excluded.
@@ -197,6 +202,64 @@ public class Logger
         catch (Exception ex)
         {
             EmergencyReport("formatting log message", ex);
+        }
+    }
+
+    /// <summary>
+    /// Builds <c>map=Name(Id) char=Name(Id) {message}</c> from ambient <see cref="Logging.LogContext"/>.
+    /// Missing keys become <c>?</c> so the column layout stays stable when context is absent
+    /// (boot, timers, non-player work). Never throws.
+    /// </summary>
+    internal static string PrefixDebugIdentity(string message)
+    {
+        try
+        {
+            string mapName = null;
+            string mapId = null;
+            string characterName = null;
+            string characterId = null;
+
+            foreach (var pair in Logging.LogContext.CurrentProperties)
+            {
+                switch (pair.Key)
+                {
+                    case "MapName":
+                        mapName ??= FormatContextValue(pair.Value);
+                        break;
+                    case "MapId":
+                        mapId ??= FormatContextValue(pair.Value);
+                        break;
+                    case "CharacterName":
+                        characterName ??= FormatContextValue(pair.Value);
+                        break;
+                    case "CharacterId":
+                        characterId ??= FormatContextValue(pair.Value);
+                        break;
+                }
+            }
+
+            return $"map={mapName ?? "?"}({mapId ?? "?"}) char={characterName ?? "?"}({characterId ?? "?"}) {message}";
+        }
+        catch
+        {
+            // Identity decoration is diagnostics only — never block the original line.
+            return $"map=?(?) char=?(?) {message}";
+        }
+    }
+
+    private static string FormatContextValue(object value)
+    {
+        if (value == null)
+            return null;
+
+        try
+        {
+            var text = value.ToString();
+            return string.IsNullOrWhiteSpace(text) ? null : text;
+        }
+        catch
+        {
+            return null;
         }
     }
 

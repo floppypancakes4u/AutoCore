@@ -2,6 +2,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace AutoCore.Utils.Tests;
 
+using AutoCore.Utils.Logging;
+
 [TestClass]
 public class LoggerTests
 {
@@ -22,6 +24,7 @@ public class LoggerTests
     [TestCleanup]
     public void Cleanup()
     {
+        LogContext.ClearForTests();
         Logger.UpdateConfig(new Logger.LoggerConfig
         {
             IsDebugMode = true,
@@ -115,6 +118,108 @@ public class LoggerTests
             LogToFile = false
         });
         Logger.WriteLog(LogType.Debug, "visible debug");
+    }
+
+    /// <summary>
+    /// Debug lines must lead with map name/id and character name/id so multi-player
+    /// playtest logs are attributable without grepping ambient NDJSON properties.
+    /// </summary>
+    [TestMethod]
+    public void WriteLog_Debug_PrefixesMapAndCharacterContext_BeforeMessage()
+    {
+        _tempLogPath = Path.Combine(Path.GetTempPath(), $"autocore-logger-{Guid.NewGuid():N}.txt");
+        Logger.UpdateConfig(new Logger.LoggerConfig
+        {
+            LogToFile = true,
+            LogFilePath = _tempLogPath,
+            IsDebugMode = true
+        });
+
+        using (LogContext.Push(
+            ("MapName", "Tierra Roja Dam"),
+            ("MapId", 698),
+            ("CharacterName", "ScopePilot"),
+            ("CharacterId", 9001L)))
+        {
+            Logger.WriteLog(LogType.Debug, "UseObject: dialog opened");
+        }
+
+        Logger.UpdateConfig(new Logger.LoggerConfig { LogToFile = false });
+        LogContext.ClearForTests();
+
+        var line = File.ReadAllLines(_tempLogPath)
+            .First(l => l.Contains("UseObject: dialog opened", StringComparison.Ordinal));
+
+        Assert.IsTrue(line.Contains("[Debug]", StringComparison.Ordinal),
+            "Debug facility tag must still be present.");
+
+        var debugIdx = line.IndexOf("[Debug]", StringComparison.Ordinal);
+        var msgIdx = line.IndexOf("UseObject: dialog opened", StringComparison.Ordinal);
+        var afterDebug = line.Substring(debugIdx + "[Debug]".Length, msgIdx - (debugIdx + "[Debug]".Length));
+
+        StringAssert.Contains(afterDebug, "map=Tierra Roja Dam(698)");
+        StringAssert.Contains(afterDebug, "char=ScopePilot(9001)");
+        Assert.IsTrue(
+            afterDebug.IndexOf("map=", StringComparison.Ordinal)
+                < afterDebug.IndexOf("char=", StringComparison.Ordinal),
+            "Map context must appear before character context.");
+        Assert.IsTrue(
+            afterDebug.IndexOf("char=", StringComparison.Ordinal)
+                < afterDebug.Length - 1,
+            "Character context must appear before the original message body.");
+    }
+
+    [TestMethod]
+    public void WriteLog_Debug_WithoutAmbientContext_StillPrefixesPlaceholders()
+    {
+        _tempLogPath = Path.Combine(Path.GetTempPath(), $"autocore-logger-{Guid.NewGuid():N}.txt");
+        Logger.UpdateConfig(new Logger.LoggerConfig
+        {
+            LogToFile = true,
+            LogFilePath = _tempLogPath,
+            IsDebugMode = true
+        });
+        LogContext.ClearForTests();
+
+        Logger.WriteLog(LogType.Debug, "boot probe");
+        Logger.UpdateConfig(new Logger.LoggerConfig { LogToFile = false });
+
+        var line = File.ReadAllLines(_tempLogPath)
+            .First(l => l.Contains("boot probe", StringComparison.Ordinal));
+
+        StringAssert.Contains(line, "map=?(?)");
+        StringAssert.Contains(line, "char=?(?)");
+        StringAssert.Contains(line, "boot probe");
+    }
+
+    [TestMethod]
+    public void WriteLog_NonDebug_DoesNotInjectMapCharacterPrefix()
+    {
+        _tempLogPath = Path.Combine(Path.GetTempPath(), $"autocore-logger-{Guid.NewGuid():N}.txt");
+        Logger.UpdateConfig(new Logger.LoggerConfig
+        {
+            LogToFile = true,
+            LogFilePath = _tempLogPath,
+            IsDebugMode = true
+        });
+
+        using (LogContext.Push(
+            ("MapName", "The Wastes"),
+            ("MapId", 708),
+            ("CharacterName", "Bob"),
+            ("CharacterId", 1L)))
+        {
+            Logger.WriteLog(LogType.Network, "client hello");
+        }
+
+        Logger.UpdateConfig(new Logger.LoggerConfig { LogToFile = false });
+        LogContext.ClearForTests();
+
+        var line = File.ReadAllLines(_tempLogPath)
+            .First(l => l.Contains("client hello", StringComparison.Ordinal));
+
+        Assert.IsFalse(line.Contains("map=", StringComparison.Ordinal),
+            "Only Debug lines should carry the map/character identity prefix.");
     }
 
     [TestMethod]

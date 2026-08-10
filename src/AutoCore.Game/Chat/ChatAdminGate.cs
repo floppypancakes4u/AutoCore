@@ -30,6 +30,7 @@ public static class ChatAdminGate
 
         // Missions
         "/showMissions", "/showmissions",
+        "/mission",
         "/clearAllMissions", "/clearallmissions",
         "/removeCurrentMission", "/removecurrentmission",
         "/removeMission", "/removemission",

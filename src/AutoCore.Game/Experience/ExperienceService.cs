@@ -707,9 +707,13 @@ public sealed class ExperienceService : Singleton<ExperienceService>
 
         try
         {
-            var fromAssets = AssetManager.Instance.GetQuestXpFraction(index);
-            if (fromAssets > 0f)
+            // Loaded table: honor it exactly, including key misses (retail is an exact-key map
+            // where a miss — e.g. XPIndex -1 on data-authored no-reward objectives — means 0).
+            if (AssetManager.Instance.TryGetQuestXpFraction(index, out var fromAssets))
+            {
+                NoteQuestKeyMiss(nameof(GetQuestFrac), index, fromAssets);
                 return fromAssets;
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
         {
@@ -728,9 +732,11 @@ public sealed class ExperienceService : Singleton<ExperienceService>
 
         try
         {
-            var fromAssets = AssetManager.Instance.GetQuestCreditsFraction(index);
-            if (fromAssets > 0f)
+            if (AssetManager.Instance.TryGetQuestCreditsFraction(index, out var fromAssets))
+            {
+                NoteQuestKeyMiss(nameof(GetQuestCreditsFrac), index, fromAssets);
                 return fromAssets;
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
         {
@@ -740,6 +746,29 @@ public sealed class ExperienceService : Singleton<ExperienceService>
 
         NoteFallback(nameof(GetQuestCreditsFrac));
         return DefaultQuestCreditsFrac(index);
+    }
+
+    /// <summary>
+    /// A zero from the loaded table on a positive index is unusual enough to note (once per
+    /// index, at Debug). Negative indices are authored "no reward" markers and index 0 is a
+    /// legitimate zero row in retail data — both stay silent.
+    /// </summary>
+    private static void NoteQuestKeyMiss(string lookup, int index, float frac)
+    {
+        if (frac != 0f || index <= 0)
+            return;
+
+        bool firstTime;
+        lock (WarnedFallbacks)
+            firstTime = WarnedFallbacks.Add($"{lookup}:{index}");
+
+        if (firstTime)
+        {
+            Logger.WriteLog(
+                LogType.Debug,
+                $"Quest lookup '{lookup}' index {index} not in loaded table — treating as " +
+                "no-reward (retail exact-map miss).");
+        }
     }
 
     public int GetQuestBaseCredits(int targetLevel)

@@ -210,6 +210,34 @@ public class SessionLifecycleLoggingTests
     }
 
     [TestMethod]
+    public void HandlePacket_WithCharacterOnMap_CarriesMapIdentity()
+    {
+        var conn = CreateClient();
+        var character = new Character();
+        character.SetCoid(CharCoid, true);
+        character.AttachTestDataForTests("MapPilot");
+
+        var continent = new ContinentObject
+        {
+            Id = 698,
+            DisplayName = "Tierra Roja Dam",
+            MapFileName = "trd",
+        };
+        var map = SectorMap.CreateForTests(continent, new Vector4(0, 0, 0, 0));
+        character.SetMap(map);
+
+        conn.CurrentCharacter = character;
+
+        InvokeHandlePacket(conn, OpcodeOnlyPacket(AutoCore.Game.Constants.GameOpcode.ObjectMoved));
+
+        var record = SingleLegacyContaining("Unhandled Opcode");
+        Assert.AreEqual(698, record.GetProperty("MapId"),
+            "MapId must be ambient so Debug lines can prefix map identity.");
+        Assert.AreEqual("Tierra Roja Dam", record.GetProperty("MapName"),
+            "MapName (DisplayName) must be ambient for human-readable Debug prefixes.");
+    }
+
+    [TestMethod]
     public void HandlePacket_AmbientScope_IsRestoredAfterDispatch()
     {
         var conn = CreateClient();

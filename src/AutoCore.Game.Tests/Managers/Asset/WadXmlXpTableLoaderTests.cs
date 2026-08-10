@@ -108,9 +108,12 @@ public class WadXmlXpTableLoaderTests
             """);
 
         var table = WadXmlWorldDataLoader.LoadQuestXpLookup(_tempXmlPath);
-        Assert.AreEqual(2, table.Count);
+        // Retail's quest lookup is an exact-key map with no sign filter — a negative row,
+        // if authored, must be honored (parity with Mission_ComputeObjectiveXp).
+        Assert.AreEqual(3, table.Count);
         Assert.AreEqual(0.10f, table[5], 0.0001f);
         Assert.AreEqual(0.30f, table[9], 0.0001f);
+        Assert.AreEqual(1.0f, table[-1], 0.0001f);
     }
 
     [TestMethod]
@@ -134,9 +137,10 @@ public class WadXmlXpTableLoaderTests
             """);
 
         var table = WadXmlWorldDataLoader.LoadQuestCreditsLookup(_tempXmlPath);
-        Assert.AreEqual(2, table.Count);
+        Assert.AreEqual(3, table.Count);
         Assert.AreEqual(0.8f, table[4], 0.0001f);
         Assert.AreEqual(1.0f, table[5], 0.0001f);
+        Assert.AreEqual(9f, table[-1], 0.0001f);
     }
 
     [TestMethod]

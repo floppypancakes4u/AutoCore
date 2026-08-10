@@ -106,6 +106,9 @@ public sealed class ChatCommandService
             case "/showmissions":
                 return ShowMissions(character);
 
+            case "/mission":
+                return MissionInfo(character, parts);
+
             case "/reportbug":
             case "/bug":
             case "/bugreport":
@@ -200,6 +203,9 @@ public sealed class ChatCommandService
                 var cmd = parts[0].ToLowerInvariant();
                 if (cmd is "/skillpoints")
                     return SkillPoints(character, parts);
+
+                if (cmd is "/mission")
+                    return MissionInfo(character, parts);
 
                 // Client steals bare /player for //playerrename — prefer /addplayer.
                 if (cmd is "/addplayer" or "/newaccount" or "/player")
@@ -505,6 +511,41 @@ public sealed class ChatCommandService
     }
 
     /// <summary>
+    /// GM diagnostic: print a mission's display name and accept dialog text by id.
+    /// Prefers GLM <c>Title</c> / <c>OnLineAccept</c>, falling back to WAD <c>Name</c> and
+    /// <c>Description</c> when the accept line is missing.
+    /// Usage: <c>/mission &lt;id&gt;</c>
+    /// </summary>
+    private static ChatCommandExecutionResult MissionInfo(Character character, string[] parts)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        if (parts.Length < 2 || !int.TryParse(parts[1], out var missionId) || missionId <= 0)
+            return new ChatCommandExecutionResult(true, "Usage: /mission <id>");
+
+        var mission = AssetManager.Instance.GetMission(missionId);
+        if (mission == null)
+            return new ChatCommandExecutionResult(true, $"Unknown mission id {missionId}.");
+
+        var name = !string.IsNullOrWhiteSpace(mission.Title)
+            ? mission.Title
+            : !string.IsNullOrWhiteSpace(mission.Name)
+                ? mission.Name
+                : $"(unnamed mission {missionId})";
+
+        var acceptText = !string.IsNullOrWhiteSpace(mission.OnLineAccept)
+            ? mission.OnLineAccept
+            : !string.IsNullOrWhiteSpace(mission.Description)
+                ? mission.Description
+                : "(no accept text)";
+
+        return new ChatCommandExecutionResult(
+            true,
+            $"Mission {missionId}: {name}\nAccept: {acceptText}");
+    }
+
+    /// <summary>
     /// Wipe this character's mission state (active + completed) from memory AND the char DB.
     /// The client keeps its current journal until the next relog, when the (now empty) create
     /// packet resets it. Diagnostic / test reset for mission persistence.
@@ -586,9 +627,16 @@ public sealed class ChatCommandService
             _ => "completed",
         };
 
+        // The retail client keeps completed missions in an in-session hash with no removal
+        // wire message — re-running the mission before a relog makes the client reject
+        // turn-in dialogs (stale NotCompleteText).
+        var relogWarning = wasCompleted
+            ? " WARNING: the client keeps completed missions in-session — relog before re-running it."
+            : string.Empty;
+
         return new ChatCommandExecutionResult(
             true,
-            $"Removed mission {missionId} ({partsDesc}; memory + DB). Client journal updated.");
+            $"Removed mission {missionId} ({partsDesc}; memory + DB). Client journal updated.{relogWarning}");
     }
 
     /// <summary>

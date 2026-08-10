@@ -46,6 +46,8 @@ public class NpcInteractUseObjectTests
         NpcInteractHandler.InvalidateMissionIndex();
         // delay≤0 runs journal/re-eval synchronously (production default is 100ms).
         NpcInteractHandler.DialogTurnInFollowupDelayMs = 0;
+        // delay≤0 sends the post-retarget dialog synchronously (production default 250ms).
+        NpcInteractHandler.DialogAfterRetargetDelayMs = 0;
         ExperienceService.Instance.ResetForTests();
     }
 
@@ -572,6 +574,47 @@ public class NpcInteractUseObjectTests
             "final deliver must get turn-in ObjectiveState");
     }
 
+    /// <summary>
+    /// Root cause of the live "wet nurse then completion" double dialog: the give-leg (seq0,
+    /// TakeItemAtEnd=false) and the take-leg (seq2, TakeItemAtEnd=true) both target Gareth. The
+    /// FIRST Gareth visit must collapse the give-leg + AutoComplete patrol straight to the
+    /// take-leg so the player sees ONE dialog (the completion), never the give-leg dialog.
+    /// </summary>
+    [TestMethod]
+    public void HandleUseObject_TrackThisFirstGarethVisit_CollapsesGiveLegToSingleCompletionDialog()
+    {
+        SeedTrackThisShapeMission(
+            MissionA,
+            giverNpcCbid: OtherNpcCbid,
+            firstDeliverObjId: ObjectiveA,
+            patrolObjId: ObjectiveA + 10,
+            finalDeliverObjId: ObjectiveB,
+            deliverNpcCbid: NpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA); // server at seq 0 = give-leg to Gareth
+        _sent.Clear();
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveA, // give-leg objective id (retail Gareth wire)
+        });
+
+        Assert.AreEqual(2, character.CurrentQuests[0].ActiveObjectiveSequence,
+            "first Gareth visit must skip give-leg + patrol straight to the final take-leg");
+        Assert.AreEqual(1, _sent.OfType<NpcMissionDialogPacket>().Count(),
+            "give-leg must not open its own dialog — one interaction, one (completion) dialog");
+        Assert.IsTrue(
+            _sent.OfType<CompleteDynamicObjectivePacket>().Any(p => p.ObjectiveId == ObjectiveA),
+            "give-leg must be force-completed client-side (0x2070), not shown as a dialog");
+        Assert.IsTrue(
+            _sent.OfType<CompleteDynamicObjectivePacket>().Any(p => p.ObjectiveId == ObjectiveA + 10),
+            "intervening patrol must be force-completed too");
+    }
+
     [TestMethod]
     public void HandleMissionDialogResponse_TrackThisAtGarethDuringPatrol_CompletesFinalDeliver()
     {
@@ -599,6 +642,305 @@ public class NpcInteractUseObjectTests
         Assert.AreEqual(0, character.CurrentQuests.Count,
             "dialog at Gareth during intervening patrol must complete final deliver");
         Assert.IsTrue(character.CompletedMissionIds.Contains(MissionA));
+    }
+
+    /// <summary>
+    /// A give-leg deliver dialog that finishes mid-sequence (the NPC is NOT also the final
+    /// hand-in, so the give-leg genuinely opens its own dialog) must schedule the delayed 0x2070
+    /// — the client does not locally complete a give-leg on the dialog button, so without it the
+    /// client's active objective (and dialog text) stays stuck. Never an immediate 0x2070 (AV
+    /// @ 0x007B6DB0 during dialog FX).
+    /// </summary>
+    [TestMethod]
+    public void HandleMissionDialogResponse_GiveLegAdvanceMidSequence_SchedulesDelayed0x2070ForFinishedObjective()
+    {
+        // Give-leg to NpcCbid at seq0, real hand-in to a DIFFERENT NPC at seq1 → no collapse.
+        SeedGiveLegThenDeliverElsewhereMission(
+            MissionA,
+            giveLegNpcCbid: NpcCbid,
+            giveLegObjId: ObjectiveA,
+            finalObjId: ObjectiveB,
+            finalNpcCbid: OtherNpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA); // seq 0 = give-leg deliver to NpcCbid
+
+        var scheduled = new List<(Action Action, int DelayMs)>();
+        NpcInteractHandler.ScheduleDelayedWork = (action, delayMs, _) => scheduled.Add((action, delayMs));
+        _sent.Clear();
+
+        NpcInteractHandler.HandleMissionDialogResponse(conn, new MissionDialogResponsePacket
+        {
+            MissionId = MissionA,
+            Accepted = false,
+            MissionGiver = new TFID(NpcCoid, false),
+        });
+
+        Assert.AreEqual(1, character.CurrentQuests[0].ActiveObjectiveSequence,
+            "give-leg dialog turn-in must advance to the next objective");
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count(),
+            "no immediate 0x2070 inside the dialog-FX window");
+
+        Assert.IsTrue(scheduled.Count > 0, "follow-up must be scheduled");
+        Assert.IsTrue(
+            scheduled.Max(s => s.DelayMs) >= MissionClientSoftPedal.GroupReactionSuppressMs,
+            "forcing 0x2070 must wait out the GRC soft-pedal window");
+
+        foreach (var (action, _) in scheduled)
+            action();
+
+        Assert.IsTrue(
+            _sent.OfType<CompleteDynamicObjectivePacket>().Any(p => p.ObjectiveId == ObjectiveA),
+            "delayed 0x2070 must force-complete the finished give-leg objective so the client " +
+            "retargets its active objective (dialog text follows it)");
+    }
+
+    /// <summary>
+    /// Safety net for characters already diverged mid-mission: a UseObject hint naming an
+    /// objective BEHIND the server sequence proves the client never completed it locally —
+    /// resync with 0x2070 for the intervening objectives before the dialog opens.
+    /// </summary>
+    [TestMethod]
+    public void HandleUseObject_TrackThisClientBehindHint_Resends0x2070ForInterveningObjectives()
+    {
+        SeedTrackThisShapeMission(
+            MissionA,
+            giverNpcCbid: OtherNpcCbid,
+            firstDeliverObjId: ObjectiveA,
+            patrolObjId: ObjectiveA + 10,
+            finalDeliverObjId: ObjectiveB,
+            deliverNpcCbid: NpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+        character.CurrentQuests[0].ActiveObjectiveSequence = 1; // server past give-leg
+        _sent.Clear();
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveA, // client still on the give-leg → behind the server
+        });
+
+        var packets = _sent.ToList();
+        var dialogIdx = packets.FindIndex(p => p is NpcMissionDialogPacket);
+        var giveLegIdx = packets.FindIndex(
+            p => p is CompleteDynamicObjectivePacket c && c.ObjectiveId == ObjectiveA);
+        var patrolIdx = packets.FindIndex(
+            p => p is CompleteDynamicObjectivePacket c && c.ObjectiveId == ObjectiveA + 10);
+
+        Assert.IsTrue(dialogIdx >= 0, "dialog must still open");
+        Assert.IsTrue(giveLegIdx >= 0, "client-behind resync must 0x2070 the stale give-leg objective");
+        Assert.IsTrue(patrolIdx >= 0, "skipped patrol must 0x2070 (existing reconcile)");
+        Assert.IsTrue(giveLegIdx < dialogIdx && patrolIdx < dialogIdx,
+            "resync packets must precede the dialog so the client renders the final deliver text");
+    }
+
+    [TestMethod]
+    public void HandleUseObject_HintMatchesActiveSequence_NoResync0x2070()
+    {
+        // Single-deliver mission: active seq0 IS the hand-in, no give-leg/patrol to collapse.
+        SeedDeliverMission(MissionA, ObjectiveA, NpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA); // seq 0, hint names seq 0 — nothing behind
+        _sent.Clear();
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveA,
+        });
+
+        Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count(),
+            "hint matching the active sequence must not trigger any resync 0x2070");
+    }
+
+    [TestMethod]
+    public void HandleUseObject_ClientBehindDuringSoftPedalWindow_SkipsResync()
+    {
+        SeedTrackThisShapeMission(
+            MissionA,
+            giverNpcCbid: OtherNpcCbid,
+            firstDeliverObjId: ObjectiveA,
+            patrolObjId: ObjectiveA + 10,
+            finalDeliverObjId: ObjectiveB,
+            deliverNpcCbid: NpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+        character.CurrentQuests[0].ActiveObjectiveSequence = 1;
+        MissionClientSoftPedal.ArmAfterDialogTurnIn(character.ObjectId.Coid);
+        _sent.Clear();
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveA,
+        });
+
+        Assert.IsFalse(
+            _sent.OfType<CompleteDynamicObjectivePacket>().Any(p => p.ObjectiveId == ObjectiveA),
+            "resync must not stack 0x2070 into the post-dialog FX window (AV @ 0x007B6DB0); " +
+            "the next UseObject resyncs after the window");
+    }
+
+    /// <summary>
+    /// Live Track This residual: the reconcile's 0x2070 and the 0x206D dialog left the server
+    /// 3ms apart, but the client applies 0x2070 through its queued reaction pump — the dialog
+    /// opened before the retarget took effect and rendered the stale objective's text once.
+    /// When an interaction sends any client-retargeting 0x2070, the dialog must be deferred.
+    /// </summary>
+    [TestMethod]
+    public void HandleUseObject_RetargetSent_DefersDialogUntilAfterDelay()
+    {
+        SeedTrackThisShapeMission(
+            MissionA,
+            giverNpcCbid: OtherNpcCbid,
+            firstDeliverObjId: ObjectiveA,
+            patrolObjId: ObjectiveA + 10,
+            finalDeliverObjId: ObjectiveB,
+            deliverNpcCbid: NpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+        character.CurrentQuests[0].ActiveObjectiveSequence = 1; // reconcile will retarget
+
+        var scheduled = new List<(Action Action, int DelayMs)>();
+        NpcInteractHandler.DialogAfterRetargetDelayMs = 250;
+        NpcInteractHandler.ScheduleDelayedWork = (action, delayMs, _) => scheduled.Add((action, delayMs));
+        _sent.Clear();
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveA,
+        });
+
+        Assert.AreEqual(0, _sent.OfType<NpcMissionDialogPacket>().Count(),
+            "dialog must not race the retarget 0x2070s — client processes them via its " +
+            "queued reaction pump");
+        Assert.IsTrue(
+            scheduled.Any(s => s.DelayMs >= NpcInteractHandler.DialogAfterRetargetDelayMs),
+            "deferred dialog must wait DialogAfterRetargetDelayMs");
+
+        foreach (var (action, _) in scheduled)
+            action();
+
+        Assert.AreEqual(1, _sent.OfType<NpcMissionDialogPacket>().Count(),
+            "deferred dialog must still open after the delay");
+    }
+
+    [TestMethod]
+    public void HandleUseObject_NoRetarget_SendsDialogImmediately()
+    {
+        // Single-deliver mission: no give-leg/patrol to collapse, hint matches active.
+        SeedDeliverMission(MissionA, ObjectiveA, NpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA); // seq 0, hint matches — nothing to retarget
+
+        NpcInteractHandler.DialogAfterRetargetDelayMs = 250;
+        NpcInteractHandler.ScheduleDelayedWork = (action, delayMs, _) =>
+            Assert.Fail("no retarget was sent — the dialog must go out synchronously");
+        _sent.Clear();
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveA,
+        });
+
+        Assert.AreEqual(1, _sent.OfType<NpcMissionDialogPacket>().Count(),
+            "the common no-retarget path must gain zero latency");
+    }
+
+    [TestMethod]
+    public void HandleUseObject_DeferredDialog_DroppedWhenCharacterChanges()
+    {
+        SeedTrackThisShapeMission(
+            MissionA,
+            giverNpcCbid: OtherNpcCbid,
+            firstDeliverObjId: ObjectiveA,
+            patrolObjId: ObjectiveA + 10,
+            finalDeliverObjId: ObjectiveB,
+            deliverNpcCbid: NpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+        character.CurrentQuests[0].ActiveObjectiveSequence = 1;
+
+        var scheduled = new List<(Action Action, int DelayMs)>();
+        NpcInteractHandler.DialogAfterRetargetDelayMs = 250;
+        NpcInteractHandler.ScheduleDelayedWork = (action, delayMs, _) => scheduled.Add((action, delayMs));
+        _sent.Clear();
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveA,
+        });
+
+        conn.CurrentCharacter = null; // logout / character switch before the delay elapses
+        foreach (var (action, _) in scheduled)
+            action();
+
+        Assert.AreEqual(0, _sent.OfType<NpcMissionDialogPacket>().Count(),
+            "deferred dialog must be dropped when the connection no longer owns the character");
+    }
+
+    [TestMethod]
+    public void HandleUseObject_SecondInteract_SupersedesPendingDialog()
+    {
+        SeedTrackThisShapeMission(
+            MissionA,
+            giverNpcCbid: OtherNpcCbid,
+            firstDeliverObjId: ObjectiveA,
+            patrolObjId: ObjectiveA + 10,
+            finalDeliverObjId: ObjectiveB,
+            deliverNpcCbid: NpcCbid);
+
+        var (conn, character, map) = CreatePlayer();
+        PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
+        character.CurrentVehicle.Position = new Vector3(0f, 0f, 0f);
+        GiveQuest(character, MissionA);
+        character.CurrentQuests[0].ActiveObjectiveSequence = 1;
+
+        var scheduled = new List<(Action Action, int DelayMs)>();
+        NpcInteractHandler.DialogAfterRetargetDelayMs = 250;
+        NpcInteractHandler.ScheduleDelayedWork = (action, delayMs, _) => scheduled.Add((action, delayMs));
+        _sent.Clear();
+
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = ObjectiveA, // defers dialog (retarget sent)
+        });
+        NpcInteractHandler.HandleUseObject(conn, new UseObjectPacket
+        {
+            Target = new TFID(NpcCoid, false),
+            ObjectiveId = -1, // player clicked again; seq now 2, no further retarget
+        });
+
+        foreach (var (action, _) in scheduled)
+            action();
+
+        Assert.AreEqual(1, _sent.OfType<NpcMissionDialogPacket>().Count(),
+            "a re-interact must supersede the pending deferred dialog — never two dialogs");
     }
 
     [TestMethod]
@@ -1398,6 +1740,42 @@ public class NpcInteractUseObjectTests
 
         var mission = Mission.CreateForTests(missionId, d0, patrol, d2);
         mission.NPC = giverNpcCbid;
+        mission.Continent = ContinentId;
+        mission.ReqMissionId = new[] { -1, -1, -1, -1 };
+        AssetManager.Instance.SetTestMission(mission);
+    }
+
+    /// <summary>
+    /// Give-leg deliver (item given at start, target NPC does not take it) to one NPC at seq0,
+    /// followed by the real take-leg hand-in to a DIFFERENT NPC at seq1. Because the give-leg
+    /// NPC is not the final hand-in, the give-leg keeps its own dialog (no same-NPC collapse).
+    /// </summary>
+    private static void SeedGiveLegThenDeliverElsewhereMission(
+        int missionId,
+        int giveLegNpcCbid,
+        int giveLegObjId,
+        int finalObjId,
+        int finalNpcCbid)
+    {
+        var giveLeg = MissionObjective.CreateForTests(giveLegObjId, 0, missionId, 1);
+        giveLeg.Requirements.Add(new ObjectiveRequirementDeliver(giveLeg)
+        {
+            NPCTargetCBID = giveLegNpcCbid,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 0,
+            TakeItemAtEnd = false,
+        });
+        var finalDeliver = MissionObjective.CreateForTests(finalObjId, 1, missionId, 1);
+        finalDeliver.Requirements.Add(new ObjectiveRequirementDeliver(finalDeliver)
+        {
+            NPCTargetCBID = finalNpcCbid,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 0,
+            TakeItemAtEnd = true,
+        });
+
+        var mission = Mission.CreateForTests(missionId, giveLeg, finalDeliver);
+        mission.NPC = giveLegNpcCbid;
         mission.Continent = ContinentId;
         mission.ReqMissionId = new[] { -1, -1, -1, -1 };
         AssetManager.Instance.SetTestMission(mission);

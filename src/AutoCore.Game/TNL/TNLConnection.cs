@@ -1069,6 +1069,28 @@ private void HandlePacket(ByteBuffer buffer)
                 catch { /* diagnostics only — a nameless character must not fail dispatch */ }
                 if (characterName != null)
                     props.Add(("CharacterName", characterName));
+
+                // Map identity feeds Logger's Debug line prefix (map=Name(Id) char=...).
+                try
+                {
+                    var map = character.Map;
+                    if (map != null)
+                    {
+                        props.Add(("MapId", map.ContinentId));
+
+                        string mapName = null;
+                        try
+                        {
+                            mapName = map.ContinentObject?.DisplayName
+                                ?? map.ContinentObject?.MapFileName;
+                        }
+                        catch { /* diagnostics only */ }
+
+                        if (!string.IsNullOrWhiteSpace(mapName))
+                            props.Add(("MapName", mapName));
+                    }
+                }
+                catch { /* diagnostics only — missing map must not fail dispatch */ }
             }
 
             if (Account != null)

@@ -54,10 +54,29 @@ public class LoggerDualWriteTests
         Logger.WriteLog(LogType.Error, "e");
         Logger.WriteLog(LogType.Fatal, "f");
 
-        Assert.AreEqual(StructuredLogLevel.Debug, RecordWithMessage("d").Level);
+        // Debug lines are prefixed with map/char identity before dual-write.
+        Assert.AreEqual(StructuredLogLevel.Debug, RecordContaining("d").Level);
         Assert.AreEqual(StructuredLogLevel.Warning, RecordWithMessage("w").Level);
         Assert.AreEqual(StructuredLogLevel.Error, RecordWithMessage("e").Level);
         Assert.AreEqual(StructuredLogLevel.Fatal, RecordWithMessage("f").Level);
+    }
+
+    [TestMethod]
+    public void WriteLog_Debug_DualWriteMessage_IncludesMapCharacterPrefix()
+    {
+        using (LogContext.Push(
+            ("MapName", "Hestia"),
+            ("MapId", 707),
+            ("CharacterName", "Ada"),
+            ("CharacterId", 12L)))
+        {
+            Logger.WriteLog(LogType.Debug, "skill cast");
+        }
+
+        var record = RecordContaining("skill cast");
+        StringAssert.Contains(record.Message, "map=Hestia(707)");
+        StringAssert.Contains(record.Message, "char=Ada(12)");
+        StringAssert.Contains(record.Message, "skill cast");
     }
 
     [TestMethod]
@@ -101,6 +120,14 @@ public class LoggerDualWriteTests
     {
         var match = _sink.Records.FirstOrDefault(r => r.Message == message);
         Assert.IsNotNull(match, $"Expected a mirrored record with message '{message}'.");
+        return match;
+    }
+
+    private StructuredLogRecord RecordContaining(string fragment)
+    {
+        var match = _sink.Records.FirstOrDefault(r =>
+            r.Message != null && r.Message.Contains(fragment, StringComparison.Ordinal));
+        Assert.IsNotNull(match, $"Expected a mirrored record containing '{fragment}'.");
         return match;
     }
 }

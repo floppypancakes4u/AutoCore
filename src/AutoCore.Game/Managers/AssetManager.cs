@@ -465,17 +465,49 @@ public class AssetManager : Singleton<AssetManager>
     /// <summary>Mission XP fraction for XPIndex (tQuestXPLookup).</summary>
     public float GetQuestXpFraction(int xpIndex)
     {
-        if (WorldDBLoader.QuestXpLookup == null)
-            return 0f;
-        return WorldDBLoader.QuestXpLookup.TryGetValue(xpIndex, out var frac) ? frac : 0f;
+        TryGetQuestXpFraction(xpIndex, out var frac);
+        return frac;
+    }
+
+    /// <summary>
+    /// Mission XP fraction for XPIndex (tQuestXPLookup). Returns false only when the table is
+    /// absent/empty; a loaded-table key miss returns true with 0 (retail exact-key map miss).
+    /// </summary>
+    public bool TryGetQuestXpFraction(int xpIndex, out float frac)
+    {
+        var table = WorldDBLoader.QuestXpLookup;
+        if (table == null || table.Count == 0)
+        {
+            frac = 0f;
+            return false;
+        }
+
+        frac = table.TryGetValue(xpIndex, out var value) ? value : 0f;
+        return true;
     }
 
     /// <summary>Mission credit multiplier for CreditsIndex (tQuestCreditsLookup.rlLevelCredits).</summary>
     public float GetQuestCreditsFraction(int creditsIndex)
     {
-        if (WorldDBLoader.QuestCreditsLookup == null)
-            return 0f;
-        return WorldDBLoader.QuestCreditsLookup.TryGetValue(creditsIndex, out var frac) ? frac : 0f;
+        TryGetQuestCreditsFraction(creditsIndex, out var frac);
+        return frac;
+    }
+
+    /// <summary>
+    /// Mission credit multiplier for CreditsIndex (tQuestCreditsLookup). Returns false only when
+    /// the table is absent/empty; a loaded-table key miss returns true with 0.
+    /// </summary>
+    public bool TryGetQuestCreditsFraction(int creditsIndex, out float frac)
+    {
+        var table = WorldDBLoader.QuestCreditsLookup;
+        if (table == null || table.Count == 0)
+        {
+            frac = 0f;
+            return false;
+        }
+
+        frac = table.TryGetValue(creditsIndex, out var value) ? value : 0f;
+        return true;
     }
 
     /// <summary>Base mission credits for TargetLevel (tQuestBaseCredits.intBaseCredits).</summary>

@@ -175,6 +175,42 @@ public class MissionChatCommandContractTests
         Assert.IsFalse(player.Character.CompletedMissionIds.Contains(MissionId));
     }
 
+    /// <summary>
+    /// The retail client keeps completed missions in an in-session hash with no removal wire
+    /// message — after /removeMission of a completed mission, re-running it in the same client
+    /// session makes the client reject turn-in dialogs (stale NotCompleteText). The command
+    /// reply must warn the operator to relog first.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("MissionCritical")]
+    public void RemoveMission_Completed_WarnsClientKeepsItUntilRelog()
+    {
+        var player = _fx.CreatePlayer();
+        player.Character.CompletedMissionIds.Add(MissionId);
+
+        var result = ChatCommandService.Instance.Execute(player.Character, $"/removeMission {MissionId}");
+
+        Assert.IsTrue(result.Handled);
+        StringAssert.Contains(result.Message, "relog",
+            "removing a completed mission must warn that the client session still has it");
+    }
+
+    [TestMethod]
+    [TestCategory("MissionCritical")]
+    public void RemoveMission_ActiveOnly_NoRelogWarning()
+    {
+        var o0 = _fx.CreateSimpleObjective(ObjectiveId, 0, MissionId);
+        _fx.SeedMission(MissionId, 0, o0);
+        var player = _fx.CreatePlayer();
+        _fx.GiveQuest(player.Character, MissionId);
+
+        var result = ChatCommandService.Instance.Execute(player.Character, $"/removeMission {MissionId}");
+
+        Assert.IsTrue(result.Handled);
+        Assert.IsFalse(result.Message.Contains("relog"),
+            "an active-only removal never entered the client's completed hash — no warning");
+    }
+
     [TestMethod]
     [TestCategory("MissionCritical")]
     public void RemoveMission_NotPresent_ReportsNotFound()
@@ -200,6 +236,7 @@ public class MissionChatCommandContractTests
     public void MissionCommands_NullCharacter_Safe()
     {
         Assert.IsTrue(ChatCommandService.Instance.Execute(null, "/showMissions").Handled);
+        Assert.IsTrue(ChatCommandService.Instance.Execute(null, "/mission 1").Handled);
         Assert.IsTrue(ChatCommandService.Instance.Execute(null, "/clearAllMissions").Handled);
         Assert.IsTrue(ChatCommandService.Instance.Execute(null, "/giveMission 1").Handled);
         Assert.IsTrue(ChatCommandService.Instance.Execute(null, "/completeMission 1").Handled);

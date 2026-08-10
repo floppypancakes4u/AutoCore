@@ -1,5 +1,10 @@
+using System.Reflection;
 using AutoCore.Game.Experience;
+using AutoCore.Game.Managers;
+using AutoCore.Game.Managers.Asset;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using GameMission = AutoCore.Game.Mission.Mission;
+using GameMissionObjective = AutoCore.Game.Mission.MissionObjective;
 
 namespace AutoCore.Game.Tests.Experience;
 
@@ -31,6 +36,7 @@ public class ExperienceFallbackVisibilityTests
     {
         _svc.ResetForTests();
         ExperienceService.ResetFallbackTrackingForTests();
+        ClearQuestLookupTables();
     }
 
     /// <summary>
@@ -114,5 +120,124 @@ public class ExperienceFallbackVisibilityTests
         ExperienceService.ResetFallbackTrackingForTests();
 
         Assert.AreEqual(0, ExperienceService.FallbackCount);
+    }
+
+    // ------------------------------------------------------------------
+    // Loaded-table key misses are NOT degradation. Retail's quest lookup is
+    // an exact-key map where a miss (e.g. XPIndex -1 on Track This 3979)
+    // legitimately means "no reward". Warning "returned no asset data" for
+    // those conflates authored data with a broken asset pipeline.
+    // ------------------------------------------------------------------
+
+    [TestMethod]
+    public void GetQuestFrac_LoadedTableKeyMissNegativeIndex_ReturnsZeroWithoutFallback()
+    {
+        SeedQuestXpLookup(new Dictionary<int, float> { [0] = 0f, [1] = 0.02f });
+
+        var value = _svc.GetQuestFrac(-1);
+
+        Assert.AreEqual(0f, value);
+        Assert.AreEqual(
+            0,
+            ExperienceService.FallbackCount,
+            "A loaded table with a data-intentional negative index miss is retail behaviour, " +
+            "not asset degradation, and must not be counted or warned as a fallback.");
+    }
+
+    [TestMethod]
+    public void GetQuestFrac_LoadedTableKeyMissPositiveIndex_ReturnsZeroWithoutFallback()
+    {
+        SeedQuestXpLookup(new Dictionary<int, float> { [0] = 0f, [1] = 0.02f });
+
+        var value = _svc.GetQuestFrac(18);
+
+        Assert.AreEqual(0f, value);
+        Assert.AreEqual(0, ExperienceService.FallbackCount);
+    }
+
+    [TestMethod]
+    public void GetQuestFrac_TableAbsent_StillWarnsAndFallsBack()
+    {
+        var value = _svc.GetQuestFrac(5);
+
+        Assert.AreEqual(ExperienceService.DefaultQuestFrac(5), value);
+        Assert.IsTrue(
+            ExperienceService.FallbackCount > 0,
+            "With no loaded table the built-in retail approximation is a real degradation " +
+            "and must keep being recorded (SS-22).");
+    }
+
+    [TestMethod]
+    public void GetQuestCreditsFrac_LoadedTableKeyMissNegativeIndex_ReturnsZeroWithoutFallback()
+    {
+        SeedQuestCreditsLookup(new Dictionary<int, float> { [0] = 0f, [1] = 0.2f });
+
+        var value = _svc.GetQuestCreditsFrac(-1);
+
+        Assert.AreEqual(0f, value);
+        Assert.AreEqual(0, ExperienceService.FallbackCount);
+    }
+
+    [TestMethod]
+    public void GetQuestCreditsFrac_LoadedTableKeyMissPositiveIndex_ReturnsZeroWithoutFallback()
+    {
+        SeedQuestCreditsLookup(new Dictionary<int, float> { [0] = 0f, [1] = 0.2f });
+
+        var value = _svc.GetQuestCreditsFrac(18);
+
+        Assert.AreEqual(0f, value);
+        Assert.AreEqual(0, ExperienceService.FallbackCount);
+    }
+
+    [TestMethod]
+    public void GetQuestCreditsFrac_TableAbsent_StillWarnsAndFallsBack()
+    {
+        var value = _svc.GetQuestCreditsFrac(5);
+
+        Assert.AreEqual(ExperienceService.DefaultQuestCreditsFrac(5), value);
+        Assert.IsTrue(ExperienceService.FallbackCount > 0);
+    }
+
+    /// <summary>
+    /// Pins retail semantics for the Track This (3979) shape: final objective XPIndex -1,
+    /// static XP 0 → zero XP by authored data, with no fallback recorded.
+    /// </summary>
+    [TestMethod]
+    public void ComputeMissionXp_XpIndexMinusOne_ReturnsZero_RetailDataIntentional()
+    {
+        SeedQuestXpLookup(new Dictionary<int, float> { [0] = 0f, [1] = 0.02f, [5] = 0.10f });
+
+        var mission = GameMission.CreateForTests(3979);
+        mission.TargetLevel = 3;
+        var objective = GameMissionObjective.CreateForTests(7659, 2, 3979);
+        var t = typeof(GameMissionObjective);
+        t.GetProperty(nameof(GameMissionObjective.XPIndex))!.SetValue(objective, (short)-1);
+        t.GetProperty(nameof(GameMissionObjective.XPScaler))!.SetValue(objective, 1f);
+        t.GetProperty(nameof(GameMissionObjective.XPBalanceScaler))!.SetValue(objective, 1f);
+
+        Assert.AreEqual(0, _svc.ComputeMissionXp(mission, objective));
+        Assert.AreEqual(0, ExperienceService.FallbackCount);
+    }
+
+    private static void SeedQuestXpLookup(IDictionary<int, float> table) =>
+        GetWorldDbLoader().QuestXpLookup = table;
+
+    private static void SeedQuestCreditsLookup(IDictionary<int, float> table) =>
+        GetWorldDbLoader().QuestCreditsLookup = table;
+
+    private static void ClearQuestLookupTables()
+    {
+        var loader = GetWorldDbLoader();
+        loader.QuestXpLookup = null;
+        loader.QuestCreditsLookup = null;
+    }
+
+    private static WorldDBLoader GetWorldDbLoader()
+    {
+        var prop = typeof(AssetManager).GetProperty(
+            "WorldDBLoader",
+            BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        Assert.IsNotNull(prop);
+        return (WorldDBLoader)prop!.GetValue(AssetManager.Instance)!;
     }
 }

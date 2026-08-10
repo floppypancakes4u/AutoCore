@@ -93,6 +93,7 @@ public class AdminCommandAuthzTests
     [TestMethod]
     [DataRow("/listItems")]
     [DataRow("/showMissions")]
+    [DataRow("/mission 1")]
     [DataRow("/cargoinfo")]
     [DataRow("/tptowaypoint")]
     [DataRow("/portto Bobby")]

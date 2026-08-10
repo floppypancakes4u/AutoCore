@@ -39,6 +39,14 @@ public static class NpcInteractHandler
     internal static int DialogTurnInFollowupDelayMs { get; set; } = 250;
 
     /// <summary>
+    /// Delay before opening the 0x206D dialog when the same interaction sent client-retargeting
+    /// 0x2070s. The client applies CompleteObjective through its queued reaction pump, so a
+    /// dialog sent milliseconds after a retarget opens against the STALE active objective and
+    /// renders the old mission text once (live Track This double-dialog). Set 0 in unit tests.
+    /// </summary>
+    internal static int DialogAfterRetargetDelayMs { get; set; } = 250;
+
+    /// <summary>
     /// Schedules delayed work. Default: sync when delay≤0, else cancelled Task.Delay.
     /// Tests may replace to capture/flush without sleeping.
     /// Signature: (action, delayMs, cancellationToken).
@@ -48,6 +56,9 @@ public static class NpcInteractHandler
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<long, CancellationTokenSource>
         PendingDialogTurnInFollowups = new();
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<long, CancellationTokenSource>
+        PendingDeferredDialogs = new();
 
     private static Dictionary<int, List<int>> _missionsByNpc;
     private static HashSet<int> _missionGiverCbids;
@@ -67,7 +78,15 @@ public static class NpcInteractHandler
     internal static void ResetDialogTurnInFollowupForTests()
     {
         DialogTurnInFollowupDelayMs = 250;
+        DialogAfterRetargetDelayMs = 250;
         ScheduleDelayedWork = DefaultScheduleDelayedWork;
+        foreach (var kv in PendingDeferredDialogs)
+        {
+            kv.Value.Cancel();
+            kv.Value.Dispose();
+        }
+
+        PendingDeferredDialogs.Clear();
         foreach (var kv in PendingDialogTurnInFollowups)
         {
             kv.Value.Cancel();
@@ -312,25 +331,103 @@ public static class NpcInteractHandler
         if (dialogMissions.Count == 0)
             return ConsumeEmptyMissionNpcInteract(npcCbid, npc.ObjectId.Coid, character.ObjectId.Coid, packet.ObjectiveId, character);
 
+        // A new interaction supersedes any dialog still deferred from the previous one —
+        // otherwise the player would get two dialogs.
+        CancelPendingDeferredDialog(character.ObjectId.Coid);
+
         // Client often advances objectives (0x206C / local UI) before the server — e.g. patrol
         // done client-side while ActiveObjectiveSequence is still 0. Reconcile from objectiveId
         // so deliver turn-in and PrepareClientTurnInDialog see the correct active sequence.
         TryReconcileClientObjectiveHint(conn, character, packet.ObjectiveId, npcCbid);
+        // The opposite divergence also happens (Track This give-leg): the client never completed
+        // an objective the server already advanced past, so its dialog text keys off the stale
+        // objective. Force-complete the intervening objectives client-side before the dialog.
+        var retargeted = TryResyncClientBehindObjective(conn, character, packet.ObjectiveId, npcCbid);
         // Track This: UseObject still carries the first deliver objective id after server moved
         // onto the intervening AutoComplete patrol — skip patrol-only gaps to the next deliver
         // at this NPC so turn-in prep sees the active deliver sequence.
-        TryReconcileAtDeliverNpcDestination(conn, character, npcCbid);
+        retargeted |= TryReconcileAtDeliverNpcDestination(conn, character, npcCbid);
 
         // Re-build after reconcile so deliver-active sequence is reflected if hint advanced it.
         dialogMissions = BuildDialogMissions(character, npcCbid, packet.ObjectiveId);
         if (dialogMissions.Count == 0)
             return ConsumeEmptyMissionNpcInteract(npcCbid, npc.ObjectId.Coid, character.ObjectId.Coid, packet.ObjectiveId, character);
 
+        if (retargeted && DialogAfterRetargetDelayMs > 0)
+        {
+            // The client applies the just-sent 0x2070 retargets through its queued reaction
+            // pump; a dialog racing them opens against the stale active objective and renders
+            // the old mission text once. Give the pump time, then rebuild and open.
+            ScheduleDeferredDialog(conn, character, npc.ObjectId, npcCbid, packet.ObjectiveId);
+            return true;
+        }
+
         PrepareClientTurnInDialog(conn, character, npcCbid, dialogMissions);
         SendNpcMissionDialog(conn, character, npc.ObjectId, npcCbid, dialogMissions);
         PlayerActionTrace.NpcInteract(character, npc.ObjectId.Coid, npcCbid, "DialogOpened",
             packet.ObjectiveId, dialogMissions.Count);
         return true;
+    }
+
+    private static void CancelPendingDeferredDialog(long coid)
+    {
+        if (PendingDeferredDialogs.TryRemove(coid, out var previous))
+        {
+            previous.Cancel();
+            previous.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Opens the 0x206D dialog after <see cref="DialogAfterRetargetDelayMs"/> so the client's
+    /// reaction pump has applied the retargeting 0x2070s first. Superseded by any newer
+    /// UseObject from the same character; dropped if the connection loses the character.
+    /// </summary>
+    private static void ScheduleDeferredDialog(
+        TNLConnection conn,
+        Character character,
+        TFID npcTfid,
+        int npcCbid,
+        int hintObjectiveId)
+    {
+        var coid = character.ObjectId.Coid;
+        var cts = new CancellationTokenSource();
+        PendingDeferredDialogs[coid] = cts;
+        var token = cts.Token;
+        var schedule = ScheduleDelayedWork ?? DefaultScheduleDelayedWork;
+
+        Logger.WriteLog(LogType.Debug,
+            "UseObject: dialog deferred {0}ms after retarget charCoid={1} npcCbid={2}",
+            DialogAfterRetargetDelayMs,
+            coid,
+            npcCbid);
+
+        schedule(
+            () =>
+            {
+                try
+                {
+                    if (token.IsCancellationRequested || conn.CurrentCharacter != character)
+                        return;
+
+                    // Rebuild — mission state may have moved while deferred.
+                    var missions = BuildDialogMissions(character, npcCbid, hintObjectiveId);
+                    if (missions.Count == 0)
+                        return;
+
+                    PrepareClientTurnInDialog(conn, character, npcCbid, missions);
+                    SendNpcMissionDialog(conn, character, npcTfid, npcCbid, missions);
+                    PlayerActionTrace.NpcInteract(character, npcTfid.Coid, npcCbid, "DialogOpenedDeferred",
+                        hintObjectiveId, missions.Count);
+                }
+                finally
+                {
+                    if (PendingDeferredDialogs.TryRemove(coid, out var done) && ReferenceEquals(done, cts))
+                        cts.Dispose();
+                }
+            },
+            DialogAfterRetargetDelayMs,
+            token);
     }
 
     /// <summary>
@@ -571,6 +668,69 @@ public static class NpcInteractHandler
     }
 
     /// <summary>
+    /// Backward-sync the CLIENT when its UseObject hint names an objective behind the server's
+    /// <see cref="CharacterQuest.ActiveObjectiveSequence"/>: send 0x2070 force-completes for the
+    /// intervening objectives so the client retargets its active objective (mission dialog text
+    /// keys off it). Counterpart of <see cref="TryReconcileClientObjectiveHint"/>, which only
+    /// moves the server forward.
+    /// </summary>
+    /// <remarks>
+    /// Live Track This (3979): the client does not locally complete a give-leg deliver on the
+    /// dialog button, so it kept rendering the mission NotCompleteText at the final turn-in.
+    /// Skipped while the post-dialog GRC soft-pedal window is armed (AV @ 0x007B6DB0) — the
+    /// stale hint recurs on the next UseObject, so no retry state is needed.
+    /// </remarks>
+    private static bool TryResyncClientBehindObjective(
+        TNLConnection conn,
+        Character character,
+        int objectiveId,
+        int npcCbid)
+    {
+        if (conn == null || character == null || objectiveId <= 0 || npcCbid <= 0)
+            return false;
+
+        if (MissionClientSoftPedal.ShouldSuppressGroupReactionCall(character.ObjectId.Coid))
+            return false;
+
+        var mission = AssetManager.Instance.GetMissionByObjectiveId(objectiveId);
+        var objective = AssetManager.Instance.GetObjectiveById(objectiveId);
+        if (mission == null || objective == null)
+            return false;
+
+        if (!ObjectiveRelatedToNpc(mission, objective, npcCbid))
+            return false;
+
+        var quest = character.CurrentQuests.FirstOrDefault(q => q.MissionId == mission.Id);
+        if (quest == null || objective.Sequence >= quest.ActiveObjectiveSequence)
+            return false;
+
+        var sentObjectiveIds = new List<int>();
+        foreach (var stale in mission.Objectives.Values
+                     .Where(o => o.Sequence >= objective.Sequence && o.Sequence < quest.ActiveObjectiveSequence)
+                     .OrderBy(o => o.Sequence))
+        {
+            conn.SendGamePacket(new CompleteDynamicObjectivePacket
+            {
+                MissionId = mission.Id,
+                ObjectiveId = stale.ObjectiveId,
+            });
+            sentObjectiveIds.Add(stale.ObjectiveId);
+        }
+
+        if (sentObjectiveIds.Count > 0)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "UseObjectResync: client-behind mission={0} clientSeq={1} serverSeq={2} sent0x2070=[{3}]",
+                mission.Id,
+                objective.Sequence,
+                quest.ActiveObjectiveSequence,
+                string.Join(',', sentObjectiveIds));
+        }
+
+        return sentObjectiveIds.Count > 0;
+    }
+
+    /// <summary>
     /// When the player interacts with an NPC that is the target of a later deliver, skip any
     /// intervening AutoComplete-only patrol objectives so turn-in can proceed.
     /// </summary>
@@ -581,14 +741,15 @@ public static class NpcInteractHandler
     /// <c>activeDeliverCbids=[]</c> / <c>remainingDeliverToNpc=1</c>.
     /// Does not skip kills, use-item, or non-AutoComplete objectives.
     /// </remarks>
-    private static void TryReconcileAtDeliverNpcDestination(
+    private static bool TryReconcileAtDeliverNpcDestination(
         TNLConnection conn,
         Character character,
         int npcCbid)
     {
         if (character == null || npcCbid <= 0)
-            return;
+            return false;
 
+        var advancedAny = false;
         foreach (var quest in character.CurrentQuests.ToList())
         {
             if (character.CompletedMissionIds.Contains(quest.MissionId))
@@ -598,30 +759,31 @@ public static class NpcInteractHandler
             if (mission?.Objectives == null || mission.Objectives.Count == 0)
                 continue;
 
-            // Already on a deliver to this NPC — HasDeliverTurnIn will handle turn-in.
-            if (HasDeliverTurnIn(quest, npcCbid))
-                continue;
-
+            // The real hand-in is the nearest same-NPC deliver that TAKES the item
+            // (TakeItemAtEnd). A give-leg deliver to the same NPC (item given at start, NPC does
+            // not take it — Track This seq0) is a pass-through: collapse it into the hand-in
+            // instead of opening its own dialog.
             MissionObjective targetDeliver = null;
             foreach (var obj in mission.Objectives.Values.OrderBy(o => o.Sequence))
             {
-                if (obj.Sequence <= quest.ActiveObjectiveSequence)
+                if (obj.Sequence < quest.ActiveObjectiveSequence)
                     continue;
 
-                var deliver = obj.Requirements?
+                var takeLeg = obj.Requirements?
                     .OfType<ObjectiveRequirementDeliver>()
-                    .FirstOrDefault(d => d.NPCTargetCompletes && d.NPCTargetCBID == npcCbid);
-                if (deliver == null)
+                    .FirstOrDefault(d => d.NPCTargetCompletes && d.NPCTargetCBID == npcCbid && d.TakeItemAtEnd);
+                if (takeLeg == null)
                     continue;
 
                 targetDeliver = obj;
                 break;
             }
 
-            if (targetDeliver == null)
+            // No take-leg here, or the active objective already IS the hand-in — normal turn-in.
+            if (targetDeliver == null || targetDeliver.Sequence == quest.ActiveObjectiveSequence)
                 continue;
 
-            if (!CanSkipObjectivesToDeliver(mission, quest.ActiveObjectiveSequence, targetDeliver.Sequence))
+            if (!CanSkipObjectivesToDeliver(mission, quest.ActiveObjectiveSequence, targetDeliver.Sequence, npcCbid))
                 continue;
 
             var guard = 0;
@@ -656,15 +818,20 @@ public static class NpcInteractHandler
                     mission,
                     current,
                     source: "DeliverDestinationReconcile");
+                advancedAny = true;
             }
         }
+
+        return advancedAny;
     }
 
     /// <summary>
-    /// True when every objective in <paramref name="fromSeq"/>..<paramref name="toSeq"/>-1 is an
-    /// AutoComplete patrol with no blocking sibling requirements.
+    /// True when every objective in <paramref name="fromSeq"/>..<paramref name="toSeq"/>-1 is
+    /// skippable toward a hand-in at <paramref name="npcCbid"/>: an AutoComplete patrol, or a
+    /// give-leg deliver to that same NPC (item handed to the player at start, NPC does not take
+    /// it). Both complete server-side without a player dialog and without consuming cargo.
     /// </summary>
-    private static bool CanSkipObjectivesToDeliver(Mission mission, byte fromSeq, byte toSeq)
+    private static bool CanSkipObjectivesToDeliver(Mission mission, byte fromSeq, byte toSeq, int npcCbid)
     {
         if (mission?.Objectives == null || toSeq <= fromSeq)
             return false;
@@ -674,11 +841,29 @@ public static class NpcInteractHandler
             if (obj.Sequence < fromSeq || obj.Sequence >= toSeq)
                 continue;
 
-            if (!IsSkippableAutoCompletePatrol(obj))
+            if (!IsSkippableAutoCompletePatrol(obj) && !IsSkippableGiveLegDeliver(obj, npcCbid))
                 return false;
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// A give-leg deliver objective toward the NPC we are collapsing to: every requirement is a
+    /// deliver to <paramref name="npcCbid"/> that the NPC completes but does NOT take the item
+    /// for (<see cref="ObjectiveRequirementDeliver.TakeItemAtEnd"/> false). Completing it
+    /// server-side neither consumes cargo nor leaves a blocking sibling (kill/collect/patrol).
+    /// </summary>
+    private static bool IsSkippableGiveLegDeliver(MissionObjective objective, int npcCbid)
+    {
+        if (objective?.Requirements == null || objective.Requirements.Count == 0)
+            return false;
+
+        return objective.Requirements.All(r =>
+            r is ObjectiveRequirementDeliver deliver
+            && deliver.NPCTargetCompletes
+            && deliver.NPCTargetCBID == npcCbid
+            && !deliver.TakeItemAtEnd);
     }
 
     private static bool IsSkippableAutoCompletePatrol(MissionObjective objective)
@@ -1828,10 +2013,13 @@ public static class NpcInteractHandler
 
         MissionClientSoftPedal.ArmAfterDialogTurnIn(character.ObjectId.Coid);
 
-        // Delayed 0x2070 only on final multi-req (patrol+deliver) so AutoPatrol waypoints clear.
-        // Mid-sequence advance: client already advanced; do not force-complete.
-        var forceClientComplete = !hasLaterObjectives
-            && ObjectiveNeedsForceClientCompleteAfterDeliver(objective);
+        // Delayed 0x2070 whenever the mission continues past this objective: the client does NOT
+        // locally complete a give-leg deliver on the dialog button (live Track This 3979 — the
+        // next UseObject still carried the finished objective id), so without the force-complete
+        // its active objective and dialog text stay stuck on the finished deliver. Also forced on
+        // a final multi-req (patrol+deliver) so AutoPatrol waypoints clear.
+        var forceClientComplete = hasLaterObjectives
+            || ObjectiveNeedsForceClientCompleteAfterDeliver(objective);
 
         Logger.WriteLog(LogType.Debug,
             "MissionDialogResponse: deliver mission={0} objective={1} npcCbid={2} advanced={3} (immediate 0x2070={4}; follow-up forceComplete={5}; GRC suppress {6}ms)",

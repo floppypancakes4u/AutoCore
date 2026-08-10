@@ -35,6 +35,7 @@ public sealed class MissionHeavyRegressionFixture : IDisposable
         MissionPersistence.Instance.AutoFlushOnEnqueue = false;
         NpcInteractHandler.InvalidateMissionIndex();
         NpcInteractHandler.DialogTurnInFollowupDelayMs = 0;
+        NpcInteractHandler.DialogAfterRetargetDelayMs = 0;
     }
 
     public void Dispose()
@@ -400,6 +401,73 @@ public sealed class MissionHeavyRegressionFixture : IDisposable
         // Site COIDs are placed by the test; CBID matching uses worldPrimaryCbid.
         _ = siteA;
         _ = siteB;
+    }
+
+    /// <summary>
+    /// Track This (3979) shape: give-leg deliver (item at start, NPC does not take) → one or more
+    /// AutoComplete patrols → take-leg deliver (NPC takes the item), all delivers to the SAME NPC.
+    /// The first visit to that NPC must collapse give-leg + patrols into the single take-leg dialog.
+    /// </summary>
+    public void SeedGivePatrolTakeSameNpc(
+        int missionId,
+        int giveObjId,
+        int[] patrolObjIds,
+        int takeObjId,
+        int npcCbid,
+        int itemCbid = -1,
+        int giverNpcCbid = 0,
+        int continentId = ContId)
+    {
+        var objectives = new List<MissionObjective>();
+
+        var give = MissionObjective.CreateForTests(giveObjId, 0, missionId, 1);
+        give.Requirements.Add(new ObjectiveRequirementDeliver(give)
+        {
+            NPCTargetCBID = npcCbid,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 0,
+            GiveItemOnStart = true,
+            TakeItemAtEnd = false,
+            ItemCBID = itemCbid,
+            RequireItemToComplete = itemCbid > 0,
+        });
+        objectives.Add(give);
+
+        byte seq = 1;
+        foreach (var patrolObjId in patrolObjIds)
+        {
+            var patrolObj = MissionObjective.CreateForTests(patrolObjId, seq++, missionId, 1);
+            var patrol = new ObjectiveRequirementPatrol(patrolObj)
+            {
+                AutoComplete = true,
+                AutoCompleteDistance = 25f,
+                TargetCount = 1,
+                Laps = 1,
+                FirstStateSlot = 0,
+            };
+            patrol.GenericTargets[0] = 10_000 + patrolObjId;
+            patrolObj.Requirements.Add(patrol);
+            objectives.Add(patrolObj);
+        }
+
+        var take = MissionObjective.CreateForTests(takeObjId, seq, missionId, 1);
+        take.Requirements.Add(new ObjectiveRequirementDeliver(take)
+        {
+            NPCTargetCBID = npcCbid,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 0,
+            GiveItemOnStart = false,
+            TakeItemAtEnd = true,
+            ItemCBID = itemCbid,
+            RequireItemToComplete = itemCbid > 0,
+        });
+        objectives.Add(take);
+
+        var mission = Mission.CreateForTests(missionId, objectives.ToArray());
+        mission.NPC = giverNpcCbid != 0 ? giverNpcCbid : npcCbid;
+        mission.Continent = continentId;
+        mission.ReqMissionId = new[] { -1, -1, -1, -1 };
+        AssetManager.Instance.SetTestMission(mission);
     }
 
     /// <summary>Single-objective UseItem with configurable requirement flags.</summary>

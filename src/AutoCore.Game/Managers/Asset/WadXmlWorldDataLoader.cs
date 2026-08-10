@@ -188,9 +188,10 @@ public static class WadXmlWorldDataLoader
         var dict = new Dictionary<int, float>();
         foreach (var row in section.Elements("row"))
         {
-            var index = GetInt(row, "IDQuestXPIndex", defaultValue: -1);
-            if (index < 0)
-                continue;
+            // Retail's lookup is an exact-key map with no sign filter — keep negative rows.
+            var index = GetInt(row, "IDQuestXPIndex", defaultValue: int.MinValue);
+            if (index == int.MinValue)
+                continue; // element missing entirely
             dict[index] = GetFloat(row, "rlLevelXP", defaultValue: 0f);
         }
 
@@ -208,9 +209,9 @@ public static class WadXmlWorldDataLoader
         var dict = new Dictionary<int, float>();
         foreach (var row in section.Elements("row"))
         {
-            var index = GetInt(row, "IDQuestCreditsIndex", defaultValue: -1);
-            if (index < 0)
-                continue;
+            var index = GetInt(row, "IDQuestCreditsIndex", defaultValue: int.MinValue);
+            if (index == int.MinValue)
+                continue; // element missing entirely
             dict[index] = GetFloat(row, "rlLevelCredits", defaultValue: 0f);
         }
 
