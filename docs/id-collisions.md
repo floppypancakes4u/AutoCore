@@ -178,12 +178,18 @@ test failure references 18274/18275, it is the guard/regression pin, not a
 second real incident.
 
 **Shadow0712 (2026-08-10) — second live face-A incident, un-triaged.** A
-second character (`Shadow0712`) hit the same character-select AV symptom the
-following day. Unlike Donuts, this incident has not yet been walked through
-`log-sector.txt` / DB inspection to confirm the exact `simple_object` row
-corruption, or whether it predates or postdates this pass's fixes landing on
-the server the account was on. Recorded here as an open item — it is **not**
-folded into the "fixed" claims in §10 until triaged.
+second character hit the same character-select AV symptom the following day,
+surfaced by the **first run** of `scripts/check-id-collisions.ps1`:
+
+- `character` 18935 **Shadow0712**, `AccountId=13`, `Deleted=0`
+- `simple_object` 18935: **Type=4 (QuestObject), CBID=20046** (expected
+  Character, CBID=20)
+
+Unlike Donuts, this incident has not yet been walked through
+`log-sector.txt` / DB inspection to confirm how the clobber happened, or
+whether it predates or postdates this pass's fixes landing on the server the
+account was on. Recorded here as an open item, needing §6.4 treatment — it is
+**not** folded into the "fixed" claims in §10 until triaged.
 
 ### 3.3 Why “character IDs and inventory IDs should be different” feels right
 
@@ -358,9 +364,8 @@ WHERE s.Type = 0
   AND NOT EXISTS (SELECT 1 FROM character_inventory i WHERE i.ItemCoid = s.Coid)
   AND NOT EXISTS (
         SELECT 1 FROM vehicle v2
-        WHERE s.Coid IN (v2.Wheelset, v2.Armor, v2.PrimaryWeapon, v2.SecondaryWeapon,
-                          v2.TertiaryWeapon, v2.QuaternaryWeapon, v2.Utility1, v2.Utility2,
-                          v2.Utility3));
+        WHERE s.Coid IN (v2.Ornament, v2.RaceItem, v2.PowerPlant, v2.Wheelset,
+                          v2.Armor, v2.MeleeWeapon, v2.Front, v2.Turret, v2.Rear));
 ```
 
 This is the same query family `scripts/check-id-collisions.ps1` runs (see
