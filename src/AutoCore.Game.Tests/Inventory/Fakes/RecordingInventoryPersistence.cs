@@ -15,6 +15,10 @@ public sealed class RecordingInventoryPersistence : IInventoryPersistence
     public List<(long CharacterCoid, long Credits)> CreditsSaves { get; } = new();
     public List<(long ItemCoid, byte Type, int Cbid)> EnsuredSimpleObjects { get; } = new();
 
+    // SS-31: lets tests simulate a guard throw (e.g. coid collision) inside EnsureSimpleObject
+    // so the equip-persist rollback path can be exercised.
+    public Func<long, Exception>? EnsureSimpleObjectFailure { get; set; }
+
     public List<CharacterInventoryItem> CargoToLoad { get; } = new();
     public List<CharacterInventoryItem> LockerToLoad { get; } = new();
     public long CreditsToLoad { get; set; }
@@ -46,8 +50,14 @@ public sealed class RecordingInventoryPersistence : IInventoryPersistence
     public void ClearCargo(long characterCoid) =>
         ClearedCharacterCoids.Add(characterCoid);
 
-    public void EnsureSimpleObject(long itemCoid, byte type, int cbid, int faction = 0, int teamFaction = 0) =>
+    public void EnsureSimpleObject(long itemCoid, byte type, int cbid, int faction = 0, int teamFaction = 0)
+    {
+        var failure = EnsureSimpleObjectFailure?.Invoke(itemCoid);
+        if (failure != null)
+            throw failure;
+
         EnsuredSimpleObjects.Add((itemCoid, type, cbid));
+    }
 
     public void SaveVehicleEquipment(long vehicleCoid, VehicleEquipmentSnapshot snapshot) =>
         EquipmentSaves.Add((vehicleCoid, snapshot));
