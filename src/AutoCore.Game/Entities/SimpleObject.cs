@@ -247,6 +247,14 @@ public class SimpleObject : GraphicsObject
             return false;
         }
 
+        if (DBData.CBID <= 0)
+        {
+            Logger.WriteLog(LogType.Error,
+                "SimpleObject.LoadFromDB: coid={0} cbid={1} — skipping (SS-31 placeholder/corrupt identity)",
+                coid, DBData.CBID);
+            return false;
+        }
+
         LoadCloneBase(DBData.CBID);
 
         SetupCBFields();

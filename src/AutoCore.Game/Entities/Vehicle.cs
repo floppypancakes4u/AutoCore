@@ -1644,7 +1644,24 @@ public class Vehicle : SimpleObject
             return false;
         }
 
+        if (DBData.SimpleObjectBase.CBID <= 0)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Vehicle.LoadFromDB: coid={0} cbid={1} — skipping (SS-31 placeholder/corrupt identity)",
+                coid, DBData.SimpleObjectBase.CBID);
+            return false;
+        }
+
         LoadCloneBase(DBData.SimpleObjectBase.CBID);
+
+        if (Type != CloneBaseObjectType.Vehicle)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Vehicle.LoadFromDB: coid={0} cbid={1} resolved to clonebase kind={2} (expected Vehicle) — " +
+                "skipping corrupt identity (SS-31)",
+                coid, DBData.SimpleObjectBase.CBID, Type);
+            return false;
+        }
 
         Position = new(DBData.PositionX, DBData.PositionY, DBData.PositionZ);
         Rotation = new(DBData.RotationX, DBData.RotationY, DBData.RotationZ, DBData.RotationW);

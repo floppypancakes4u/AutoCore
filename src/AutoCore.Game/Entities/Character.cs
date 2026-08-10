@@ -371,9 +371,26 @@ public partial class Character : Creature
             return false;
         }
 
+        if (DBData.SimpleObjectBase.CBID <= 0)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Character.LoadFromDB: coid={0} cbid={1} — skipping (SS-31 placeholder/corrupt identity)",
+                coid, DBData.SimpleObjectBase.CBID);
+            return false;
+        }
+
         AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Network, $"Character.LoadFromDB: Loaded character Coid {coid}, Name from DB: '{DBData.Name}' (Length: {DBData.Name?.Length ?? 0})");
 
         LoadCloneBase(DBData.SimpleObjectBase.CBID);
+
+        if (Type != CloneBaseObjectType.Character)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Character.LoadFromDB: coid={0} cbid={1} resolved to clonebase kind={2} (expected Character) — " +
+                "skipping corrupt identity (SS-31)",
+                coid, DBData.SimpleObjectBase.CBID, Type);
+            return false;
+        }
 
         ClanMemberDBData = context.ClanMembers.Include(cm => cm.Clan).FirstOrDefault(cm => cm.CharacterCoid == coid);
 
