@@ -75,6 +75,38 @@ public class InventoryPlaceholderLeakTests
     }
 
     [TestMethod]
+    public void AddItem_MergeOnlyAccept_DoesNotLeakFirstCoidPlaceholder()
+    {
+        // SS-31: caller pre-allocates firstCoid (a Type=0/CBID=0 placeholder simple_object row)
+        // before calling AddItem. When the entire requested quantity is absorbed by the merge
+        // pass against an existing same-cbid stack, the placement loop never runs and firstCoid
+        // is never consumed into an item — the placeholder row must be released, not orphaned.
+        var persistence = new RecordingInventoryPersistence();
+        var clones = new FakeCloneBaseLookup();
+        clones.Register(31, StackableClone(31, stackSize: 10));
+        var inventory = new InventoryManager(persistence, clones);
+        inventory.SetCapacity(1, 13);
+        // Fill 12 of 13 slots with unrelated filler, and the last slot with a partial stack of
+        // cbid 31 (quantity below maxStack) — the grid is completely full either way, so only
+        // the merge path can accept the incoming unit.
+        var coid = 1000L;
+        for (var row = 0; row < 12; row++)
+        {
+            inventory.TryAdd(new CharacterInventoryItem(99, CloneBaseObjectType.Item, "Filler", coid, 0, (byte)row, 1));
+            coid++;
+        }
+        inventory.TryAdd(new CharacterInventoryItem(31, CloneBaseObjectType.Item, "Parts", coid, 0, 12, 1));
+
+        const long firstCoid = 5000L;
+        var result = inventory.AddItem(Entry(31), new TestItemCreator(), coid: firstCoid, quantity: 1);
+
+        Assert.AreEqual(1, result.AcceptedQuantity, "the unit is fully absorbed by the merge");
+        Assert.IsNull(inventory.FindByCoid(firstCoid), "the pre-allocated coid was never placed as an item");
+        Assert.IsTrue(persistence.ReleasedPlaceholders.Contains(firstCoid),
+            "merge-only accepts must release the unused firstCoid placeholder row instead of orphaning it");
+    }
+
+    [TestMethod]
     public void CanAcceptAnyOfCbid_FullCargoNoStack_ReturnsFalse()
     {
         // SS-31: cargo is completely full (no free 1x1 cell) and the cbid is non-stackable, so
