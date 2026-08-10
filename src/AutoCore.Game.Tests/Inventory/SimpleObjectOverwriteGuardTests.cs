@@ -97,7 +97,7 @@ public class SimpleObjectOverwriteGuardTests
     }
 
     [TestMethod]
-    public void EnsureSimpleObject_UpdatesSameCategoryRow_Normally()
+    public void EnsureSimpleObject_SameTypeDifferentCbid_ThrowsSs31Guard()
     {
         using (var seed = new CharContext(_options))
         {
@@ -105,9 +105,42 @@ public class SimpleObjectOverwriteGuardTests
             seed.SaveChanges();
         }
 
-        InventoryPersistence.Instance.EnsureSimpleObject(600, (byte)CloneBaseObjectType.Item, 5477);
+        Assert.ThrowsException<InvalidOperationException>(() =>
+            InventoryPersistence.Instance.EnsureSimpleObject(600, (byte)CloneBaseObjectType.Item, 5477));
 
         using var verify = new CharContext(_options);
-        Assert.AreEqual(5477, verify.SimpleObjects.Find(600L).CBID, "same-category re-save must still update normally");
+        Assert.AreEqual(2993, verify.SimpleObjects.Find(600L).CBID,
+            "no production path legitimately rewrites CBID under an existing coid");
+    }
+
+    [TestMethod]
+    public void EnsureSimpleObject_CrossItemCategoryOverwrite_Throws()
+    {
+        using (var seed = new CharContext(_options))
+        {
+            seed.SimpleObjects.Add(new SimpleObjectData { Coid = 601, Type = (byte)CloneBaseObjectType.Weapon, CBID = 1552 });
+            seed.SaveChanges();
+        }
+
+        Assert.ThrowsException<InvalidOperationException>(() =>
+            InventoryPersistence.Instance.EnsureSimpleObject(601, (byte)CloneBaseObjectType.Armor, 900));
+    }
+
+    [TestMethod]
+    public void EnsureSimpleObject_SameTypeSameCbid_Resave_Succeeds()
+    {
+        using (var seed = new CharContext(_options))
+        {
+            seed.SimpleObjects.Add(new SimpleObjectData { Coid = 602, Type = (byte)CloneBaseObjectType.Item, CBID = 2993 });
+            seed.SaveChanges();
+        }
+
+        InventoryPersistence.Instance.EnsureSimpleObject(602, (byte)CloneBaseObjectType.Item, 2993, faction: 7, teamFaction: 3);
+
+        using var verify = new CharContext(_options);
+        var row = verify.SimpleObjects.Find(602L);
+        Assert.AreEqual(2993, row.CBID);
+        Assert.AreEqual(7, row.Faction, "same-identity re-save must still refresh faction");
+        Assert.AreEqual(3, row.TeamFaction, "same-identity re-save must still refresh team faction");
     }
 }
