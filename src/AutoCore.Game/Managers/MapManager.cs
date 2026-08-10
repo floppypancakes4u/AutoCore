@@ -483,6 +483,12 @@ public class MapManager : Singleton<MapManager>
         // against objects from the previous sector while MapInfo loads the new one.
         connection.ResetGhosting();
 
+        // SS-51: close the world-entry gate before the character lands on the new map. EnterMap
+        // runs ApplyMissionPhaseWorldState on SetMap, which would otherwise fire mission gates at
+        // a client whose create stream is still seconds away (ReestablishGhostingAfterMapTransfer
+        // below). CompleteWorldEntry at the end of SendLocalPlayerCreatePackets flushes it once.
+        character.BeginWorldEntry();
+
         // Move server-side state onto the destination map before restarting ghosting,
         // so scope queries (PerformScopeQuery) see the new continent's entities.
         character.SetMap(map);
