@@ -259,6 +259,29 @@ public sealed class InventoryManager
         return TryFindFirstFreeCargoSlot(sizeX, sizeY, out x, out y);
     }
 
+    /// <summary>
+    /// SS-31 leak guard: "at least one unit accepted" — mirrors <see cref="AddItemInternal"/>'s
+    /// acceptance order exactly (clonebase/footprint resolve, partial-stack merge check, first-fit
+    /// placement) WITHOUT allocating any coid. Callers must check this before allocating firstCoid
+    /// so a claim that cannot accept even one unit never allocates (and leaks) a persistent coid.
+    /// An unresolvable footprint returns false even if a merge could absorb quantity — AddItemInternal
+    /// rejects the whole add in that case too, so this stays consistent with it.
+    /// </summary>
+    public bool CanAcceptAnyOfCbid(int cbid)
+    {
+        var cloneBase = _cloneBases.GetCloneBase(cbid);
+        if (!TryResolveFootprintForAcquisition(cloneBase, cbid, out var footprintX, out var footprintY))
+            return false;
+
+        var (maxStack, stackable) = cloneBase == null
+            ? (int.MaxValue, true)
+            : InventoryStackPolicy.GetLimits(cloneBase);
+        if (stackable && _items.Any(item => item.Cbid == cbid && item.Quantity < maxStack))
+            return true;
+
+        return TryFindFirstFreeCargoSlot(footprintX, footprintY, out _, out _);
+    }
+
     public bool TryAdd(CharacterInventoryItem item)
     {
         if (!CanAdd(item))
@@ -2287,7 +2310,8 @@ public sealed class InventoryManager
         }
     }
 
-    private string BuildCargoFullMessage()
+    /// <summary>Same "cargo full" text AddItemInternal returns when a claim accepts zero units.</summary>
+    public string BuildCargoFullMessage()
     {
         return $"Cargo inventory is full ({GetOccupiedSlotCount()}/{SlotCount} slots used, {_items.Count} item(s) loaded). Try /cargoinfo or /clearcargo.";
     }

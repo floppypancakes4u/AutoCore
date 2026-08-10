@@ -521,6 +521,16 @@ public static class VendorStoreService
             return false;
         }
 
+        if (!character.Inventory.CanAcceptAnyOfCbid(cbid))
+        {
+            Logger.WriteLog(LogType.Debug,
+                "StoreTransaction buy: no free slot or mergeable stack for CBID {0} source={1} (SS-31 leak guard)",
+                cbid,
+                sourceTag);
+            rejectReason = "NoInventorySpace";
+            return false;
+        }
+
         var coid = runtime.AllocateItemCoid();
         var creator = TestItemCreator ?? new InventoryItemCreator();
         var result = character.Inventory.AddItem(

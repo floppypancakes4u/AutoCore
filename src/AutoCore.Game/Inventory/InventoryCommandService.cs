@@ -47,6 +47,11 @@ public sealed class InventoryCommandService
         if (runtime == null || !runtime.CanAllocateItem)
             return new InventoryCommandResult("Cannot add item: character or map is not available.");
 
+        // SS-31 leak guard: confirm the claim can actually be placed before allocating a
+        // persistent coid, or a failed claim leaks an orphan simple_object placeholder row.
+        if (!runtime.Inventory.CanAcceptAnyOfCbid(entry.Cbid))
+            return new InventoryCommandResult(runtime.Inventory.BuildCargoFullMessage());
+
         var coid = runtime.AllocateItemCoid();
         return runtime.Inventory.AddItem(entry, _itemCreator, coid, runtime.CharacterCoid, quantity,
             runtime.AllocateItemCoid);

@@ -933,6 +933,13 @@ public class LootManager : Singleton<LootManager>
         if (string.IsNullOrWhiteSpace(displayName))
             displayName = $"CBID {cbid}";
 
+        if (!character.Inventory.CanAcceptAnyOfCbid(cbid))
+        {
+            Logger.WriteLog(LogType.Debug,
+                $"LootManager.AutoLootItem: claim failed for CBID {cbid}: no free slot or mergeable stack (SS-31 leak guard)");
+            return false;
+        }
+
         var inventoryCoid = runtime.AllocateItemCoid();
         var claim = character.Inventory.PickupWorldItem(
             cbid,

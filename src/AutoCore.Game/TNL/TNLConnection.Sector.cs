@@ -817,6 +817,14 @@ public partial class TNLConnection
         var cbid = simpleObject.CBID;
         var type = simpleObject.Type;
         var displayName = simpleObject.CloneBaseObject?.CloneBaseSpecific.UniqueName ?? $"CBID {cbid}";
+
+        if (!inventory.CanAcceptAnyOfCbid(cbid))
+        {
+            Logger.WriteLog(LogType.Debug,
+                $"HandleItemPickupPacket: claim failed for world coid={worldObjectId.Coid}: no free slot or mergeable stack (SS-31 leak guard)");
+            return;
+        }
+
         var inventoryCoid = runtime.AllocateItemCoid();
 
         var claim = inventory.PickupWorldItem(

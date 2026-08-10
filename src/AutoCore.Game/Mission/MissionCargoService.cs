@@ -235,6 +235,17 @@ public static class MissionCargoService
             if (missing <= 0)
                 continue;
 
+            // SS-31 leak guard: confirm the claim can actually be placed before allocating a
+            // persistent coid, or a failed claim leaks an orphan simple_object placeholder row.
+            if (!character.Inventory.CanAcceptAnyOfCbid(cbid))
+            {
+                Logger.WriteLog(LogType.Error,
+                    "MissionCargoService: no free slot or mergeable stack for mission CBID {0} char={1} (SS-31 leak guard)",
+                    cbid,
+                    character.ObjectId.Coid);
+                continue;
+            }
+
             var coid = allocateCoid != null
                 ? allocateCoid()
                 : AllocateInventoryCoid(character);
