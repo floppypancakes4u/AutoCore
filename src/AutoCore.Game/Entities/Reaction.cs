@@ -137,6 +137,7 @@ public enum ReactionTextTargetType
 
 public class Reaction : ClonedObjectBase
 {
+    private const bool DEBUG_MSG = false;
     public ReactionTemplate Template { get; }
 
     public Reaction(ReactionTemplate template)
@@ -835,23 +836,29 @@ public class Reaction : ClonedObjectBase
         var continentId = Template.GenericVar1;
 
         var charLabel = character != null ? $"coid={character.ObjectId.Coid}" : "(null)";
-        Logger.WriteLog(LogType.Debug,
-            "UnlockContObj reaction {0}: continentId={1} g3={2} actOn={3} char={4}",
-            Template.COID,
-            continentId,
-            Template.GenericVar3,
-            Template.ActOnActivator,
-            charLabel);
+        if (DEBUG_MSG)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "UnlockContObj reaction {0}: continentId={1} g3={2} actOn={3} char={4}",
+                Template.COID,
+                continentId,
+                Template.GenericVar3,
+                Template.ActOnActivator,
+                charLabel);
+        }
 
         if (character != null && continentId != 0)
         {
             var newly = Managers.ExplorationManager.Instance.UnlockContinent(character, continentId);
-            Logger.WriteLog(LogType.Debug,
-                "UnlockContObj reaction {0}: {1} continent {2} for {3}",
-                Template.COID,
-                newly ? "unlocked" : "already-unlocked",
-                continentId,
-                charLabel);
+            if (DEBUG_MSG)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "UnlockContObj reaction {0}: {1} continent {2} for {3}",
+                    Template.COID,
+                    newly ? "unlocked" : "already-unlocked",
+                    continentId,
+                    charLabel);
+            }
         }
 
         return true;

@@ -24,6 +24,7 @@ public enum GraphicsObjectType
 /// </summary>
 public class GraphicsObject : ClonedObjectBase
 {
+    private const bool DEBUG_MSG = false;
     public GraphicsObjectType ObjectType { get; }
 
     /// <summary>Runtime hit points for damagable map props.</summary>
@@ -72,17 +73,20 @@ public class GraphicsObject : ClonedObjectBase
             EnsureCombatGhost();
             Ghost?.SetMaskBits(GhostObject.HealthMask);
 
-            LogFilters.WriteIf(
-                LogFilters.TakeDamage,
-                LogType.Debug,
-                "TakeDamage: {0} coid={1} {2}->{3}/{4} dealt={5} (rolled={6})",
-                GetType().Name,
-                ObjectId.Coid,
-                before,
-                HP,
-                MaxHP,
-                actualDamage,
-                damage);
+            if (DEBUG_MSG)
+            {
+                LogFilters.WriteIf(
+                    LogFilters.TakeDamage,
+                    LogType.Debug,
+                    "TakeDamage: {0} coid={1} {2}->{3}/{4} dealt={5} (rolled={6})",
+                    GetType().Name,
+                    ObjectId.Coid,
+                    before,
+                    HP,
+                    MaxHP,
+                    actualDamage,
+                    damage);
+            }
         }
 
         return actualDamage;

@@ -11,6 +11,7 @@ using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Skills;
 using AutoCore.Game.Structures;
+using AutoCore.Utils;
 
 namespace AutoCore.Game.Chat;
 
@@ -694,8 +695,10 @@ public sealed class ChatCommandService
     /// <summary>
     /// GM: teleport the caller to the HUD/GPS primary waypoint for their active mission
     /// objective (map <see cref="VisualWaypoint"/>), with patrol-pad / WorldPosition / deliver
-    /// fallbacks. Client snap is <see cref="TeleportCharacterPacket"/> (0x8058 →
-    /// <c>CVOGReaction_TeleportTarget</c>); owner ghost pose is not motion authority.
+    /// fallbacks. Same-map client snap is <see cref="TeleportCharacterPacket"/> (0x8058 →
+    /// <c>CVOGReaction_TeleportTarget</c>). Off-map targets use
+    /// <see cref="MapManager.TransferCharacterToMap(Character, SectorMap, Vector3, Quaternion)"/>
+    /// (same path as /warp + /portto) at the resolved pose.
     /// Usage: <c>/tptowaypoint</c> (aliases: <c>/tpToWaypoint</c>, <c>/tpwaypoint</c>).
     /// </summary>
     private static ChatCommandExecutionResult TpToWaypoint(Character character)
@@ -726,22 +729,43 @@ public sealed class ChatCommandService
         }
 
         if (!TryResolveMissionWaypoint(
-                character, quest, objective, out var targetCoid, out var position, out var source, out var detail))
+                character,
+                quest,
+                objective,
+                out var targetCoid,
+                out var position,
+                out var destinationMap,
+                out var source,
+                out var detail))
         {
             return new ChatCommandExecutionResult(true, detail);
         }
 
-        // Server pose (same discontinuous path as respawn / map transfer).
         var rotation = vehicle.Rotation;
+        var sameMap = ReferenceEquals(character.Map, destinationMap);
+        if (!sameMap)
+        {
+            // Cross-map: MapInfo + ghost re-establish already place the client at spawnPos.
+            if (!MapManager.Instance.TransferCharacterToMap(character, destinationMap, position, rotation))
+            {
+                return new ChatCommandExecutionResult(
+                    true,
+                    $"Failed to transfer to map {destinationMap.ContinentId} for mission waypoint.");
+            }
+
+            return new ChatCommandExecutionResult(
+                true,
+                $"Transferred to map {destinationMap.ContinentId} mission {quest.MissionId} GPS waypoint " +
+                $"({source} {targetCoid}) ({position.X:F1}, {position.Y:F1}, {position.Z:F1}).");
+        }
+
+        // Same-map discontinuous pose + living client snap (0x8058).
         character.Position = position;
         character.Rotation = rotation;
         vehicle.ClearPhysicsInstance();
         vehicle.SetPosition(position);
         vehicle.Rotation = rotation;
 
-        // Living client snap: opcode 0x8058 TeleportCharacter → FUN_00808910 →
-        // CVOGReaction_TeleportTarget (same primitive as retail client /teleport).
-        // Ghost resync only flickers; SpecialEvent Respawn is death airlift only.
         var teleport = new TeleportCharacterPacket { Position = position };
 
         return new ChatCommandExecutionResult(
@@ -752,11 +776,120 @@ public sealed class ChatCommandService
     }
 
     /// <summary>
-    /// Prefer map VisualWaypoint for the active objective (HUD/GPS marker), then next patrol pad,
-    /// objective WorldPosition COID, then a live deliver NPC.
+    /// Prefer current-map VisualWaypoint / patrol / WorldPosition / deliver / UseItem; if that
+    /// fails and the objective names another continent, resolve on that map instead.
     /// </summary>
     private static bool TryResolveMissionWaypoint(
         Character character,
+        CharacterQuest quest,
+        MissionObjective objective,
+        out long targetCoid,
+        out Vector3 position,
+        out SectorMap destinationMap,
+        out string source,
+        out string failureMessage)
+    {
+        targetCoid = 0;
+        position = default;
+        destinationMap = null;
+        source = "waypoint";
+        failureMessage = "No mission waypoint on the active objective.";
+
+        var currentMap = character.Map;
+        if (currentMap == null)
+        {
+            failureMessage = "You are not in a map!";
+            return false;
+        }
+
+        if (TryResolveMissionWaypointOnMap(
+                currentMap, quest, objective, out targetCoid, out position, out source, out failureMessage))
+        {
+            destinationMap = currentMap;
+            return true;
+        }
+
+        var localFailure = failureMessage;
+        var continentHint = ResolveObjectiveContinentHint(objective);
+        if (continentHint <= 0 || continentHint == currentMap.ContinentId)
+        {
+            failureMessage = localFailure;
+            return false;
+        }
+
+        var remoteMap = TryResolveContinentMap(character, continentHint);
+        if (remoteMap == null)
+        {
+            failureMessage = $"Could not load continent {continentHint} for mission waypoint.";
+            return false;
+        }
+
+        if (TryResolveMissionWaypointOnMap(
+                remoteMap, quest, objective, out targetCoid, out position, out source, out failureMessage))
+        {
+            destinationMap = remoteMap;
+            return true;
+        }
+
+        // Prefer the local failure when remote also misses — it names the same COID/CBID.
+        if (!string.IsNullOrEmpty(localFailure))
+            failureMessage = localFailure;
+        return false;
+    }
+
+    /// <summary>
+    /// Continent authored on patrol / deliver / use-item requirements (0 when unset).
+    /// </summary>
+    private static int ResolveObjectiveContinentHint(MissionObjective objective)
+    {
+        if (objective?.Requirements == null)
+            return 0;
+
+        var patrol = objective.Requirements.OfType<ObjectiveRequirementPatrol>().FirstOrDefault();
+        if (patrol != null && patrol.ContinentId > 0)
+            return patrol.ContinentId;
+
+        var deliver = objective.Requirements.OfType<ObjectiveRequirementDeliver>()
+            .FirstOrDefault(d => d.NPCContinentId > 0);
+        if (deliver != null)
+            return deliver.NPCContinentId;
+
+        var useItem = objective.Requirements.OfType<ObjectiveRequirementUseItem>()
+            .FirstOrDefault(u => u.ContinentID > 0);
+        if (useItem != null)
+            return useItem.ContinentID;
+
+        return 0;
+    }
+
+    private static SectorMap TryResolveContinentMap(Character character, int continentId)
+    {
+        if (character == null || continentId <= 0)
+            return null;
+
+        try
+        {
+            if (MapManager.Instance.ResolveMapForTests != null)
+                return MapManager.Instance.ResolveMapForTests(continentId);
+
+            return MapManager.Instance.GetMapForCharacter(continentId, character);
+        }
+        catch (Exception ex)
+        {
+            // Boundary: unknown/unloadable continent is a command reject, not a server fault.
+            Logger.WriteLog(
+                LogType.Debug,
+                $"TpToWaypoint: continent {continentId} resolve failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Prefer map VisualWaypoint for the active objective (HUD/GPS marker), then next patrol pad,
+    /// objective WorldPosition COID, then a live deliver NPC, then UseItem world PrimaryItem.
+    /// </summary>
+    private static bool TryResolveMissionWaypointOnMap(
+        SectorMap map,
         CharacterQuest quest,
         MissionObjective objective,
         out long targetCoid,
@@ -769,7 +902,6 @@ public sealed class ChatCommandService
         source = "waypoint";
         failureMessage = "No mission waypoint on the active objective.";
 
-        var map = character.Map;
         if (map == null)
         {
             failureMessage = "You are not in a map!";
@@ -777,6 +909,7 @@ public sealed class ChatCommandService
         }
 
         // GPS / HUD primary marker: map VisualWaypoint rows tagged with this ObjectiveId.
+        // Entity-bound markers (ObjectCoid) use the live object when present.
         if (TryResolveVisualWaypoint(map, objective.ObjectiveId, out targetCoid, out position))
         {
             source = "visual";
@@ -848,13 +981,30 @@ public sealed class ChatCommandService
             return false;
         }
 
+        var useItem = objective.Requirements?.OfType<ObjectiveRequirementUseItem>()
+            .FirstOrDefault(u => u.PrimaryItem > 0);
+        if (useItem != null)
+        {
+            targetCoid = useItem.PrimaryItem;
+            if (NpcInteractHandler.TryGetWorldPosition(map, targetCoid, out position))
+            {
+                source = "useitem";
+                return true;
+            }
+
+            failureMessage =
+                $"Could not resolve world position for use-item coid {targetCoid} on this map.";
+            return false;
+        }
+
         failureMessage = "No mission waypoint on the active objective.";
         return false;
     }
 
     /// <summary>
     /// HUD GPS marker for an objective: first map VisualWaypoint whose Objectives list contains
-    /// <paramref name="objectiveId"/>. Position is the authored marker (what the compass points at).
+    /// <paramref name="objectiveId"/>. When the marker binds an <see cref="VisualWaypoint.ObjectCoid"/>,
+    /// prefer that live/template world position; otherwise use the authored marker position.
     /// </summary>
     private static bool TryResolveVisualWaypoint(
         SectorMap map,
@@ -895,6 +1045,13 @@ public sealed class ChatCommandService
             return false;
 
         targetCoid = best.ObjectCoid > 0 ? best.ObjectCoid : best.Id;
+        if (best.ObjectCoid > 0
+            && NpcInteractHandler.TryGetWorldPosition(map, best.ObjectCoid, out var livePos))
+        {
+            position = livePos;
+            return true;
+        }
+
         position = best.Position;
         return true;
     }

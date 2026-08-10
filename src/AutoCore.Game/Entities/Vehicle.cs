@@ -27,6 +27,7 @@ using AutoCore.Utils.Reliability;
 
 public class Vehicle : SimpleObject
 {
+    private const bool DEBUG_MSG = false;
     #region Properties
     #region Database Vehicle Data
     private VehicleData DBData { get; set; }
@@ -309,17 +310,20 @@ public class Vehicle : SimpleObject
 
         if (shieldAbsorb > 0 || hpDamage > 0)
         {
-            Logger.WriteLog(LogType.Debug,
-                "TakeDamage: vehicle coid={0} dmg={1} shield {2}->{3}/{4} absorb={5} hpNow={6}/{7} hpDmg={8}",
-                ObjectId.Coid,
-                damage,
-                shieldBefore,
-                CurrentShield,
-                MaxShield,
-                shieldAbsorb,
-                GetCurrentHP(),
-                GetMaximumHP(),
-                hpDamage);
+            if (DEBUG_MSG)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "TakeDamage: vehicle coid={0} dmg={1} shield {2}->{3}/{4} absorb={5} hpNow={6}/{7} hpDmg={8}",
+                    ObjectId.Coid,
+                    damage,
+                    shieldBefore,
+                    CurrentShield,
+                    MaxShield,
+                    shieldAbsorb,
+                    GetCurrentHP(),
+                    GetMaximumHP(),
+                    hpDamage);
+            }
         }
 
         return shieldAbsorb + hpDamage;

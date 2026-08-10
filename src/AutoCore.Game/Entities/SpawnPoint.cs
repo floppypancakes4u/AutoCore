@@ -13,6 +13,7 @@ using AutoCore.Utils;
 
 public class SpawnPoint : ClonedObjectBase
 {
+    private const bool DEBUG_MSG = false;
     // NOTE: Let's not duplicate this data, if we don't need to create new spawnpoints manually!
     public SpawnPointTemplate Template { get; }
 
@@ -733,10 +734,13 @@ public class SpawnPoint : ClonedObjectBase
         if (faction == null)
         {
             // SS-41: unauthored 0 — keep the clonebase faction instead of stamping Human.
-            Logger.WriteLog(LogType.Debug,
-                "FactionDirty skip (SS-41): spawn coid={0} has no authored faction; keeping clonebase faction {1}",
-                ObjectId.Coid,
-                entity.Faction);
+            if (DEBUG_MSG)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "FactionDirty skip (SS-41): spawn coid={0} has no authored faction; keeping clonebase faction {1}",
+                    ObjectId.Coid,
+                    entity.Faction);
+            }
             return;
         }
 

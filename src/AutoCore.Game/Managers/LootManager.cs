@@ -22,6 +22,7 @@ using AutoCore.Utils.Memory;
 /// </summary>
 public class LootManager : Singleton<LootManager>
 {
+    private const bool DEBUG_MSG = false;
     private readonly Random _random = new();
 
     // Item index: (ItemType, Rarity) -> List of (CBID, RequiredLevel, RequiredClass)
@@ -315,7 +316,10 @@ public class LootManager : Singleton<LootManager>
         var lootTable = AssetManager.Instance.GetLootTable(lootTableId);
         if (lootTable == null)
         {
-            Logger.WriteLog(LogType.Debug, $"LootManager.GenerateLoot: No loot table {lootTableId} found for creature {creature.ObjectId.Coid}");
+            if (DEBUG_MSG)
+            {
+                Logger.WriteLog(LogType.Debug, $"LootManager.GenerateLoot: No loot table {lootTableId} found for creature {creature.ObjectId.Coid}");
+            }
             return lootItems;
         }
 
@@ -324,8 +328,11 @@ public class LootManager : Singleton<LootManager>
         var effectiveDropChance = lootTable.DropChance * creatureLootChance;
         if (!LootTuning.Passes(effectiveDropChance, _random))
         {
-            Logger.WriteLog(LogType.Debug,
-                $"LootManager.GenerateLoot: Creature {creature.ObjectId.Coid} failed drop chance (base={effectiveDropChance:P2}, rate={LootTuning.LootRate:0.###})");
+            if (DEBUG_MSG)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    $"LootManager.GenerateLoot: Creature {creature.ObjectId.Coid} failed drop chance (base={effectiveDropChance:P2}, rate={LootTuning.LootRate:0.###})");
+            }
             return lootItems;
         }
 
@@ -336,13 +343,19 @@ public class LootManager : Singleton<LootManager>
             if (item.HasValue)
             {
                 lootItems.Add(item.Value);
-                Logger.WriteLog(LogType.Debug, $"LootManager.GenerateLoot: Generated item CBID {item.Value} for creature {creature.ObjectId.Coid}");
+                if (DEBUG_MSG)
+                {
+                    Logger.WriteLog(LogType.Debug, $"LootManager.GenerateLoot: Generated item CBID {item.Value} for creature {creature.ObjectId.Coid}");
+                }
             }
         }
 
         if (lootItems.Count > 0)
         {
-            Logger.WriteLog(LogType.Debug, $"LootManager.GenerateLoot: Generated {lootItems.Count} items for creature {creature.ObjectId.Coid} from loot table {lootTableId} ({lootTable.Name})");
+            if (DEBUG_MSG)
+            {
+                Logger.WriteLog(LogType.Debug, $"LootManager.GenerateLoot: Generated {lootItems.Count} items for creature {creature.ObjectId.Coid} from loot table {lootTableId} ({lootTable.Name})");
+            }
         }
 
         return lootItems;
@@ -374,7 +387,10 @@ public class LootManager : Singleton<LootManager>
         var lootTable = AssetManager.Instance.GetLootTable(lootTableId);
         if (lootTable == null)
         {
-            Logger.WriteLog(LogType.Debug, $"LootManager.GenerateLoot(template): No loot table {lootTableId} found");
+            if (DEBUG_MSG)
+            {
+                Logger.WriteLog(LogType.Debug, $"LootManager.GenerateLoot(template): No loot table {lootTableId} found");
+            }
             return lootItems;
         }
 
@@ -421,11 +437,14 @@ public class LootManager : Singleton<LootManager>
         if (request.MapPropSalvage)
         {
             // Retail scenery: only the handful of CBIDs in tLootWeights drop anything.
-            LogFilters.WriteIf(
-                LogFilters.Loot,
-                LogType.Debug,
-                "LootManager.ProcessDeathLoot: mapProp junk={0} victimCbid={1} junkWeights={2}",
-                junkCount, request.VictimCbid, junkWeightCount);
+            if (DEBUG_MSG)
+            {
+                LogFilters.WriteIf(
+                    LogFilters.Loot,
+                    LogType.Debug,
+                    "LootManager.ProcessDeathLoot: mapProp junk={0} victimCbid={1} junkWeights={2}",
+                    junkCount, request.VictimCbid, junkWeightCount);
+            }
 
             DeliverDeathLoot(
                 lootCbids,
@@ -474,25 +493,31 @@ public class LootManager : Singleton<LootManager>
         if (creditsAwarded > 0 && request.Killer != null)
             TryGiveCredits(request.Killer, creditsAwarded);
 
-        LogFilters.WriteIf(
-            LogFilters.Loot,
-            LogType.Debug,
-            "LootManager.ProcessDeathLoot: gear={0} junk={1} cons={2} credits={3} commodity={4} table={5} race={6} victimCbid={7} dropCommodities={8} junkWeights={9} commodityPool={10} ignoreGate={11}",
-            gearCount, junkCount, consumableCount, creditsAwarded, commodityCount,
-            request.LootTableId, killerRace?.ToString() ?? "any", request.VictimCbid,
-            dropCommodities, junkWeightCount, commodityPool, LootTuning.IgnoreDropCommoditiesGate);
-
-        if (lootCbids.Count == 0)
+        if (DEBUG_MSG)
         {
             LogFilters.WriteIf(
                 LogFilters.Loot,
                 LogType.Debug,
-                "LootManager.ProcessDeathLoot: empty — reasons: junkWeights={0}, dropCommodities={1}, ignoreGate={2}, commodityPool={3}, masterPass={4}",
-                junkWeightCount,
-                dropCommodities,
-                LootTuning.IgnoreDropCommoditiesGate,
-                commodityPool,
-                masterPass);
+                "LootManager.ProcessDeathLoot: gear={0} junk={1} cons={2} credits={3} commodity={4} table={5} race={6} victimCbid={7} dropCommodities={8} junkWeights={9} commodityPool={10} ignoreGate={11}",
+                gearCount, junkCount, consumableCount, creditsAwarded, commodityCount,
+                request.LootTableId, killerRace?.ToString() ?? "any", request.VictimCbid,
+                dropCommodities, junkWeightCount, commodityPool, LootTuning.IgnoreDropCommoditiesGate);
+        }
+
+        if (lootCbids.Count == 0)
+        {
+            if (DEBUG_MSG)
+            {
+                LogFilters.WriteIf(
+                    LogFilters.Loot,
+                    LogType.Debug,
+                    "LootManager.ProcessDeathLoot: empty — reasons: junkWeights={0}, dropCommodities={1}, ignoreGate={2}, commodityPool={3}, masterPass={4}",
+                    junkWeightCount,
+                    dropCommodities,
+                    LootTuning.IgnoreDropCommoditiesGate,
+                    commodityPool,
+                    masterPass);
+            }
         }
 
         DeliverDeathLoot(
@@ -725,8 +750,11 @@ public class LootManager : Singleton<LootManager>
                 if (AutoLootItem(cbid, killerCharacter))
                     continue;
 
-                Logger.WriteLog(LogType.Debug,
-                    $"LootManager.DeliverDeathLoot: auto-loot failed for CBID {cbid}; falling back to ground");
+                if (DEBUG_MSG)
+                {
+                    Logger.WriteLog(LogType.Debug,
+                        $"LootManager.DeliverDeathLoot: auto-loot failed for CBID {cbid}; falling back to ground");
+                }
             }
 
             Vector3 lootPosition;
@@ -776,16 +804,22 @@ public class LootManager : Singleton<LootManager>
 
         if (item == null)
         {
-            Logger.WriteLog(LogType.Debug,
-                $"LootManager: No item found for type={itemType}, rarity={rarity}, level={minLevel}-{maxLevel}, race={killerRace?.ToString() ?? "any"}");
+            if (DEBUG_MSG)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    $"LootManager: No item found for type={itemType}, rarity={rarity}, level={minLevel}-{maxLevel}, race={killerRace?.ToString() ?? "any"}");
+            }
             return null;
         }
 
-        LogFilters.WriteIf(
-            LogFilters.Loot,
-            LogType.Debug,
-            "LootManager: Generated item CBID {0} ({1}), type={2}, rarity={3}, level={4}",
-            item.CBID, item.Name, itemType, rarity, item.RequiredLevel);
+        if (DEBUG_MSG)
+        {
+            LogFilters.WriteIf(
+                LogFilters.Loot,
+                LogType.Debug,
+                "LootManager: Generated item CBID {0} ({1}), type={2}, rarity={3}, level={4}",
+                item.CBID, item.Name, itemType, rarity, item.RequiredLevel);
+        }
         return item.CBID;
     }
 
@@ -921,7 +955,10 @@ public class LootManager : Singleton<LootManager>
         var runtime = new InventoryRuntime(character);
         if (!runtime.CanAllocateItem)
         {
-            Logger.WriteLog(LogType.Debug, $"LootManager.AutoLootItem: cannot allocate coid for character coid={character.ObjectId?.Coid}");
+            if (DEBUG_MSG)
+            {
+                Logger.WriteLog(LogType.Debug, $"LootManager.AutoLootItem: cannot allocate coid for character coid={character.ObjectId?.Coid}");
+            }
             return false;
         }
 
@@ -935,8 +972,11 @@ public class LootManager : Singleton<LootManager>
 
         if (!character.Inventory.CanAcceptAnyOfCbid(cbid))
         {
-            Logger.WriteLog(LogType.Debug,
-                $"LootManager.AutoLootItem: claim failed for CBID {cbid}: no free slot or mergeable stack (SS-31 leak guard)");
+            if (DEBUG_MSG)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    $"LootManager.AutoLootItem: claim failed for CBID {cbid}: no free slot or mergeable stack (SS-31 leak guard)");
+            }
             return false;
         }
 
@@ -951,16 +991,22 @@ public class LootManager : Singleton<LootManager>
 
         if (claim.AddedItem == null)
         {
-            Logger.WriteLog(LogType.Debug,
-                $"LootManager.AutoLootItem: claim failed for CBID {cbid}: {claim.Message}");
+            if (DEBUG_MSG)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    $"LootManager.AutoLootItem: claim failed for CBID {cbid}: {claim.Message}");
+            }
             return false;
         }
 
         foreach (var packet in claim.Packets)
             character.OwningConnection.SendGamePacket(packet);
 
-        Logger.WriteLog(LogType.Debug,
-            $"LootManager.AutoLootItem: {displayName} (CBID {cbid}) → cargo coid={inventoryCoid} for character coid={character.ObjectId?.Coid}");
+        if (DEBUG_MSG)
+        {
+            Logger.WriteLog(LogType.Debug,
+                $"LootManager.AutoLootItem: {displayName} (CBID {cbid}) → cargo coid={inventoryCoid} for character coid={character.ObjectId?.Coid}");
+        }
 
         GameLog.Audit("LootReceived",
             ("CharacterId", character.ObjectId.Coid),
@@ -1131,11 +1177,14 @@ public class LootManager : Singleton<LootManager>
         BroadcastPacketToMap(map, createPacket);
 
         var itemName = AssetManager.Instance.GetCloneBase(cbid)?.CloneBaseSpecific.UniqueName ?? "Unknown";
-        LogFilters.WriteIf(
-            LogFilters.Loot,
-            LogType.Debug,
-            "LootManager.TrySpawnLootItem: Spawned {0} (CBID {1}, COID {2}) at {3}",
-            itemName, cbid, spawnedCoid, position);
+        if (DEBUG_MSG)
+        {
+            LogFilters.WriteIf(
+                LogFilters.Loot,
+                LogType.Debug,
+                "LootManager.TrySpawnLootItem: Spawned {0} (CBID {1}, COID {2}) at {3}",
+                itemName, cbid, spawnedCoid, position);
+        }
         return true;
     }
 
