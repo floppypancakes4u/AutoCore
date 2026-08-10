@@ -183,7 +183,7 @@ surfaced by the **first run** of `scripts/check-id-collisions.ps1`:
 
 - `character` 18935 **Shadow0712**, `AccountId=13`, `Deleted=0`
 - `simple_object` 18935: **Type=4 (QuestObject), CBID=20046** (expected
-  Character, CBID=20)
+  Type=Character (20); original character CBID unknown — clobbered)
 
 Unlike Donuts, this incident has not yet been walked through
 `log-sector.txt` / DB inspection to confirm how the clobber happened, or
