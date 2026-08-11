@@ -129,6 +129,8 @@ public sealed class ChatCommandService
 
             case "/giveMission":
             case "/givemission":
+            case "/addMission":
+            case "/addmission":
                 return GiveMission(character, parts);
 
             case "/completeMission":
