@@ -14,14 +14,20 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from mission_live.actuator import DevToolActuator
+from mission_live.actuator import ActuatorError, DevToolActuator
+from mission_live.cli_batch import (
+    error_mission_result,
+    load_prior_results,
+    mission_ids_done,
+    should_skip_mission,
+)
 from mission_live.console import LiveStepPrinter, enable_coloring, paint
 from mission_live.oracle import DevApiOracle
 from mission_live.registry import load_registry
 from mission_live.report.coverage import build_coverage
 from mission_live.report.html import write_html_report
 from mission_live.report.model import default_out_dir, write_results
-from mission_live.runner import run_mission, run_registry
+from mission_live.runner import run_mission
 from mission_live.strategies.base import RunContext
 
 
@@ -39,6 +45,11 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--registry", action="store_true", help="Run all registry missions")
     p_run.add_argument("--force-grant", action="store_true", help="Bypass race/class via /giveMission")
     p_run.add_argument("--policy", choices=("partial", "strict"), default="partial")
+    p_run.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip mission ids already present in out/results.json and append new runs",
+    )
 
     sub.add_parser("coverage", help="Print retail/registry/last-run coverage summary")
 
@@ -100,25 +111,65 @@ def _run(args, out_dir: Path) -> int:
         progress=progress,
     )
 
-    results = []
+    results = load_prior_results(out_dir) if args.resume else []
+    done = mission_ids_done(results) if args.resume else set()
+    if args.resume and done:
+        print(f"resume: keeping {len(done)} prior result(s), skipping those ids")
+
+    def _persist() -> None:
+        write_results(results, out_dir=out_dir)
+        write_html_report(out_dir=out_dir)
+
+    def _print_one(r) -> None:
+        status_colored = paint(
+            r.status,
+            {
+                "PASS": "green",
+                "PARTIAL": "yellow",
+                "SKIP": "yellow",
+                "FAIL": "red",
+                "ERROR": "red",
+            }.get(r.status, "dim"),
+        )
+        print(
+            f"mission {r.mission_id}: {status_colored} locus={r.fail_locus or '-'} "
+            f"forceGrant={r.force_grant}"
+        )
+
+    def _run_one(mission_id: int, *, policy: str, title_hint: str = "") -> None:
+        if should_skip_mission(mission_id, done, resume=bool(args.resume)):
+            print(f"skip resume id={mission_id}")
+            return
+        try:
+            result = run_mission(ctx, mission_id, policy=policy, title_hint=title_hint)
+        except ActuatorError as ex:
+            result = error_mission_result(
+                mission_id,
+                title=title_hint,
+                policy=policy,
+                force_grant=bool(args.force_grant),
+                detail=str(ex),
+            )
+            if progress is not None:
+                progress.note(f"result ERROR actuator={ex}")
+        result.force_grant = bool(args.force_grant)
+        results.append(result)
+        done.add(mission_id)
+        _persist()
+        _print_one(result)
+
     for mid in args.id:
-        results.append(run_mission(ctx, mid, policy=args.policy))
+        _run_one(mid, policy=args.policy)
     if args.registry:
-        results.extend(run_registry(ctx, load_registry()))
+        for entry in load_registry():
+            if entry.timeout_sec:
+                ctx.step_timeout_sec = entry.timeout_sec
+            _run_one(entry.mission_id, policy=entry.policy, title_hint=entry.notes)
 
     path = write_results(results, out_dir=out_dir)
     html_path = write_html_report(out_dir=out_dir)
     print(f"wrote {path}")
     print(f"wrote {html_path}")
-    for r in results:
-        status_colored = paint(r.status, {
-            "PASS": "green",
-            "PARTIAL": "yellow",
-            "SKIP": "yellow",
-            "FAIL": "red",
-            "ERROR": "red",
-        }.get(r.status, "dim"))
-        print(f"mission {r.mission_id}: {status_colored} locus={r.fail_locus or '-'} forceGrant={r.force_grant}")
 
     if any(r.status == "ERROR" for r in results):
         print(

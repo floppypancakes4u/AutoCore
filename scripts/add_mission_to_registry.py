@@ -32,7 +32,7 @@ except ImportError:  # pragma: no cover
     yaml = None
 
 # Phase-1 harness auto strategies (keep in sync with mission_live.plan.SUPPORTED_TYPES).
-SUPPORTED_REQ_TYPES = frozenset({"patrol", "mission"})
+SUPPORTED_REQ_TYPES = frozenset({"patrol", "mission", "deliver"})
 
 RACE_NAMES = {
     -1: "any",

@@ -23,7 +23,8 @@ Game-data tools default to `C:\Program Files (x86)\NetDevil\Auto Assault`; overr
 | [`scan_map_ids.py`](scripts/scan_map_ids.py) | Counts little-endian i32 hits for CBIDs/COIDs across maps GLMs and optional ASCII/UTF-16 string needles. Use before extracting a full `.fam`. |
 | [`lookup_inventory_cbid.py`](scripts/lookup_inventory_cbid.py) | Looks up CBIDs in `tools/inventory-catalog/inventory-items.json` (displayName, uniqueName, className). Faster than opening `clonebase.wad` when the catalog has the row. |
 | [`add_mission_to_registry.py`](scripts/add_mission_to_registry.py) | Upserts a mission into `tools/mission-live/registry/missions.yaml` from `missions.glm` + `clonebase.wad` (`--id` / `--title` / `--name`). Infers policy/tags from requirement types. |
-| [`../tools/mission-live`](tools/mission-live/README.md) | Live mission harness (`python -m mission_live`): DevTool pipe + Dev API oracle, registry YAML, HTML coverage report. Phase-1 strategies: Patrol + Mission req. |
+| [`sync_talk_patrol_deliver_registry.py`](scripts/sync_talk_patrol_deliver_registry.py) | Filters `missions.json` for talk → optional patrol → speak-only deliver missions and writes them into the mission-live registry (`--replace` / `--upsert` / `--dry-run`). |
+| [`../tools/mission-live`](tools/mission-live/README.md) | Live mission harness (`python -m mission_live`): DevTool pipe + Dev API oracle, registry YAML, HTML coverage report. Phase-1 strategies: Patrol, Deliver, Mission req. |
 
 ---
 

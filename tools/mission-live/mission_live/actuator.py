@@ -29,6 +29,10 @@ class DevToolActuator:
             except OSError as ex:
                 last_err = ex
                 time.sleep(0.25)
+            except ActuatorError as ex:
+                # Empty / truncated pipe replies are often transient under UI load.
+                last_err = ex
+                time.sleep(0.35)
         raise ActuatorError(f"DevTool pipe unavailable ({self.pipe_name}): {last_err}")
 
     def _once(self, payload: bytes, command: str) -> dict[str, Any]:
