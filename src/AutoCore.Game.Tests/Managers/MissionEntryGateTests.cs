@@ -172,6 +172,52 @@ public class MissionEntryGateTests
     }
 
     [TestMethod]
+    public void ApplyMissionPhaseWorldState_DuringWorldEntry_DefersReplayHalfToo()
+    {
+        // ApplyMissionPhaseWorldState runs OnMissionStateChanged AND ReplayMissionWorldSetup.
+        // Gating only the first left the second (-> FireMissionConditionTriggers) firing the
+        // storm anyway: live 16:30:52, 116 gates between the deferral and the flush.
+        var (character, vehicle, map) = CreatePlayer();
+        SeedMissionVars(map);
+        PlaceConditionalTrigger(map, RemoteTriggerCoid, scale: 1f, reactionCoid: DeleteReactionCoid);
+        PlaceDeletableObject(map, GateObjectCoid);
+        GiveActiveQuest(character);
+        vehicle.Position = new Vector3(0, 0, 0);
+        character.Position = vehicle.Position;
+
+        character.BeginWorldEntry();
+        map.ApplyMissionPhaseWorldState(vehicle);
+
+        Assert.IsFalse(character.MapPresence.IsSuppressed(GateObjectCoid),
+            "both halves of the mission phase must wait for the client to finish loading");
+
+        character.CompleteWorldEntry();
+
+        Assert.IsTrue(character.MapPresence.IsSuppressed(GateObjectCoid),
+            "the deferred mission phase must still run once entry completes");
+    }
+
+    [TestMethod]
+    public void ApplyMissionPhaseWorldState_DuringWorldEntry_DoesNotOpenDistantCollisionGate()
+    {
+        // The live 661 shape: quest-holding character enters, gate volume is far away.
+        var (character, vehicle, map) = CreatePlayer();
+        SeedMissionVars(map);
+        PlaceConditionalTrigger(map, VolumeTriggerCoid, scale: 25f, reactionCoid: DeleteReactionCoid);
+        PlaceDeletableObject(map, GateObjectCoid);
+        GiveActiveQuest(character);
+        vehicle.Position = new Vector3(500, 0, 500);
+        character.Position = vehicle.Position;
+
+        character.BeginWorldEntry();
+        map.ApplyMissionPhaseWorldState(vehicle);
+        character.CompleteWorldEntry();
+
+        Assert.IsFalse(character.MapPresence.IsSuppressed(GateObjectCoid),
+            "entering a map must not open collision gates across the continent");
+    }
+
+    [TestMethod]
     public void CompleteWorldEntry_WithNoDeferredWork_IsHarmless()
     {
         var (character, _, map) = CreatePlayer();

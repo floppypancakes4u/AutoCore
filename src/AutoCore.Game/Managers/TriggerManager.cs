@@ -295,18 +295,8 @@ public class TriggerManager : Singleton<TriggerManager>
             return;
         }
 
-        // SS-51: the client has not received its create stream yet (login / map transfer).
-        // Firing now reaches a client that has not materialized its own objects. Remember the
-        // character and let CompleteWorldEntry flush exactly one pass after the create packets.
-        if (character != null && !character.WorldEntryComplete)
-        {
-            _entryDeferredReeval.Add(character.ObjectId.Coid);
-            MissionFlowDiag.Log(
-                "OnMissionStateChanged DEFER world-entry char={0} map={1}",
-                character.ObjectId.Coid,
-                map.ContinentId);
+        if (TryDeferForWorldEntry(character, "OnMissionStateChanged"))
             return;
-        }
 
         // Prefer character vehicle/body that has the map for trigger volume checks.
         var reevalActivator = activator;
@@ -395,6 +385,32 @@ public class TriggerManager : Singleton<TriggerManager>
     /// </summary>
     public void FireMissionConditionTriggers(ClonedObjectBase activator)
         => ReevaluateConditionalTriggers(activator, watchVarId: null);
+
+    /// <summary>
+    /// SS-51: true when the character's client has not received its create stream yet (login /
+    /// map transfer), in which case the caller must not fire anything — the work is remembered
+    /// and replayed once by <see cref="FlushDeferredEntryReeval"/>.
+    /// <para>
+    /// Every entry into mission-phase work must consult this, not just
+    /// <see cref="OnMissionStateChanged"/>: <c>SectorMap.ApplyMissionPhaseWorldState</c> also
+    /// runs <c>ReplayMissionWorldSetup</c>, which reaches the same out-of-volume firing through
+    /// <see cref="FireMissionConditionTriggers"/>. Gating only one half still stormed the client
+    /// (live 2026-08-10 16:30: 116 gates fired between the deferral and the flush).
+    /// </para>
+    /// </summary>
+    internal bool TryDeferForWorldEntry(Character character, string source)
+    {
+        if (character == null || character.WorldEntryComplete)
+            return false;
+
+        _entryDeferredReeval.Add(character.ObjectId.Coid);
+        MissionFlowDiag.Log(
+            "{0} DEFER world-entry char={1} map={2}",
+            source,
+            character.ObjectId.Coid,
+            character.Map?.ContinentId ?? -1);
+        return true;
+    }
 
     /// <summary>
     /// SS-51: run the single coalesced mission re-eval deferred while the character was entering

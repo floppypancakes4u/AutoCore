@@ -648,6 +648,13 @@ public class SectorMap
         if (activator == null)
             return;
 
+        // SS-51: defer BOTH halves while the client is still loading in. ReplayMissionWorldSetup
+        // reaches the same out-of-volume gate firing via FireMissionConditionTriggers, so gating
+        // only OnMissionStateChanged still stormed the client between deferral and flush.
+        var character = activator.GetAsCharacter() ?? activator.GetSuperCharacter(false);
+        if (TriggerManager.Instance.TryDeferForWorldEntry(character, "ApplyMissionPhaseWorldState"))
+            return;
+
         TriggerManager.Instance.OnMissionStateChanged(activator);
         ReplayMissionWorldSetup(activator);
     }
