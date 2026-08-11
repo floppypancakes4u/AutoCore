@@ -1,0 +1,25 @@
+missions:
+- id: 3032
+  title: Live and Direct
+  name: h_1-1_tas_arkbay_liveanddirect
+  internal: Human tutorial 2
+  policy: partial
+  tags:
+  - tutorial
+  - human
+  - deliver
+  - patrol
+  - arkbay
+  - core
+  notes: 'Human tutorial 2; race=human; reqs={''patrol'': 18, ''deliver'': 1}; unsupported=[''deliver'']
+    -> policy partial'
+  continent: 707
+  npc: 2477
+  reqRace: 0
+  reqClass: -1
+  reqLevelMin: 1
+  reqMissionIds: []
+  requirementCounts:
+    patrol: 18
+    deliver: 1
+  objectiveCount: 19

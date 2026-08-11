@@ -22,6 +22,8 @@ Game-data tools default to `C:\Program Files (x86)\NetDevil\Auto Assault`; overr
 | [`mission_useitem_stats.py`](scripts/mission_useitem_stats.py) | Aggregates pattern stats for all `useitem` requirements in `missions.glm` (PrimaryCOID/CBID, explode/destroy/in-world, etc.). Can sample missions with PrimaryExplode set. |
 | [`scan_map_ids.py`](scripts/scan_map_ids.py) | Counts little-endian i32 hits for CBIDs/COIDs across maps GLMs and optional ASCII/UTF-16 string needles. Use before extracting a full `.fam`. |
 | [`lookup_inventory_cbid.py`](scripts/lookup_inventory_cbid.py) | Looks up CBIDs in `tools/inventory-catalog/inventory-items.json` (displayName, uniqueName, className). Faster than opening `clonebase.wad` when the catalog has the row. |
+| [`add_mission_to_registry.py`](scripts/add_mission_to_registry.py) | Upserts a mission into `tools/mission-live/registry/missions.yaml` from `missions.glm` + `clonebase.wad` (`--id` / `--title` / `--name`). Infers policy/tags from requirement types. |
+| [`../tools/mission-live`](tools/mission-live/README.md) | Live mission harness (`python -m mission_live`): DevTool pipe + Dev API oracle, registry YAML, HTML coverage report. Phase-1 strategies: Patrol + Mission req. |
 
 ---
 
@@ -29,6 +31,7 @@ Game-data tools default to `C:\Program Files (x86)\NetDevil\Auto Assault`; overr
 
 | Script | What it does |
 |--------|----------------|
+| [`run-mission-live.ps1`](scripts/run-mission-live.ps1) | Forwards remaining args to `tools/mission-live` (`python -m mission_live …`). Use for doctor/run/coverage/report against a live client+server. |
 | [`init-databases.ps1`](scripts/init-databases.ps1) | Creates the MySQL databases required by AutoCore (auth/world/character, etc.) using local MySQL credentials. |
 | [`export-starter-db.ps1`](scripts/export-starter-db.ps1) | Dumps live MySQL into shareable starter SQL under `sql/` (`autocore_world` with static data; auth/char schema only — no accounts or player rows). Re-run after world-data changes; use `-Force` to overwrite. |
 | [`import-starter-db.ps1`](scripts/import-starter-db.ps1) | Imports `sql/autocore_starter.sql` into local MySQL so other operators get world data without any accounts. Create an admin after first boot via `DefaultAdminPassword` or `auth.create`. |

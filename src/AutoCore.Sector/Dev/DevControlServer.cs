@@ -7,6 +7,9 @@ using System.Text.Json;
 using AutoCore.Game.Chat;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Inventory;
+using AutoCore.Game.Managers;
+using AutoCore.Game.Mission;
+using AutoCore.Game.Mission.Requirements;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.TNL;
 using AutoCore.Utils;
@@ -238,6 +241,17 @@ public sealed class DevControlServer
                 return DevHttpResponse.Json(200, ExecuteCommand(commandRequest));
             }
 
+            if (request.Method == "GET" && path == "/mission-plan")
+            {
+                if (!int.TryParse(request.Query("id"), out var missionId) || missionId <= 0)
+                    throw new InvalidOperationException("Query id (mission id) is required.");
+
+                return DevHttpResponse.Json(200, CreateMissionPlanResponse(missionId));
+            }
+
+            if (request.Method == "GET" && path == "/mission-state")
+                return DevHttpResponse.Json(200, CreateMissionStateResponse(GetSelectedCharacter(request.Query("character"))));
+
             return DevHttpResponse.Json(404, new { error = "Unknown dev endpoint." });
         }
         catch (Exception ex)
@@ -298,6 +312,170 @@ public sealed class DevControlServer
             selected.CharacterName,
             selected.CharacterCoid,
             items = selected.Connection.CurrentCharacter.Inventory.Items.Select(ToDto).ToArray()
+        };
+    }
+
+    private static object CreateMissionPlanResponse(int missionId)
+    {
+        var mission = AssetManager.Instance.GetMission(missionId);
+        if (mission == null)
+            throw new InvalidOperationException($"Unknown mission id {missionId}.");
+
+        var title = !string.IsNullOrWhiteSpace(mission.Title)
+            ? mission.Title
+            : !string.IsNullOrWhiteSpace(mission.Name)
+                ? mission.Name
+                : $"(unnamed mission {missionId})";
+
+        var reqMissionIds = (mission.ReqMissionId ?? Array.Empty<int>())
+            .Where(id => id > 0)
+            .ToArray();
+
+        var objectives = mission.Objectives
+            .OrderBy(kv => kv.Key)
+            .Select(kv =>
+            {
+                var objective = kv.Value;
+                return new
+                {
+                    sequence = objective.Sequence,
+                    objectiveId = objective.ObjectiveId,
+                    objectiveName = objective.ObjectiveName,
+                    continentObject = objective.ContinentObject,
+                    worldPosition = objective.WorldPosition,
+                    returnToNpc = objective.ReturnToNPC,
+                    requirements = (objective.Requirements ?? new List<ObjectiveRequirement>())
+                        .Select(SummarizeRequirement)
+                        .ToArray()
+                };
+            })
+            .ToArray();
+
+        return new
+        {
+            ok = true,
+            missionId = mission.Id,
+            title,
+            name = mission.Name,
+            continent = mission.Continent,
+            npc = mission.NPC,
+            reqLevelMin = mission.ReqLevelMin,
+            reqLevelMax = mission.ReqLevelMax,
+            reqRace = mission.ReqRace,
+            reqClass = mission.ReqClass,
+            reqMissionIds,
+            requirementsOred = mission.RequirementsOred,
+            isRepeatable = mission.IsRepeatable,
+            objectives
+        };
+    }
+
+    private object CreateMissionStateResponse(DevConnectedCharacter selected)
+    {
+        var character = selected.Connection.CurrentCharacter;
+        var hasBody = false;
+        var race = 0;
+        var classId = 0;
+        if (character.CloneBaseObject is AutoCore.Game.CloneBases.CloneBaseCharacter cbc)
+        {
+            hasBody = true;
+            race = cbc.CharacterSpecific.Race;
+            classId = cbc.CharacterSpecific.Class;
+        }
+
+        var active = character.CurrentQuests.Select(q =>
+        {
+            var progress = q.ObjectiveProgress != null && q.ActiveObjectiveSequence < q.ObjectiveProgress.Length
+                ? q.ObjectiveProgress[q.ActiveObjectiveSequence]
+                : 0;
+            var max = q.ObjectiveMax != null && q.ActiveObjectiveSequence < q.ObjectiveMax.Length
+                ? q.ObjectiveMax[q.ActiveObjectiveSequence]
+                : 0;
+            return new
+            {
+                missionId = q.MissionId,
+                seq = q.ActiveObjectiveSequence,
+                progress,
+                max
+            };
+        }).ToArray();
+
+        return new
+        {
+            ok = true,
+            selected.ConnectionId,
+            selected.AccountName,
+            selected.CharacterName,
+            selected.CharacterCoid,
+            level = character.Level,
+            continentId = character.Map?.ContinentId ?? 0,
+            hasBody,
+            race = hasBody ? race : (int?)null,
+            @class = hasBody ? classId : (int?)null,
+            activeQuests = active,
+            completedMissionIds = character.CompletedMissionIds.OrderBy(x => x).ToArray()
+        };
+    }
+
+    private static object SummarizeRequirement(ObjectiveRequirement req)
+    {
+        if (req == null)
+            return new { type = "unknown" };
+
+        return req switch
+        {
+            ObjectiveRequirementPatrol patrol => new
+            {
+                type = req.RequirementType.ToString(),
+                slot = req.FirstStateSlot,
+                continentId = patrol.ContinentId,
+                targetCount = patrol.TargetCount,
+                sequential = patrol.Sequential,
+                laps = patrol.Laps,
+                targets = patrol.GenericTargets.Where(t => t > 0).ToArray()
+            },
+            ObjectiveRequirementDeliver deliver => new
+            {
+                type = req.RequirementType.ToString(),
+                slot = req.FirstStateSlot,
+                npcTargetCbid = deliver.NPCTargetCBID,
+                npcContinentId = deliver.NPCContinentId,
+                itemCbid = deliver.ItemCBID,
+                numToDeliver = deliver.NumToDeliver
+            },
+            ObjectiveRequirementUseItem useItem => new
+            {
+                type = req.RequirementType.ToString(),
+                slot = req.FirstStateSlot,
+                primaryItem = useItem.PrimaryItem,
+                primaryInWorld = useItem.PrimaryInWorld
+            },
+            ObjectiveRequirementMission missionReq => new
+            {
+                type = req.RequirementType.ToString(),
+                slot = req.FirstStateSlot,
+                missionIds = missionReq.MissionIds.ToArray(),
+                countNeeded = missionReq.CountNeeded,
+                idsAreMedals = missionReq.IdsAreMedals
+            },
+            ObjectiveRequirementKill kill => new
+            {
+                type = req.RequirementType.ToString(),
+                slot = req.FirstStateSlot,
+                targetCbid = kill.TargetCBID,
+                numToKill = kill.NumToKill
+            },
+            ObjectiveRequirementCharacterLevel levelReq => new
+            {
+                type = req.RequirementType.ToString(),
+                slot = req.FirstStateSlot,
+                requiredLevel = levelReq.RequiredLevel
+            },
+            _ => new
+            {
+                type = req.RequirementType.ToString(),
+                slot = req.FirstStateSlot
+            }
         };
     }
 

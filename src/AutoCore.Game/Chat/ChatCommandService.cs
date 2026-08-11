@@ -137,6 +137,20 @@ public sealed class ChatCommandService
             case "/completemission":
                 return CompleteMission(character, parts);
 
+            case "/completeMissionTree":
+            case "/completemissiontree":
+                return CompleteMissionTree(character, parts);
+
+            case "/seedCompleted":
+            case "/seedcompleted":
+                return SeedCompleted(character, parts);
+
+            case "/teleporttopos":
+                return TeleportToPos(character, parts);
+
+            case "/tptonpc":
+                return TpToNpc(character, parts);
+
             case "/tptowaypoint":
             case "/tpToWaypoint":
             case "/tpwaypoint":
@@ -692,6 +706,260 @@ public sealed class ChatCommandService
         return new ChatCommandExecutionResult(
             true,
             $"Completed mission {missionId} (removed from active + client sync).");
+    }
+
+    /// <summary>
+    /// GM: same-map teleport to absolute world coordinates.
+    /// Usage: <c>/teleporttopos &lt;x&gt; &lt;y&gt; &lt;z&gt;</c>.
+    /// </summary>
+    private static ChatCommandExecutionResult TeleportToPos(Character character, string[] parts)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        var vehicle = character.CurrentVehicle;
+        if (vehicle == null)
+            return new ChatCommandExecutionResult(true, "You are not in a vehicle!");
+
+        if (character.Map == null)
+            return new ChatCommandExecutionResult(true, "You are not in a map!");
+
+        if (parts.Length < 4
+            || !float.TryParse(parts[1], out var x)
+            || !float.TryParse(parts[2], out var y)
+            || !float.TryParse(parts[3], out var z))
+        {
+            return new ChatCommandExecutionResult(true, "Usage: /teleporttopos <x> <y> <z>");
+        }
+
+        var position = new Vector3(x, y, z);
+        return ApplySameMapTeleport(character, vehicle, position,
+            $"Teleported to ({position.X:F1}, {position.Y:F1}, {position.Z:F1}).");
+    }
+
+    /// <summary>
+    /// GM: teleport to the first live object with the given clonebase id.
+    /// Searches the current map first, then every loaded map; cross-map hits transfer
+    /// via <see cref="MapManager.TransferCharacterToMap(Character, SectorMap, Vector3, Quaternion)"/>
+    /// (same path as <c>/tptowaypoint</c>).
+    /// Usage: <c>/tptonpc &lt;cbid&gt;</c>.
+    /// </summary>
+    private static ChatCommandExecutionResult TpToNpc(Character character, string[] parts)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        var vehicle = character.CurrentVehicle;
+        if (vehicle == null)
+            return new ChatCommandExecutionResult(true, "You are not in a vehicle!");
+
+        if (character.Map == null)
+            return new ChatCommandExecutionResult(true, "You are not in a map!");
+
+        if (parts.Length < 2 || !int.TryParse(parts[1], out var cbid) || cbid <= 0)
+            return new ChatCommandExecutionResult(true, "Usage: /tptonpc <cbid>");
+
+        if (!TryFindNpcByCbid(character, cbid, out var foundCoid, out var position, out var foundOnMap))
+        {
+            return new ChatCommandExecutionResult(
+                true,
+                $"NPC cbid {cbid} not found on any loaded map.");
+        }
+
+        // Prefer the caller's instance of an instanced continent (identical local poses).
+        var destinationMap = TryResolveContinentMap(character, foundOnMap.ContinentId) ?? foundOnMap;
+        var poseLabel =
+            $"NPC cbid {cbid} (coid {foundCoid}) " +
+            $"({position.X:F1}, {position.Y:F1}, {position.Z:F1})";
+
+        if (ReferenceEquals(character.Map, destinationMap))
+        {
+            return ApplySameMapTeleport(character, vehicle, position, $"Teleported to {poseLabel}.");
+        }
+
+        var rotation = vehicle.Rotation;
+        if (!MapManager.Instance.TransferCharacterToMap(character, destinationMap, position, rotation))
+        {
+            return new ChatCommandExecutionResult(
+                true,
+                $"Failed to transfer to map {destinationMap.ContinentId} for NPC cbid {cbid}.");
+        }
+
+        return new ChatCommandExecutionResult(
+            true,
+            $"Transferred to map {destinationMap.ContinentId} {poseLabel}.");
+    }
+
+    /// <summary>
+    /// Current map first, then every registered map (shared + instances).
+    /// </summary>
+    private static bool TryFindNpcByCbid(
+        Character character,
+        int cbid,
+        out long foundCoid,
+        out Vector3 position,
+        out SectorMap foundOnMap)
+    {
+        foundCoid = 0;
+        position = default;
+        foundOnMap = null;
+
+        if (TryFindNpcByCbidOnMap(character.Map, cbid, out foundCoid, out position))
+        {
+            foundOnMap = character.Map;
+            return true;
+        }
+
+        foreach (var map in MapManager.Instance.AllMaps())
+        {
+            if (map == null || ReferenceEquals(map, character.Map))
+                continue;
+
+            if (!TryFindNpcByCbidOnMap(map, cbid, out foundCoid, out position))
+                continue;
+
+            foundOnMap = map;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryFindNpcByCbidOnMap(
+        SectorMap map,
+        int cbid,
+        out long foundCoid,
+        out Vector3 position)
+    {
+        foundCoid = 0;
+        position = default;
+        if (map?.Objects == null)
+            return false;
+
+        foreach (var obj in map.Objects.Values)
+        {
+            if (obj == null || obj.CBID != cbid)
+                continue;
+
+            foundCoid = obj.ObjectId.Coid;
+            position = obj.Position;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static ChatCommandExecutionResult ApplySameMapTeleport(
+        Character character,
+        Vehicle vehicle,
+        Vector3 position,
+        string message)
+    {
+        var rotation = vehicle.Rotation;
+        character.Position = position;
+        character.Rotation = rotation;
+        vehicle.ClearPhysicsInstance();
+        vehicle.SetPosition(position);
+        vehicle.Rotation = rotation;
+
+        var teleport = new TeleportCharacterPacket { Position = position };
+        return new ChatCommandExecutionResult(true, message, new BasePacket[] { teleport });
+    }
+
+    /// <summary>
+    /// GM: mark every mission in the transitive <see cref="Mission.ReqMissionId"/> closure of
+    /// <c>missionId</c> as completed (seed only — no rewards). Does not complete the target itself.
+    /// Usage: <c>/completemissiontree &lt;missionId&gt;</c>.
+    /// </summary>
+    private static ChatCommandExecutionResult CompleteMissionTree(Character character, string[] parts)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        if (parts.Length < 2 || !int.TryParse(parts[1], out var missionId) || missionId <= 0)
+            return new ChatCommandExecutionResult(true, "Usage: /completemissiontree <missionId>");
+
+        var mission = AssetManager.Instance.GetMission(missionId);
+        if (mission == null)
+            return new ChatCommandExecutionResult(true, $"Unknown mission id {missionId}.");
+
+        var toSeed = CollectPrerequisiteMissionIds(missionId);
+        if (toSeed.Count == 0)
+        {
+            return new ChatCommandExecutionResult(
+                true,
+                $"Mission {missionId} has no prerequisite missions to seed.");
+        }
+
+        var seeded = NpcInteractHandler.MarkMissionsCompletedForSeed(
+            character.OwningConnection,
+            character,
+            toSeed);
+
+        var list = seeded.Count == 0 ? "none (already complete)" : string.Join(", ", seeded);
+        return new ChatCommandExecutionResult(
+            true,
+            $"Seeded {seeded.Count} completed: {list}");
+    }
+
+    /// <summary>
+    /// GM: mark one or more mission ids completed without rewards (harness seed).
+    /// Usage: <c>/seedcompleted &lt;id&gt; [id...]</c>.
+    /// </summary>
+    private static ChatCommandExecutionResult SeedCompleted(Character character, string[] parts)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        if (parts.Length < 2)
+            return new ChatCommandExecutionResult(true, "Usage: /seedcompleted <id> [id...]");
+
+        var ids = new List<int>();
+        for (var i = 1; i < parts.Length; i++)
+        {
+            if (!int.TryParse(parts[i], out var id) || id <= 0)
+                return new ChatCommandExecutionResult(true, $"Invalid mission id '{parts[i]}'.");
+            ids.Add(id);
+        }
+
+        var seeded = NpcInteractHandler.MarkMissionsCompletedForSeed(
+            character.OwningConnection,
+            character,
+            ids);
+        var list = seeded.Count == 0 ? "none (already complete)" : string.Join(", ", seeded);
+        return new ChatCommandExecutionResult(true, $"Seeded {seeded.Count} completed: {list}");
+    }
+
+    /// <summary>
+    /// Transitive closure of <see cref="Mission.ReqMissionId"/> entries (&gt; 0), excluding
+    /// <paramref name="rootMissionId"/>. Cycle-safe; includes every OR-branch id so either
+    /// RequirementsOred style still passes.
+    /// </summary>
+    internal static List<int> CollectPrerequisiteMissionIds(int rootMissionId)
+    {
+        var result = new List<int>();
+        var seen = new HashSet<int> { rootMissionId };
+        var queue = new Queue<int>();
+        queue.Enqueue(rootMissionId);
+
+        while (queue.Count > 0)
+        {
+            var currentId = queue.Dequeue();
+            var current = AssetManager.Instance.GetMission(currentId);
+            if (current?.ReqMissionId == null)
+                continue;
+
+            foreach (var reqId in current.ReqMissionId)
+            {
+                if (reqId <= 0 || !seen.Add(reqId))
+                    continue;
+
+                result.Add(reqId);
+                queue.Enqueue(reqId);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>

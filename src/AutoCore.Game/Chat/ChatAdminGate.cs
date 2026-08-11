@@ -37,6 +37,8 @@ public static class ChatAdminGate
         "/giveMission", "/givemission",
         "/addMission", "/addmission",
         "/completeMission", "/completemission",
+        "/completeMissionTree", "/completemissiontree",
+        "/seedCompleted", "/seedcompleted",
 
         // Combat / vehicle stats
         "/setHP", "/sethp", "/hp",
@@ -74,7 +76,8 @@ public static class ChatAdminGate
         "/warp", "/map",
         "/loot",
         "/spawn",
-        "/teleport", "/tp",
+        "/teleporttopos",
+        "/tptonpc",
         "/tptowaypoint", "/tpToWaypoint", "/tpwaypoint",
         "/portto", "/portTo",
         "/porttome", "/portToMe",

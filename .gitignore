@@ -319,6 +319,10 @@ src/AutoCore.Launcher/appsettings.discord.json
 Documentation/
 docs/
 tmp-map/
-tools/
-scripts/
+tools/*
+!tools/mission-live/
+!tools/mission-live/**
+scripts/*
+!scripts/run-mission-live.ps1
+!scripts/add_mission_to_registry.py
 AutoCore.DevTool/

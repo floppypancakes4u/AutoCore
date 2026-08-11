@@ -8,6 +8,10 @@ namespace AutoCore.Sector.Tests.Dev;
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Inventory;
+using AutoCore.Game.Managers;
+using AutoCore.Game.Mission;
+using AutoCore.Game.Mission.Requirements;
+using AutoCore.Game.Structures;
 using AutoCore.Game.TNL;
 using AutoCore.Sector.Dev;
 
@@ -236,6 +240,108 @@ public class DevControlServerTests
 
             Assert.AreEqual(400, response.StatusCode);
             StringAssert.Contains(response.Body, "Unsupported dev chat command");
+        }
+        finally
+        {
+            iface?.Socket?.Stop();
+            iface?.Close();
+        }
+    }
+
+    [TestMethod]
+    public void HandleRequest_MissionPlan_MissingId_Returns400()
+    {
+        var server = new DevControlServer(() => null);
+        var response = server.HandleRequest(
+            DevControlServer.CreateRequestForTests("GET", "/mission-plan"));
+
+        Assert.AreEqual(400, response.StatusCode);
+        StringAssert.Contains(response.Body, "mission id");
+    }
+
+    [TestMethod]
+    public void HandleRequest_MissionPlan_UnknownId_Returns400()
+    {
+        var server = new DevControlServer(() => null);
+        var response = server.HandleRequest(
+            DevControlServer.CreateRequestForTests("GET", "/mission-plan", query: "id=99999999"));
+
+        Assert.AreEqual(400, response.StatusCode);
+        StringAssert.Contains(response.Body, "Unknown mission");
+    }
+
+    [TestMethod]
+    public void HandleRequest_MissionPlan_ReturnsObjectivesAndGates()
+    {
+        const int missionId = 88101;
+        try
+        {
+            var obj = MissionObjective.CreateForTests(88111, 0, missionId, 1);
+            obj.Requirements.Add(new ObjectiveRequirementPatrol(obj)
+            {
+                TargetCount = 1,
+                Sequential = true,
+                FirstStateSlot = 0,
+            });
+            var mission = Mission.CreateForTests(missionId, obj);
+            mission.Continent = 707;
+            mission.NPC = 12345;
+            mission.ReqLevelMin = 5;
+            mission.ReqMissionId = new[] { 100, -1, -1, -1 };
+            mission.Title = "Plan Test Mission";
+            AssetManager.Instance.SetTestMission(mission);
+
+            var server = new DevControlServer(() => null);
+            var response = server.HandleRequest(
+                DevControlServer.CreateRequestForTests("GET", "/mission-plan", query: $"id={missionId}"));
+
+            Assert.AreEqual(200, response.StatusCode);
+            using var doc = JsonDocument.Parse(response.Body);
+            var root = doc.RootElement;
+            Assert.IsTrue(root.GetProperty("ok").GetBoolean());
+            Assert.AreEqual(missionId, root.GetProperty("missionId").GetInt32());
+            Assert.AreEqual(707, root.GetProperty("continent").GetInt32());
+            Assert.AreEqual(12345, root.GetProperty("npc").GetInt32());
+            Assert.AreEqual(5, root.GetProperty("reqLevelMin").GetInt32());
+            Assert.AreEqual(100, root.GetProperty("reqMissionIds")[0].GetInt32());
+            Assert.AreEqual(1, root.GetProperty("objectives").GetArrayLength());
+            Assert.AreEqual("Patrol", root.GetProperty("objectives")[0].GetProperty("requirements")[0].GetProperty("type").GetString());
+        }
+        finally
+        {
+            AssetManager.Instance.ClearTestMissions();
+        }
+    }
+
+    [TestMethod]
+    public void HandleRequest_MissionState_WithActiveQuest()
+    {
+        TNLInterface iface = null;
+        try
+        {
+            iface = new TNLInterface(GetFreeUdpPort(), true);
+            var conn = CreateConnectionWithCharacter(88, "MissionPilot", "acct");
+            var quest = new CharacterQuest(88101, 0);
+            quest.ObjectiveProgress[0] = 2;
+            quest.ObjectiveMax[0] = 5;
+            conn.CurrentCharacter.CurrentQuests.Add(quest);
+            conn.CurrentCharacter.CompletedMissionIds.Add(42);
+            conn.CurrentCharacter.SetLevel(7);
+            iface.MapConnections[1] = conn;
+
+            var server = new DevControlServer(() => iface);
+            var response = server.HandleRequest(
+                DevControlServer.CreateRequestForTests("GET", "/mission-state", query: "character=MissionPilot"));
+
+            Assert.AreEqual(200, response.StatusCode);
+            using var doc = JsonDocument.Parse(response.Body);
+            var root = doc.RootElement;
+            Assert.IsTrue(root.GetProperty("ok").GetBoolean());
+            Assert.AreEqual(7, root.GetProperty("level").GetInt32());
+            Assert.AreEqual(88101, root.GetProperty("activeQuests")[0].GetProperty("missionId").GetInt32());
+            Assert.AreEqual(2, root.GetProperty("activeQuests")[0].GetProperty("progress").GetInt32());
+            Assert.AreEqual(5, root.GetProperty("activeQuests")[0].GetProperty("max").GetInt32());
+            Assert.AreEqual(42, root.GetProperty("completedMissionIds")[0].GetInt32());
         }
         finally
         {

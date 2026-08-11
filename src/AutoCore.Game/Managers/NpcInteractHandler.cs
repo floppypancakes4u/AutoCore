@@ -1482,6 +1482,55 @@ public static class NpcInteractHandler
     }
 
     /// <summary>
+    /// Seed completed-mission ids for harness / GM prereq setup. Removes any active row for
+    /// those ids, stamps <see cref="Character.CompletedMissionIds"/> + persistence, syncs the
+    /// client journal — <b>no</b> complete rewards. Returns newly seeded ids (already-complete
+    /// ids are skipped).
+    /// </summary>
+    internal static List<int> MarkMissionsCompletedForSeed(
+        TNLConnection conn,
+        Character character,
+        IEnumerable<int> missionIds)
+    {
+        var seeded = new List<int>();
+        if (character == null || missionIds == null)
+            return seeded;
+
+        var changed = false;
+        foreach (var missionId in missionIds.Distinct())
+        {
+            if (missionId <= 0)
+                continue;
+
+            if (character.CompletedMissionIds.Contains(missionId))
+                continue;
+
+            var active = character.CurrentQuests.FirstOrDefault(q => q.MissionId == missionId);
+            if (active != null)
+            {
+                character.CurrentQuests.Remove(active);
+                MissionPersistence.Instance.OnMissionRemoved(character.ObjectId.Coid, missionId);
+            }
+
+            character.CompletedMissionIds.Add(missionId);
+            MissionPersistence.Instance.OnMissionCompleted(character.ObjectId.Coid, missionId);
+            seeded.Add(missionId);
+            changed = true;
+        }
+
+        if (changed && conn != null)
+            PushJournalMissionList(conn, character);
+
+        if (changed)
+        {
+            TriggerManager.Instance.OnMissionStateChanged(
+                character.CurrentVehicle ?? (ClonedObjectBase)character);
+        }
+
+        return seeded;
+    }
+
+    /// <summary>
     /// C2S FailMission (0x20B2) from journal abandon confirm. Ignores packet CharacterCoid;
     /// server session character is authoritative.
     /// </summary>
