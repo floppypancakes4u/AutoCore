@@ -74,6 +74,8 @@ public partial class SectorServer : BaseServer, ILoopable
             ("TickMaxMs", max),
             ("MissionPersistPending", MissionPersistence.Instance.PendingPersistCount),
             ("MissionPersistDeadLettered", MissionPersistence.Instance.DeadLetteredCount),
+            ("Ss31SelectSkips", CharacterSelectionManager.CorruptIdentitySkipCount),
+            ("Ss31OverwriteRefusals", AutoCore.Game.Inventory.InventoryPersistence.Ss31OverwriteRefusedCount),
             ("UptimeSeconds", (long)_uptime.Elapsed.TotalSeconds),
         };
     }

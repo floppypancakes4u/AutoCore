@@ -80,7 +80,8 @@ public class SpawnPointMapNpcTests
         Assert.AreEqual(8, SpawnPoint.CalculateSpawnLevel(5, 3));
         Assert.AreEqual(1, SpawnPoint.CalculateSpawnLevel(0, 0));
         Assert.AreEqual(1, SpawnPoint.CalculateSpawnLevel(1, -10));
-        Assert.AreEqual(255, SpawnPoint.CalculateSpawnLevel(200, 100));
+        Assert.AreEqual(125, SpawnPoint.CalculateSpawnLevel(200, 100),
+            "SS-40/SS-48: spawn levels clamp to the tCreatureExperienceLevel ceiling (125), not the byte range");
     }
 
     [TestMethod]

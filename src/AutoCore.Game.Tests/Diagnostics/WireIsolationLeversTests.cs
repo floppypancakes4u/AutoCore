@@ -53,7 +53,8 @@ public class WireIsolationLeversTests
         Assert.IsFalse(GhostVehicle.EnableClientSidePathVisual,
             "client-side path visual freezes server pose authority when misused");
         Assert.IsFalse(GhostVehicle.EnableMinimalForeignHealthBlock,
-            "NPC health under minimal foreign is opt-in via production levers JSON");
+            "compiled default keeps foreign health OFF — the levers JSON is what enables it, " +
+            "and a trailing-comma JSON must FAIL parse so we stay on safe defaults (login AV)");
         Assert.IsFalse(WireDiag.Enabled);
         Assert.IsFalse(GhostObjectDiag.Enabled);
     }
@@ -102,6 +103,75 @@ public class WireIsolationLeversTests
         WireIsolationLevers.ResetToDefaults();
         Assert.IsTrue(WireIsolationLevers.TrySet("MINIMAL_FOREIGN_HEALTH", true, out _));
         Assert.IsTrue(GhostVehicle.EnableMinimalForeignHealthBlock);
+    }
+
+    /// <summary>
+    /// Production wire-isolation.levers.json historically shipped with a trailing comma and was
+    /// rejected wholesale — leaving compiled defaults. That accidental fail-closed behaviour is
+    /// load-bearing: accepting trailing commas made the full minimal-foreign profile go live and
+    /// crashed the retail client at login (AV 0x0080A62A). Keep strict JSON parse.
+    /// </summary>
+    [TestMethod]
+    public void ApplyFromJson_TrailingComma_Rejected_LeavesCompiledDefaults()
+    {
+        GhostVehicle.EnableMinimalForeignInitialProfile = false;
+        GhostVehicle.EnableMinimalForeignHealthBlock = false;
+
+        var applied = WireIsolationLevers.ApplyFromJson(
+            """
+            {
+              "EnableMinimalForeignInitialProfile": true,
+              "EnableMinimalForeignHealthBlock": true,
+            }
+            """, out var error);
+        Assert.IsFalse(applied, "trailing comma must fail parse: " + error);
+        Assert.IsFalse(GhostVehicle.EnableMinimalForeignInitialProfile,
+            "failed parse must not partially apply — stay on compiled defaults");
+        Assert.IsFalse(GhostVehicle.EnableMinimalForeignHealthBlock);
+    }
+
+    /// <summary>
+    /// SS-50: a levers file silently rewrites wire behaviour, and a file that fails to parse (or
+    /// is picked up from an unexpected working directory) looks identical at startup to one that
+    /// loaded cleanly. The startup diff must name every lever that a configuration changed.
+    /// </summary>
+    [TestMethod]
+    public void GetLeversDifferingFromDefaults_NamesOnlyOverriddenLevers()
+    {
+        var defaults = WireIsolationLevers.CaptureDefaults();
+
+        Assert.AreEqual(0, WireIsolationLevers.GetLeversDifferingFromDefaults(defaults).Count,
+            "a freshly reset board differs from defaults in nothing");
+
+        Assert.IsTrue(WireIsolationLevers.ApplyFromJson(
+            """{"EnableMinimalForeignInitialProfile": true, "ScopeGlobalVehicleGhost": true}""", out var error),
+            error);
+
+        var overrides = WireIsolationLevers.GetLeversDifferingFromDefaults(defaults);
+        CollectionAssert.AreEquivalent(
+            new[] { "EnableMinimalForeignInitialProfile=true", "ScopeGlobalVehicleGhost=true" },
+            overrides.ToArray(),
+            "exactly the levers the file changed must be reported");
+    }
+
+    [TestMethod]
+    public void GetLeversDifferingFromDefaults_NullDefaults_IsEmpty()
+    {
+        Assert.AreEqual(0, WireIsolationLevers.GetLeversDifferingFromDefaults(null).Count);
+    }
+
+    [TestMethod]
+    public void CaptureDefaults_DoesNotDisturbCurrentLevers()
+    {
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        WireDiag.Enabled = true;
+
+        var defaults = WireIsolationLevers.CaptureDefaults();
+
+        Assert.IsTrue(GhostVehicle.EnableMinimalForeignInitialProfile, "live values must be restored");
+        Assert.IsTrue(WireDiag.Enabled, "live values must be restored");
+        Assert.IsFalse(defaults["EnableMinimalForeignInitialProfile"], "captured value is the compiled default");
+        Assert.IsFalse(defaults["EnableMinimalForeignHealthBlock"], "compiled default keeps health off");
     }
 
     [TestMethod]

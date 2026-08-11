@@ -38,11 +38,17 @@ public class TpToWaypointCommandTests
         GameLog.SetSinkForTests(_sink);
         AssetManager.Instance.ClearTestMissions();
         NpcInteractHandler.InvalidateMissionIndex();
+        MapManager.Instance.ClearMapsForTests();
+        MapManager.Instance.ResolveMapForTests = null;
+        MapManager.Instance.SuppressCreatePacketsForTests = true;
     }
 
     [TestCleanup]
     public void Cleanup()
     {
+        MapManager.Instance.SuppressCreatePacketsForTests = false;
+        MapManager.Instance.ResolveMapForTests = null;
+        MapManager.Instance.ClearMapsForTests();
         GameLog.ResetForTests();
         LogContext.ClearForTests();
         AssetManager.Instance.ClearTestMissions();
@@ -208,6 +214,134 @@ public class TpToWaypointCommandTests
     }
 
     [TestMethod]
+    public void TpToWaypoint_VisualWaypoint_ObjectCoid_UsesLiveEntityPosition()
+    {
+        var (character, vehicle, map) = CreatePlayer(gmLevel: 1);
+        SeedBareObjectiveMission();
+        GiveQuest(character, MissionId);
+
+        var authoredPos = new Vector3(100f, 1f, 100f);
+        var livePos = new Vector3(777f, 4f, 888f);
+        const long entityCoid = 44001;
+        PlaceVisualWaypoint(map, id: 60, authoredPos, objectCoid: entityCoid, ObjectiveId);
+        PlaceWaypoint(map, entityCoid, livePos);
+
+        var result = ChatCommandService.Instance.Execute(character, "/tptowaypoint");
+
+        Assert.IsTrue(result.Handled);
+        Assert.AreEqual(livePos.X, vehicle.Position.X, 0.01f);
+        Assert.AreEqual(livePos.Y, vehicle.Position.Y, 0.01f);
+        Assert.AreEqual(livePos.Z, vehicle.Position.Z, 0.01f);
+        StringAssert.Contains(result.Message, entityCoid.ToString());
+        AssertSendsClientSnap(result, character, livePos);
+    }
+
+    [TestMethod]
+    public void TpToWaypoint_VisualWaypoint_ObjectCoid_MissingEntity_FallsBackToAuthoredPosition()
+    {
+        var (character, vehicle, map) = CreatePlayer(gmLevel: 1);
+        SeedBareObjectiveMission();
+        GiveQuest(character, MissionId);
+
+        var authoredPos = new Vector3(250f, 2f, 350f);
+        const long missingEntityCoid = 44002;
+        PlaceVisualWaypoint(map, id: 61, authoredPos, objectCoid: missingEntityCoid, ObjectiveId);
+
+        var result = ChatCommandService.Instance.Execute(character, "/tptowaypoint");
+
+        Assert.IsTrue(result.Handled);
+        Assert.AreEqual(authoredPos.X, vehicle.Position.X, 0.01f);
+        Assert.AreEqual(authoredPos.Z, vehicle.Position.Z, 0.01f);
+        AssertSendsClientSnap(result, character, authoredPos);
+    }
+
+    [TestMethod]
+    public void TpToWaypoint_UseItem_WorldObject_Teleports()
+    {
+        var (character, vehicle, map) = CreatePlayer(gmLevel: 1);
+        const long useCoid = 55001;
+        SeedUseItemMission(useCoid);
+        GiveQuest(character, MissionId);
+        var dest = new Vector3(420f, 6f, 530f);
+        PlaceWaypoint(map, useCoid, dest);
+
+        var result = ChatCommandService.Instance.Execute(character, "/tptowaypoint");
+
+        Assert.IsTrue(result.Handled);
+        Assert.AreEqual(dest.X, vehicle.Position.X, 0.01f);
+        Assert.AreEqual(dest.Y, vehicle.Position.Y, 0.01f);
+        Assert.AreEqual(dest.Z, vehicle.Position.Z, 0.01f);
+        StringAssert.Contains(result.Message, "useitem");
+        AssertSendsClientSnap(result, character, dest);
+    }
+
+    [TestMethod]
+    public void TpToWaypoint_CrossMap_DeliverNpc_TransfersToContinentAtNpcPose()
+    {
+        // Non-instanced continents so RegisterMapForTests + GetMapForCharacter stay simple.
+        const int homeContinent = 8801;
+        const int destContinent = 8802;
+        const int npcCbid = 4243;
+        const long npcCoid = 66001;
+
+        var homeMap = CreateContinentMap(homeContinent, "tp-home");
+        var destMap = CreateContinentMap(destContinent, "tp-dest");
+        MapManager.Instance.RegisterMapForTests(homeMap);
+        MapManager.Instance.RegisterMapForTests(destMap);
+
+        var (character, vehicle, _) = CreatePlayerOnMap(gmLevel: 1, homeMap, new Vector3(1f, 0f, 1f));
+        SeedDeliverMission(npcCbid, destContinent);
+        GiveQuest(character, MissionId);
+
+        var npcPos = new Vector3(333f, 5f, 444f);
+        PlaceNpc(destMap, npcCoid, npcCbid, npcPos);
+
+        var result = ChatCommandService.Instance.Execute(character, "/tptowaypoint");
+
+        Assert.IsTrue(result.Handled);
+        Assert.IsFalse(result.Message.Contains("Failed", StringComparison.OrdinalIgnoreCase), result.Message);
+        Assert.AreSame(destMap, character.Map);
+        Assert.AreSame(destMap, vehicle.Map);
+        Assert.AreEqual(npcPos.X, character.Position.X, 0.01f);
+        Assert.AreEqual(npcPos.Z, character.Position.Z, 0.01f);
+        Assert.AreEqual(npcPos.X, vehicle.Position.X, 0.01f);
+        Assert.AreEqual(npcPos.Z, vehicle.Position.Z, 0.01f);
+        Assert.AreEqual(0, result.Packets.OfType<TeleportCharacterPacket>().Count(),
+            "cross-map transfer uses MapInfo/ghosting; must not also send same-map TeleportCharacter");
+        StringAssert.Contains(result.Message, "deliver");
+        StringAssert.Contains(result.Message, destContinent.ToString());
+    }
+
+    [TestMethod]
+    public void TpToWaypoint_CrossMap_PatrolPad_TransfersToContinentAtPad()
+    {
+        const int homeContinent = 8803;
+        const int destContinent = 8804;
+        const long padCoid = 67001;
+
+        var homeMap = CreateContinentMap(homeContinent, "tp-patrol-home");
+        var destMap = CreateContinentMap(destContinent, "tp-patrol-dest");
+        MapManager.Instance.RegisterMapForTests(homeMap);
+        MapManager.Instance.RegisterMapForTests(destMap);
+
+        var (character, vehicle, _) = CreatePlayerOnMap(gmLevel: 1, homeMap, new Vector3(2f, 0f, 2f));
+        SeedPatrolMission(padCoid, continentId: destContinent);
+        GiveQuest(character, MissionId);
+        var padPos = new Vector3(111f, 2f, 222f);
+        PlaceWaypoint(destMap, padCoid, padPos);
+
+        var result = ChatCommandService.Instance.Execute(character, "/tptowaypoint");
+
+        Assert.IsTrue(result.Handled);
+        Assert.IsFalse(result.Message.Contains("Failed", StringComparison.OrdinalIgnoreCase), result.Message);
+        Assert.AreSame(destMap, character.Map);
+        Assert.AreEqual(padPos.X, vehicle.Position.X, 0.01f);
+        Assert.AreEqual(padPos.Z, vehicle.Position.Z, 0.01f);
+        Assert.AreEqual(0, result.Packets.OfType<TeleportCharacterPacket>().Count());
+        StringAssert.Contains(result.Message, "patrol");
+    }
+
+    [TestMethod]
     public void TpToWaypoint_MissingWorldObject_ReturnsError()
     {
         var (character, vehicle, _) = CreatePlayer(gmLevel: 1);
@@ -245,12 +379,46 @@ public class TpToWaypointCommandTests
     }
 
     static void PlaceVisualWaypoint(SectorMap map, int id, Vector3 position, params int[] objectiveIds)
+        => PlaceVisualWaypoint(map, id, position, objectCoid: 0, objectiveIds);
+
+    static void PlaceVisualWaypoint(SectorMap map, int id, Vector3 position, long objectCoid, params int[] objectiveIds)
     {
-        var wp = VisualWaypoint.CreateForTests(id, position, objectiveIds);
+        var wp = VisualWaypoint.CreateForTests(id, position, objectiveIds, objectCoid);
         map.MapData.VisualWaypoints[id] = wp;
     }
 
-    static void SeedPatrolMission(long pad)
+    static void SeedBareObjectiveMission()
+    {
+        var obj = MissionObjective.CreateForTests(ObjectiveId, 0, MissionId, 1);
+        AssetManager.Instance.SetTestMission(Mission.CreateForTests(MissionId, obj));
+    }
+
+    static void SeedUseItemMission(long primaryCoid)
+    {
+        var obj = MissionObjective.CreateForTests(ObjectiveId, 0, MissionId, 1);
+        obj.Requirements.Add(new ObjectiveRequirementUseItem(obj)
+        {
+            PrimaryItem = primaryCoid,
+            PrimaryInWorld = true,
+            FirstStateSlot = 0,
+        });
+        AssetManager.Instance.SetTestMission(Mission.CreateForTests(MissionId, obj));
+    }
+
+    static void SeedDeliverMission(int npcCbid, int npcContinentId)
+    {
+        var obj = MissionObjective.CreateForTests(ObjectiveId, 0, MissionId, 1);
+        obj.Requirements.Add(new ObjectiveRequirementDeliver(obj)
+        {
+            NPCTargetCBID = npcCbid,
+            NPCContinentId = npcContinentId,
+            NPCTargetCompletes = true,
+            FirstStateSlot = 0,
+        });
+        AssetManager.Instance.SetTestMission(Mission.CreateForTests(MissionId, obj));
+    }
+
+    static void SeedPatrolMission(long pad, int continentId = -1)
     {
         var obj = MissionObjective.CreateForTests(ObjectiveId, 0, MissionId, 1);
         var patrol = new ObjectiveRequirementPatrol(obj)
@@ -261,6 +429,7 @@ public class TpToWaypointCommandTests
             Sequential = true,
             Laps = 1,
             FirstStateSlot = 0,
+            ContinentId = continentId,
         };
         patrol.GenericTargets[0] = pad;
         obj.Requirements.Add(patrol);
@@ -300,17 +469,38 @@ public class TpToWaypointCommandTests
         obj.SetMap(map);
     }
 
-    static (Character Character, Vehicle Vehicle, SectorMap Map) CreatePlayer(int gmLevel)
+    static void PlaceNpc(SectorMap map, long coid, int cbid, Vector3 position)
     {
-        var continent = new ContinentObject
-        {
-            Id = 707,
-            MapFileName = "tm_tp_waypoint_test",
-            DisplayName = "tp-test",
-            IsTown = false,
-            IsPersistent = true,
-        };
-        var map = SectorMap.CreateForTests(continent, new Vector4(0, 0, 0, 0));
+        var obj = new SimpleObject(GraphicsObjectType.Graphics);
+        obj.SetCoid(coid, false);
+        obj.SetCbidForTests(cbid);
+        obj.Position = position;
+        obj.SetMap(map);
+    }
+
+    static SectorMap CreateContinentMap(int continentId, string label) =>
+        SectorMap.CreateForTests(
+            new ContinentObject
+            {
+                Id = continentId,
+                MapFileName = $"tm_tp_waypoint_{continentId}_{label}",
+                DisplayName = label,
+                IsTown = false,
+                IsPersistent = true,
+            },
+            new Vector4(0, 0, 0, 0));
+
+    static (Character Character, Vehicle Vehicle, SectorMap Map) CreatePlayer(int gmLevel)
+        => CreatePlayerOnMap(
+            gmLevel,
+            CreateContinentMap(707, "tp-test"),
+            new Vector3(0, 0, 0));
+
+    static (Character Character, Vehicle Vehicle, SectorMap Map) CreatePlayerOnMap(
+        int gmLevel,
+        SectorMap map,
+        Vector3 position)
+    {
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
         connection.SetGhostTo(false);
@@ -320,6 +510,7 @@ public class TpToWaypointCommandTests
         var character = new Character();
         character.SetCoid(91001, true);
         character.GMLevel = (byte)gmLevel;
+        character.AttachTestDataForTests("TpWaypointPilot");
         character.SetOwningConnection(connection);
         connection.CurrentCharacter = character;
 
@@ -328,8 +519,8 @@ public class TpToWaypointCommandTests
         character.SetCurrentVehicleForTests(vehicle);
         character.SetMap(map);
         vehicle.SetMap(map);
-        vehicle.Position = new Vector3(0, 0, 0);
-        character.Position = new Vector3(0, 0, 0);
+        vehicle.Position = position;
+        character.Position = position;
         return (character, vehicle, map);
     }
 }

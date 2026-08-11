@@ -27,6 +27,7 @@ using AutoCore.Utils.Reliability;
 
 public class Vehicle : SimpleObject
 {
+    private const bool DEBUG_MSG = false;
     #region Properties
     #region Database Vehicle Data
     private VehicleData DBData { get; set; }
@@ -309,17 +310,20 @@ public class Vehicle : SimpleObject
 
         if (shieldAbsorb > 0 || hpDamage > 0)
         {
-            Logger.WriteLog(LogType.Debug,
-                "TakeDamage: vehicle coid={0} dmg={1} shield {2}->{3}/{4} absorb={5} hpNow={6}/{7} hpDmg={8}",
-                ObjectId.Coid,
-                damage,
-                shieldBefore,
-                CurrentShield,
-                MaxShield,
-                shieldAbsorb,
-                GetCurrentHP(),
-                GetMaximumHP(),
-                hpDamage);
+            if (DEBUG_MSG)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "TakeDamage: vehicle coid={0} dmg={1} shield {2}->{3}/{4} absorb={5} hpNow={6}/{7} hpDmg={8}",
+                    ObjectId.Coid,
+                    damage,
+                    shieldBefore,
+                    CurrentShield,
+                    MaxShield,
+                    shieldAbsorb,
+                    GetCurrentHP(),
+                    GetMaximumHP(),
+                    hpDamage);
+            }
         }
 
         return shieldAbsorb + hpDamage;
@@ -510,19 +514,40 @@ public class Vehicle : SimpleObject
     /// <summary>Per-vehicle hit/crit roll source (seeded once, independent across vehicles).</summary>
     internal Random CombatRng => _combatRng ??= new Random(Random.Shared.Next());
 
+    /// <summary>Test seam: deterministic hit/damage rolls (SS-37 ordering tests).</summary>
+    internal void SetCombatRngForTests(Random rng) => _combatRng = rng;
+
     // Retail floating numbers use EMSG_Sector_Damage (0x2023) → combat-event list (game+0xAA8).
     // Broadcast freeform floaters use a different list (game+0xAC0) and do not reliably render.
     // SS-33: keyed per (attacker, victim) TFID pair — attacker-only keying ate the floaters for
-    // every OTHER target hit inside the window. ConcurrentDictionary because this is mutated from
-    // both the sector tick and packet-handler paths.
+    // every OTHER target hit inside the window. SS-39: suppressed amounts accumulate in
+    // PendingAmount and fold into the next shipped packet — discarding them hid up to half the
+    // real damage at 20 Hz fire ("health drains out of nowhere"). ConcurrentDictionary because
+    // this is mutated from both the sector tick and packet-handler paths.
+    // SS-47: PendingSinceMs ages the accumulator independently of the send stamp. Pending is only
+    // drained by a later packet for the same pair, so without an expiry a suppressed splash hit
+    // survived a disconnect / map change and folded onto a fresh hit minutes later (COIDs are
+    // stable across a relog), displaying more damage than was applied.
+    private readonly record struct CombatThrottleEntry(long LastSentMs, int PendingAmount, long PendingSinceMs);
+
+    /// <summary>How long a suppressed amount may wait for a packet to ride out on (SS-47).</summary>
+    private static long CombatPendingExpiryMs(int windowMs) => Math.Max(windowMs, 1) * 10L;
+
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<
-        (long AttackerCoid, bool AttackerGlobal, long VictimCoid, bool VictimGlobal), long>
+        (long AttackerCoid, bool AttackerGlobal, long VictimCoid, bool VictimGlobal), CombatThrottleEntry>
         _lastCombatMsgByAttackerVictimMs = new();
 
     private const int CombatThrottlePruneThreshold = 4096;
 
+    /// <summary>Test seam: throttle clock (SS-39 deterministic window tests).</summary>
+    internal static Func<long> CombatThrottleClock = static () => Environment.TickCount64;
+
     /// <summary>Clears the damage-packet throttle so tests don't leak state across runs.</summary>
-    internal static void ClearCombatThrottleForTests() => _lastCombatMsgByAttackerVictimMs.Clear();
+    internal static void ClearCombatThrottleForTests()
+    {
+        _lastCombatMsgByAttackerVictimMs.Clear();
+        CombatThrottleClock = static () => Environment.TickCount64;
+    }
 
     // NPC attackers have no OwningConnection, so a victim-only send is required for the hit to be
     // visible to the player being shot. Deliver to both the attacker's and the victim's connections
@@ -572,13 +597,14 @@ public class Vehicle : SimpleObject
             if (connections.Count == 0)
                 return;
 
-            var now = Environment.TickCount64;
+            var now = CombatThrottleClock();
             var windowMs = Diagnostics.ServerConfig.DamagePacketThrottleMs;
             if (windowMs > 0 && source is { Coid: > 0 })
             {
-                // Send if ANY victim pair is outside its window; stamp every pair we ship.
+                // Send if ANY victim pair is outside its window — or contains a killing blow
+                // (SS-39: a dead victim's final floater must never be throttled away; also
+                // backstops the SS-37 flush-before-death ordering).
                 var anyFresh = victims == null || victims.Count == 0;
-                var pairs = new List<(long, bool, long, bool)>(victims?.Count ?? 0);
                 if (victims != null)
                 {
                     foreach (var victim in victims)
@@ -586,25 +612,106 @@ public class Vehicle : SimpleObject
                         if (victim?.ObjectId == null)
                             continue;
                         var pair = (source.Coid, source.Global, victim.ObjectId.Coid, victim.ObjectId.Global);
-                        pairs.Add(pair);
-                        if (!_lastCombatMsgByAttackerVictimMs.TryGetValue(pair, out var last) || now - last >= windowMs)
+                        if (!_lastCombatMsgByAttackerVictimMs.TryGetValue(pair, out var entry)
+                            || now - entry.LastSentMs >= windowMs
+                            || victim.GetCurrentHP() <= 0)
+                        {
                             anyFresh = true;
+                        }
                     }
                 }
 
                 if (!anyFresh)
-                    return;
+                {
+                    // SS-39: suppressed, not discarded — accumulate each entry's amount so the
+                    // next shipped packet for the pair displays the true total.
+                    var expiryMs = CombatPendingExpiryMs(windowMs);
+                    foreach (var hit in packet.Entries)
+                    {
+                        if (hit.Target == null)
+                            continue;
+                        var pair = (source.Coid, source.Global, hit.Target.Coid, hit.Target.Global);
+                        var amount = (int)hit.Amount;
+                        _lastCombatMsgByAttackerVictimMs.AddOrUpdate(
+                            pair,
+                            _ => new CombatThrottleEntry(now, amount, now),
+                            (_, entry) =>
+                            {
+                                // SS-47: a pending amount older than the expiry belongs to a
+                                // finished fight — start a fresh accumulation instead of adding
+                                // to it, so nothing carries across a disconnect or map change.
+                                var stale = entry.PendingAmount != 0
+                                    && now - entry.PendingSinceMs >= expiryMs;
+                                var carried = stale ? 0 : entry.PendingAmount;
+                                return entry with
+                                {
+                                    PendingAmount = Math.Clamp(
+                                        carried + amount,
+                                        DamagePacket.MinDisplayAmount,
+                                        DamagePacket.MaxDisplayAmount),
+                                    PendingSinceMs = carried == 0 ? now : entry.PendingSinceMs,
+                                };
+                            });
+                    }
 
-                foreach (var pair in pairs)
-                    _lastCombatMsgByAttackerVictimMs[pair] = now;
+                    return;
+                }
+
+                // Shipping: fold any pending suppressed damage into the matching entries, then
+                // stamp every pair's window and zero its pending. SS-47: the fold is atomic — the
+                // read-modify-write below used to be able to lose a concurrent accumulation.
+                var foldExpiryMs = CombatPendingExpiryMs(windowMs);
+                foreach (var hit in packet.Entries)
+                {
+                    if (hit.Target == null)
+                        continue;
+                    var pair = (source.Coid, source.Global, hit.Target.Coid, hit.Target.Global);
+                    var folded = 0;
+                    _lastCombatMsgByAttackerVictimMs.AddOrUpdate(
+                        pair,
+                        _ => new CombatThrottleEntry(now, 0, 0),
+                        (_, entry) =>
+                        {
+                            if (entry.PendingAmount != 0 && now - entry.PendingSinceMs < foldExpiryMs)
+                                folded = entry.PendingAmount;
+                            else if (entry.PendingAmount != 0)
+                            {
+                                Logger.WriteLog(LogType.Debug,
+                                    "Combat floater: dropped {0} stale pending damage for attacker={1} victim={2} (SS-47)",
+                                    entry.PendingAmount, pair.Item1, pair.Item3);
+                            }
+
+                            return new CombatThrottleEntry(now, 0, 0);
+                        });
+
+                    if (folded != 0)
+                    {
+                        hit.Amount = (short)Math.Clamp(
+                            hit.Amount + folded,
+                            DamagePacket.MinDisplayAmount,
+                            DamagePacket.MaxDisplayAmount);
+                    }
+                }
 
                 // Bounded state: prune stale pairs so a long-lived sector cannot grow unboundedly.
                 if (_lastCombatMsgByAttackerVictimMs.Count > CombatThrottlePruneThreshold)
                 {
                     foreach (var kvp in _lastCombatMsgByAttackerVictimMs)
                     {
-                        if (now - kvp.Value >= windowMs * 10L)
-                            _lastCombatMsgByAttackerVictimMs.TryRemove(kvp.Key, out _);
+                        if (now - kvp.Value.LastSentMs < CombatPendingExpiryMs(windowMs))
+                            continue;
+
+                        // SS-47: evicting a pair that still owes a floater loses that damage from
+                        // the display. It is already past its expiry, but say so rather than
+                        // silently reintroducing "health drains out of nowhere".
+                        if (kvp.Value.PendingAmount != 0)
+                        {
+                            Logger.WriteLog(LogType.Debug,
+                                "Combat floater: pruned {0} unsent pending damage for attacker={1} victim={2} (SS-47)",
+                                kvp.Value.PendingAmount, kvp.Key.AttackerCoid, kvp.Key.VictimCoid);
+                        }
+
+                        _lastCombatMsgByAttackerVictimMs.TryRemove(kvp.Key, out _);
                     }
                 }
             }
@@ -1520,7 +1627,45 @@ public class Vehicle : SimpleObject
         if (DBData == null)
             return false;
 
+        // SS-31 residual: same identity overwrite as Character — refuse vehicle rows whose
+        // simple_object was clobbered to item/weapon/etc. before CreateVehicle hits the wire.
+        if (DBData.SimpleObjectBase == null)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Vehicle.LoadFromDB: coid={0} has no simple_object row — skipping (SS-31)",
+                coid);
+            return false;
+        }
+
+        if (DBData.SimpleObjectBase.Type != 0
+            && DBData.SimpleObjectBase.Type != (byte)CloneBaseObjectType.Vehicle)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Vehicle.LoadFromDB: coid={0} simple_object.Type={1} cbid={2} (expected Vehicle={3}) — " +
+                "skipping corrupt identity (SS-31; client would AV at 0x0080A62A)",
+                coid, DBData.SimpleObjectBase.Type, DBData.SimpleObjectBase.CBID,
+                (byte)CloneBaseObjectType.Vehicle);
+            return false;
+        }
+
+        if (DBData.SimpleObjectBase.CBID <= 0)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Vehicle.LoadFromDB: coid={0} cbid={1} — skipping (SS-31 placeholder/corrupt identity)",
+                coid, DBData.SimpleObjectBase.CBID);
+            return false;
+        }
+
         LoadCloneBase(DBData.SimpleObjectBase.CBID);
+
+        if (Type != CloneBaseObjectType.Vehicle)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Vehicle.LoadFromDB: coid={0} cbid={1} resolved to clonebase kind={2} (expected Vehicle) — " +
+                "skipping corrupt identity (SS-31)",
+                coid, DBData.SimpleObjectBase.CBID, Type);
+            return false;
+        }
 
         Position = new(DBData.PositionX, DBData.PositionY, DBData.PositionZ);
         Rotation = new(DBData.RotationX, DBData.RotationY, DBData.RotationZ, DBData.RotationW);
@@ -2091,6 +2236,22 @@ public class Vehicle : SimpleObject
         if (packet.Entries.Count > 0)
             TrySendDamagePacketMulti(attackerChar, packet, ObjectId, victimsHit);
 
+        // SS-37: deaths drain AFTER the damage flush so the removal packet never precedes the
+        // killing blow's floater on the ordered stream. IsCorpse dedupes repeated victims.
+        // SS-46: isolate each death — OnDeath runs authored work (loot, mission credit, spawn
+        // trigger events, SetMap). One throwing victim must not strand the rest of the volley's
+        // dead at 0 HP with IsCorpse false: such an entity is never re-acquired (candidates need
+        // HP > 0), never re-killable (TakeDamage returns 0 at 0 HP) and never respawns.
+        Guard.ForEach(
+            victimsHit,
+            "SS-37 volley death drain",
+            victim =>
+            {
+                if (victim.GetCurrentHP() <= 0 && !victim.IsCorpse)
+                    victim.OnDeath(DeathType.Violent);
+            },
+            describe: victim => $"coid={victim?.ObjectId?.Coid}");
+
         void TryFireSlot(byte bit, Weapon weapon, float aimYaw, bool includeHardTarget, ref long lastFireMs)
         {
             if ((Firing & bit) == 0 || weapon?.CloneBaseWeapon == null)
@@ -2152,7 +2313,7 @@ public class Vehicle : SimpleObject
                 var splash = WeaponFireTargetAcquisition.AcquireExplosion(
                     primaryPos.Value,
                     weaponSpec.ExplosionRadius,
-                    Faction,
+                    shooterFaction, // SS-36/RC2: owner-chain faction, never chassis Faction (−1 for players)
                     ObjectId.Coid,
                     ownerCoid,
                     candidates,
@@ -2295,7 +2456,7 @@ public class Vehicle : SimpleObject
         return target != null;
     }
 
-    private void ApplyWeaponHit(
+    internal void ApplyWeaponHit(
         ClonedObjectBase target,
         CloneBases.Specifics.WeaponSpecific weaponSpec,
         int attackerLevel,
@@ -2315,6 +2476,14 @@ public class Vehicle : SimpleObject
 
         // Never weapon-kill a player Character body (see IsWeaponCombatantTarget).
         if (target is Character)
+            return;
+
+        // SS-36: entity-level recheck of the unified hostility gate. Acquisition already
+        // filtered candidates, but this computes the effective faction from the live entities,
+        // so a wrong faction at a call site (the RC2 chassis-faction splash bug) cannot land.
+        if (!Combat.CombatEligibility.CanDamage(
+                this, target,
+                isSprayTarget ? Combat.DamageContext.Splash : Combat.DamageContext.WeaponFire))
             return;
 
         // Inanimate / non-creature always hit (client AutoHit); creatures/vehicles roll.
@@ -2403,8 +2572,11 @@ public class Vehicle : SimpleObject
 
         if (target.GetCurrentHP() <= 0)
         {
+            // SS-37: stamp the murderer now (loot/XP read it in OnDeath) but DEFER OnDeath —
+            // its removal broadcast (InitCreateObject doDeath / DestroyObject) must not beat
+            // the volley's DamagePacket onto the wire, or the client tears the object down and
+            // drops the killing blow's floater. ProcessCombatInternal drains deaths post-flush.
             target.SetMurderer(this);
-            target.OnDeath(DeathType.Violent);
         }
     }
 

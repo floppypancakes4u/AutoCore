@@ -6,6 +6,7 @@ using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Managers.Asset;
 using AutoCore.Game.Map;
+using AutoCore.Game.Structures;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 
@@ -79,6 +80,27 @@ public static class AssetManagerTestHelper
         GetCloneBasesDictionary()[cbid] = clone;
     }
 
+    /// <summary>Registers a fake <see cref="CloneBaseWeapon"/> that equips on any ranged hardpoint (Flags 0).</summary>
+    public static void RegisterWeaponCloneBase(int cbid, float rangeMax = 50f)
+    {
+        var clone = (CloneBaseWeapon)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseWeapon));
+        clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.Weapon, CloneBaseId = cbid };
+        clone.SimpleObjectSpecific = new SimpleObjectSpecific { MaxHitPoint = 1 };
+        clone.WeaponSpecific = new WeaponSpecific
+        {
+            RangeMin = 0f,
+            RangeMax = rangeMax,
+            RechargeTime = 1,
+            DamageScalar = 1f,
+            DmgMinMin = 1,
+            DmgMaxMax = 2,
+            MinMin = DamageSpecific.CreateEmpty(),
+            MaxMax = DamageSpecific.CreateEmpty(),
+        };
+        Registered[cbid] = clone;
+        GetCloneBasesDictionary()[cbid] = clone;
+    }
+
     /// <summary>Registers a fake <see cref="CloneBaseArmor"/> with an ArmorFactor for HP tests.</summary>
     public static void RegisterArmorCloneBase(int cbid, short armorFactor = 10, short defenseBonus = 0)
     {
@@ -119,7 +141,9 @@ public static class AssetManagerTestHelper
         int aiBehaviorId = 0,
         short baseLevel = 1,
         int faction = 0,
-        short maxHitPoint = 100)
+        short maxHitPoint = 100,
+        short flags = 0,
+        int isNpc = 0)
     {
         var clone = (CloneBaseCreature)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseCreature));
         clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.Creature, CloneBaseId = cbid };
@@ -127,8 +151,9 @@ public static class AssetManagerTestHelper
         {
             Faction = faction,
             MaxHitPoint = maxHitPoint,
+            Flags = flags,
         };
-        clone.CreatureSpecific = new CreatureSpecific { AIBehavior = aiBehaviorId, BaseLevel = baseLevel };
+        clone.CreatureSpecific = new CreatureSpecific { AIBehavior = aiBehaviorId, BaseLevel = baseLevel, IsNPC = isNpc };
         Registered[cbid] = clone;
         GetCloneBasesDictionary()[cbid] = clone;
     }
@@ -148,6 +173,27 @@ public static class AssetManagerTestHelper
             PowerMaximum = 100,
             PowerRegenRate = 10,
             CoolRate = 10,
+        };
+        Registered[cbid] = clone;
+        GetCloneBasesDictionary()[cbid] = clone;
+    }
+
+    /// <summary>
+    /// Registers a fake <see cref="CloneBaseWheelSet"/> with a populated Friction array so
+    /// <see cref="Entities.WheelSet.WriteToPacket"/> can resolve WheelSetSpecific without a WAD.
+    /// </summary>
+    public static void RegisterWheelSetCloneBase(int cbid)
+    {
+        var clone = (CloneBaseWheelSet)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseWheelSet));
+        clone.CloneBaseSpecific = new CloneBaseSpecific { Type = (int)CloneBaseObjectType.WheelSet, CloneBaseId = cbid };
+        clone.SimpleObjectSpecific = new SimpleObjectSpecific();
+        clone.WheelSetSpecific = new WheelSetSpecific
+        {
+            Friction = new short[] { 1, 1, 1, 1, 1, 1 },
+            NumWheelsAxle = new byte[] { 2, 2 },
+            Wheel0Name = "",
+            Wheel1Name = "",
+            WheelSetType = 0,
         };
         Registered[cbid] = clone;
         GetCloneBasesDictionary()[cbid] = clone;

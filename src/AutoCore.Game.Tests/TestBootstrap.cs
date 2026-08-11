@@ -21,5 +21,11 @@ public static class TestBootstrap
         GhostVehicle.RegisterNetClassReps();
         TNLConnection.RegisterNetClassReps();
         NetClassRep.Initialize();
+
+        // Unit tests must never reach the live MySQL-backed coid sequence (SS-31 allocator).
+        // High base keeps test item coids clear of test character/vehicle/map coids.
+        var nextTestItemCoid = 900_000L;
+        AutoCore.Game.Inventory.InventoryRuntime.AllocatePersistentCoid =
+            () => System.Threading.Interlocked.Increment(ref nextTestItemCoid);
     }
 }

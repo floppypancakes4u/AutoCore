@@ -204,15 +204,10 @@ public static class WeaponFireTargetAcquisition
             return false;
         if (c.IsCorpse || c.IsInvincible || !c.IsDamageable)
             return false;
-        // Map props (guard rails, billboards, fences): no faction hostility — inanimate scenery.
-        if (c.IgnoresHostility)
-            return true;
-        // Hostility stand-in for client owner vfunc +0x298: different faction.
-        // Callers must pass GetIDFaction() (owner-chain), not chassis SimpleObject.Faction —
-        // NPC vehicles often share chassis faction with players while the driver is hostile.
-        if (c.Faction == shooterFaction)
-            return false;
-        return true;
+        // SS-36: single hostility rule shared with CombatEligibility.CanDamage. Callers must
+        // pass GetIDFaction() (owner-chain), not chassis SimpleObject.Faction — a negative
+        // shooter faction now fails closed (acquires nothing) instead of matching everyone.
+        return CombatEligibility.IsFactionEligible(shooterFaction, c.Faction, c.IgnoresHostility);
     }
 
     private static bool TryMeasure(

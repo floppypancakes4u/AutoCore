@@ -521,6 +521,16 @@ public static class VendorStoreService
             return false;
         }
 
+        if (!character.Inventory.CanAcceptAnyOfCbid(cbid))
+        {
+            Logger.WriteLog(LogType.Debug,
+                "StoreTransaction buy: no free slot or mergeable stack for CBID {0} source={1} (SS-31 leak guard)",
+                cbid,
+                sourceTag);
+            rejectReason = "NoInventorySpace";
+            return false;
+        }
+
         var coid = runtime.AllocateItemCoid();
         var creator = TestItemCreator ?? new InventoryItemCreator();
         var result = character.Inventory.AddItem(
@@ -800,7 +810,12 @@ public static class VendorStoreService
             if (line == null || line.CBID <= 0)
                 continue;
 
-            var slotCoid = character.Map.LocalCoidCounter++;
+            // SS-31: mint from the reserved store-slot range, not the raw map counter —
+            // Global=true raw counter values collided client-side with DB-sequence cargo coids.
+            var counter = character.Map.LocalCoidCounter;
+            var slotId = StoreSlotIdentity.AllocateSlotCoid(ref counter);
+            character.Map.LocalCoidCounter = counter;
+            var slotCoid = slotId.Coid;
             session[slotCoid] = line;
 
             if (conn == null)
@@ -810,7 +825,7 @@ public static class VendorStoreService
             {
                 CBID = line.CBID,
                 CoidStore = storeCoid,
-                ObjectId = new TFID(slotCoid, true),
+                ObjectId = slotId,
                 IsInInventory = true,
                 IsInfinite = line.Unlimited,
                 Quantity = Math.Max(1, line.Unlimited ? 1 : 1),

@@ -592,7 +592,11 @@ public class ChatManager : Singleton<ChatManager>
                     break;
                 }
 
-                var target = vehicle.Target;
+                // SS-46: the client can latch a Character TFID. Kill the body and OnDeath
+                // SetMap(null)s it (F3) — remap to the vehicle exactly like weapons and skills do.
+                var target = vehicle.Target is Character targetChar && targetChar.CurrentVehicle != null
+                    ? targetChar.CurrentVehicle
+                    : vehicle.Target;
                 if (target.IsCorpse || target.IsInvincible)
                 {
                     respPacket.Message = "Cannot damage target (corpse or invincible)!";
@@ -602,6 +606,14 @@ public class ChatManager : Singleton<ChatManager>
                 // Deal 10000 damage (attacker-attributed so combat AI + /reportbug fire)
                 const int killDamage = 10000;
                 var attacker = character.CurrentVehicle ?? (ClonedObjectBase)character;
+                // SS-36: /kill runs under DamageContext.Admin — the unified gate waives
+                // hostility for GM-gated commands but keeps the route on the choke point.
+                if (!CombatEligibility.CanDamage(attacker, target, DamageContext.Admin))
+                {
+                    respPacket.Message = "Cannot damage target!";
+                    break;
+                }
+
                 var actualDamage = target.TakeDamage(killDamage, attacker);
 
                 try

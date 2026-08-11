@@ -229,9 +229,20 @@ public static class MissionUseItemProgress
         if (character.Inventory.CountByCbid(cbid) > 0)
             return;
 
-        var coid = character.Map != null
-            ? character.Map.LocalCoidCounter++
-            : character.ObjectId.Coid + 1_000_000 + character.Inventory.Items.Count + 1;
+        // SS-31 leak guard: confirm the claim can actually be placed before allocating a
+        // persistent coid, or a failed claim leaks an orphan simple_object placeholder row.
+        if (!character.Inventory.CanAcceptAnyOfCbid(cbid))
+        {
+            Logger.WriteLog(LogType.Error,
+                "MissionUseItemProgress.GrantOne: no free slot or mergeable stack for CBID {0} char={1} (SS-31 leak guard)",
+                cbid,
+                character.ObjectId.Coid);
+            return;
+        }
+
+        // SS-31: persisted mission grants share the simple_object coid sequence with
+        // characters/vehicles — never Map.LocalCoidCounter (see InventoryRuntime).
+        var coid = InventoryRuntime.AllocatePersistentCoid();
 
         var type = CloneBaseObjectType.Item;
         var cloneBase = AssetManager.Instance.GetCloneBase(cbid);

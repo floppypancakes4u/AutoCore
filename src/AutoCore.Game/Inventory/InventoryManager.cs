@@ -259,6 +259,29 @@ public sealed class InventoryManager
         return TryFindFirstFreeCargoSlot(sizeX, sizeY, out x, out y);
     }
 
+    /// <summary>
+    /// SS-31 leak guard: "at least one unit accepted" — mirrors <see cref="AddItemInternal"/>'s
+    /// acceptance order exactly (clonebase/footprint resolve, partial-stack merge check, first-fit
+    /// placement) WITHOUT allocating any coid. Callers must check this before allocating firstCoid
+    /// so a claim that cannot accept even one unit never allocates (and leaks) a persistent coid.
+    /// An unresolvable footprint returns false even if a merge could absorb quantity — AddItemInternal
+    /// rejects the whole add in that case too, so this stays consistent with it.
+    /// </summary>
+    public bool CanAcceptAnyOfCbid(int cbid)
+    {
+        var cloneBase = _cloneBases.GetCloneBase(cbid);
+        if (!TryResolveFootprintForAcquisition(cloneBase, cbid, out var footprintX, out var footprintY))
+            return false;
+
+        var (maxStack, stackable) = cloneBase == null
+            ? (int.MaxValue, true)
+            : InventoryStackPolicy.GetLimits(cloneBase);
+        if (stackable && _items.Any(item => item.Cbid == cbid && item.Quantity < maxStack))
+            return true;
+
+        return TryFindFirstFreeCargoSlot(footprintX, footprintY, out _, out _);
+    }
+
     public bool TryAdd(CharacterInventoryItem item)
     {
         if (!CanAdd(item))
@@ -657,11 +680,18 @@ public sealed class InventoryManager
         // Account for quantity merges already applied in-memory only after loop — occupancy
         // of existing stacks is unchanged; new stack origins need free footprints.
         var nextCoid = firstCoid;
+        var isFirstStack = true;
         while (remaining > 0
                && InventoryGridPlacement.TryFindFirstFree(
                    Width, PageCount, VehicleCargoCapacity.RowsPerPage,
                    occupiedCells, footprintX, footprintY, out var x, out var y))
         {
+            // SS-31: allocate the additional-stack coid only after a free slot is confirmed —
+            // allocating before this point leaks an orphan simple_object placeholder row for
+            // every stack the loop never places.
+            if (!isFirstStack)
+                nextCoid = allocateAdditionalCoid?.Invoke() ?? 0;
+            isFirstStack = false;
             if (nextCoid <= 0 || !usedCoids.Add(nextCoid))
                 break;
 
@@ -670,7 +700,15 @@ public sealed class InventoryManager
             if (!create.WasSuccessful)
             {
                 if (updates.Count == 0 && plannedAdds.Count == 0)
+                {
+                    // SS-31: firstCoid was reserved (placeholder simple_object row) but never
+                    // consumed into an item — release it instead of orphaning it. Best-effort
+                    // only: a persistence failure here (e.g. DB unreachable) must not mask the
+                    // real item-creation error being returned to the caller.
+                    if (nextCoid == firstCoid)
+                        TryReleaseUnusedPlaceholder(firstCoid);
                     return new InventoryCommandResult($"Cannot add CBID {entry.Cbid}: {create.Error}", remainingQuantity: quantity);
+                }
                 break;
             }
 
@@ -682,8 +720,16 @@ public sealed class InventoryManager
             foreach (var cell in InventoryGridPlacement.EnumerateCells(x, y, footprintX, footprintY))
                 occupiedCells.Add((cell.X, cell.Y));
             remaining -= stackQuantity;
-            if (remaining > 0)
-                nextCoid = allocateAdditionalCoid?.Invoke() ?? 0;
+        }
+
+        if (plannedAdds.Count == 0)
+        {
+            // SS-31: firstCoid was reserved (placeholder simple_object row) up front by the
+            // caller, but the placement loop above never placed it as an item — either the
+            // merge pass fully absorbed the requested quantity, or the grid had no free slot
+            // left after merging. Release the placeholder instead of orphaning it. Best-effort
+            // only: a persistence failure here must not strand an otherwise-successful merge.
+            TryReleaseUnusedPlaceholder(firstCoid);
         }
 
         var packets = new List<BasePacket>();
@@ -1540,7 +1586,34 @@ public sealed class InventoryManager
             PersistCargoUpsert(character.ObjectId.Coid, swappedCargoItem);
         }
 
-        PersistEquip(vehicle, equipObject);
+        if (!TryPersistEquip(character.ObjectId.Coid, vehicle, equipObject))
+        {
+            // SS-31: roll back the equip — mirrors the cargo-full rollback above — so a
+            // persist throw never leaves the item stranded (deleted from cargo, equipped
+            // only in memory, nothing saved).
+            if (swappedCargoItem != null)
+            {
+                _items.Remove(swappedCargoItem);
+                PersistCargoDelete(character.ObjectId.Coid, swappedCargoItem.Coid);
+            }
+
+            if (previousItem != null)
+                vehicle.TryEquipItem(slot, previousItem, out _);
+            else
+                vehicle.TryUnequipItem(equipObject.ObjectId.Coid, out _, out _);
+
+            if (cargoItem != null)
+            {
+                _items.Add(cargoItem);
+                PersistCargoUpsert(character.ObjectId.Coid, cargoItem);
+            }
+            if (pending.HasValue)
+                _pendingEquippedItemDrags[packet.ItemCoid] = pending.Value;
+
+            return InventoryOperationResult.SinglePacket(
+                CreateDropFailure(packet),
+                $"HandleInventoryDropPacket: (SS-31) Equip persist failed for CBID {cbid} into slot {slot}; rolled back");
+        }
 
         // Always refresh cargo: item left cargo, and a swap may have added the previous hardpoint item.
         var packets = BuildHardpointEquipPackets(
@@ -2255,7 +2328,8 @@ public sealed class InventoryManager
         }
     }
 
-    private string BuildCargoFullMessage()
+    /// <summary>Same "cargo full" text AddItemInternal returns when a claim accepts zero units.</summary>
+    public string BuildCargoFullMessage()
     {
         return $"Cargo inventory is full ({GetOccupiedSlotCount()}/{SlotCount} slots used, {_items.Count} item(s) loaded). Try /cargoinfo or /clearcargo.";
     }
@@ -2275,12 +2349,37 @@ public sealed class InventoryManager
         return $"Cannot add item to cargo slot {x},{y}. {DescribeCargoStatus()}";
     }
 
-    private void PersistEquip(Vehicle vehicle, SimpleObject equippedItem)
+    // SS-31: throw-safe wrapper around the equip persistence calls. A guard throw here
+    // (e.g. a coid collision inside EnsureSimpleObject) must not strand the item after
+    // the caller has already deleted its cargo row — the caller rolls back on false.
+    // SS-31: releasing an unused placeholder is best-effort cleanup, not a correctness
+    // requirement — the row is inert (Type=0, CBID=0) until claimed, so a failure here (e.g.
+    // the DB is unreachable) must never propagate and mask/replace the real result of the
+    // add-item attempt that triggered the release.
+    private void TryReleaseUnusedPlaceholder(long coid)
     {
-        if (vehicle == null)
+        if (_persistence == null)
             return;
 
-        GameLog.Audit(
+        try
+        {
+            _persistence.ReleaseUnusedPlaceholder(coid);
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteException(LogType.Error, "ReleaseUnusedPlaceholder", ex);
+        }
+    }
+
+    private bool TryPersistEquip(long characterCoid, Vehicle vehicle, SimpleObject equippedItem)
+    {
+        if (vehicle == null)
+            return true;
+
+        // SS-31: audit only after the equip is actually committed. Emitting this before the
+        // persist attempt meant a rolled-back equip (guard throw inside EnsureSimpleObject,
+        // caller unwinds) still logged ItemEquipped even though the mutation never stuck.
+        void AuditEquipped() => GameLog.Audit(
             "ItemEquipped",
             ("Container", "Hardpoint"),
             ("VehicleCoid", vehicle.ObjectId.Coid),
@@ -2288,12 +2387,26 @@ public sealed class InventoryManager
             ("ItemCbid", equippedItem?.CBID));
 
         if (_persistence == null)
-            return;
+        {
+            AuditEquipped();
+            return true;
+        }
 
-        if (equippedItem != null)
-            _persistence.EnsureSimpleObject(equippedItem.ObjectId.Coid, (byte)equippedItem.Type, equippedItem.CBID);
+        try
+        {
+            if (equippedItem != null)
+                _persistence.EnsureSimpleObject(equippedItem.ObjectId.Coid, (byte)equippedItem.Type, equippedItem.CBID);
 
-        _persistence.SaveVehicleEquipment(vehicle.ObjectId.Coid, vehicle.CreateEquipmentSnapshot());
+            _persistence.SaveVehicleEquipment(vehicle.ObjectId.Coid, vehicle.CreateEquipmentSnapshot());
+            AuditEquipped();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AuditPersistFailure("PersistEquip", characterCoid, equippedItem?.ObjectId.Coid ?? 0);
+            Logger.WriteException(LogType.Error, "PersistEquip", ex);
+            return false;
+        }
     }
 
     private void PersistUnequip(Vehicle vehicle)

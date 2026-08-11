@@ -55,6 +55,20 @@ public class MissionChatCommandContractTests
 
     [TestMethod]
     [TestCategory("MissionCritical")]
+    public void AddMission_Alias_GrantsSameAsGiveMission()
+    {
+        var o0 = _fx.CreateSimpleObjective(ObjectiveId, 0, MissionId);
+        _fx.SeedMission(MissionId, 0, o0);
+        var player = _fx.CreatePlayer();
+
+        var result = ChatCommandService.Instance.Execute(player.Character, $"/addmission {MissionId}");
+        Assert.IsTrue(result.Handled);
+        StringAssert.Contains(result.Message, "Granted");
+        MissionInvariantAssertions.AssertActiveMission(player.Character, MissionId, 0);
+    }
+
+    [TestMethod]
+    [TestCategory("MissionCritical")]
     public void CompleteMission_Active_CompletesAndPersists()
     {
         var o0 = _fx.CreateSimpleObjective(ObjectiveId, 0, MissionId);

@@ -738,6 +738,84 @@ public class AssetManager : Singleton<AssetManager>
         return null;
     }
 
+    // SS-43: reverse index chassis CBID → the tVehicleTemplate row that supplies its loadout.
+    // SS-48: only UNAMBIGUOUS chassis are indexed. 114 of 407 shipped chassis carry several
+    // template variants and 112 of those differ materially (chassis 2818: a 465-HP mob and a
+    // 4000-HP boss with different drivers; chassis 4584 spans 153..7500 HP). The driver decides
+    // the owner-chain faction and BaseHp overwrites chassis HP, so guessing a variant can flip an
+    // NPC's hostility or nerf a boss 49x. Ambiguous chassis keep the legacy raw path.
+    private Dictionary<int, VehicleTemplate> _vehicleTemplateByVehicleCbid;
+
+    /// <summary>
+    /// SS-43/SS-48: resolves a <see cref="VehicleTemplate"/> from a raw chassis CBID so raw-CBID
+    /// spawn lists (which carry no template id) can still equip weapons/armor and set BaseHp.
+    /// Returns false when the chassis has no row, or more than one — an ambiguous chassis must
+    /// not be resolved by guesswork.
+    /// </summary>
+    public bool TryGetVehicleTemplateByVehicleCbid(int vehicleCbid, out VehicleTemplate template)
+    {
+        template = null;
+        if (vehicleCbid <= 0)
+            return false;
+
+        var index = _vehicleTemplateByVehicleCbid;
+        if (index == null)
+        {
+            index = BuildVehicleTemplateByCbidIndex();
+
+            // Never cache an index built before the world data loaded: LoadAllData tolerates a
+            // WorldDB failure, and a cached empty index would disable this path for the process.
+            if (WorldDBLoader.VehicleTemplates != null || _testVehicleTemplates != null)
+                Interlocked.CompareExchange(ref _vehicleTemplateByVehicleCbid, index, null);
+        }
+
+        return index.TryGetValue(vehicleCbid, out template);
+    }
+
+    private Dictionary<int, VehicleTemplate> BuildVehicleTemplateByCbidIndex()
+    {
+        var index = new Dictionary<int, VehicleTemplate>();
+        var ambiguous = new HashSet<int>();
+
+        void Consider(IEnumerable<VehicleTemplate> rows)
+        {
+            if (rows == null)
+                return;
+            foreach (var row in rows)
+            {
+                if (row == null || row.VehicleCbid <= 0)
+                    continue;
+
+                if (index.TryGetValue(row.VehicleCbid, out var existing))
+                {
+                    if (existing.Id == row.Id)
+                        continue; // same row seen twice (test set overriding a loaded row)
+
+                    index.Remove(row.VehicleCbid);
+                    ambiguous.Add(row.VehicleCbid);
+                    continue;
+                }
+
+                if (!ambiguous.Contains(row.VehicleCbid))
+                    index[row.VehicleCbid] = row;
+            }
+        }
+
+        Consider(WorldDBLoader.VehicleTemplates?.Values);
+        Consider(_testVehicleTemplates?.Values);
+
+        if (ambiguous.Count > 0)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "VehicleTemplate reverse index (SS-48): {0} chassis have multiple template variants and " +
+                "will not be auto-resolved for raw-CBID spawns; {1} chassis resolved unambiguously",
+                ambiguous.Count,
+                index.Count);
+        }
+
+        return index;
+    }
+
     public CreatureAiProfile GetCreatureAiProfile(int aiId)
     {
         if (_testCreatureAiProfiles != null && _testCreatureAiProfiles.TryGetValue(aiId, out var testProfile))
@@ -758,7 +836,14 @@ public class AssetManager : Singleton<AssetManager>
             return;
         _testVehicleTemplates ??= new Dictionary<int, VehicleTemplate>();
         foreach (var template in templates)
+        {
+            if (template == null)
+                continue; // SS-48: a null row must not NRE the setter
+
             _testVehicleTemplates[template.Id] = template;
+        }
+
+        _vehicleTemplateByVehicleCbid = null; // SS-43: rebuild the reverse index on next use
     }
 
     internal void SetTestCreatureAiProfiles(IEnumerable<CreatureAiProfile> profiles)
@@ -805,6 +890,7 @@ public class AssetManager : Singleton<AssetManager>
     internal void ClearTestNpcData()
     {
         _testVehicleTemplates = null;
+        _vehicleTemplateByVehicleCbid = null; // SS-43
         _testCreatureAiProfiles = null;
         _testLootTables = null;
         _testLootWeights = null;

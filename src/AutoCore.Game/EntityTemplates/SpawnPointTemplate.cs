@@ -124,7 +124,9 @@ public class SpawnPointTemplate : GraphicsObjectTemplate
     public class SpawnList
     {
         public bool IsTemplate { get; set; }
-        public byte LevelOffset;
+
+        /// <summary>SS-40: signed fam byte — retail authors negative offsets (0xFF = −1).</summary>
+        public sbyte LevelOffset;
         public byte LowerNumberOfSpawns;
         public int SpawnType;
         public byte UpperNumberOfSpawns;
@@ -140,7 +142,7 @@ public class SpawnPointTemplate : GraphicsObjectTemplate
             reader.BaseStream.Position += 2;
 
             spawnList.SpawnType = reader.ReadInt32();
-            spawnList.LevelOffset = reader.ReadByte();
+            spawnList.LevelOffset = unchecked((sbyte)reader.ReadByte()); // SS-40: signed on the wire
             spawnList.IsTemplate = reader.ReadBoolean();
 
             reader.BaseStream.Position += 2;

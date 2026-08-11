@@ -195,6 +195,12 @@ public partial class TNLConnection
 
         CurrentCharacter.SetOwningConnection(this);
         CurrentCharacter.GMLevel = Account.Level;
+
+        // SS-51: login lands the character on its map here, but the create stream only goes out
+        // in Stage3 (SendLocalPlayerCreatePackets). Close the world-entry gate so EnterMap's
+        // mission-phase replay is deferred instead of firing at a client that has nothing yet.
+        CurrentCharacter.BeginWorldEntry();
+
         CurrentCharacter.SetMap(map);
         CurrentCharacter.CurrentVehicle.SetMap(map);
 
@@ -430,7 +436,6 @@ public partial class TNLConnection
         character.WriteToPacket(charPacket);
         character.CurrentVehicle.WriteToPacket(vehiclePacket);
 
-        InventoryCoidCounter.SyncFromCargo(character);
         SendInventoryLoginObjectPackets(character);
         SendGamePacket(vehiclePacket);
         SendGamePacket(charPacket);
@@ -456,6 +461,10 @@ public partial class TNLConnection
 
         // Always push Level/XP/currency/points after create (client XP starts at 0).
         xpSvc.SendLoginProgressToClient(character);
+
+        // SS-51: the client now has its own objects. Open the world-entry gate and flush the
+        // single coalesced mission re-eval that was deferred during entry.
+        character.CompleteWorldEntry();
     }
 
     private void SendInventoryLoginObjectPackets(Character character)
@@ -818,6 +827,14 @@ public partial class TNLConnection
         var cbid = simpleObject.CBID;
         var type = simpleObject.Type;
         var displayName = simpleObject.CloneBaseObject?.CloneBaseSpecific.UniqueName ?? $"CBID {cbid}";
+
+        if (!inventory.CanAcceptAnyOfCbid(cbid))
+        {
+            Logger.WriteLog(LogType.Debug,
+                $"HandleItemPickupPacket: claim failed for world coid={worldObjectId.Coid}: no free slot or mergeable stack (SS-31 leak guard)");
+            return;
+        }
+
         var inventoryCoid = runtime.AllocateItemCoid();
 
         var claim = inventory.PickupWorldItem(

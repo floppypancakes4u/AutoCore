@@ -235,6 +235,17 @@ public static class MissionCargoService
             if (missing <= 0)
                 continue;
 
+            // SS-31 leak guard: confirm the claim can actually be placed before allocating a
+            // persistent coid, or a failed claim leaks an orphan simple_object placeholder row.
+            if (!character.Inventory.CanAcceptAnyOfCbid(cbid))
+            {
+                Logger.WriteLog(LogType.Error,
+                    "MissionCargoService: no free slot or mergeable stack for mission CBID {0} char={1} (SS-31 leak guard)",
+                    cbid,
+                    character.ObjectId.Coid);
+                continue;
+            }
+
             var coid = allocateCoid != null
                 ? allocateCoid()
                 : AllocateInventoryCoid(character);
@@ -406,13 +417,10 @@ public static class MissionCargoService
 
     private static long AllocateInventoryCoid(Character character)
     {
-        if (character.Map != null)
-            return character.Map.LocalCoidCounter++;
-
-        // Offline / unit tests without a map: use a high ephemeral range.
-        return character.ObjectId.Coid > 0
-            ? character.ObjectId.Coid + 1_000_000 + character.Inventory.Items.Count + 1
-            : Environment.TickCount64 & 0x7FFFFFFF;
+        // SS-31: mission cargo is persisted into simple_object like any other item.
+        // Never mint from Map.LocalCoidCounter — that counter is for local map props and
+        // leapfrogs the DB sequence (Donuts/18950 was clobbered this way on pickup).
+        return InventoryRuntime.AllocatePersistentCoid();
     }
 
     private static CloneBaseObjectType ResolveItemType(int cbid)

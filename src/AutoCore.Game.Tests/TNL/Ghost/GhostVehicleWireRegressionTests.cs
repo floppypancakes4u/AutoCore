@@ -47,7 +47,7 @@ public class GhostVehicleWireRegressionTests
         GhostVehicle.EnableMinimalForeignPathBlock = false;
         GhostVehicle.EnableMinimalForeignTemplateSpawnBlock = false;
         GhostVehicle.EnableMinimalForeignOwnerBlock = false;
-        GhostVehicle.EnableMinimalForeignHealthBlock = false;
+        GhostVehicle.EnableMinimalForeignHealthBlock = false; // compiled default (master)
         GhostVehicle.HealthResendWindowMs = GhostVehicle.DefaultHealthResendWindowMs;
         GhostVehicle.EnableInitialHardpointPack = false;
         GhostVehicle.EnableDeferredForeignPose = false;
@@ -778,6 +778,7 @@ public class GhostVehicleWireRegressionTests
         vehicle.SetOwner(driver);
 
         GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = false; // this test pins the fully-stripped profile
         WireDiag.Enabled = true;
         var stream = PackInitial(vehicle, ulong.MaxValue);
 
@@ -803,6 +804,7 @@ public class GhostVehicleWireRegressionTests
         vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_073, true);
 
         GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = false; // this test pins the fully-stripped profile
         WireDiag.Enabled = true;
         var stream = PackUpdateNonInitial(vehicle, ulong.MaxValue);
 
@@ -991,6 +993,64 @@ public class GhostVehicleWireRegressionTests
         }
     }
 
+    /// <summary>
+    /// When minimal foreign profile is on AND health is explicitly admitted, health bits pack.
+    /// Health is opt-in (compiled default false) — enabling it only via a valid levers key.
+    /// </summary>
+    [TestMethod]
+    public void PackDelta_ForeignMinimal_WithHealthLeverOn_PacksHealthBits()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_186);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_186, true);
+
+        AutoCore.Game.Diagnostics.WireIsolationLevers.ResetToDefaults();
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = true; // explicit opt-in
+        var stream = PackUpdateNonInitial(vehicle, GhostObject.HealthMask | GhostObject.HealthMaxMask);
+
+        Assert.IsFalse(stream.ReadFlag()); // Skills
+        for (var i = 0; i < 7; ++i)
+            Assert.IsFalse(stream.ReadFlag(), $"equipment lead flag {i} must stay false");
+        Assert.IsFalse(stream.ReadFlag()); // GM
+        Assert.IsFalse(stream.ReadFlag()); // clan
+        Assert.IsFalse(stream.ReadFlag()); // pet
+        Assert.IsFalse(stream.ReadFlag()); // murderer
+        Assert.IsTrue(stream.ReadFlag(),
+            "health must pack when minimal foreign profile admits HealthMask");
+        Assert.AreEqual((uint)vehicle.GetCurrentHP(), stream.ReadInt(18));
+    }
+
+    /// <summary>
+    /// SS-50: the pinned foreign-INITIAL layout tests all opt the health lever off, so no test
+    /// covered the layout production actually ships. This pins the initial pack at compiled
+    /// defaults (health on) so a future default flip cannot pass unnoticed.
+    /// </summary>
+    [TestMethod]
+    public void PackInitial_ForeignMinimal_CompiledDefaults_KeepsHealthDirtyForNextDelta()
+    {
+        var vehicle = CreateVehicleWithMap(MapNpcIdentity.CoidBase + 20_187);
+        vehicle.SetCoid(MapNpcIdentity.CoidBase + 20_187, true);
+        vehicle.CreateGhost();
+
+        AutoCore.Game.Diagnostics.WireIsolationLevers.ResetToDefaults();
+        GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = true; // explicit opt-in for this layout pin
+        NetObject.PIsInitialUpdate = true;
+        try
+        {
+            var stream = new BitStream(new byte[8192], 8192);
+            var ret = vehicle.Ghost.PackUpdate(null, ulong.MaxValue, stream);
+            Assert.AreEqual(GhostObject.HealthMask | GhostObject.HealthMaxMask,
+                ret & (GhostObject.HealthMask | GhostObject.HealthMaxMask),
+                "under production defaults a foreign initial must pack health and keep it dirty " +
+                "for the post-materialize re-send");
+        }
+        finally
+        {
+            NetObject.PIsInitialUpdate = false;
+        }
+    }
+
     [TestMethod]
     public void PackDelta_ForeignMinimal_HealthLever_AdmitsHealthBits()
     {
@@ -1050,6 +1110,7 @@ public class GhostVehicleWireRegressionTests
         vehicle.CreateGhost();
 
         GhostVehicle.EnableMinimalForeignInitialProfile = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = false; // lever-off strip is the behavior under test
         WireDiag.Enabled = true;
         NetObject.PIsInitialUpdate = false;
         var stream = new BitStream(new byte[8192], 8192);
@@ -1281,6 +1342,7 @@ public class GhostVehicleWireRegressionTests
 
         GhostVehicle.EnableMinimalForeignInitialProfile = true;
         GhostVehicle.EnableMinimalForeignOwnerBlock = true;
+        GhostVehicle.EnableMinimalForeignHealthBlock = false; // pinned wire shape predates SS-38 health bits
         GhostVehicle.EnableDeferredForeignPose = true;
         WireDiag.Enabled = true;
 

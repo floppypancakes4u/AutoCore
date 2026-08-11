@@ -894,6 +894,7 @@ public class SkillsHpPowerRegressionTests
     {
         var character = new Character();
         character.SetCoid(coid, true);
+        character.Faction = 0; // SS-36: the gate computes the caster's effective faction (Human)
         var dbData = new CharacterData { Coid = coid, Name = "Regress", Level = 1, SkillPoints = 0 };
         typeof(Character)
             .GetProperty("DBData", BindingFlags.Instance | BindingFlags.NonPublic)!
@@ -934,6 +935,7 @@ public class SkillsHpPowerRegressionTests
         var connection = new TNLConnection();
         var character = new Character();
         character.SetCoid(characterCoid, true);
+        character.Faction = 0; // SS-36: the gate computes the caster's effective faction (Human)
         character.SetOwningConnection(connection);
         connection.CurrentCharacter = character;
         var vehicle = new Vehicle();

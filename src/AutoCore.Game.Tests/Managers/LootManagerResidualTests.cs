@@ -355,6 +355,43 @@ public class LootManagerResidualTests
     }
 
     [TestMethod]
+    public void AutoLootItem_CargoFull_DoesNotAllocatePlaceholderCoid()
+    {
+        // SS-31 leak guard: cargo is completely full, so AutoLootItem must reject the claim
+        // BEFORE calling runtime.AllocateItemCoid() — allocating first and rejecting after
+        // leaks an orphan simple_object placeholder row for the coid nobody ever uses.
+        const int cbid = 8603;
+        AssetManagerTestHelper.RegisterCloneBase(cbid, CloneBaseObjectType.Item); // 1x1, non-stackable
+
+        var map = CreateMap(701);
+        var character = CreateCharacterOnMap(map, 8610);
+        character.Inventory.SetCapacity(1, 1); // exactly one 1x1 slot
+        character.Inventory.TryAdd(new CharacterInventoryItem(
+            99, CloneBaseObjectType.Item, "Filler", 5000, 0, 0, 1)); // fills the only slot
+
+        var saved = InventoryRuntime.AllocatePersistentCoid;
+        try
+        {
+            var allocations = 0;
+            InventoryRuntime.AllocatePersistentCoid = () =>
+            {
+                allocations++;
+                return 999_500L + allocations;
+            };
+
+            var result = LootManager.Instance.AutoLootItem(cbid, character);
+
+            Assert.IsFalse(result, "full cargo must reject the auto-loot claim");
+            Assert.AreEqual(0, allocations,
+                "no persistent coid may be allocated for a claim that cannot fit anywhere (SS-31 leak guard)");
+        }
+        finally
+        {
+            InventoryRuntime.AllocatePersistentCoid = saved;
+        }
+    }
+
+    [TestMethod]
     public void TrySpawnLootItem_NullMap_False()
     {
         AssetManagerTestHelper.RegisterCloneBase(8701, CloneBaseObjectType.Item);

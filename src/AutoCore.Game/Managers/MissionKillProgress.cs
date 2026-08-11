@@ -13,6 +13,7 @@ using AutoCore.Utils;
 /// </summary>
 public static class MissionKillProgress
 {
+    private const bool DEBUG_MSG = false;
     /// <summary>
     /// Credit the murderer's character for kill requirements on active quests.
     /// Called from <see cref="ClonedObjectBase.OnDeath"/> after Murderer is set.
@@ -27,11 +28,14 @@ public static class MissionKillProgress
         {
             // Without this, an unattributable kill is indistinguishable from one that matched no
             // objective — both leave no trace at all while the victim still dies and drops loot.
-            Logger.WriteLog(LogType.Debug,
-                "Kill progress: no credited killer for victim coid={0} cbid={1} murderer={2} — kill not counted",
-                victim.ObjectId?.Coid ?? -1,
-                victim.CBID,
-                victim.Murderer?.Coid ?? -1);
+            if (DEBUG_MSG)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "Kill progress: no credited killer for victim coid={0} cbid={1} murderer={2} — kill not counted",
+                    victim.ObjectId?.Coid ?? -1,
+                    victim.CBID,
+                    victim.Murderer?.Coid ?? -1);
+            }
             return;
         }
 
@@ -76,16 +80,19 @@ public static class MissionKillProgress
             if (quest.ObjectiveMax[seq] > needed)
                 needed = quest.ObjectiveMax[seq];
 
-            Logger.WriteLog(LogType.Debug,
-                "Kill progress: mission={0} seq={1} objective={2} progress={3}/{4} victim coid={5} cbid={6} templateId={7}",
-                quest.MissionId,
-                seq,
-                objective.ObjectiveId,
-                quest.ObjectiveProgress[seq],
-                needed,
-                victimCoid,
-                victimCbid,
-                victimTemplateId);
+            if (DEBUG_MSG)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "Kill progress: mission={0} seq={1} objective={2} progress={3}/{4} victim coid={5} cbid={6} templateId={7}",
+                    quest.MissionId,
+                    seq,
+                    objective.ObjectiveId,
+                    quest.ObjectiveProgress[seq],
+                    needed,
+                    victimCoid,
+                    victimCbid,
+                    victimTemplateId);
+            }
 
             // Always publish absolute kill progress to the client (0x2071).
             var statePacket = ObjectiveStateBuilder.Build(
@@ -118,12 +125,15 @@ public static class MissionKillProgress
             // mission giver (FUN_0052b420). Completing requires dialog with mission.NPC.
             if (IsKillOnlyObjective(objective))
             {
-                Logger.WriteLog(LogType.Debug,
-                    "Kill progress: mission={0} objective={1} ready for giver turn-in ({2}/{3})",
-                    quest.MissionId,
-                    objective.ObjectiveId,
-                    quest.ObjectiveProgress[seq],
-                    needed);
+                if (DEBUG_MSG)
+                {
+                    Logger.WriteLog(LogType.Debug,
+                        "Kill progress: mission={0} objective={1} ready for giver turn-in ({2}/{3})",
+                        quest.MissionId,
+                        objective.ObjectiveId,
+                        quest.ObjectiveProgress[seq],
+                        needed);
+                }
                 return;
             }
 

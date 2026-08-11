@@ -25,6 +25,14 @@ public interface IInventoryPersistence
 
     void EnsureSimpleObject(long itemCoid, byte type, int cbid, int faction = 0, int teamFaction = 0);
 
+    /// <summary>
+    /// SS-31: release a caller-preallocated simple_object placeholder row (Type == 0, CBID == 0)
+    /// that ended up unused — e.g. a merge-only accept absorbed the whole add and the placeholder
+    /// coid was never placed. No-op if the row was already filled in (real identity) or does not
+    /// exist. Must never delete a row that is not a placeholder.
+    /// </summary>
+    void ReleaseUnusedPlaceholder(long coid);
+
     void SaveVehicleEquipment(long vehicleCoid, VehicleEquipmentSnapshot snapshot);
 
     void SaveCharacterCargoCapacity(long characterCoid, int width, int pageCount);

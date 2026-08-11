@@ -80,7 +80,7 @@ public class CreatureMovementPoseTests
         var target = CreateTarget(TargetCoidA);
         character.SetTargetObject(target);
         Assert.IsNotNull(character.Target);
-        character.Ghost.ClearMaskBits(ulong.MaxValue);
+        character.Ghost.ClearDirtyMaskBitsForTests();
 
         character.HandleMovement(MakeMove(character.ObjectId, character.Position, Quaternion.Default, targetCoid: -1));
 
@@ -95,7 +95,7 @@ public class CreatureMovementPoseTests
         var targetA = CreateTarget(TargetCoidA);
         var targetB = CreateTarget(TargetCoidB);
         character.SetTargetObject(targetA);
-        character.Ghost.ClearMaskBits(ulong.MaxValue);
+        character.Ghost.ClearDirtyMaskBitsForTests();
 
         character.HandleMovement(MakeMove(
             character.ObjectId,
@@ -114,7 +114,7 @@ public class CreatureMovementPoseTests
         var character = CreateCharacterWithGhost();
         var target = CreateTarget(TargetCoidA);
         Assert.IsNull(character.Target);
-        character.Ghost.ClearMaskBits(ulong.MaxValue);
+        character.Ghost.ClearDirtyMaskBitsForTests();
 
         character.HandleMovement(MakeMove(
             character.ObjectId,
@@ -134,7 +134,7 @@ public class CreatureMovementPoseTests
         var target = CreateTarget(TargetCoidA);
         character.SetTargetObject(target);
         // Clear dirty bits after SetTargetObject so we only observe HandleMovement.
-        character.Ghost.ClearMaskBits(ulong.MaxValue);
+        character.Ghost.ClearDirtyMaskBitsForTests();
 
         character.HandleMovement(MakeMove(
             character.ObjectId,
@@ -209,7 +209,7 @@ public class CreatureMovementPoseTests
         character.SetCoid(CharCoid, true);
         character.Position = new Vector3(0f, 0f, 0f);
         character.CreateGhost();
-        character.Ghost.ClearMaskBits(ulong.MaxValue);
+        character.Ghost.ClearDirtyMaskBitsForTests();
         return character;
     }
 

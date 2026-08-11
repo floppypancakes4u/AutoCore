@@ -13,6 +13,7 @@ using AutoCore.Utils;
 
 public class SpawnPoint : ClonedObjectBase
 {
+    private const bool DEBUG_MSG = false;
     // NOTE: Let's not duplicate this data, if we don't need to create new spawnpoints manually!
     public SpawnPointTemplate Template { get; }
 
@@ -179,7 +180,13 @@ public class SpawnPoint : ClonedObjectBase
 
         if (cloneBase.Type == CloneBaseObjectType.Vehicle)
         {
-            var vehicle = SpawnVehicle(cloneBase.CloneBaseSpecific.CloneBaseId, spawnList);
+            // SS-43: a raw-CBID spawn list carries no template, so SpawnVehicle equips no weapons
+            // and the NPC chases but never fires. When a tVehicleTemplate row exists for this
+            // chassis, delegate to the template path (weapons, BaseHp, SpawnOwnerCoid, driver).
+            var chassisCbid = cloneBase.CloneBaseSpecific.CloneBaseId;
+            var vehicle = AssetManager.Instance.TryGetVehicleTemplateByVehicleCbid(chassisCbid, out var resolved)
+                ? SpawnTemplateVehicle(resolved, spawnList)
+                : SpawnVehicle(chassisCbid, spawnList);
             if (vehicle == null)
                 return false;
 
@@ -402,12 +409,32 @@ public class SpawnPoint : ClonedObjectBase
     }
 
     /// <summary>
-    /// Clamps spawn level into the valid byte range (1..255).
+    /// Retail max NPC level. SS-48: this is the <c>tCreatureExperienceLevel</c> ceiling (125), not
+    /// the 80 originally used — authored content genuinely reaches level 86
+    /// (<c>tVehicleTemplate.sinBaseLevel</c>) and <see cref="Experience.ExperienceService"/> caps
+    /// players at 120, so a cap of 80 silently nerfed real bosses.
+    /// </summary>
+    internal const int RetailMaxNpcLevel = 125;
+
+    /// <summary>
+    /// Clamps spawn level to retail's [1, 125] (SS-40/SS-48). fam <c>LevelOffset</c> is SIGNED —
+    /// reading it unsigned turned retail "−1" into +255: forced 0.95 hit chance vs players,
+    /// a flat DamageBonusPerLevel×255 on every shot, and 3.75× crits. Both ends of the clamp warn
+    /// once per authored pair, because a silently floored level is as wrong as a ceilinged one.
     /// </summary>
     internal static byte CalculateSpawnLevel(int baseLevel, int levelOffset)
     {
         var calculatedLevel = baseLevel + levelOffset;
-        return (byte)Math.Max(1, Math.Min(255, calculatedLevel));
+        var clamped = Math.Clamp(calculatedLevel, 1, RetailMaxNpcLevel);
+        if (calculatedLevel != clamped
+            && IncompleteHandlerLog.TryMarkOnce($"SpawnLevelClamp:{baseLevel}:{levelOffset}"))
+        {
+            Logger.WriteLog(LogType.Warning,
+                "SpawnLevel clamp (SS-40): baseLevel={0} offset={1} -> {2} (valid range 1..{3}) — check authored spawn data",
+                baseLevel, levelOffset, clamped, RetailMaxNpcLevel);
+        }
+
+        return (byte)clamped;
     }
 
     /// <summary>
@@ -548,6 +575,11 @@ public class SpawnPoint : ClonedObjectBase
         // Static/interactive NPCs (IsNPC != 0) don't patrol or run combat AI; combat creatures do.
         if (cloneBaseCreature != null && cloneBaseCreature.CreatureSpecific.IsNPC == 0)
         {
+            // SS-42: clonebase may flag combat creatures invincible (Flags bit 12) and the
+            // client MakeNotInvincible reaction is not always authored — clear here, mirroring
+            // both vehicle spawn paths. Interactive NPCs (IsNPC != 0, mission givers) keep the
+            // authored protection; reaction 7 can still clear them.
+            creature.SetInvincible(false);
             ApplySpawnPath(creature, Template, ResolveTemplatePath());
             creature.NpcAi = BuildNpcAi(cloneBaseCreature.CreatureSpecific.AIBehavior, creature.Position);
         }
@@ -567,6 +599,9 @@ public class SpawnPoint : ClonedObjectBase
         vehicle.LoadCloneBase(cbid);
         vehicle.SetupCBFields();
         ApplySpawnFactionOverride(vehicle);
+        // SS-43: own the vehicle so DespawnOwnedEntities can clean it up (the template path sets
+        // this too). This branch only runs when no tVehicleTemplate row exists for the chassis.
+        vehicle.SpawnOwnerCoid = ObjectId.Coid;
         vehicle.Layer = Layer;
         // Pure terrain when heightfield present (CreateTemplateVehicle cast).
         vehicle.Position = NpcTicker.SnapToTerrain(Map, Position);
@@ -575,10 +610,18 @@ public class SpawnPoint : ClonedObjectBase
         vehicle.SetInvincible(false);
 
         // Raw-CBID spawn lists have no VehicleTemplate row, so the driver can only come from
-        // the vehicle clonebase's own VehicleSpecific.DefaultDriver.
+        // the vehicle clonebase's own VehicleSpecific.DefaultDriver, and there are no weapons to
+        // equip — SS-43 delegates to the template path when a matching row exists, so a raw
+        // spawn reaching here is genuinely weaponless.
         var cloneBaseVehicle = vehicle.CloneBaseObject as CloneBaseVehicle;
         EquipDefaultWheelSet(vehicle, cloneBaseVehicle);
         var defaultDriverCbid = cloneBaseVehicle?.VehicleSpecific.DefaultDriver ?? 0;
+        if (defaultDriverCbid <= 0)
+        {
+            Logger.WriteLog(LogType.Warning,
+                "SpawnPoint {0}: raw-CBID vehicle {1} has no template row and no default driver — it will not attack",
+                Template.COID, cbid);
+        }
         var driver = BuildDriver(0, defaultDriverCbid, spawnList.LevelOffset);
         if (driver != null)
         {
@@ -687,26 +730,51 @@ public class SpawnPoint : ClonedObjectBase
         if (entity == null || Template == null || !Template.FactionDirty)
             return;
 
-        entity.Faction = ResolveFactionDirtyOverride();
+        var faction = ResolveFactionDirtyOverride();
+        if (faction == null)
+        {
+            // SS-41: unauthored 0 — keep the clonebase faction instead of stamping Human.
+            if (DEBUG_MSG)
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "FactionDirty skip (SS-41): spawn coid={0} has no authored faction; keeping clonebase faction {1}",
+                    ObjectId.Coid,
+                    entity.Faction);
+            }
+            return;
+        }
+
+        entity.Faction = faction.Value;
     }
 
     /// <summary>
-    /// Resolves FactionDirty override: live spawnpoint Faction, else template Faction,
-    /// else fam <see cref="SpawnPointTemplate.OriginalFaction"/>.
+    /// Resolves FactionDirty override: live spawnpoint Faction, else template Faction, else fam
+    /// <see cref="SpawnPointTemplate.OriginalFaction"/>. SS-41: null (no override) when the
+    /// resolution bottoms out at unauthored 0 — 0 is both the C# default and retail Human, never
+    /// a sensible spawn-pipeline NPC faction, and stamping it made the NPC same-faction with
+    /// every Human player: unhittable through the SS-36 gate and ignored by aggro. The clonebase
+    /// faction from <see cref="SimpleObject.SetupCBFields"/> stays in that case.
     /// </summary>
-    internal int ResolveFactionDirtyOverride()
+    internal int? ResolveFactionDirtyOverride()
     {
         if (Template == null)
             return Faction;
 
-        // Neutral (-100) and positive mission factions are valid; -1 is ClonedObjectBase unset.
-        if (Faction != -1 && (Faction != 0 || Template.OriginalFaction == 0))
+        // Neutral (-100) and positive mission factions are valid; -1 is ClonedObjectBase unset,
+        // and 0 only counts when the fam actually authored it somewhere down the chain.
+        if (Faction != -1 && Faction != 0)
             return Faction;
 
-        if (Template.Faction != -1 && (Template.Faction != 0 || Template.OriginalFaction == 0))
+        if (Template.Faction != -1 && Template.Faction != 0)
             return Template.Faction;
 
-        return Template.OriginalFaction;
+        // SS-48: -1 is the ClonedObjectBase "unset" sentinel, exactly like the two branches above.
+        // Stamping it makes the NPC a negative-faction attacker, which the gate fails closed —
+        // hittable but unable to damage anything (the same defect class SS-41 fixed for 0).
+        if (Template.OriginalFaction != 0 && Template.OriginalFaction != -1)
+            return Template.OriginalFaction;
+
+        return null;
     }
 
     /// <summary>Copies the driver's wad.xml AI behavior onto the vehicle it owns, if any.</summary>

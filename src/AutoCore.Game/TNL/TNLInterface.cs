@@ -1,4 +1,5 @@
 ﻿using TNL.Entities;
+using TNL.Network;
 
 namespace AutoCore.Game.TNL;
 
@@ -36,12 +37,22 @@ public class TNLInterface : NetInterface
     }
 
     /// <summary>
-    /// Constructs interface configuration without opening a UDP listen socket (unit tests).
+    /// Test-only interface. Stock TNL.NET has no unbound <see cref="NetInterface"/> ctor, so we
+    /// briefly bind an ephemeral UDP port (<c>base(0)</c>), stop its receive loop, and replace
+    /// <see cref="NetInterface.Socket"/> with a parameterless unbound <see cref="TNLSocket"/>.
+    /// Production servers always use <see cref="TNLInterface(int, bool)"/>.
     /// </summary>
     internal TNLInterface(bool doGhosting, bool skipNetworkBind)
-        : base(unbound: true)
+        : base(0)
     {
-        _ = skipNetworkBind;
+        if (skipNetworkBind)
+        {
+            // Drop the ephemeral listen socket opened by base(0). TNLSocket.Stop only flags the
+            // async receive loop; swapping Socket detaches us from that UdpClient entirely.
+            Socket?.Stop();
+            Socket = new TNLSocket();
+        }
+
         DoGhosting = doGhosting;
         FragmentSize = 220;
         ConnectionId = 0;

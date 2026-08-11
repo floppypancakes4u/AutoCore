@@ -40,6 +40,13 @@ public class TriggerManager : Singleton<TriggerManager>
     private bool _missionReevalPending;
     private bool _variableReevalActive;
 
+    // SS-51: characters whose mission re-eval was deferred because their client was still
+    // loading in. Coalesced to one flush per character by FlushDeferredEntryReeval.
+    private readonly HashSet<long> _entryDeferredReeval = new();
+
+    // SS-51: true only while running that entry flush — collision gates must contain the player.
+    private bool _entryScopedReeval;
+
     /// <summary>
     /// Fires a trigger reaction list once ActivationCount allows.
     /// Shared by collision, mission re-eval, variable watchers, and Activate cascades.
@@ -288,6 +295,9 @@ public class TriggerManager : Singleton<TriggerManager>
             return;
         }
 
+        if (TryDeferForWorldEntry(character, "OnMissionStateChanged"))
+            return;
+
         // Prefer character vehicle/body that has the map for trigger volume checks.
         var reevalActivator = activator;
         if (reevalActivator.Map == null && character != null)
@@ -377,6 +387,72 @@ public class TriggerManager : Singleton<TriggerManager>
         => ReevaluateConditionalTriggers(activator, watchVarId: null);
 
     /// <summary>
+    /// SS-51: true when the character's client has not received its create stream yet (login /
+    /// map transfer), in which case the caller must not fire anything — the work is remembered
+    /// and replayed once by <see cref="FlushDeferredEntryReeval"/>.
+    /// <para>
+    /// Every entry into mission-phase work must consult this, not just
+    /// <see cref="OnMissionStateChanged"/>: <c>SectorMap.ApplyMissionPhaseWorldState</c> also
+    /// runs <c>ReplayMissionWorldSetup</c>, which reaches the same out-of-volume firing through
+    /// <see cref="FireMissionConditionTriggers"/>. Gating only one half still stormed the client
+    /// (live 2026-08-10 16:30: 116 gates fired between the deferral and the flush).
+    /// </para>
+    /// </summary>
+    internal bool TryDeferForWorldEntry(Character character, string source)
+    {
+        if (character == null || character.WorldEntryComplete)
+            return false;
+
+        _entryDeferredReeval.Add(character.ObjectId.Coid);
+        MissionFlowDiag.Log(
+            "{0} DEFER world-entry char={1} map={2}",
+            source,
+            character.ObjectId.Coid,
+            character.Map?.ContinentId ?? -1);
+        return true;
+    }
+
+    /// <summary>
+    /// SS-51: run the single coalesced mission re-eval deferred while the character was entering
+    /// the world. Called by <see cref="Character.CompleteWorldEntry"/> after the create stream.
+    /// The flush is <em>entry-scoped</em>: collision gates must contain the player (see
+    /// <see cref="ReevaluateConditionalTriggers"/>), so entering a map cannot mass-open gates
+    /// across the whole continent.
+    /// </summary>
+    public void FlushDeferredEntryReeval(Character character)
+    {
+        if (character == null)
+            return;
+
+        if (!_entryDeferredReeval.Remove(character.ObjectId.Coid))
+            return;
+
+        var activator = character.CurrentVehicle?.Map != null
+            ? (ClonedObjectBase)character.CurrentVehicle
+            : character;
+        if (activator.Map == null)
+            return;
+
+        MissionFlowDiag.Log(
+            "FlushDeferredEntryReeval char={0} map={1} {2}",
+            character.ObjectId.Coid,
+            activator.Map.ContinentId,
+            MissionFlowDiag.QuestSummary(character));
+
+        var wasEntryFlush = _entryScopedReeval;
+        _entryScopedReeval = true;
+        try
+        {
+            OnMissionStateChanged(activator);
+            character.Map?.ReplayMissionWorldSetup(activator);
+        }
+        finally
+        {
+            _entryScopedReeval = wasEntryFlush;
+        }
+    }
+
+    /// <summary>
     /// After a VariableSet (etc.) writes a Type-0 flag, fire remote triggers watching that variable.
     /// </summary>
     public void OnVariableChanged(ClonedObjectBase activator, int varId)
@@ -437,8 +513,18 @@ public class TriggerManager : Singleton<TriggerManager>
             {
                 if (trigger.Template.DoCollision)
                 {
+                    // SS-51: on world entry a collision gate must actually contain the player.
+                    // Without this, entering a map fires every condition-passing gate on the
+                    // continent (live: map 661 opened 68 of them for a fresh character standing
+                    // at the spawn pad). Out-of-volume opening stays available for genuine
+                    // mid-play state changes below (dialog turn-in gates etc.).
+                    if (_entryScopedReeval)
+                    {
+                        if (activator.Position.DistSq(trigger.Position) > trigger.Scale * trigger.Scale)
+                            continue;
+                    }
                     // Outside-volume mission fire only for gate openers (Create/Delete/Death).
-                    if (!HasWorldMutatingGateReactions(map, trigger))
+                    else if (!HasWorldMutatingGateReactions(map, trigger))
                         continue;
                 }
                 else if (trigger.Scale > 2.0f)
@@ -607,5 +693,7 @@ public class TriggerManager : Singleton<TriggerManager>
         _missionReevalActive = false;
         _missionReevalPending = false;
         _variableReevalActive = false;
+        _entryDeferredReeval.Clear();
+        _entryScopedReeval = false;
     }
 }

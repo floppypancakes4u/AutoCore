@@ -485,6 +485,35 @@ public class ChatManagerDispatchTests
         StringAssert.Contains(broadcast.Message, "no target");
     }
 
+    /// <summary>
+    /// SS-36 pin: /kill runs under DamageContext.Admin, which bypasses the unified hostility
+    /// gate — a same-faction (or any) latched target must still die for a GM.
+    /// </summary>
+    [TestMethod]
+    public void HandleChatPacket_Kill_SameFactionTarget_StillKills_AdminBypass()
+    {
+        var connection = CreateConnection(withCharacter: true, withVehicle: true);
+        var character = connection.CurrentCharacter!;
+        character.Faction = 0;
+        var vehicle = character.CurrentVehicle!;
+
+        var victimOwner = new Character();
+        victimOwner.SetCoid(5003, true);
+        victimOwner.Faction = 0; // same race as the admin — every non-admin route denies this
+        var victim = new Vehicle();
+        victim.SetCoid(5004, true);
+        victim.InitializeHealthForTests(50);
+        victim.SetOwner(victimOwner);
+        victimOwner.SetCurrentVehicleForTests(victim);
+        vehicle.SetTargetObject(victim);
+
+        ChatManager.Instance.HandleChatPacket(connection, ChatReader("/kill"));
+
+        Assert.IsTrue(victim.IsCorpse, "/kill (Admin context) must bypass the hostility gate");
+        var broadcast = _sent.OfType<BroadcastPacket>().Single();
+        StringAssert.Contains(broadcast.Message, "Killed");
+    }
+
     [TestMethod]
     public void HandleChatPacket_EquippedItems_WithEmptyVehicle_ReportsNone()
     {

@@ -230,6 +230,55 @@ public class VendorStoreBuyRegressionTests
     }
 
     [TestMethod]
+    public void TryBuy_CargoFull_RejectsBeforeAllocatingCoid()
+    {
+        // SS-31 leak guard: cargo has no room for the purchased CBID, so the buy must be
+        // rejected (rejectReason="NoInventorySpace") BEFORE any persistent coid is allocated.
+        // Allocating first and rejecting after leaves an orphan simple_object placeholder row,
+        // and (unlike credits, which are already charged after AddItem) there is no cheap way
+        // to notice the leak from the response alone.
+        var (conn, character, map) = CreatePlayer(credits: 50_000);
+        PlaceStore(map, StoreCoid, StockCbidA, StockCbidB);
+        VendorStoreService.NoteOpened(character, StoreCoid, conn);
+        var slotCoid = VendorStoreService.GetStockSessionForTests(character.ObjectId.Coid)
+            .First(kv => kv.Value.CBID == StockCbidA).Key;
+
+        character.Inventory.SetCapacity(1, 1); // exactly one 1x1 slot
+        character.Inventory.TryAdd(new CharacterInventoryItem(
+            99, CloneBaseObjectType.Item, "Filler", 7000, 0, 0, 1)); // fills the only slot
+        _sent.Clear();
+
+        var saved = InventoryRuntime.AllocatePersistentCoid;
+        try
+        {
+            var allocations = 0;
+            InventoryRuntime.AllocatePersistentCoid = () =>
+            {
+                allocations++;
+                return 999_600L + allocations;
+            };
+
+            VendorStoreService.HandleTransaction(conn, new StoreTransactionRequestPacket
+            {
+                Item = new TFID(slotCoid, true),
+                StoreCoid = StoreCoid,
+                IsBuy = true,
+                Quantity = 1,
+            });
+
+            var response = _sent.OfType<StoreTransactionResponsePacket>().Single();
+            Assert.IsFalse(response.WasSuccessful, "full cargo must reject the buy");
+            Assert.AreEqual(50_000L, character.Credits, "credits must not be charged for a rejected buy");
+            Assert.AreEqual(0, allocations,
+                "no persistent coid may be allocated for a buy that cannot fit anywhere (SS-31 leak guard)");
+        }
+        finally
+        {
+            InventoryRuntime.AllocatePersistentCoid = saved;
+        }
+    }
+
+    [TestMethod]
     public void HandleTransaction_Buy_ResponseWire_IsBuyAndLayout()
     {
         var (conn, character, map) = CreatePlayer(credits: 50_000);

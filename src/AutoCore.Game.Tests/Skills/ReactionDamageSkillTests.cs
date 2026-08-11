@@ -125,6 +125,38 @@ public class ReactionDamageSkillTests
         Assert.AreEqual(60, vehicle.GetCurrentHP(), "25% of 200 = 50 restored");
     }
 
+    /// <summary>
+    /// SS-36 pin: pain pads damage the activator itself under DamageContext.Reaction — the one
+    /// context where the unified gate's self-exclusion is waived (and the only thing it waives:
+    /// reactions can never damage a different root).
+    /// </summary>
+    [TestMethod]
+    public void TryCastReaction_SelfDamage_AllowedThroughGate()
+    {
+        AssetManager.Instance.SetTestSkill(new Skill
+        {
+            Id = 2570,
+            Name = "pain pad",
+            Elements = new List<SkillElement>
+            {
+                new()
+                {
+                    ElementType = SkillElementTypes.Heal,
+                    EquationType = 0,
+                    ValueBase = -25f,
+                },
+            }
+        });
+
+        var (_, vehicle, _) = CreatePlayer(characterCoid: 916, vehicleCoid: 917);
+        vehicle.SetMaximumHP(200, triggerGhostUpdate: false);
+        vehicle.SetHPForTests(200);
+
+        Assert.IsTrue(SkillService.TryCastReaction(vehicle, 2570, 1),
+            "authored self-damage reactions must pass the SS-36 gate under Reaction context");
+        Assert.AreEqual(175, vehicle.GetCurrentHP());
+    }
+
     private (Character Character, Vehicle Vehicle, SectorMap Map) CreatePlayer(
         long characterCoid = 910,
         long vehicleCoid = 911)

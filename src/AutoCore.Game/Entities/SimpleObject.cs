@@ -234,6 +234,27 @@ public class SimpleObject : GraphicsObject
         if (DBData == null)
             return false;
 
+        // SS-31 residual: equipment loaders share this path. Never treat a character/vehicle
+        // identity row as inventory gear — that is how a coid collision used to launder a
+        // corrupted row into CreateCharacter/CreateVehicle (client AV 0x0080A62A).
+        if (DBData.Type == (byte)CloneBaseObjectType.Character
+            || DBData.Type == (byte)CloneBaseObjectType.Vehicle)
+        {
+            Logger.WriteLog(LogType.Error,
+                "SimpleObject.LoadFromDB: coid={0} is type={1} (character/vehicle identity); " +
+                "refusing equipment load (SS-31)",
+                coid, DBData.Type);
+            return false;
+        }
+
+        if (DBData.CBID <= 0)
+        {
+            Logger.WriteLog(LogType.Error,
+                "SimpleObject.LoadFromDB: coid={0} cbid={1} — skipping (SS-31 placeholder/corrupt identity)",
+                coid, DBData.CBID);
+            return false;
+        }
+
         LoadCloneBase(DBData.CBID);
 
         SetupCBFields();

@@ -6,6 +6,7 @@ namespace AutoCore.Game.Entities;
 using AutoCore.Database.Char;
 using AutoCore.Database.Char.Models;
 using AutoCore.Game.CloneBases;
+using AutoCore.Game.Constants;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Map;
 using AutoCore.Game.Packets.Sector;
@@ -273,6 +274,36 @@ public partial class Character : Creature
     public CharacterMapPresence MapPresence { get; } = new();
 
     /// <summary>
+    /// SS-51: false while the character is being placed on a map but the client has not yet
+    /// received its CreateCharacter/CreateVehicle stream (login and map transfer).
+    /// <para>
+    /// Mission-state trigger re-evaluation is deferred and coalesced while this is false, then
+    /// flushed once by <see cref="CompleteWorldEntry"/> after the create packets go out. Firing
+    /// reactions at a client that has not materialized its own objects corrupts its object
+    /// bindings (live 2026-08-10: map 661 mass-fired 68 out-of-volume gates ~3s before the create
+    /// stream — incomplete vehicle, wrong position, dead controls).
+    /// </para>
+    /// <para>
+    /// Defaults to true so only paths that explicitly call <see cref="BeginWorldEntry"/> gate
+    /// themselves; code that never announces an entry keeps its previous behavior.
+    /// </para>
+    /// </summary>
+    public bool WorldEntryComplete { get; private set; } = true;
+
+    /// <summary>Close the entry gate: defer mission re-eval until the create stream is sent.</summary>
+    public void BeginWorldEntry() => WorldEntryComplete = false;
+
+    /// <summary>
+    /// Open the entry gate and flush any mission re-eval deferred during entry (SS-51).
+    /// Idempotent — a second call with nothing pending is a no-op.
+    /// </summary>
+    public void CompleteWorldEntry()
+    {
+        WorldEntryComplete = true;
+        Managers.TriggerManager.Instance.FlushDeferredEntryReeval(this);
+    }
+
+    /// <summary>
     /// Returns the logic-variable store for the character's current map, creating it if needed.
     /// </summary>
     public LogicVariableStore EnsureLogicVariables()
@@ -348,9 +379,48 @@ public partial class Character : Creature
         if (DBData == null)
             return false;
 
+        // SS-31 residual: item coid collisions used to overwrite simple_object.Type/CBID for
+        // character rows. Loading the wrong clonebase then shipping CreateCharacter AVs the
+        // retail client at character select (autoassault!0x0080A62A). Fail closed.
+        if (DBData.SimpleObjectBase == null)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Character.LoadFromDB: coid={0} has no simple_object row — skipping (SS-31)",
+                coid);
+            return false;
+        }
+
+        if (DBData.SimpleObjectBase.Type != 0
+            && DBData.SimpleObjectBase.Type != (byte)CloneBaseObjectType.Character)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Character.LoadFromDB: coid={0} simple_object.Type={1} cbid={2} (expected Character={3}) — " +
+                "skipping corrupt identity (SS-31; client would AV at 0x0080A62A)",
+                coid, DBData.SimpleObjectBase.Type, DBData.SimpleObjectBase.CBID,
+                (byte)CloneBaseObjectType.Character);
+            return false;
+        }
+
+        if (DBData.SimpleObjectBase.CBID <= 0)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Character.LoadFromDB: coid={0} cbid={1} — skipping (SS-31 placeholder/corrupt identity)",
+                coid, DBData.SimpleObjectBase.CBID);
+            return false;
+        }
+
         AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Network, $"Character.LoadFromDB: Loaded character Coid {coid}, Name from DB: '{DBData.Name}' (Length: {DBData.Name?.Length ?? 0})");
 
         LoadCloneBase(DBData.SimpleObjectBase.CBID);
+
+        if (Type != CloneBaseObjectType.Character)
+        {
+            AutoCore.Utils.Logger.WriteLog(AutoCore.Utils.LogType.Error,
+                "Character.LoadFromDB: coid={0} cbid={1} resolved to clonebase kind={2} (expected Character) — " +
+                "skipping corrupt identity (SS-31)",
+                coid, DBData.SimpleObjectBase.CBID, Type);
+            return false;
+        }
 
         ClanMemberDBData = context.ClanMembers.Include(cm => cm.Clan).FirstOrDefault(cm => cm.CharacterCoid == coid);
 

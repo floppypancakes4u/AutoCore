@@ -258,6 +258,116 @@ public class NpcCombatAiTests
         Assert.AreEqual(0f, npc.WantedTurretDirection, 1e-3f, "target dead ahead → relative aim 0");
     }
 
+    // --- SS-45: arc-aware firing-slot selection (turret dead-letter) ---
+
+    /// <summary>
+    /// SS-45 tripwire: SelectFiringWeapon always preferred the front gun, which aims
+    /// chassis-forward — but pathed NPCs never rotate toward the target, so the front cone never
+    /// bears and acquisition returns nothing. 447/865 vehicle templates carry both a front and a
+    /// turret; the turret (which tracks the target) was dead-lettered. A pathed dual-gun NPC with
+    /// the target off its bow must fire the TURRET (bit 2), not silently miss forever.
+    /// </summary>
+    [TestMethod]
+    public void Combat_PathedNpc_FrontAndTurret_TargetOffBow_FiresTurret()
+    {
+        var map = CreateFieldMap();
+        var npc = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: 3, visionRange: 60f);
+        npc.Rotation = new Quaternion(0f, 0f, 0f, 1f); // face +Z
+        npc.CoidCurrentPath = 700; // pathed → CombatMove never rotates the chassis
+        EquipFrontWeapon(npc, rangeMax: 50f);
+        EquipTurretWeapon(npc, rangeMax: 50f);
+        npc.CreateGhost();
+
+        // Target 90° off the bow (+X): outside the front cone, inside the turret's tracked aim.
+        var (player, _) = PlacePlayerVehicle(map, new Vector3(20f, 0f, 0f), faction: 0);
+        player.ApplyTemplateBaseHp(100_000);
+
+        npc.SetTargetObject(player);
+        npc.NpcAi.CombatState = HBAICombatState.Combat;
+
+        NpcCombatAi.Tick(map, npc, nowMs: 100_000, dt: 0.1f);
+
+        Assert.AreEqual((byte)2, npc.Firing,
+            "target off the bow must fire the target-tracking turret, not the chassis-forward front gun");
+    }
+
+    /// <summary>
+    /// SS-49 tripwire: SS-45 defaulted a missing clonebase's ValidArc to 0f, so a front weapon
+    /// whose clonebase failed to resolve still "bore" on anything in the forward hemisphere and
+    /// was selected — but Vehicle.TryFireSlot refuses to fire any weapon with a null clonebase, so
+    /// the NPC raised a firing bit, never fired, and shadowed a perfectly good turret. That is the
+    /// exact dead-letter SS-45 set out to remove, one level down.
+    /// </summary>
+    [TestMethod]
+    public void Combat_UnresolvableFrontWeapon_DoesNotShadowWorkingTurret()
+    {
+        var map = CreateFieldMap();
+        var npc = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: 3, visionRange: 60f);
+        npc.Rotation = new Quaternion(0f, 0f, 0f, 1f); // face +Z
+        EquipClonebaselessFrontWeapon(npc);
+        EquipTurretWeapon(npc, rangeMax: 50f);
+        npc.CreateGhost();
+
+        var (player, _) = PlacePlayerVehicle(map, new Vector3(0f, 0f, 20f), faction: 0); // dead ahead
+        player.ApplyTemplateBaseHp(100_000);
+
+        npc.SetTargetObject(player);
+        npc.NpcAi.CombatState = HBAICombatState.Combat;
+
+        NpcCombatAi.Tick(map, npc, nowMs: 100_000, dt: 0.1f);
+
+        Assert.AreEqual((byte)2, npc.Firing,
+            "a weapon that cannot fire must never be selected over one that can");
+    }
+
+    /// <summary>SS-49: engage approach distance must not flip as the target crosses the front cone.</summary>
+    [TestMethod]
+    public void Engage_ApproachRange_IsStableAcrossBearingChanges()
+    {
+        var map = CreateFieldMap();
+        var npc = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: 3, visionRange: 200f, speed: 10f);
+        npc.Rotation = new Quaternion(0f, 0f, 0f, 1f); // face +Z
+        EquipFrontWeapon(npc, rangeMax: 60f);
+        EquipTurretWeapon(npc, rangeMax: 20f); // deliberately shorter than the front gun
+        npc.CreateGhost();
+
+        // Off the bow: the front gun does not bear, so slot selection returns the short turret.
+        var (player, _) = PlacePlayerVehicle(map, new Vector3(40f, 0f, 0f), faction: 0);
+        player.ApplyTemplateBaseHp(100_000);
+        npc.SetTargetObject(player);
+        npc.NpcAi.CombatState = HBAICombatState.Engage;
+        npc.NpcAi.EngageStartedMs = 100_000;
+        var startX = npc.Position.X;
+
+        NpcCombatAi.Tick(map, npc, nowMs: 100_000, dt: 0.5f);
+
+        Assert.AreEqual(startX, npc.Position.X, 0.01f,
+            "at 40 units the NPC is inside 80% of its best equipped range (60) and must hold, " +
+            "not close to the turret's 20 — approach distance must not depend on which slot bears");
+    }
+
+    /// <summary>Preference pin: target on the bow keeps the front gun (no DPS doubling).</summary>
+    [TestMethod]
+    public void Combat_FrontAndTurret_TargetOnBow_KeepsFront()
+    {
+        var map = CreateFieldMap();
+        var npc = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: 3, visionRange: 60f);
+        npc.Rotation = new Quaternion(0f, 0f, 0f, 1f); // face +Z
+        EquipFrontWeapon(npc, rangeMax: 50f);
+        EquipTurretWeapon(npc, rangeMax: 50f);
+        npc.CreateGhost();
+
+        var (player, _) = PlacePlayerVehicle(map, new Vector3(0f, 0f, 20f), faction: 0); // dead ahead
+        player.ApplyTemplateBaseHp(100_000);
+
+        npc.SetTargetObject(player);
+        npc.NpcAi.CombatState = HBAICombatState.Combat;
+
+        NpcCombatAi.Tick(map, npc, nowMs: 100_000, dt: 0.1f);
+
+        Assert.AreEqual((byte)1, npc.Firing, "target on the bow keeps the front gun; exactly one slot fires");
+    }
+
     [TestMethod]
     public void Combat_Leash_ClearsFiringAndTurretAim()
     {
@@ -485,6 +595,16 @@ public class NpcCombatAiTests
 
     private static void EquipTurretWeapon(Vehicle vehicle, float rangeMax)
         => EquipWeapon(vehicle, VehicleEquipmentSlot.WeaponTurret, rangeMax, coid: 9_999_002);
+
+    /// <summary>Front weapon whose clonebase never resolved — equippable, but never firable.</summary>
+    private static void EquipClonebaselessFrontWeapon(Vehicle vehicle)
+    {
+        var weapon = new Weapon();
+        weapon.SetCoid(9_999_009, false);
+        Assert.IsTrue(vehicle.TryEquipItem(VehicleEquipmentSlot.WeaponFront, weapon, out _),
+            "a clonebase-less weapon still equips (the equip guard only checks type)");
+        Assert.IsNull(weapon.CloneBaseWeapon, "precondition: no clonebase");
+    }
 
     private static void EquipWeapon(Vehicle vehicle, VehicleEquipmentSlot slot, float rangeMax, long coid)
     {

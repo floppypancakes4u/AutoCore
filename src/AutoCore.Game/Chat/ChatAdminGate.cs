@@ -35,6 +35,7 @@ public static class ChatAdminGate
         "/removeCurrentMission", "/removecurrentmission",
         "/removeMission", "/removemission",
         "/giveMission", "/givemission",
+        "/addMission", "/addmission",
         "/completeMission", "/completemission",
 
         // Combat / vehicle stats
