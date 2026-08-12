@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import re
+import time
 
-from mission_live.strategies.base import RunContext, StepResult, action_clicked
+from mission_live.strategies.base import (
+    RunContext,
+    StepResult,
+    action_clicked,
+    dialog_kind,
+)
 
 
 def parse_active_mission_id(output: str) -> int:
@@ -27,6 +33,31 @@ def mission_is_active(ctx: RunContext, mission_id: int) -> tuple[bool, str]:
     except Exception as ex:
         out = f"{out}\n[oracle] {ex}"
     return False, out
+
+
+def wait_for_dialog(
+    ctx: RunContext,
+    *,
+    timeout: float = 6.0,
+    kinds: tuple[str, ...] = ("new", "complete", "ok"),
+) -> tuple[str, str]:
+    """
+    Poll ``mission dialog`` until a classified box appears or timeout.
+
+    Returns (kind, output). kind is new|complete|ok|none.
+    """
+    last = ""
+    deadline = time.time() + timeout
+    while True:
+        resp = ctx.cmd("mission dialog")
+        out = str(resp.get("output") or "")
+        last = out
+        kind = dialog_kind(resp)
+        if kind in kinds or (kind != "none" and "any" in kinds):
+            return kind, out
+        if time.time() >= deadline:
+            return "none", last
+        ctx.sleep(0.35)
 
 
 def _click_complete_once(ctx: RunContext, results: list[StepResult], post_click: float) -> bool:
@@ -74,11 +105,26 @@ def handle_dialogs(ctx: RunContext, *, max_rounds: int = 2) -> list[StepResult]:
     """
     Drain Complete then OK after an NPC interact.
 
-    First Complete click often only posts mouse-down; after a settle, one spaced
-    retry clears a sticky turn-in without a full re-interact round.
+    First waits briefly for any mission dialog (single MemScan classify), then
+    clicks Complete/OK. First Complete click often only posts mouse-down; after
+    a settle, one spaced retry clears a sticky turn-in without a full re-interact.
     """
     results: list[StepResult] = []
     post_click = max(getattr(ctx, "ui_settle_sec", 1.2), 2.0)
+
+    kind, classify_out = wait_for_dialog(ctx, timeout=4.0, kinds=("complete", "ok", "new"))
+    if kind != "none":
+        ctx.step_begin("dialog/classify", kind)
+        results.append(
+            ctx.step_end(
+                StepResult(
+                    key="dialog/classify",
+                    status="PASS",
+                    detail=kind,
+                    output=classify_out,
+                )
+            )
+        )
 
     clicked = _click_complete_once(ctx, results, post_click)
     if clicked:
@@ -109,11 +155,9 @@ def accept_mission_from_npc(
         return ctx.record_step(steps, key, status, detail=detail, output=output, began=True)
 
     def wait_active(timeout: float) -> tuple[bool, str]:
-        import time as _time
-
         last = ""
-        deadline = _time.time() + timeout
-        while _time.time() < deadline:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
             ok, last = mission_is_active(ctx, mission_id)
             if ok:
                 return True, last
@@ -126,6 +170,17 @@ def accept_mission_from_npc(
         for click_i in range(2):
             key = f"setup/missionAccept{suffix}" if click_i == 0 else f"setup/missionAccept{suffix}b"
             ctx.step_begin(key)
+            kind, classify_out = wait_for_dialog(ctx, timeout=3.0, kinds=("new",))
+            if kind != "new":
+                ctx.step_end(
+                    StepResult(
+                        key=key,
+                        status="PASS",
+                        detail="no offer dialog yet",
+                        output=classify_out,
+                    )
+                )
+                break
             accept = ctx.cmd("mission accept")
             out = str(accept.get("output") or "")
             ok = action_clicked(accept)

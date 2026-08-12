@@ -50,12 +50,23 @@ def dialog_found(response: dict[str, Any] | None, *, kind: str = "any") -> bool:
         return False
     out = str(response.get("output") or "")
     patterns = {
-        "new": r"mission: new-dialog found=1\b",
-        "completion": r"mission-completion: found=1\b",
-        "current": r"mission-current: found=1\b",
-        "any": r"found=1\b",
+        "new": r"mission: (?:new-dialog |action )?found=1\b",
+        "completion": r"mission-completion: (?:action )?found=1\b",
+        "current": r"mission-current: (?:action )?found=1\b",
+        "any": r"(?:mission-dialog: found=1|found=1)\b",
     }
     return bool(re.search(patterns.get(kind, patterns["any"]), out))
+
+
+def dialog_kind(response: dict[str, Any] | None) -> str:
+    """Parse ``mission dialog`` kind=new|complete|ok|none."""
+    if not response:
+        return "none"
+    out = str(response.get("output") or "")
+    m = re.search(r"mission-dialog:\s*found=(\d+)\s+kind=(\w+)", out)
+    if not m:
+        return "none"
+    return m.group(2) if m.group(1) == "1" else "none"
 
 
 @dataclass
