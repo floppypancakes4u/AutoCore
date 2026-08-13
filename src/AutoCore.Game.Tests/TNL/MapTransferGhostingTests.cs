@@ -100,6 +100,38 @@ public class MapTransferGhostingTests
         Assert.IsNotNull(character.Ghost);
         Assert.IsNotNull(character.CurrentVehicle.Ghost);
         Assert.AreSame(character.Ghost, connection.GetScopeObject());
+        Assert.IsFalse(connection.LocalCreateSentBeforeActivateGhostingForTests,
+            "skipped create is not a journal-before-ghosting restore");
+    }
+
+    [TestMethod]
+    public void ReestablishGhostingAfterMapTransfer_DoesNotActivateGhostingBeforeLocalCreate()
+    {
+        var connection = CreateGhostingConnection();
+        connection.SuppressCreatePacketsForTests = true;
+        var character = CreateCharacterWithVehicle(connection);
+        connection.ResetGhosting();
+
+        connection.ReestablishGhostingAfterMapTransfer(character, sendCreatePackets: true);
+
+        Assert.IsTrue(connection.LocalCreateSentBeforeActivateGhostingForTests,
+            "CreateCharacterExtended must land before rpcStartGhosting so the client " +
+            "has completed missions before nearby giver CreateCreature");
+    }
+
+    [TestMethod]
+    public void ReestablishGhostingAfterMapTransfer_WhenAlreadyScoping_DoesNotClaimCreateBeforeActivate()
+    {
+        var connection = CreateGhostingConnection();
+        connection.SuppressCreatePacketsForTests = true;
+        var character = CreateCharacterWithVehicle(connection);
+        connection.ActivateGhosting();
+
+        connection.ReestablishGhostingAfterMapTransfer(character, sendCreatePackets: true);
+
+        Assert.IsFalse(connection.LocalCreateSentBeforeActivateGhostingForTests,
+            "already-scoping connections cannot delay rpcStartGhosting; flag must stay false");
+        Assert.AreSame(character.Ghost, connection.GetScopeObject());
     }
 
     [TestMethod]

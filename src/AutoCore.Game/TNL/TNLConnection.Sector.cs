@@ -289,13 +289,46 @@ public partial class TNLConnection
     /// </summary>
     public void ReestablishGhostingAfterMapTransfer(Character character, bool sendCreatePackets = true)
     {
-        EnsureGhostsAndScopeAfterMapTransfer(character);
+        if (character == null)
+            throw new ArgumentNullException(nameof(character));
+        if (character.CurrentVehicle == null)
+            throw new InvalidOperationException("Cannot re-establish ghosting without a current vehicle.");
 
-        // Client deleted local ghosts on rpcEndGhosting; global entities need create packets
-        // again after MapInfo so ghost assignment can find the player/vehicle.
-        if (sendCreatePackets)
+        // Create local ghosts and forget old-map global-vehicle tracking, but do not
+        // ActivateGhosting yet. rpcStartGhosting would let nearby giver CreateCreature
+        // land before CreateCharacterExtended restores the client's completed-mission hash
+        // (interact icon states 6/7). Login Stage3 still activates first — the client is
+        // usually still loading then.
+        ClearGlobalVehicleCreateTracking();
+        character.CreateGhost();
+        character.CurrentVehicle.CreateGhost();
+
+        var ghostingAlreadyStarted = Scoping;
+        if (ghostingAlreadyStarted)
+            ScopeLocalPlayerGhosts(character);
+
+        if (sendCreatePackets && !SuppressCreatePacketsForTests)
             SendLocalPlayerCreatePackets(character);
+
+        EnsureSectorGhostingStarted();
+        ScopeLocalPlayerGhosts(character);
+
+        LocalCreateSentBeforeActivateGhostingForTests = sendCreatePackets && !ghostingAlreadyStarted;
     }
+
+    private void ScopeLocalPlayerGhosts(Character character)
+    {
+        SetScopeObject(character.Ghost);
+        ObjectLocalScopeAlways(character.Ghost);
+        if (character.CurrentVehicle?.Ghost != null)
+            ObjectLocalScopeAlways(character.CurrentVehicle.Ghost);
+    }
+
+    /// <summary>
+    /// True when the last <see cref="ReestablishGhostingAfterMapTransfer"/> sequenced
+    /// local create (or its suppressed stand-in) before <c>ActivateGhosting</c>.
+    /// </summary>
+    public bool LocalCreateSentBeforeActivateGhostingForTests { get; private set; }
 
     /// <summary>
     /// Same-map owner teleport: tear down client ghosts and re-send local create packets so the
@@ -359,12 +392,7 @@ public partial class TNLConnection
 
         // ResetGhosting clears Ghosting and Scoping; restart only if not already scoping.
         EnsureSectorGhostingStarted();
-
-        SetScopeObject(character.Ghost);
-
-        ObjectLocalScopeAlways(character.Ghost);
-        if (character.CurrentVehicle?.Ghost != null)
-            ObjectLocalScopeAlways(character.CurrentVehicle.Ghost);
+        ScopeLocalPlayerGhosts(character);
     }
 
     /// <summary>
