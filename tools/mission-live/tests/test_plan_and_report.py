@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from mission_live.plan import annotate_plan, capability_for, race_class_eligible
+from mission_live.plan import annotate_plan, capability_for, filter_race_class_eligible, race_class_eligible
 from mission_live.report.model import summarize
 from mission_live.strategies.base import MissionResult as MR
 from mission_live.strategies.unsupported import UnsupportedStrategy
@@ -60,6 +60,29 @@ def test_race_class_match():
         {"hasBody": True, "race": 1, "class": 2},
     )
     assert ok
+
+
+def test_filter_race_class_drops_mismatches_keeps_open_and_matches():
+    state = {"hasBody": True, "race": 0, "class": 1}
+    missions = [
+        {"id": 1, "reqRace": 0, "reqClass": -1},
+        {"id": 2, "reqRace": 1, "reqClass": -1},
+        {"id": 3, "reqRace": -1, "reqClass": -1},
+        {"id": 4, "reqRace": 0, "reqClass": 2},
+    ]
+    keep, skip = filter_race_class_eligible(missions, state)
+    assert [m["id"] for m in keep] == [1, 3]
+    assert [m["id"] for m in skip] == [2, 4]
+
+
+def test_filter_race_class_keeps_all_when_force_grant_or_no_body():
+    missions = [{"id": 1, "reqRace": 1}]
+    keep, skip = filter_race_class_eligible(
+        missions, {"hasBody": True, "race": 0}, force_grant=True
+    )
+    assert keep == missions and skip == []
+    keep2, skip2 = filter_race_class_eligible(missions, {"hasBody": False})
+    assert keep2 == missions and skip2 == []
 
 
 def test_unsupported_strategy_skips():

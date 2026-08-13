@@ -24,7 +24,7 @@ Game-data tools default to `C:\Program Files (x86)\NetDevil\Auto Assault`; overr
 | [`lookup_inventory_cbid.py`](scripts/lookup_inventory_cbid.py) | Looks up CBIDs in `tools/inventory-catalog/inventory-items.json` (displayName, uniqueName, className). Faster than opening `clonebase.wad` when the catalog has the row. |
 | [`add_mission_to_registry.py`](scripts/add_mission_to_registry.py) | Upserts a mission into `tools/mission-live/registry/missions.yaml` from `missions.glm` + `clonebase.wad` (`--id` / `--title` / `--name`). Infers policy/tags from requirement types. |
 | [`sync_talk_patrol_deliver_registry.py`](scripts/sync_talk_patrol_deliver_registry.py) | Filters `missions.json` for talk → optional patrol → speak-only deliver missions and writes them into the mission-live registry (`--replace` / `--upsert` / `--dry-run`). |
-| [`../tools/mission-live`](tools/mission-live/README.md) | Live mission harness (`python -m mission_live`): DevTool pipe + Dev API oracle, registry YAML, HTML coverage report. Phase-1 strategies: Patrol, Deliver, Mission req. |
+| [`../tools/mission-live`](tools/mission-live/README.md) | Live mission harness (`python -m mission_live`): DevTool pipe + Dev API oracle, retail-catalog categories (`travel`/`cargo`/`combat`/`collect`/`other`), registry YAML, HTML coverage report. Phase-1 strategies: Patrol, Deliver, Mission req. |
 
 ---
 
@@ -32,7 +32,7 @@ Game-data tools default to `C:\Program Files (x86)\NetDevil\Auto Assault`; overr
 
 | Script | What it does |
 |--------|----------------|
-| [`run-mission-live.ps1`](scripts/run-mission-live.ps1) | Forwards remaining args to `tools/mission-live` (`python -m mission_live …`). Use for doctor/run/coverage/report against a live client+server. |
+| [`run-mission-live.ps1`](scripts/run-mission-live.ps1) | Forwards remaining args to `tools/mission-live` (`python -m mission_live …`). Use for doctor/categories/list/run/coverage/report against a live client+server. |
 | [`init-databases.ps1`](scripts/init-databases.ps1) | Creates the MySQL databases required by AutoCore (auth/world/character, etc.) using local MySQL credentials. |
 | [`export-starter-db.ps1`](scripts/export-starter-db.ps1) | Dumps live MySQL into shareable starter SQL under `sql/` (`autocore_world` with static data; auth/char schema only — no accounts or player rows). Re-run after world-data changes; use `-Force` to overwrite. |
 | [`import-starter-db.ps1`](scripts/import-starter-db.ps1) | Imports `sql/autocore_starter.sql` into local MySQL so other operators get world data without any accounts. Create an admin after first boot via `DefaultAdminPassword` or `auth.create`. |

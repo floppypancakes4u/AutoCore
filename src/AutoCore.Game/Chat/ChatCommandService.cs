@@ -1023,6 +1023,7 @@ public sealed class ChatCommandService
                     $"Failed to transfer to map {destinationMap.ContinentId} for mission waypoint.");
             }
 
+            NpcInteractHandler.TryCreditAutoCompletePatrolAtPlayer(character.OwningConnection, targetCoid);
             return new ChatCommandExecutionResult(
                 true,
                 $"Transferred to map {destinationMap.ContinentId} mission {quest.MissionId} GPS waypoint " +
@@ -1035,6 +1036,8 @@ public sealed class ChatCommandService
         vehicle.ClearPhysicsInstance();
         vehicle.SetPosition(position);
         vehicle.Rotation = rotation;
+
+        NpcInteractHandler.TryCreditAutoCompletePatrolAtPlayer(character.OwningConnection, targetCoid);
 
         var teleport = new TeleportCharacterPacket { Position = position };
 
@@ -1178,15 +1181,18 @@ public sealed class ChatCommandService
             return false;
         }
 
-        // GPS / HUD primary marker: map VisualWaypoint rows tagged with this ObjectiveId.
-        // Entity-bound markers (ObjectCoid) use the live object when present.
-        if (TryResolveVisualWaypoint(map, objective.ObjectiveId, out targetCoid, out position))
+        var patrol = objective.Requirements?.OfType<ObjectiveRequirementPatrol>().FirstOrDefault();
+        var multiPad = patrol != null && MissionPatrolProgress.CountListedTargets(patrol) > 1;
+
+        // Multi-pad (Crater Run): next GenericTarget, not the single objective VisualWaypoint.
+        // Single-pad (Live and Direct): GPS VisualWaypoint stays first.
+        if (!multiPad
+            && TryResolveVisualWaypoint(map, objective.ObjectiveId, out targetCoid, out position))
         {
             source = "visual";
             return true;
         }
 
-        var patrol = objective.Requirements?.OfType<ObjectiveRequirementPatrol>().FirstOrDefault();
         if (patrol != null && MissionPatrolProgress.CountListedTargets(patrol) > 0)
         {
             var progress = quest.ActiveObjectiveSequence < quest.ObjectiveProgress.Length

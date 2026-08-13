@@ -35,29 +35,116 @@ def mission_is_active(ctx: RunContext, mission_id: int) -> tuple[bool, str]:
     return False, out
 
 
+def pick_mission_from_list(
+    ctx: RunContext,
+    results: list[StepResult],
+    *,
+    mission_id: int,
+    key: str = "dialog/select",
+    post_click: float = 2.0,
+) -> bool:
+    """Click the matching row on a multi-mission picker (kind=select)."""
+    pick = ctx.cmd(f"mission pick {mission_id}")
+    out = str(pick.get("output") or "")
+    ok = action_clicked(pick)
+    ctx.step_begin(key, str(mission_id))
+    step = StepResult(
+        key=key,
+        status="PASS" if ok else "FAIL",
+        detail=f"id={mission_id}",
+        output=out,
+    )
+    results.append(step)
+    ctx.step_end(step)
+    if ok:
+        ctx.sleep(post_click)
+    return ok
+
+
+def select_mission(
+    ctx: RunContext,
+    results: list[StepResult],
+    *,
+    mission_id: int,
+    key: str = "dialog/select",
+    post_click: float = 2.0,
+) -> bool:
+    """Dedicated select-mission task: click the listed row for ``mission_id``."""
+    return pick_mission_from_list(
+        ctx, results, mission_id=mission_id, key=key, post_click=post_click
+    )
+
+
 def wait_for_dialog(
     ctx: RunContext,
     *,
     timeout: float = 6.0,
-    kinds: tuple[str, ...] = ("new", "complete", "ok"),
+    kinds: tuple[str, ...] = ("new", "complete", "ok", "select"),
 ) -> tuple[str, str]:
     """
     Poll ``mission dialog`` until a classified box appears or timeout.
 
-    Returns (kind, output). kind is new|complete|ok|none.
+    Returns (kind, output). kind is new|complete|ok|select|none.
     """
+    override = getattr(ctx, "dialog_timeout_sec", None)
+    if override is not None:
+        timeout = float(override)
     last = ""
     deadline = time.time() + timeout
+    probe_select = "select" in kinds or "any" in kinds
     while True:
         resp = ctx.cmd("mission dialog")
         out = str(resp.get("output") or "")
         last = out
         kind = dialog_kind(resp)
+        if kind == "none" and probe_select:
+            sel = ctx.cmd("mission select")
+            sel_out = str(sel.get("output") or "")
+            if sel_out:
+                last = f"{out}\n{sel_out}".strip() if out else sel_out
+            kind = dialog_kind({"output": last})
         if kind in kinds or (kind != "none" and "any" in kinds):
-            return kind, out
+            return kind, last
         if time.time() >= deadline:
             return "none", last
         ctx.sleep(0.35)
+
+
+def identify_dialog(
+    ctx: RunContext,
+    results: list[StepResult],
+    *,
+    timeout: float = 4.0,
+    kinds: tuple[str, ...] = ("new", "complete", "ok", "select"),
+    key: str = "dialog/classify",
+) -> tuple[str, str]:
+    """
+    Always classify the open mission dialog and record it before any click.
+
+    After NPC interact the box may be new / complete / ok / select. Callers
+    must use the returned kind to decide the next action.
+    """
+    kind, out = wait_for_dialog(ctx, timeout=timeout, kinds=kinds)
+    if kind == "none":
+        sel = ctx.cmd("mission select")
+        sel_out = str(sel.get("output") or "")
+        if sel_out:
+            out = f"{out}\n{sel_out}".strip() if out else sel_out
+        kind = dialog_kind({"output": out})
+    ctx.step_begin(key, kind)
+    results.append(
+        ctx.step_end(
+            StepResult(
+                key=key,
+                # "none" is a successful classification (no box), not an
+                # unsupported-requirement SKIP. Strict policy treats SKIP as FAIL.
+                status="PASS",
+                detail=kind,
+                output=out,
+            )
+        )
+    )
+    return kind, out
 
 
 def _click_complete_once(ctx: RunContext, results: list[StepResult], post_click: float) -> bool:
@@ -103,35 +190,44 @@ def _drain_ok(ctx: RunContext, results: list[StepResult], post_click: float, rou
 
 def handle_dialogs(ctx: RunContext, *, max_rounds: int = 2) -> list[StepResult]:
     """
-    Drain Complete then OK after an NPC interact.
+    Identify the open mission dialog, then act on that kind.
 
-    First waits briefly for any mission dialog (single MemScan classify), then
-    clicks Complete/OK. First Complete click often only posts mouse-down; after
-    a settle, one spaced retry clears a sticky turn-in without a full re-interact.
+    After interact, classify first (new / complete / ok / select / none). A
+    multi-mission picker is picked only after that identify step. Complete/OK
+    run only when the classified box is a turn-in. First Complete click often
+    only posts mouse-down; after a settle, one spaced retry clears a sticky
+    turn-in without a full re-interact.
     """
     results: list[StepResult] = []
     post_click = max(getattr(ctx, "ui_settle_sec", 1.2), 2.0)
 
-    kind, classify_out = wait_for_dialog(ctx, timeout=4.0, kinds=("complete", "ok", "new"))
-    if kind != "none":
-        ctx.step_begin("dialog/classify", kind)
-        results.append(
-            ctx.step_end(
-                StepResult(
-                    key="dialog/classify",
-                    status="PASS",
-                    detail=kind,
-                    output=classify_out,
-                )
+    kind, _ = identify_dialog(
+        ctx, results, timeout=4.0, kinds=("complete", "ok", "new", "select")
+    )
+    if kind == "select":
+        mid = 0
+        mr = getattr(ctx, "mission_result", None)
+        if mr is not None:
+            mid = int(getattr(mr, "mission_id", 0) or 0)
+        if mid:
+            select_mission(
+                ctx, results, mission_id=mid, key="dialog/select", post_click=post_click
             )
-        )
+            kind, _ = identify_dialog(
+                ctx,
+                results,
+                timeout=3.0,
+                kinds=("complete", "ok", "new"),
+                key="dialog/classify#2",
+            )
 
-    clicked = _click_complete_once(ctx, results, post_click)
-    if clicked:
-        # Sticky turn-in: one spaced second Complete if still present.
-        _click_complete_once(ctx, results, post_click)
+    if kind in ("complete", "none"):
+        # none: classify missed or box not up yet — probe Complete/OK once.
+        clicked = _click_complete_once(ctx, results, post_click)
+        if clicked:
+            _click_complete_once(ctx, results, post_click)
         _drain_ok(ctx, results, post_click, rounds=max_rounds)
-    else:
+    elif kind == "ok":
         _drain_ok(ctx, results, post_click, rounds=max_rounds)
     return results
 
@@ -170,7 +266,21 @@ def accept_mission_from_npc(
         for click_i in range(2):
             key = f"setup/missionAccept{suffix}" if click_i == 0 else f"setup/missionAccept{suffix}b"
             ctx.step_begin(key)
-            kind, classify_out = wait_for_dialog(ctx, timeout=3.0, kinds=("new",))
+            kind, classify_out = wait_for_dialog(ctx, timeout=3.0, kinds=("new", "select"))
+            if kind == "none":
+                sel = ctx.cmd("mission select")
+                classify_out = str(sel.get("output") or classify_out)
+                kind = dialog_kind({"output": classify_out})
+            if kind == "select":
+                pick_key = f"setup/missionPick{suffix}" if click_i == 0 else f"setup/missionPick{suffix}b"
+                if not select_mission(
+                    ctx, steps, mission_id=mission_id, key=pick_key, post_click=post_click
+                ):
+                    ctx.step_end(
+                        StepResult(key=key, status="FAIL", detail="select pick failed", output=classify_out)
+                    )
+                    break
+                kind, classify_out = wait_for_dialog(ctx, timeout=3.0, kinds=("new",))
             if kind != "new":
                 ctx.step_end(
                     StepResult(

@@ -4,6 +4,9 @@ AutoCore sector to validate registry missions (setup, accept, patrol, reports).
 
 Usage:
   python -m mission_live doctor
+  python -m mission_live categories
+  python -m mission_live list --category travel
+  python -m mission_live run --category travel
   python -m mission_live run --id 1234
   python -m mission_live run --registry --force-grant
   python -m mission_live coverage

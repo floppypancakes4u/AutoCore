@@ -160,8 +160,10 @@ public class CharacterQuest
     }
 
     /// <summary>
-    /// CompleteCount when authored; otherwise max of UseItem RepeatCount / kill NumToKill; else 1.
+    /// CompleteCount when authored; otherwise max of UseItem RepeatCount / kill NumToKill /
+    /// patrol NeededCount; else 1.
     /// Grouchy Gun (and many kill quests) author CompleteCount=0 with NumToKill on the requirement.
+    /// Crater Run (874) authors CompleteCount=0 with five GenericTargets — max is NeededCount.
     /// </summary>
     internal static int ResolveObjectiveMax(MissionObjective objective)
     {
@@ -189,6 +191,11 @@ public class CharacterQuest
                         break;
                     case ObjectiveRequirementCollect collect when collect.NumToCollect > derived:
                         derived = collect.NumToCollect;
+                        break;
+                    case ObjectiveRequirementPatrol patrol:
+                        var needed = MissionPatrolProgress.NeededCount(patrol);
+                        if (needed > derived)
+                            derived = needed;
                         break;
                 }
             }

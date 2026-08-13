@@ -90,3 +90,42 @@ def test_deliver_falls_back_to_tptowaypoint_without_cbid():
     steps = strat.execute(ctx, req, mission_id=3032, seq=18)
     assert steps[0].status == "PASS"
     assert "/tptowaypoint" in ctx.chats
+
+
+class LateCompleteCtx(FakeCtx):
+    """Turn-in box is missing for the first two classify rounds, then appears."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.dialog_timeout_sec = 0.0
+        self._dialog_rounds = 0
+
+    def cmd(self, line: str) -> dict[str, Any]:
+        self.cmds.append(line)
+        if line == "mission dialog":
+            self._dialog_rounds += 1
+            if self._dialog_rounds >= 3:
+                return {"ok": True, "output": "mission-dialog: found=1 kind=complete\n"}
+            return {"ok": True, "output": "mission-dialog: found=0 kind=none\n"}
+        if line == "mission select":
+            return {"ok": True, "output": "mission-select: found=0\n"}
+        if line == "mission complete":
+            if self._dialog_rounds >= 3:
+                self._complete_clicks += 1
+                self._completed = [3032]
+                return {"ok": True, "output": "mission-completion: action found=1 clicked=1"}
+            return {"ok": True, "output": "mission-completion: action found=0 clicked=0"}
+        if line == "mission ok":
+            return {"ok": True, "output": "mission-current: action found=0 clicked=0"}
+        return {"ok": True, "output": "ok"}
+
+
+def test_deliver_waits_for_late_complete_dialog_before_verify():
+    ctx = LateCompleteCtx()
+    steps = DeliverStrategy().execute(
+        ctx, {"type": "Deliver", "npcTargetCbid": 3192}, mission_id=3032, seq=1
+    )
+    verify = next(s for s in steps if s.key.endswith("/verify"))
+    assert verify.status == "PASS", [s.to_dict() for s in steps]
+    assert any(s.key == "dialog/complete" and s.status == "PASS" for s in steps)
+    assert ctx._completed == [3032]

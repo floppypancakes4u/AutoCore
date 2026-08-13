@@ -108,7 +108,7 @@ def run_mission(
 
             if step.status == "SKIP":
                 skipped += 1
-                if policy == "strict":
+                if policy == "strict" and not _is_informational_skip(step):
                     failed = True
                     result.fail_locus = step.key
                     break
@@ -127,13 +127,16 @@ def run_mission(
         if failed or _is_completed(ctx.state(), mission_id):
             break
 
-    # Final dialogs / assert complete
-    result.steps.extend(handle_dialogs(ctx))
+    # Final dialogs only if the turn-in box may still be up.
     completed = _is_completed(ctx.state(), mission_id)
-    if completed and not failed:
-        result.status = "PASS" if skipped == 0 or policy == "partial" else "PARTIAL"
-        if skipped and policy == "partial":
-            result.status = "PARTIAL"
+    if not completed:
+        result.steps.extend(handle_dialogs(ctx))
+        completed = _is_completed(ctx.state(), mission_id)
+    if completed:
+        # End state wins: a premature Deliver/verify FAIL (dialog not up yet)
+        # is not a failure if we then clicked Complete and the mission finished.
+        result.status = "PASS"
+        result.fail_locus = ""
     elif failed:
         result.status = "FAIL"
     elif skipped:
@@ -182,12 +185,24 @@ def _is_completed(state: dict[str, Any], mission_id: int) -> bool:
     return mission_id in {int(x) for x in (state.get("completedMissionIds") or [])}
 
 
+def _is_informational_skip(step: StepResult) -> bool:
+    """SKIP classify-none is not an unsupported requirement."""
+    return step.key.startswith("dialog/") and step.detail == "none"
+
+
 def _aggregate_step(key: str, steps: list[StepResult]) -> StepResult:
     """Collapse multi-step strategies into one status for the runner loop."""
     if not steps:
         return StepResult(key=key, status="ERROR", detail="no steps produced")
-    for status in ("ERROR", "FAIL", "SKIP"):
+    for status in ("ERROR", "FAIL"):
         hit = next((s for s in steps if s.status == status), None)
         if hit is not None:
             return hit
+    # Intermediate classify-none SKIPs must not hide a later verify PASS.
+    passes = [s for s in steps if s.status == "PASS"]
+    if passes:
+        return passes[-1]
+    skip = next((s for s in steps if s.status == "SKIP"), None)
+    if skip is not None:
+        return skip
     return steps[-1]

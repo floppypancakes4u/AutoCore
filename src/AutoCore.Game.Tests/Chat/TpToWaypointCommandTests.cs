@@ -10,6 +10,7 @@ using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
 using AutoCore.Game.Mission;
 using AutoCore.Game.Mission.Requirements;
+using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL;
@@ -189,6 +190,86 @@ public class TpToWaypointCommandTests
         Assert.AreEqual(600f, vehicle.Position.Z, 0.01f);
         StringAssert.Contains(result.Message, WaypointCoidB.ToString());
         AssertSendsClientSnap(result, character, new Vector3(500f, 0f, 600f));
+    }
+
+    [TestMethod]
+    public void TpToWaypoint_MultiPad_PrefersNextGenericTargetOverObjectiveVisual()
+    {
+        var (character, vehicle, map) = CreatePlayer(gmLevel: 1);
+        SeedMultiPadPatrol(74751, 74752);
+        GiveQuest(character, MissionId);
+
+        var gpsPos = new Vector3(900f, 0f, 800f);
+        var pad0 = new Vector3(10f, 0f, 10f);
+        var pad1 = new Vector3(20f, 0f, 20f);
+        PlaceVisualWaypoint(map, id: 1237, gpsPos, ObjectiveId);
+        PlaceWaypoint(map, 74751, pad0);
+        PlaceWaypoint(map, 74752, pad1);
+
+        var result = ChatCommandService.Instance.Execute(character, "/tptowaypoint");
+
+        Assert.IsTrue(result.Handled);
+        Assert.AreEqual(pad0.X, vehicle.Position.X, 0.01f);
+        Assert.AreEqual(pad0.Z, vehicle.Position.Z, 0.01f);
+        StringAssert.Contains(result.Message, "patrol");
+        StringAssert.Contains(result.Message, "74751");
+        Assert.IsFalse(result.Message.Contains("visual", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public void TpToWaypoint_MultiPad_SecondPad_AfterFirstProgress()
+    {
+        var (character, vehicle, map) = CreatePlayer(gmLevel: 1);
+        SeedMultiPadPatrol(74751, 74752);
+        GiveQuest(character, MissionId);
+        character.CurrentQuests[0].ObjectiveProgress[0] = 1;
+
+        PlaceVisualWaypoint(map, id: 1237, new Vector3(900f, 0f, 800f), ObjectiveId);
+        PlaceWaypoint(map, 74751, new Vector3(10f, 0f, 10f));
+        PlaceWaypoint(map, 74752, new Vector3(20f, 0f, 20f));
+
+        var result = ChatCommandService.Instance.Execute(character, "/tptowaypoint");
+
+        Assert.IsTrue(result.Handled);
+        Assert.AreEqual(20f, vehicle.Position.X, 0.01f);
+        Assert.AreEqual(20f, vehicle.Position.Z, 0.01f);
+        StringAssert.Contains(result.Message, "74752");
+    }
+
+    [TestMethod]
+    public void TpToWaypoint_MultiPad_CreditsNextPadWithoutAutoPatrolPacket()
+    {
+        var sent = new List<BasePacket>();
+        TNLConnection.TestPacketSink = (_, p) => sent.Add(p);
+        try
+        {
+            var (character, _, map) = CreatePlayer(gmLevel: 1);
+            SeedMultiPadPatrol(74751, 74752);
+            GiveQuest(character, MissionId);
+            PlaceWaypoint(map, 74751, new Vector3(10f, 0f, 10f));
+            PlaceWaypoint(map, 74752, new Vector3(40f, 0f, 40f));
+
+            ChatCommandService.Instance.Execute(character, "/tptowaypoint");
+
+            Assert.AreEqual(1, character.CurrentQuests[0].ObjectiveProgress[0],
+                "snap onto pad 0 must credit without a client AutoPatrol packet");
+            Assert.IsTrue(
+                sent.OfType<ObjectiveStatePacket>().Any(p =>
+                    p.ObjectiveId == ObjectiveId && p.SlotProgress[0] >= 1f),
+                "mid-route 0x2071 expected");
+            Assert.AreEqual(0, sent.OfType<CompleteDynamicObjectivePacket>().Count());
+
+            sent.Clear();
+            ChatCommandService.Instance.Execute(character, "/tptowaypoint");
+
+            Assert.AreEqual(0, character.CurrentQuests.Count, "second pad completes the mission");
+            Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
+            Assert.IsTrue(sent.OfType<CompleteDynamicObjectivePacket>().Any(p => p.ObjectiveId == ObjectiveId));
+        }
+        finally
+        {
+            TNLConnection.TestPacketSink = null;
+        }
     }
 
     [TestMethod]

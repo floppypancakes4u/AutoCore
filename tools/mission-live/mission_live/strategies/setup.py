@@ -16,6 +16,20 @@ def run_setup(ctx: RunContext, mission_id: int, plan: dict[str, Any]) -> list[St
     def add(key: str, status: str, detail: str = "", output: str = "", *, began: bool = True) -> StepResult:
         return ctx.record_step(steps, key, status, detail=detail, output=output, began=began)
 
+    # Race/class first — do not warp/level/seed a mission this body cannot accept.
+    ctx.step_begin("setup/raceClass")
+    state = ctx.state()
+    eligible, reason = race_class_eligible(plan, state)
+    if not eligible and not ctx.force_grant:
+        add("setup/raceClass", "SKIP", detail=reason)
+        return steps
+    if not eligible and ctx.force_grant:
+        add("setup/raceClass", "PASS", detail=f"force_grant bypass: {reason}")
+        if mr is not None:
+            mr.force_grant = True
+    else:
+        add("setup/raceClass", "PASS", detail="eligible")
+
     # 1. Clear missions
     ctx.step_begin("setup/clearAllMissions")
     r = ctx.chat("/clearAllMissions", settle_sec=2.0)
@@ -59,18 +73,7 @@ def run_setup(ctx: RunContext, mission_id: int, plan: dict[str, Any]) -> list[St
         mr.seeded_prereqs = seeded
     ctx.sleep(0.3)
 
-    # Race/class gate
-    ctx.step_begin("setup/raceClass")
-    state = ctx.state()
-    eligible, reason = race_class_eligible(plan, state)
-    if not eligible and not ctx.force_grant:
-        add("setup/raceClass", "SKIP", detail=reason)
-        return steps
-
     if not eligible and ctx.force_grant:
-        add("setup/raceClass", "PASS", detail=f"force_grant bypass: {reason}")
-        if mr is not None:
-            mr.force_grant = True
         # World may still matter for objectives — hop continent when known.
         if continent > 0:
             ctx.step_begin("setup/warpContinent", str(continent))
@@ -87,8 +90,6 @@ def run_setup(ctx: RunContext, mission_id: int, plan: dict[str, Any]) -> list[St
         add("setup/giveMission", "PASS" if r.get("ok") else "FAIL", output=str(r.get("output") or ""))
         ctx.sleep(0.5)
         return steps
-
-    add("setup/raceClass", "PASS", detail="eligible")
 
     # 5. Travel to giver via /tptonpc (cross-map transfer).
     npc = int(plan.get("npc") or 0)

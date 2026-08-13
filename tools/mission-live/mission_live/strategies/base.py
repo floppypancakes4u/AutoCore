@@ -53,20 +53,29 @@ def dialog_found(response: dict[str, Any] | None, *, kind: str = "any") -> bool:
         "new": r"mission: (?:new-dialog |action )?found=1\b",
         "completion": r"mission-completion: (?:action )?found=1\b",
         "current": r"mission-current: (?:action )?found=1\b",
+        "select": r"mission-select: (?:action )?found=1\b",
         "any": r"(?:mission-dialog: found=1|found=1)\b",
     }
     return bool(re.search(patterns.get(kind, patterns["any"]), out))
 
 
 def dialog_kind(response: dict[str, Any] | None) -> str:
-    """Parse ``mission dialog`` kind=new|complete|ok|none."""
+    """Parse ``mission dialog`` kind=new|complete|ok|select|none."""
     if not response:
         return "none"
     out = str(response.get("output") or "")
     m = re.search(r"mission-dialog:\s*found=(\d+)\s+kind=(\w+)", out)
-    if not m:
-        return "none"
-    return m.group(2) if m.group(1) == "1" else "none"
+    if m and m.group(1) == "1":
+        return m.group(2)
+    # Picker rows / found=1 even when kind=none (state!=3 or older DevTool).
+    cm = re.search(r"mission-select:\s*count=(\d+)", out)
+    if cm and int(cm.group(1)) > 0:
+        return "select"
+    if re.search(r"mission-select:\s*found=1\b", out):
+        return "select"
+    if re.search(r"mission-select:\s*id=\d+", out):
+        return "select"
+    return "none"
 
 
 @dataclass

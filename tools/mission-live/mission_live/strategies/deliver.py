@@ -85,6 +85,11 @@ class DeliverStrategy:
             steps.append(retry)
             steps.extend(handle_dialogs(ctx))
 
+        # Complete box can spawn a beat after the last classify-none
+        # (live 874: verify ran, then kind=complete appeared). Drain once more.
+        if not _mission_done(ctx, mission_id):
+            steps.extend(handle_dialogs(ctx))
+
         verify_key = f"{prefix}/verify"
         ctx.step_begin(verify_key)
         if _mission_done(ctx, mission_id):

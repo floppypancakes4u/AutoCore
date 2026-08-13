@@ -54,3 +54,24 @@ def race_class_eligible(plan: dict[str, Any], state: dict[str, Any]) -> tuple[bo
     if need_class and class_id != req_class:
         return False, f"reqClass={req_class} characterClass={class_id}"
     return True, ""
+
+
+def filter_race_class_eligible(
+    missions: list[dict[str, Any]],
+    state: dict[str, Any],
+    *,
+    force_grant: bool = False,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split missions into (eligible, skipped) using character race/class.
+
+    ``force_grant`` or a missing character body leaves the list unchanged so a
+    live run can still attempt the mission (or skip later with a real state).
+    """
+    if force_grant or not state.get("hasBody"):
+        return list(missions), []
+    keep: list[dict[str, Any]] = []
+    skip: list[dict[str, Any]] = []
+    for mission in missions:
+        ok, _reason = race_class_eligible(mission, state)
+        (keep if ok else skip).append(mission)
+    return keep, skip

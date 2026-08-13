@@ -1,4 +1,4 @@
-"""Patrol requirement strategy: /tptowaypoint + interact loop."""
+"""Patrol requirement strategy: walk AutoComplete pads via /tptowaypoint."""
 
 from __future__ import annotations
 
@@ -14,6 +14,35 @@ _POS_RE = re.compile(
     re.IGNORECASE,
 )
 
+_PATROL_RE = re.compile(
+    r"mission-patrol:\s*id=(-?\d+)\s+seq=(-?\d+)\s+progress=(-?\d+)\s+max=(-?\d+)\s+next=(-?\d+)",
+    re.IGNORECASE,
+)
+
+
+def parse_mission_patrol(output: str) -> dict[str, int] | None:
+    """Parse a DevTool ``mission patrol`` status line."""
+    m = _PATROL_RE.search(output or "")
+    if not m:
+        return None
+    return {
+        "id": int(m.group(1)),
+        "seq": int(m.group(2)),
+        "progress": int(m.group(3)),
+        "max": int(m.group(4)),
+        "next": int(m.group(5)),
+    }
+
+
+def needed_pads(req: dict[str, Any]) -> int:
+    targets = req.get("targets") or []
+    listed = len(targets) if isinstance(targets, list) else 0
+    target_count = int(req.get("targetCount") or 0)
+    laps = int(req.get("laps") or 1)
+    if laps < 1:
+        laps = 1
+    return max(target_count, listed, 1) * laps
+
 
 class PatrolStrategy:
     requirement_type = "Patrol"
@@ -23,47 +52,109 @@ class PatrolStrategy:
 
     def execute(self, ctx: RunContext, req: dict[str, Any], *, mission_id: int, seq: int) -> StepResult:
         key = f"{mission_id}/{seq}/Patrol"
-        before = _quest_snapshot(ctx.state(), mission_id)
+        start = _quest_snapshot(ctx.state(), mission_id)
+        baseline = dict(start) if start else None
         before_pos = _read_position(ctx)
+        needed = needed_pads(req)
+        auto_complete = req.get("autoComplete")
+        if auto_complete is None:
+            auto_complete = True
 
         def advanced(s: dict) -> bool:
             after = _quest_snapshot(s, mission_id)
             if after is None:
                 return True
-            if before is None:
+            if baseline is None:
                 return False
-            if after["seq"] > before["seq"]:
+            if after["seq"] > baseline["seq"]:
                 return True
-            if after["seq"] == before["seq"] and after["progress"] > before["progress"]:
+            if after["seq"] == baseline["seq"] and after["progress"] > baseline["progress"]:
                 return True
             return False
 
         attempts = 0
-        max_attempts = 12
+        max_attempts = max(needed * 3, 12)
         outputs: list[str] = []
         while attempts < max_attempts:
             attempts += 1
-            # Enter chat immediately; advance as soon as pose/progress verifies.
             tp = ctx.chat("/tptowaypoint", settle_sec=0.0)
             outputs.append(str(tp.get("output") or ""))
-            outcome = _wait_pose_or_progress(ctx, advanced, before_pos, timeout=2.0)
-            if outcome == "advanced":
-                return _pass(key, attempts, before, ctx, outputs)
+            try:
+                status = ctx.cmd("mission patrol")
+                outputs.append(str(status.get("output") or ""))
+            except Exception:
+                pass
 
-            interact = ctx.cmd("action activate-or-interact")
-            outputs.append(str(interact.get("output") or ""))
-            if _poll_advanced(ctx, advanced, timeout=0.8):
-                return _pass(key, attempts, before, ctx, outputs)
+            outcome = _wait_pose_or_progress(ctx, advanced, before_pos, timeout=2.0)
+            if outcome == "advanced" or _quest_done(ctx, mission_id, baseline, needed):
+                if _quest_finished(ctx, mission_id, start, needed):
+                    return _pass(key, attempts, start, ctx, outputs)
+                after = _quest_snapshot(ctx.state(), mission_id)
+                if after is not None:
+                    baseline = dict(after)
+                    before_pos = _read_position(ctx) or before_pos
+                continue
+
+            if not auto_complete:
+                interact = ctx.cmd("action activate-or-interact")
+                outputs.append(str(interact.get("output") or ""))
+                if _poll_advanced(ctx, advanced, timeout=0.8):
+                    if _quest_finished(ctx, mission_id, start, needed):
+                        return _pass(key, attempts, start, ctx, outputs)
+                    after = _quest_snapshot(ctx.state(), mission_id)
+                    if after is not None:
+                        baseline = dict(after)
+                        before_pos = _read_position(ctx) or before_pos
+                    continue
+
             before_pos = _read_position(ctx) or before_pos
 
         return StepResult(
             key=key,
             status="FAIL",
-            detail=f"no progress after {attempts} tp+interact attempts",
-            before=before or {},
+            detail=f"no progress after {attempts} tp attempts",
+            before=start or {},
             after=_quest_snapshot(ctx.state(), mission_id) or {},
             output="\n".join(outputs)[-2000:],
         )
+
+
+def _quest_finished(
+    ctx: RunContext,
+    mission_id: int,
+    start: dict[str, Any] | None,
+    needed: int,
+) -> bool:
+    after = _quest_snapshot(ctx.state(), mission_id)
+    if after is None:
+        return True
+    if start is not None and after["seq"] > start["seq"]:
+        return True
+    if after["progress"] >= needed:
+        return True
+    if after["max"] > 1 and after["progress"] >= after["max"]:
+        return True
+    if needed <= 1 and start is not None and after["progress"] > start["progress"]:
+        return True
+    if needed <= 1 and start is None and after["progress"] > 0:
+        return True
+    return False
+
+
+def _quest_done(
+    ctx: RunContext,
+    mission_id: int,
+    baseline: dict[str, Any] | None,
+    needed: int,
+) -> bool:
+    after = _quest_snapshot(ctx.state(), mission_id)
+    if after is None:
+        return True
+    if baseline is not None and after["seq"] > baseline["seq"]:
+        return True
+    if after["progress"] >= needed:
+        return True
+    return False
 
 
 def _pass(

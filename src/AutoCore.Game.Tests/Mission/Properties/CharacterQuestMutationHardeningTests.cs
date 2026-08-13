@@ -475,6 +475,28 @@ public class CharacterQuestMutationHardeningTests
 
     [TestMethod]
     [TestCategory("MissionCritical")]
+    public void ResolveObjectiveMax_MultiPadPatrol_UsesNeededCount()
+    {
+        var obj = MissionObjective.CreateForTests(1237, 0, 874, completeCount: 0);
+        var patrol = new ObjectiveRequirementPatrol(obj)
+        {
+            TargetCount = 5,
+            Laps = 1,
+            Sequential = true,
+        };
+        for (var i = 0; i < 5; i++)
+            patrol.GenericTargets[i] = 74751 + i;
+        obj.Requirements.Add(patrol);
+
+        Assert.AreEqual(5, CharacterQuest.ResolveObjectiveMax(obj));
+
+        var quest = new CharacterQuest(874, 0);
+        quest.PopulateFromMission(Mission.CreateForTests(874, obj));
+        Assert.AreEqual(5, quest.ObjectiveMax[0]);
+    }
+
+    [TestMethod]
+    [TestCategory("MissionCritical")]
     public void Write_NegativeProgress_ClampedToZeroOnAbsolutePaths()
     {
         const int missionId = 99191;

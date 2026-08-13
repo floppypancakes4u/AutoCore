@@ -2104,6 +2104,18 @@ public static class NpcInteractHandler
     }
 
     /// <summary>
+    /// After a GM/harness snap onto a pad, credit the same AutoComplete hit as C2S 0x20B3.
+    /// No-op when the target is not the next in-range AutoComplete pad.
+    /// </summary>
+    public static void TryCreditAutoCompletePatrolAtPlayer(TNLConnection conn, long targetCoid)
+    {
+        if (conn == null || targetCoid <= 0)
+            return;
+
+        HandleAutoPatrol(conn, new AutoPatrolPacket { Target = new TFID(targetCoid, false) });
+    }
+
+    /// <summary>
     /// C2S AutoPatrol (0x20B3): client is within auto-complete range of a patrol waypoint.
     /// Match packet target to the active AutoComplete patrol requirement, verify range, then
     /// advance the objective sequence or complete the mission.
