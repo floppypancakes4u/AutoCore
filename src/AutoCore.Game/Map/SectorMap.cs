@@ -176,9 +176,11 @@ public class SectorMap
             obj.Layer = template.Value.Layer;
             obj.SetMap(this);
 
-            // Do NOT CreateGhost for all GraphicsObjects here — flooding the ghost table
-            // with every map prop exhausts client ghost slots and NPCs stop appearing.
-            // Combat props get ghosts lazily via MakeNotInvincible / first TakeDamage.
+            // Do NOT CreateGhost FAM-local creatures (or any map-load object) here.
+            // The client already instantiated FAM COIDs from the map file. ObjectInScope of a
+            // GhostCreature on that TFID (or ghost-slot exhaustion) arms Havok with a null
+            // vehicle+0x258 → AV 0x004F5566. Spawn-point NPCs still CreateGhost themselves
+            // with MapNpcIdentity (global high COID). Combat props ghost lazily on damage.
 
             // Always place the SpawnPoint entity; only materialize children when IsActive.
             if (obj is SpawnPoint sp && ShouldSpawnChildrenAtMapLoad(template.Value))

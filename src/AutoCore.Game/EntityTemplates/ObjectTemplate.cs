@@ -98,6 +98,9 @@ public class ObjectTemplate
             case CloneBaseObjectType.QuestObject:
                 return new QuestObjectTemplate();
 
+            case CloneBaseObjectType.Creature:
+                return new CreatureTemplate();
+
             default:
                 Logger.WriteLog(LogType.Error, $"Unhandled template type: {cloneBaseObj.Type}!");
                 return null;

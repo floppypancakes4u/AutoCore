@@ -1,6 +1,7 @@
 namespace AutoCore.Game.Skills;
 
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using AutoCore.Game.Combat;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
@@ -305,6 +306,92 @@ public static class SkillService
         return true;
     }
 
+    /// <summary>
+    /// NPC/creature combat skill: damage elements only, no learned-skill or power cost.
+    /// </summary>
+    public static bool TryCastNpc(
+        ClonedObjectBase caster,
+        int skillId,
+        int skillLevel,
+        ClonedObjectBase target)
+    {
+        if (caster == null || target == null || skillId <= 0 || caster.Map == null)
+            return false;
+        if (!ReferenceEquals(caster.Map, target.Map))
+            return false;
+
+        var skill = AssetManager.Instance.GetSkill(skillId);
+        if (skill == null)
+            return false;
+
+        var level = Math.Max(1, skillLevel);
+        if (!TryGetDamageRange(skill, level, out var minDmg, out var maxDmg, out var pen))
+            return false;
+
+        var range = GetScalarElement(skill, SkillElementTypes.Range, level);
+        if (range > 0f && caster.Position.Dist(target.Position) > range)
+            return false;
+
+        if (!CombatEligibility.CanDamage(caster, target, DamageContext.Skill))
+            return false;
+
+        var nowMs = Environment.TickCount64;
+        var cooldownMs = (long)MathF.Round(GetScalarElement(skill, SkillElementTypes.CoolDown, level));
+        var cooldownKey = (caster.ObjectId.Coid, skillId);
+        var cooldownReserved = false;
+        long untilMs = 0;
+        if (cooldownMs > 0)
+        {
+            lock (CooldownReservationLock)
+            {
+                if (CooldownUntilMs.TryGetValue(cooldownKey, out untilMs) && nowMs < untilMs)
+                    return false;
+                untilMs = nowMs + cooldownMs;
+                CooldownUntilMs[cooldownKey] = untilMs;
+                cooldownReserved = true;
+            }
+        }
+
+        var damage = RollDamage(minDmg, maxDmg, pen, nowMs, caster.ObjectId.Coid, target.ObjectId.Coid);
+        if (damage <= 0)
+        {
+            ReleaseCooldownReservation(cooldownKey, untilMs, cooldownReserved);
+            return false;
+        }
+
+        var actual = target.TakeDamage(damage, caster);
+        if (actual <= 0)
+        {
+            ReleaseCooldownReservation(cooldownKey, untilMs, cooldownReserved);
+            return false;
+        }
+
+        var killed = target.GetCurrentHP() <= 0;
+        if (killed)
+            target.SetMurderer(caster);
+
+        SendEffect(
+            character: null,
+            caster,
+            target,
+            target.ObjectId,
+            skill.Id,
+            level,
+            applyPower: 0,
+            powerDelta: actual,
+            target.Position,
+            isItemSkill: false);
+
+        var victimChar = target.GetSuperCharacter(false);
+        if (victimChar != null && actual > 0)
+            Vehicle.TrySendDamagePacket(victimChar, target, caster.ObjectId, actual);
+
+        if (killed)
+            target.OnDeath(DeathType.Violent);
+
+        return true;
+    }
+
     public static bool TryCastReaction(ClonedObjectBase activator, int skillId, int skillLevel)
     {
         if (activator == null || skillId <= 0)
@@ -562,7 +649,7 @@ public static class SkillService
         return Math.Max(0, rolled + Math.Max(0, pen));
     }
 
-    private static float GetScalarElement(Skill skill, int elementType, int level)
+    internal static float GetScalarElement(Skill skill, int elementType, int level)
     {
         var element = FindElement(skill, elementType);
         if (element == null)
@@ -633,35 +720,39 @@ public static class SkillService
         Vector3 position,
         bool isItemSkill)
     {
-        var connection = character?.OwningConnection
-            ?? caster.GetAsCharacter()?.OwningConnection
-            ?? caster.GetSuperCharacter(false)?.OwningConnection;
-        if (connection == null)
-            return;
-
         var effectSourceId = !isItemSkill && character != null
             ? character.ObjectId
             : caster.ObjectId;
-        var packet = new SkillStatusEffectPacket
-        {
-            SkillId = skillId,
-            SkillLevel = (short)Math.Clamp(skillLevel, short.MinValue, short.MaxValue),
-            ApplyPower = Math.Max(0, applyPower),
-            Caster = effectSourceId,
-            PosX = position.X,
-            PosY = position.Y,
-            PosZ = position.Z,
-            Flag = isItemSkill ? (byte)1 : (byte)0,
-        };
         var targetPower = GetTargetPower(target);
-        packet.AddTarget(visualTargetId, targetPower.Current, targetPower.Maximum);
-        connection.SendGamePacket(packet);
 
-        // Victim may need the cast FX too when they are a different player.
-        var victimConn = target.GetSuperCharacter(false)?.OwningConnection;
-        if (victimConn != null && !ReferenceEquals(victimConn, connection))
+        // FAM turrets / NPC casters have no OwningConnection. If the victim is also an NPC,
+        // the only clients that can play caster vfunc+0x238(4) (muzzle / projectile) are
+        // players already on the map. Union caster/victim owners with map.Players.
+        var connections = new HashSet<TNL.TNLConnection>();
+        void Add(TNL.TNLConnection conn)
         {
-            var victimPacket = new SkillStatusEffectPacket
+            if (conn != null)
+                connections.Add(conn);
+        }
+
+        Add(character?.OwningConnection);
+        Add(caster.GetAsCharacter()?.OwningConnection);
+        Add(caster.GetSuperCharacter(false)?.OwningConnection);
+        Add(target.GetSuperCharacter(false)?.OwningConnection);
+
+        var map = caster.Map ?? target?.Map;
+        if (map?.Players != null)
+        {
+            foreach (var player in map.Players)
+                Add(player?.OwningConnection);
+        }
+
+        if (connections.Count == 0)
+            return;
+
+        foreach (var connection in connections)
+        {
+            var packet = new SkillStatusEffectPacket
             {
                 SkillId = skillId,
                 SkillLevel = (short)Math.Clamp(skillLevel, short.MinValue, short.MaxValue),
@@ -672,8 +763,8 @@ public static class SkillService
                 PosZ = position.Z,
                 Flag = isItemSkill ? (byte)1 : (byte)0,
             };
-            victimPacket.AddTarget(visualTargetId, targetPower.Current, targetPower.Maximum);
-            victimConn.SendGamePacket(victimPacket);
+            packet.AddTarget(visualTargetId, targetPower.Current, targetPower.Maximum);
+            connection.SendGamePacket(packet);
         }
     }
 

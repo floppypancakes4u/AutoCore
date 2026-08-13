@@ -66,4 +66,7 @@ public sealed class NpcAiState
 
     /// <summary>Whether the NPC is currently walking back to <see cref="HomePosition"/>.</summary>
     public bool ReturningHome { get; set; }
+
+    /// <summary>Last successful creature-skill fire (TickCount64); 0 = never.</summary>
+    public long LastSkillFireMs { get; set; }
 }

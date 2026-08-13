@@ -5,10 +5,9 @@ namespace AutoCore.Game.Tests.NpcAi;
 using AutoCore.Game.Npc;
 
 /// <summary>
-/// Stage 10: <see cref="FactionHostility.IsHostile"/> is the single choke point for aggro
-/// decisions. Server heuristic (NPC.md §15.2): player races 0/1/2 never mutual-aggro; &gt;= 3
-/// (including Ambient 21) aggressive toward any other real faction; -1 / -100 never aggress.
-/// Retail client is slightly broader (any unequal faction via vtable+0x298); Ambient is proactive.
+/// <see cref="FactionHostility.IsHostile"/> is the single choke point for NPC aggro.
+/// Retail <c>FUN_005c9450</c>: distinct real factions (&gt;= 0) are hostile. Humans (0) are
+/// friendly to other Humans and hostile to Mutants/Biomeks/wildlife. -1 / -100 never aggress.
 /// </summary>
 [TestClass]
 public class FactionHostilityTests
@@ -28,10 +27,11 @@ public class FactionHostilityTests
         Assert.IsFalse(FactionHostility.IsHostile(3, 3), "same NPC faction must not aggro itself");
         Assert.IsFalse(FactionHostility.IsHostile(0, 0), "same player faction must not aggro itself");
 
-        // Player factions (0/1/2) never mutually aggro.
-        Assert.IsFalse(FactionHostility.IsHostile(0, 1), "player races must never mutual-aggro (0 vs 1)");
-        Assert.IsFalse(FactionHostility.IsHostile(1, 2), "player races must never mutual-aggro (1 vs 2)");
-        Assert.IsFalse(FactionHostility.IsHostile(2, 0), "player races must never mutual-aggro (2 vs 0)");
+        // Distinct player races are hostile so Human militia (0) attacks Mutants/Biomeks.
+        Assert.IsTrue(FactionHostility.IsHostile(0, 1), "Human vs Mutant must be hostile");
+        Assert.IsTrue(FactionHostility.IsHostile(1, 2), "Mutant vs Biomek must be hostile");
+        Assert.IsTrue(FactionHostility.IsHostile(2, 0), "Biomek vs Human must be hostile");
+        Assert.IsTrue(FactionHostility.IsHostile(0, 10), "Human vs Wildlife must be hostile");
 
         // Unset (-1) and neutral (-100) never aggro, in either slot.
         Assert.IsFalse(FactionHostility.IsHostile(3, -1), "NPC vs unset (-1) must not aggro");

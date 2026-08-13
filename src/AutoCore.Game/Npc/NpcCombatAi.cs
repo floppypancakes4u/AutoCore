@@ -6,7 +6,9 @@ using AutoCore.Game.CloneBases.Specifics;
 using AutoCore.Game.Combat;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
+using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
+using AutoCore.Game.Skills;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL.Ghost;
 
@@ -183,6 +185,8 @@ public static class NpcCombatAi
         var target = entity.Target;
         var (bit, weapon) = SelectFiringWeapon(entity, target);
         var rangeMax = WeaponRangeMax(weapon);
+        if (rangeMax <= 0f)
+            rangeMax = CreatureSkillRange(entity);
         var inRange = rangeMax <= 0f || entity.Position.Dist(target.Position) <= rangeMax;
 
         // Aim every combat tick so remotes see turrets track (WantedTurretDirection on PositionMask).
@@ -192,6 +196,10 @@ public static class NpcCombatAi
             vehicle.SetTargetObject(target);
             UpdateVehicleCombatAim(vehicle, target, firing: bit);
             vehicle.ProcessCombatIfFiring();
+        }
+        else if (entity is Creature && entity is not Character)
+        {
+            TryFireCreatureSkill(entity, npcAi, target, inRange, nowMs);
         }
         else
         {
@@ -615,7 +623,94 @@ public static class NpcCombatAi
     /// </summary>
     private static float EngageApproachRange(ClonedObjectBase entity)
     {
-        return entity is Vehicle vehicle ? vehicle.GetMaxEquippedWeaponRange() : 0f;
+        if (entity is Vehicle vehicle)
+        {
+            var equipped = vehicle.GetMaxEquippedWeaponRange();
+            if (equipped > 0f)
+                return equipped;
+        }
+
+        return CreatureSkillRange(entity);
+    }
+
+    private static void TryFireCreatureSkill(
+        ClonedObjectBase entity,
+        NpcAiState npcAi,
+        ClonedObjectBase target,
+        bool inRange,
+        long nowMs)
+    {
+        if (!inRange || npcAi == null || target == null)
+            return;
+
+        if (!TrySelectCreatureCombatSkill(entity, out var skillId, out var skillLevel, out var pauseMs))
+            return;
+
+        var skill = AssetManager.Instance.GetSkill(skillId);
+        if (skill == null)
+            return;
+
+        var cooldownMs = (long)MathF.Round(
+            SkillService.GetScalarElement(skill, SkillElementTypes.CoolDown, Math.Max(1, skillLevel)));
+        var wait = Math.Max(cooldownMs, pauseMs);
+        if (wait > 0 && npcAi.LastSkillFireMs > 0 && nowMs - npcAi.LastSkillFireMs < wait)
+            return;
+
+        if (SkillService.TryCastNpc(entity, skillId, skillLevel, target))
+            npcAi.LastSkillFireMs = nowMs;
+    }
+
+    private static bool TrySelectCreatureCombatSkill(
+        ClonedObjectBase entity,
+        out int skillId,
+        out int skillLevel,
+        out int pauseMs)
+    {
+        skillId = 0;
+        skillLevel = 1;
+        pauseMs = 0;
+        if (entity is not Creature creature || creature is Character)
+            return false;
+        if (creature.CloneBaseObject is not CloneBaseCreature clone)
+            return false;
+
+        var skills = clone.CreatureSpecific?.Skills;
+        if (skills == null || skills.Count == 0)
+            return false;
+
+        if (!skills.TryGetValue(2, out var list) || list == null || list.Count == 0)
+        {
+            list = null;
+            foreach (var pair in skills)
+            {
+                if (pair.Value is { Count: > 0 })
+                {
+                    list = pair.Value;
+                    break;
+                }
+            }
+        }
+
+        if (list == null || list.Count == 0)
+            return false;
+
+        var set = list[0];
+        if (set.SkillId <= 0)
+            return false;
+        skillId = set.SkillId;
+        skillLevel = Math.Max(1, (int)set.SkillLevel);
+        pauseMs = set.PauseTime;
+        return true;
+    }
+
+    private static float CreatureSkillRange(ClonedObjectBase entity)
+    {
+        if (!TrySelectCreatureCombatSkill(entity, out var skillId, out var skillLevel, out _))
+            return 0f;
+        var skill = AssetManager.Instance.GetSkill(skillId);
+        if (skill == null)
+            return 0f;
+        return SkillService.GetScalarElement(skill, SkillElementTypes.Range, Math.Max(1, skillLevel));
     }
 
     private static float GetPatrolDistance(ClonedObjectBase entity) => entity switch
