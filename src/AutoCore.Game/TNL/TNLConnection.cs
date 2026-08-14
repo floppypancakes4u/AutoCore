@@ -193,6 +193,18 @@ public partial class TNLConnection : GhostConnection
     internal void ForceGhostingForTests(bool value) => Ghosting = value;
 
     /// <summary>
+    /// Test seam for "ghosting is live": <c>ActivateGhosting</c> only sets <c>Scoping</c> and sends
+    /// <c>rpcStartGhosting</c>; <c>Ghosting</c> flips only when the client answers, which no unit
+    /// test does. Scope queries are gated on <c>Ghosting</c> (nothing can be transmitted before
+    /// then), so tests that mean "the client is receiving ghosts" must use this.
+    /// </summary>
+    public void BeginGhostingForTests()
+    {
+        ActivateGhosting();
+        Ghosting = true;
+    }
+
+    /// <summary>
     /// Spawn pose <see cref="Managers.MapTransferSpawn"/> resolved for the pending transfer,
     /// latched at MapInfo time. The handshake hands control of the timeline to the client
     /// (MapInfo → FAM load → Stage2 → Stage3 → ack), so live entity pose is not a safe source
@@ -903,7 +915,9 @@ private void HandlePacket(ByteBuffer buffer)
         // Diagnostic capture must never be able to drop a real packet.
         Guard.Run("inbound packet debug capture", () =>
         {
-            if (gameOpcode == GameOpcode.InventoryGrab)
+            if (gameOpcode == GameOpcode.Firing)
+                FiringPacketCapture.RecordIncoming(rawBytes, CurrentCharacter);
+            else if (gameOpcode == GameOpcode.InventoryGrab)
                 InventoryGrabDebugLog.RecordIncoming(rawBytes);
             else
                 InventoryDropDebugLog.RecordIncomingIfTossRelated(gameOpcode, rawBytes);
@@ -915,9 +929,7 @@ private void HandlePacket(ByteBuffer buffer)
         if (!Enum.IsDefined(typeof(GameOpcode), gameOpcode))
         {
             Logger.WriteLog(LogType.Warning, "Unknown GameOpcode received from client: 0x{0:X} ({1})", rawOpcode, rawOpcode);
-            GameLog.Warn("UnknownOpcodeReceived", "NET-001",
-                ("Opcode", rawOpcode),
-                ("SessionId", SessionId));
+            LogUnknownOpcodeReceived(rawOpcode, rawBytes.Length);
             return;
         }
 
@@ -973,43 +985,47 @@ private void HandlePacket(ByteBuffer buffer)
                     break;
 
                 case GameOpcode.GetFriends:
-                    //SocialManager.GetFriends(this);
+                    // Opcode-only C2S (RequestFriendsList). No SocialManager; drain leftover bytes.
+                    DrainUnreadStubPayload(reader);
                     break;
 
                 case GameOpcode.GetEnemies:
-                    //SocialManager.GetEnemies(this);
+                    DrainUnreadStubPayload(reader);
                     break;
 
                 case GameOpcode.GetIgnored:
-                    //SocialManager.GetIgnored(this);
+                    DrainUnreadStubPayload(reader);
                     break;
 
                 case GameOpcode.AddFriend:
-                    //SocialManager.AddEntry(this, reader, SocialType.Friend);
+                    // Retail 0x28: pad4 + i64 coid + char[17] name. Feature unimplemented.
+                    DrainUnreadStubPayload(reader);
                     break;
 
                 case GameOpcode.AddEnemy:
-                    //SocialManager.AddEntry(this, reader, SocialType.Enemy);
+                    DrainUnreadStubPayload(reader);
                     break;
 
                 case GameOpcode.AddIgnore:
-                    //SocialManager.AddEntry(this, reader, SocialType.Ignore);
+                    DrainUnreadStubPayload(reader);
                     break;
 
                 case GameOpcode.RemoveFriend:
-                    //SocialManager.RemoveEntry(this, reader.ReadPadding(4).ReadLong(), SocialType.Friend);
+                    // Retail 0x10: pad4 + i64 coid. Feature unimplemented.
+                    DrainUnreadStubPayload(reader);
                     break;
 
                 case GameOpcode.RemoveEnemy:
-                    //SocialManager.RemoveEntry(this, reader.ReadPadding(4).ReadLong(), SocialType.Enemy);
+                    DrainUnreadStubPayload(reader);
                     break;
 
                 case GameOpcode.RemoveIgnore:
-                    //SocialManager.RemoveEntry(this, reader.ReadPadding(4).ReadLong(), SocialType.Ignore);
+                    DrainUnreadStubPayload(reader);
                     break;
 
                 case GameOpcode.RequestClanInfo:
-                    //ClanManager.RequestInfo(this);
+                    // Opcode-only C2S. ClanManager has no RequestInfo path.
+                    DrainUnreadStubPayload(reader);
                     break;
 
                 case GameOpcode.ConvoyMissionsRequest:
@@ -1123,7 +1139,9 @@ private void HandlePacket(ByteBuffer buffer)
                     break;
 
                 case GameOpcode.Firing:
-                    // Client may send fire state without a VehicleMoved (stationary shooting).
+                    // Heuristic compatibility parser; live fire is VehicleMoved 0x200A.
+                    // Inbound 0x2022 frames are captured in the prologue; do not retune this
+                    // reader until a live C2S capture proves the 24-byte fidWeapon layout.
                     HandleFiringPacket(reader);
                     break;
 
@@ -1149,9 +1167,7 @@ private void HandlePacket(ByteBuffer buffer)
 
                 default:
                     Logger.WriteLog(LogType.Error, "Unhandled Opcode: {0}", gameOpcode);
-                    GameLog.Warn("UnknownOpcodeReceived", "NET-001",
-                        ("Opcode", gameOpcode.ToString()),
-                        ("SessionId", SessionId));
+                    LogUnknownOpcodeReceived(gameOpcode.ToString(), rawBytes.Length);
                     break;
             }
         }
@@ -1165,6 +1181,34 @@ private void HandlePacket(ByteBuffer buffer)
                 ("SessionId", SessionId),
                 ("ExceptionType", e.GetType().Name));
         }
+    }
+
+    private static void DrainUnreadStubPayload(BinaryReader reader)
+    {
+        if (reader?.BaseStream == null)
+            return;
+
+        var remaining = (int)(reader.BaseStream.Length - reader.BaseStream.Position);
+        if (remaining > 0)
+            _ = reader.ReadBytes(remaining);
+    }
+
+    private void LogUnknownOpcodeReceived(object opcode, int packetSize)
+    {
+        var surface = "Game";
+        if (Interface is TNLInterface tnl)
+            surface = tnl.DoGhosting ? "Sector" : "Global";
+
+        var coid = CurrentCharacter?.ObjectId.Coid ?? GetPlayerCOID();
+        var map = CurrentCharacter?.Map?.ContinentId ?? -1;
+
+        GameLog.Warn("UnknownOpcodeReceived", "NET-001",
+            ("Opcode", opcode),
+            ("SessionId", SessionId),
+            ("PacketSize", packetSize),
+            ("Surface", surface),
+            ("CharacterCoid", coid),
+            ("Map", map));
     }
 
     /// <summary>
