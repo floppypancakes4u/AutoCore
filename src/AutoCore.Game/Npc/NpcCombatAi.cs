@@ -11,6 +11,7 @@ using AutoCore.Game.Map;
 using AutoCore.Game.Skills;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL.Ghost;
+using AutoCore.Utils;
 
 /// <summary>
 /// Server-side combat brain for a single NPC vehicle/creature (client parity
@@ -115,11 +116,17 @@ public static class NpcCombatAi
         if (npcAi.ReturningHome)
         {
             if (entity.Position.Dist(npcAi.ReturnAnchor) <= ResumePathRadius)
+            {
                 npcAi.ReturningHome = false;
+                npcAi.SuppressAggroUntilHome = false;
+            }
             else
             {
                 SteerToward(entity, npcAi.ReturnAnchor, NpcTicker.ResolveSpeed(entity), dt);
-                return;
+                // Distance-leash must not re-scan the same player (oscillate). Target loss
+                // still scans so a second hostile in vision can be acquired immediately.
+                if (npcAi.SuppressAggroUntilHome)
+                    return;
             }
         }
 
@@ -138,6 +145,8 @@ public static class NpcCombatAi
         entity.SetTargetObject(target);
         npcAi.EngageStartedMs = nowMs;
         npcAi.HelpCalled = false;
+        npcAi.ReturningHome = false;
+        npcAi.SuppressAggroUntilHome = false;
         SetCombatState(entity, HBAICombatState.Engage);
         TryCallForHelp(entity, npcAi, target, nowMs);
     }
@@ -195,7 +204,7 @@ public static class NpcCombatAi
         {
             vehicle.SetTargetObject(target);
             UpdateVehicleCombatAim(vehicle, target, firing: bit);
-            vehicle.ProcessCombatIfFiring();
+            vehicle.ProcessCombatIfFiring(nowMs);
         }
         else if (entity is Creature && entity is not Character)
         {
@@ -205,6 +214,8 @@ public static class NpcCombatAi
         {
             // Out of range / no weapon: still aim at the target; clear fire bits for observers.
             UpdateVehicleCombatAim(entity, target, firing: 0);
+            if (entity is Vehicle)
+                LogCombatRefusal(entity, weapon, rangeMax, inRange);
         }
 
         CombatMove(entity, npcAi, target.Position, atRange: inRange, dt);
@@ -297,7 +308,7 @@ public static class NpcCombatAi
             if (entity.Position.Dist(npcAi.ReturnAnchor) <= leash)
                 return false;
 
-            Disengage(entity, npcAi);
+            Disengage(entity, npcAi, suppressAggroUntilHome: true);
             return true;
         }
 
@@ -305,17 +316,18 @@ public static class NpcCombatAi
         if (target == null || entity.Position.Dist(target.Position) <= ResolveAggroRange(entity, npcAi))
             return false;
 
-        Disengage(entity, npcAi);
+        Disengage(entity, npcAi, suppressAggroUntilHome: true);
         return true;
     }
 
-    private static void Disengage(ClonedObjectBase entity, NpcAiState npcAi)
+    private static void Disengage(ClonedObjectBase entity, NpcAiState npcAi, bool suppressAggroUntilHome = false)
     {
         CeaseFire(entity);
         entity.SetTargetObject(null);
         if (npcAi != null)
         {
             npcAi.ReturningHome = true;
+            npcAi.SuppressAggroUntilHome = suppressAggroUntilHome;
             npcAi.FleeUntilMs = 0;
             // Path NPC: drop the cursor so NpcPathFollower.Step re-latches to the nearest node when
             // patrol resumes at the anchor (the point we are walking back to), not the stale index.
@@ -711,6 +723,39 @@ public static class NpcCombatAi
         if (skill == null)
             return 0f;
         return SkillService.GetScalarElement(skill, SkillElementTypes.Range, Math.Max(1, skillLevel));
+    }
+
+    private static void LogCombatRefusal(ClonedObjectBase entity, Weapon weapon, float rangeMax, bool inRange)
+    {
+        if (entity is not Vehicle vehicle)
+            return;
+
+        string reason;
+        if (weapon == null)
+            reason = "no usable weapon";
+        else if (rangeMax <= 0f && vehicle.WeaponFront == null && vehicle.WeaponTurret == null && vehicle.WeaponRear == null)
+            reason = "weapon range is zero";
+        else
+            return; // out of range with a valid gun is expected, not a data error
+
+        var key = $"NpcVehicleCombat:{reason}:{vehicle.TemplateId}:{vehicle.CBID}";
+        if (!IncompleteHandlerLog.TryMarkOnce(key))
+            return;
+
+        Logger.WriteLog(LogType.Warning,
+            "NPC vehicle combat refused map={0} coid={1} template={2} chassis={3} target={4} reason={5} front={6} turret={7} rear={8} rangeMax={9} inRange={10}",
+            vehicle.Map?.ContinentId,
+            vehicle.ObjectId.Coid,
+            vehicle.TemplateId,
+            vehicle.CBID,
+            vehicle.Target?.ObjectId.Coid,
+            reason,
+            vehicle.WeaponFront?.CBID ?? 0,
+            vehicle.WeaponTurret?.CBID ?? 0,
+            vehicle.WeaponRear?.CBID ?? 0,
+            rangeMax,
+            inRange);
+        IncompleteHandlerLog.TestSink?.Invoke($"{reason} template={vehicle.TemplateId}");
     }
 
     private static float GetPatrolDistance(ClonedObjectBase entity) => entity switch

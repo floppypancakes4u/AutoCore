@@ -147,6 +147,27 @@ public partial class TNLConnection : GhostConnection
     internal uint TransferHandshakeGeneration { get; private set; }
 
     /// <summary>
+    /// Monotonic ms stamp of the last handshake <em>progress</em> — arming the transfer, and the
+    /// Stage2 → Stage3-ack advance. Zero when no handshake is pending. Timed per phase rather than
+    /// per transfer because the two waits fail for different reasons (see
+    /// <see cref="ReportMapTransferHandshakeStall"/>).
+    /// </summary>
+    internal long TransferHandshakePhaseSinceMs { get; private set; }
+
+    /// <summary>How many <see cref="MapTransferStallWarnMs"/> bands of the current wait have been reported.</summary>
+    private long _transferStallBandsReported;
+
+    /// <summary>
+    /// How long a single handshake phase may sit without progress before the watchdog logs it.
+    /// A cold destination map load plus client-side FAM/terrain work is routinely several seconds,
+    /// so this is well clear of a healthy transfer.
+    /// </summary>
+    internal const int MapTransferStallWarnMs = 15_000;
+
+    /// <summary>Clock seam for the stall watchdog (mirrors <c>Vehicle.CombatThrottleClock</c>).</summary>
+    internal static Func<long> MapTransferHandshakeClock = static () => Environment.TickCount64;
+
+    /// <summary>
     /// Spawn pose <see cref="Managers.MapTransferSpawn"/> resolved for the pending transfer,
     /// latched at MapInfo time. The handshake hands control of the timeline to the client
     /// (MapInfo → FAM load → Stage2 → Stage3 → ack), so live entity pose is not a safe source

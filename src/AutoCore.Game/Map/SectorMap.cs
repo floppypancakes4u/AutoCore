@@ -448,6 +448,13 @@ public class SectorMap
         if (clonedObject is Reaction reaction)
             Reactions.Remove(reaction.ObjectId);
 
+        // A detached SpawnPoint must leave the refill heartbeat with it: TickRespawn -> Spawn ->
+        // SpawnCreature dereferences Map (LocalCoidCounter), so a stale entry NREs on every tick
+        // and starves the rest of this map's spawn points. TickRespawn's own
+        // Map?.UnregisterSpawnRespawn cannot do it — Map is already null by then.
+        if (clonedObject is SpawnPoint spawnPoint)
+            UnregisterSpawnRespawn(spawnPoint);
+
         if (clonedObject is Character character)
         {
             if (PlayerCount > 0)
@@ -1632,6 +1639,10 @@ public class SectorMap
         Objects.Clear();
         Triggers.Clear();
         Reactions.Clear();
+        // LeaveMap unregisters detached spawn points, but it early-returns for one already
+        // dropped from Objects (PlayerCount drift) — that entry would keep refilling a map that
+        // has been torn down, or NRE once its Map is null.
+        _pendingSpawnRespawns?.Clear();
         NpcAiEntities.Clear();
         Players.Clear();
         PlayerCount = 0;

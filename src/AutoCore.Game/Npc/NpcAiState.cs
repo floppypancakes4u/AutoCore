@@ -67,6 +67,13 @@ public sealed class NpcAiState
     /// <summary>Whether the NPC is currently walking back to <see cref="HomePosition"/>.</summary>
     public bool ReturningHome { get; set; }
 
+    /// <summary>
+    /// When true, IdlePatrol will not re-scan until the NPC reaches <see cref="ReturnAnchor"/>.
+    /// Set only for a distance leash so the same player cannot immediately re-aggro and oscillate.
+    /// Target death / leave-map must leave this false so a second nearby hostile can be acquired.
+    /// </summary>
+    public bool SuppressAggroUntilHome { get; set; }
+
     /// <summary>Last successful creature-skill fire (TickCount64); 0 = never.</summary>
     public long LastSkillFireMs { get; set; }
 }

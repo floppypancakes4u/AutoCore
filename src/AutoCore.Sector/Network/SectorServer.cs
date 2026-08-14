@@ -218,6 +218,16 @@ public partial class SectorServer : BaseServer, ILoopable
                 }
                 SectorCombatTick.ProcessAll(combatEntries);
 
+                // Log-only watchdog for a map-transfer handshake that stopped advancing. The client
+                // has no local player between MapInfo and the Stage3 ack, so a stalled handshake
+                // shows up in-game as a frozen full loading bar with nothing in the server log.
+                Guard.Run("sector tick: map-transfer stall watchdog", () =>
+                {
+                    var nowMs = Environment.TickCount64;
+                    foreach (var kvp in Interface.MapConnections)
+                        kvp.Value?.ReportMapTransferHandshakeStall(nowMs);
+                });
+
                 // Delayed map-prop corpse despawn (ram wrecks stay ~12.5s then DestroyObject).
                 MapPropCorpseDespawn.Tick();
 

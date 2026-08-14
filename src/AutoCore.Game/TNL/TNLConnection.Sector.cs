@@ -232,10 +232,15 @@ public partial class TNLConnection
         {
             SendTransferStage3(character, packet.SecurityKey);
             TransferPhase = SectorTransferPhase.WaitingForStage3Ack;
+            MarkTransferHandshakeProgress();
             AutoCore.Utils.Logging.GameLog.Info("MapTransferStage2Received",
                 TransferHandshakeLogProps());
             AutoCore.Utils.Logging.GameLog.Info("MapTransferStage3Sent",
                 TransferHandshakeLogProps());
+            Logger.WriteLog(LogType.Network,
+                "MapTransfer: Stage2 received from character {0} (map {1}); Stage3 sent — awaiting ack.",
+                TransferHandshakeCharacterCoid,
+                TransferHandshakeDestinationContinentId);
             return;
         }
 
@@ -285,7 +290,12 @@ public partial class TNLConnection
         {
             AutoCore.Utils.Logging.GameLog.Info("MapTransferStage3AckReceived",
                 TransferHandshakeLogProps());
+            Logger.WriteLog(LogType.Network,
+                "MapTransfer: Stage3 ack received from character {0} (map {1}); releasing Creates.",
+                TransferHandshakeCharacterCoid,
+                TransferHandshakeDestinationContinentId);
             TransferPhase = SectorTransferPhase.None;
+            ClearTransferHandshakeStallTracking();
             CompletePendingMapTransferWorldEntry(character);
             return;
         }
@@ -521,6 +531,7 @@ public partial class TNLConnection
 
         TransferHandshakeGeneration++;
         TransferPhase = SectorTransferPhase.WaitingForStage2;
+        MarkTransferHandshakeProgress();
         TransferHandshakeCharacterCoid = character.ObjectId.Coid;
         TransferHandshakeDestinationContinentId = destinationContinentId;
         TransferHandshakeSourceContinentId = sourceContinentId;
@@ -544,6 +555,7 @@ public partial class TNLConnection
         AutoCore.Utils.Logging.GameLog.Info("MapTransferHandshakeAborted",
             TransferHandshakeLogProps(("Reason", reason)));
         TransferPhase = SectorTransferPhase.None;
+        ClearTransferHandshakeStallTracking();
         TransferHandshakeCharacterCoid = 0;
         TransferHandshakeDestinationContinentId = 0;
         TransferHandshakeSourceContinentId = 0;
@@ -665,12 +677,88 @@ public partial class TNLConnection
             && characterCoid == CurrentCharacter.ObjectId.Coid;
     }
 
+    /// <summary>
+    /// Records handshake progress so <see cref="ReportMapTransferHandshakeStall"/> times the
+    /// current wait rather than the whole transfer.
+    /// </summary>
+    private void MarkTransferHandshakeProgress()
+    {
+        TransferHandshakePhaseSinceMs = MapTransferHandshakeClock();
+        _transferStallBandsReported = 0;
+    }
+
+    private void ClearTransferHandshakeStallTracking()
+    {
+        TransferHandshakePhaseSinceMs = 0;
+        _transferStallBandsReported = 0;
+    }
+
+    /// <summary>
+    /// Log-only watchdog for a handshake that stopped advancing. The client has no local player
+    /// between MapInfo and the Stage3 ack, so a stage packet that is never sent, never arrives, or
+    /// is rejected as stale parks it on a full loading bar indefinitely — and until this ran, the
+    /// server printed nothing after "waiting for Stage2.".
+    /// <para>
+    /// Deliberately does not abort or restart the handshake: which phase stalls, and how long it
+    /// has stalled, is the evidence needed to find the cause. Emits at most one line per
+    /// <see cref="MapTransferStallWarnMs"/> band because the sector tick calls it every frame.
+    /// </para>
+    /// </summary>
+    /// <param name="nowMs">Monotonic millisecond stamp for this tick.</param>
+    /// <returns>True when this call emitted a stall report.</returns>
+    public bool ReportMapTransferHandshakeStall(long nowMs)
+    {
+        if (TransferPhase == SectorTransferPhase.None || TransferHandshakePhaseSinceMs == 0)
+            return false;
+
+        var stalledForMs = nowMs - TransferHandshakePhaseSinceMs;
+        if (stalledForMs < MapTransferStallWarnMs)
+            return false;
+
+        var band = stalledForMs / MapTransferStallWarnMs;
+        if (band <= _transferStallBandsReported)
+            return false;
+
+        _transferStallBandsReported = band;
+
+        var waitingFor = TransferPhase == SectorTransferPhase.WaitingForStage2
+            ? "client Stage2 (destination load never reported complete)"
+            : "client Stage3 ack (terrain preload never reported complete)";
+
+        AutoCore.Utils.Logging.GameLog.Warn("MapTransferHandshakeStalled", "NET-004",
+            TransferHandshakeLogProps(
+                ("StalledForMs", stalledForMs),
+                ("WaitingFor", waitingFor)));
+
+        Logger.WriteLog(LogType.Error,
+            "MapTransfer STALLED: character {0} has been in {1} for {2}ms waiting on {3} (to map {4}, from map {5}). "
+            + "The client is parked on a loading screen; no Creates will be sent until this advances.",
+            TransferHandshakeCharacterCoid,
+            TransferPhase,
+            stalledForMs,
+            waitingFor,
+            TransferHandshakeDestinationContinentId,
+            TransferHandshakeSourceContinentId);
+
+        return true;
+    }
+
     private void LogStaleTransferStage(string reason, long packetCharacterCoid)
     {
-        AutoCore.Utils.Logging.GameLog.Info("MapTransferStaleStagePacket",
+        // Warning, not Info: every one of these drops a stage packet on the floor, and because the
+        // handshake has no retry that silently strands the client on its loading screen.
+        AutoCore.Utils.Logging.GameLog.Warn("MapTransferStaleStagePacket", "NET-005",
             TransferHandshakeLogProps(
                 ("Reason", reason),
                 ("PacketCharacterId", packetCharacterCoid)));
+
+        Logger.WriteLog(LogType.Warning,
+            "MapTransfer: dropped stage packet ({0}) for character {1} while phase={2} handshakeChar={3} toMap={4}.",
+            reason,
+            packetCharacterCoid,
+            TransferPhase,
+            TransferHandshakeCharacterCoid,
+            TransferHandshakeDestinationContinentId);
     }
 
     private (string, object)[] TransferHandshakeLogProps(params (string, object)[] extra)

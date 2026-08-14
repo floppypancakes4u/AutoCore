@@ -913,9 +913,10 @@ public class SpawnPoint : ClonedObjectBase
         }
 
         ApplySpawnPath(vehicle, Template, ResolveTemplatePath());
+        EnsureNpcVehicleAi(vehicle, hadDriver: driver != null);
 
-        // vehicle.NpcAi (set above via ApplyDriverAi, if any) must be assigned before SetMap so
-        // EnterMap's HasNpcAi check sees it and registers the vehicle in Map.NpcAiEntities.
+        // vehicle.NpcAi must be assigned before SetMap so EnterMap's HasNpcAi check
+        // registers the chassis in Map.NpcAiEntities (retail CreateAIVehicle 0x00563AB0).
         vehicle.SetMap(Map);
         vehicle.CreateGhost();
 
@@ -962,9 +963,10 @@ public class SpawnPoint : ClonedObjectBase
         }
 
         ApplySpawnPath(vehicle, Template, ResolveTemplatePath());
+        EnsureNpcVehicleAi(vehicle, hadDriver: driver != null);
 
-        // vehicle.NpcAi (set above via ApplyDriverAi, if any) must be assigned before SetMap so
-        // EnterMap's HasNpcAi check sees it and registers the vehicle in Map.NpcAiEntities.
+        // vehicle.NpcAi must be assigned before SetMap so EnterMap's HasNpcAi check
+        // registers the chassis in Map.NpcAiEntities (retail CreateAIVehicle 0x00563AB0).
         vehicle.SetMap(Map);
         vehicle.CreateGhost();
 
@@ -1061,11 +1063,64 @@ public class SpawnPoint : ClonedObjectBase
         return null;
     }
 
-    /// <summary>Copies the driver's wad.xml AI behavior onto the vehicle it owns, if any.</summary>
+    /// <summary>
+    /// Copies the driver's wad.xml AI behavior onto the chassis. Retail
+    /// <c>CVOGSpawnPoint::CreateAIVehicle</c> (<c>0x00563AB0</c>) always inserts the
+    /// vehicle/driver into the server heartbeat list — a missing <c>tCreatureAI</c> row
+    /// must not drop the chassis from <see cref="SectorMap.NpcAiEntities"/>.
+    /// </summary>
     private static void ApplyDriverAi(Vehicle vehicle, Creature driver)
     {
         var aiId = (driver?.CloneBaseObject as CloneBaseCreature)?.CreatureSpecific.AIBehavior ?? 0;
-        vehicle.NpcAi = BuildNpcAi(aiId, vehicle.Position);
+        vehicle.NpcAi = BuildNpcAi(aiId, vehicle.Position)
+                        ?? new NpcAiState { HomePosition = vehicle.Position };
+    }
+
+    /// <summary>
+    /// Guarantees a spawned NPC vehicle has a tick owner before <see cref="ClonedObjectBase.SetMap"/>.
+    /// Logs once per spawn-point for missing driver / missing profile / unresolved path COID.
+    /// </summary>
+    private void EnsureNpcVehicleAi(Vehicle vehicle, bool hadDriver)
+    {
+        if (vehicle == null)
+            return;
+
+        vehicle.NpcAi ??= new NpcAiState { HomePosition = vehicle.Position };
+
+        if (!hadDriver)
+        {
+            LogVehicleAiInitOnce(
+                $"NpcVehicleAi:noDriver:{Template?.COID}",
+                "NPC vehicle created but no AI owner/driver map={0} spawn={1} chassis={2} template={3}",
+                Map?.ContinentId, Template?.COID, vehicle.CBID, vehicle.TemplateId);
+        }
+        else if (vehicle.NpcAi.Profile == null)
+        {
+            var aiId = (vehicle.Owner?.GetAsCreature()?.CloneBaseObject as CloneBaseCreature)
+                ?.CreatureSpecific.AIBehavior ?? 0;
+            LogVehicleAiInitOnce(
+                $"NpcVehicleAi:noProfile:{Template?.COID}:{aiId}",
+                "NPC vehicle AI owner has no tCreatureAI profile map={0} spawn={1} chassis={2} template={3} aiBehavior={4} — ticking with default IdlePatrol",
+                Map?.ContinentId, Template?.COID, vehicle.CBID, vehicle.TemplateId, aiId);
+        }
+
+        if (Template != null && Template.MapPathCoid > 0 && ResolveTemplatePath() == null)
+        {
+            LogVehicleAiInitOnce(
+                $"NpcVehicleAi:path:{Template.COID}:{Template.MapPathCoid}",
+                "NPC vehicle path COID missing map={0} spawn={1} mapPathCoid={2}",
+                Map?.ContinentId, Template.COID, Template.MapPathCoid);
+        }
+    }
+
+    private static void LogVehicleAiInitOnce(string key, string format, params object[] args)
+    {
+        if (!IncompleteHandlerLog.TryMarkOnce(key))
+            return;
+
+        Logger.WriteLog(LogType.Warning, format, args);
+        IncompleteHandlerLog.TestSink?.Invoke(string.Format(
+            System.Globalization.CultureInfo.InvariantCulture, format, args));
     }
 
     /// <summary>Resolves a wad.xml tCreatureAI profile (AIBehavior/AIID) into runtime NPC AI state.</summary>

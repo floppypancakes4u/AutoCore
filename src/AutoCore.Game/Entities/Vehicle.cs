@@ -2176,13 +2176,13 @@ public class Vehicle : SimpleObject
     // Called from both movement packets AND the server tick, so holding fire works even if VehicleMoved packets are sparse.
     // Hard Target is OPTIONAL — TacArc soft acquisition handles cone fire (client multi-slot model).
     [ExcludeFromCodeCoverage]
-    public void ProcessCombatIfFiring()
+    public void ProcessCombatIfFiring(long nowMs = 0)
     {
         if (Ghost == null)
             return;
 
         if (Firing > 0)
-            ProcessCombatInternal();
+            ProcessCombatInternal(nowMs > 0 ? nowMs : Environment.TickCount64);
     }
 
     /// <summary>
@@ -2190,7 +2190,7 @@ public class Vehicle : SimpleObject
     /// Client anchors: SetWeaponsFiring @0x5021d0, FindDistanceToTarget @0x4e9aa0, OnFire @0x56e000.
     /// </summary>
     [ExcludeFromCodeCoverage]
-    private void ProcessCombatInternal()
+    private void ProcessCombatInternal(long nowMs)
     {
         if (Firing <= 0)
             return;
@@ -2198,8 +2198,6 @@ public class Vehicle : SimpleObject
         // Overheat lock: client FUN_0056aca0 blocks fire while heat >= max (all slots).
         if (MaxHeat > 0 && CurrentHeat >= MaxHeat)
             return;
-
-        var nowMs = Environment.TickCount64;
         var attackerLevel = Owner?.GetAsCreature()?.GetLevel() ?? 1;
         var attackerChar = Owner?.GetAsCharacter();
         var combat = attackerChar?.AttributeCombat ?? (short)1;

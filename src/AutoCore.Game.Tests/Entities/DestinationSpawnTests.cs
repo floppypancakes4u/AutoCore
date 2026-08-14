@@ -517,6 +517,74 @@ public class DestinationSpawnTests
             "a persisted map must refill from the spawn heartbeat even after every child died");
     }
 
+    /// <summary>
+    /// A SpawnPoint detached from the map (local-world reset / instance disposal calls
+    /// <c>SetMap(null)</c> on every non-Character object) must not stay on the respawn
+    /// heartbeat list. Otherwise the next due tick runs <c>SpawnCreature</c> with
+    /// <c>Map == null</c> and NREs on <c>Map.LocalCoidCounter</c>, every tick, forever.
+    /// </summary>
+    [TestMethod]
+    public void DetachedSpawnPoint_IsRemovedFromRespawnHeartbeat()
+    {
+        var map = CreateTestMap(9726);
+        RegisterWalkingCreature(CreatureCbid);
+        var template = ActiveCreatureTemplate(20_127, CreatureCbid, 2, 2);
+        template.RespawnTime = 1_000f;
+        var spawn = PlaceSpawn(map, template);
+        Assert.IsTrue(spawn.Spawn());
+
+        foreach (var child in map.Objects.Values.OfType<Creature>().Where(c => c is not Character).ToList())
+        {
+            child.SetMap(null);
+            spawn.NotifySpawnedChildDied(child, null);
+        }
+
+        var dueAt = spawn.RespawnDueAtMs ?? 0;
+        Assert.IsTrue(dueAt > 0, "child deaths must schedule a refill heartbeat");
+
+        // Local-world reset: detach the spawn point itself.
+        spawn.SetMap(null);
+
+        map.TickSpawnRespawns(dueAt);
+
+        Assert.AreEqual(0, CountMappedCreatures(map),
+            "a detached spawn point must not refill a map it no longer belongs to");
+    }
+
+    /// <summary>
+    /// Teardown clears every other map-local collection; the respawn heartbeat must go too.
+    /// LeaveMap's unregister is skipped when the object was already dropped from
+    /// <c>Objects</c> (documented PlayerCount-drift path), so the list must also be cleared here.
+    /// </summary>
+    [TestMethod]
+    public void TearDownLocalEntities_ClearsRespawnHeartbeat()
+    {
+        var map = CreateTestMap(9727);
+        RegisterWalkingCreature(CreatureCbid);
+        var template = ActiveCreatureTemplate(20_128, CreatureCbid, 2, 2);
+        template.RespawnTime = 1_000f;
+        var spawn = PlaceSpawn(map, template);
+        Assert.IsTrue(spawn.Spawn());
+
+        foreach (var child in map.Objects.Values.OfType<Creature>().Where(c => c is not Character).ToList())
+        {
+            child.SetMap(null);
+            spawn.NotifySpawnedChildDied(child, null);
+        }
+
+        var dueAt = spawn.RespawnDueAtMs ?? 0;
+        Assert.IsTrue(dueAt > 0, "child deaths must schedule a refill heartbeat");
+
+        // PlayerCount drift: the spawn point is gone from Objects, so LeaveMap will early-return.
+        map.Objects.Remove(spawn.ObjectId);
+
+        map.TearDownLocalEntities();
+        map.TickSpawnRespawns(dueAt);
+
+        Assert.AreEqual(0, CountMappedCreatures(map),
+            "teardown must drop the respawn heartbeat along with the other map-local collections");
+    }
+
     [TestMethod]
     public void UnsupportedSpawnChild_ProducesDiagnostic()
     {
