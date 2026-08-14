@@ -37,7 +37,7 @@ public class GlobalConfigTests
                 "PublicAddress": "127.0.0.1",
                 "Port": 26880,
                 "AllowVersionMismatch": true,
-                "ExpectedVersion": 149,
+                "ExpectedVersion": 175,
                 "AllowMissingCBID": true
               },
               "ServerInfoConfig": {
@@ -65,7 +65,7 @@ public class GlobalConfigTests
         Assert.AreEqual(26880, config.GameConfig.Port);
         Assert.AreEqual("127.0.0.1", config.GameConfig.PublicAddress);
         Assert.IsTrue(config.GameConfig.AllowVersionMismatch);
-        Assert.AreEqual(149, config.GameConfig.ExpectedVersion);
+        Assert.AreEqual(175, config.GameConfig.ExpectedVersion);
         Assert.IsTrue(config.GameConfig.AllowMissingCBID);
         Assert.AreEqual(1, config.ServerInfoConfig.Id);
         Assert.AreEqual("test", config.ServerInfoConfig.Password);

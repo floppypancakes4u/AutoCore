@@ -34,6 +34,34 @@ public class TransferAndMailEnvelopePacketTests
         Assert.AreEqual(127, bytes[3]);
         Assert.AreEqual(27001u, BitConverter.ToUInt32(bytes, 4));
         Assert.AreEqual(3u, BitConverter.ToUInt32(bytes, 8));
+        Assert.AreEqual(12, bytes.Length, "Client FUN_00816100 reads only IP u32 + port u32; flags u32 is unused but present");
+    }
+
+    /// <summary>
+    /// Client FUN_0092d900 formats the IP dword as (>>24).(>>16).(>>8).(&amp;0xFF).
+    /// AutoCore's reversed GetAddressBytes() on a little-endian write produces that dword.
+    /// </summary>
+    [TestMethod]
+    public void TransferToSector_ReversedIpv4_FormatsAsClientDottedDecimal()
+    {
+        var packet = new TransferToSectorPacket
+        {
+            IPAddress = IPAddress.Parse("192.168.1.10"),
+            Port = 27001,
+            Flags = 0
+        };
+
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+        packet.Write(writer);
+        var bytes = ms.ToArray();
+
+        var ipDword = BitConverter.ToUInt32(bytes, 0);
+        Assert.AreEqual(192u, ipDword >> 24);
+        Assert.AreEqual(168u, (ipDword >> 16) & 0xFF);
+        Assert.AreEqual(1u, (ipDword >> 8) & 0xFF);
+        Assert.AreEqual(10u, ipDword & 0xFF);
+        Assert.AreEqual(27001u, BitConverter.ToUInt32(bytes, 4));
     }
 
     [TestMethod]

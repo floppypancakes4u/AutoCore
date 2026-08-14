@@ -135,9 +135,10 @@ public class MapTransferPreconditionsTests
             Assert.AreEqual(10f, character.GetDbPositionXForTests());
             Assert.AreEqual(20f, character.GetDbPositionYForTests());
             Assert.AreEqual(30f, character.GetDbPositionZForTests());
-            Assert.IsNotNull(character.Ghost);
-            Assert.IsNotNull(character.CurrentVehicle.Ghost);
-            Assert.AreSame(character.Ghost, connection.GetScopeObject());
+            Assert.AreEqual(SectorTransferPhase.WaitingForStage2, connection.TransferPhase);
+            Assert.IsFalse(connection.IsScopingForTests,
+                "destination ghosts wait for the Stage2/Stage3 handshake");
+            Assert.IsFalse(character.WorldEntryComplete);
 
             // Also exercise TransferCharacterToMap null-map resolver path.
             MapManager.Instance.ResolveMapForTests = _ => null;
@@ -166,13 +167,12 @@ public class MapTransferPreconditionsTests
         try
         {
             MapManager.Instance.ResolveMapForTests = _ => map;
-            // Create packets fail without clonebase, so overall transfer returns false,
-            // but the transfer body (ResetGhosting / SetMap / Reestablish) still runs.
+            // Creates are gated on Stage3 ack, so Core no longer fails on missing clonebase.
             var result = MapManager.Instance.TransferCharacterToMap(character, 1);
-            Assert.IsFalse(result);
+            Assert.IsTrue(result);
             Assert.AreSame(map, character.Map);
-            Assert.IsNotNull(character.Ghost);
-            Assert.IsNotNull(character.CurrentVehicle.Ghost);
+            Assert.AreEqual(SectorTransferPhase.WaitingForStage2, connection.TransferPhase);
+            Assert.IsFalse(connection.IsScopingForTests);
         }
         finally
         {

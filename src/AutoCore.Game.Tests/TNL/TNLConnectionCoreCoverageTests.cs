@@ -237,7 +237,7 @@ public class TNLConnectionCoreCoverageTests
     }
 
     [TestMethod]
-    public void OnConnectionEstablished_WithGhosting_ActivatesGhosting()
+    public void OnConnectionEstablished_WithGhosting_ConfiguresCapabilityWithoutActivating()
     {
         var iface = new TNLInterface(doGhosting: true, skipNetworkBind: true);
         var conn = new TNLConnection();
@@ -248,8 +248,11 @@ public class TNLConnectionCoreCoverageTests
         // OnConnectionEstablished may require established state in base; catch/skip if not.
         try
         {
+            var seq = conn.GetGhostingSequence();
             conn.OnConnectionEstablished();
             Assert.IsTrue(conn.DoesGhostFrom());
+            Assert.IsFalse(conn.IsScopingForTests);
+            Assert.AreEqual(seq, conn.GetGhostingSequence());
         }
         catch
         {

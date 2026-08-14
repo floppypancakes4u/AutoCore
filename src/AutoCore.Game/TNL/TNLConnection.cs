@@ -133,6 +133,22 @@ public partial class TNLConnection : GhostConnection
     public Account Account { get; set; }
     public Character CurrentCharacter { get; set; }
 
+    /// <summary>
+    /// In-world map-transfer handshake. Login stays <see cref="SectorTransferPhase.None"/>.
+    /// </summary>
+    internal SectorTransferPhase TransferPhase { get; private set; }
+
+    internal long TransferHandshakeCharacterCoid { get; private set; }
+
+    internal int TransferHandshakeDestinationContinentId { get; private set; }
+
+    internal int TransferHandshakeSourceContinentId { get; private set; }
+
+    internal uint TransferHandshakeGeneration { get; private set; }
+
+    /// <summary>Test view of TNL <c>Scoping</c> (set by <c>ActivateGhosting</c>, cleared by <c>ResetGhosting</c>).</summary>
+    internal bool IsScopingForTests => Scoping;
+
     private sealed class ForeignVehicleCreateHold
     {
         public long CreatedAtUnixMs;
@@ -518,6 +534,45 @@ public partial class TNLConnection : GhostConnection
     /// </summary>
     internal static Action<TNLConnection, BasePacket> TestPacketSink { get; set; }
 
+    /// <summary>
+    /// When set, <c>rpcMsg*</c> records the live serialize/fragment result and skips
+    /// <see cref="PostNetEvent"/>. Used to exercise <see cref="SendGamePacketLive"/>
+    /// without UDP.
+    /// </summary>
+    internal static Action<TNLConnection, GameRpcCapture> TestOutboundRpcSink { get; set; }
+
+    /// <summary>When set, receives a copy of each fully reassembled fragment payload.</summary>
+    internal static Action<byte[]> TestReassembledBufferSink { get; set; }
+
+    internal sealed class GameRpcCapture
+    {
+        public required string Method { get; init; }
+        public uint Type { get; init; }
+        public ushort? Fragment { get; init; }
+        public ushort? FragmentId { get; init; }
+        public ushort? FragmentCount { get; init; }
+        public required byte[] Data { get; init; }
+        public bool IsFragmented => Fragment.HasValue;
+    }
+
+    private static byte[] CopyRpcPayload(ByteBuffer data)
+    {
+        var size = (int)data.GetBufferSize();
+        var copy = new byte[size];
+        if (size > 0)
+            Array.Copy(data.GetBuffer(), 0, copy, 0, size);
+        return copy;
+    }
+
+    private bool TryCaptureOutboundRpc(GameRpcCapture capture)
+    {
+        if (TestOutboundRpcSink == null)
+            return false;
+
+        TestOutboundRpcSink(this, capture);
+        return true;
+    }
+
     public void SendGamePacket(BasePacket packet, RPCGuaranteeType type = RPCGuaranteeType.RPCGuaranteedOrdered, bool skipOpcode = false)
     {
         if (Diagnostics.LogFilters.OutgoingPackets)
@@ -672,15 +727,19 @@ public partial class TNLConnection : GhostConnection
         }
 
         var arrLength = (uint)arr.Length;
-        if (arrLength > 1400U)
+        var fragmentSize = Interface is TNLInterface tnlInterface
+            ? tnlInterface.FragmentSize
+            : (ushort)220;
+
+        if (arrLength > fragmentSize)
         {
             ++FragmentCounter;
 
             var doneSize = 0U;
-            var count = (ushort)Math.Ceiling(arrLength / 220.0);
+            var count = (ushort)Math.Ceiling(arrLength / (double)fragmentSize);
             for (ushort i = 0; i < count; ++i)
             {
-                var buffSize = 220U;
+                var buffSize = (uint)fragmentSize;
                 if (buffSize >= arrLength - doneSize)
                     buffSize = arrLength - doneSize;
 
@@ -1111,6 +1170,14 @@ private void HandlePacket(ByteBuffer buffer)
     public void rpcMsgGuaranteed(uint type, ByteBuffer data)
     #region rpcMsgGuaranteed
     {
+        if (TryCaptureOutboundRpc(new GameRpcCapture
+            {
+                Method = nameof(rpcMsgGuaranteed),
+                Type = type,
+                Data = CopyRpcPayload(data)
+            }))
+            return;
+
         var rpcEvent = new RPCMsgGuaranteed();
         rpcEvent.Functor.Set(new object[] { type, data });
 
@@ -1126,6 +1193,14 @@ private void HandlePacket(ByteBuffer buffer)
     public void rpcMsgGuaranteedOrdered(uint type, ByteBuffer data)
     #region rpcMsgGuaranteedOrdered
     {
+        if (TryCaptureOutboundRpc(new GameRpcCapture
+            {
+                Method = nameof(rpcMsgGuaranteedOrdered),
+                Type = type,
+                Data = CopyRpcPayload(data)
+            }))
+            return;
+
         var rpcEvent = new RPCMsgGuaranteedOrdered();
         rpcEvent.Functor.Set(new object[] { type, data });
 
@@ -1141,6 +1216,14 @@ private void HandlePacket(ByteBuffer buffer)
     public void rpcMsgNonGuaranteed(uint type, ByteBuffer data)
     #region rpcMsgNonGuaranteed
     {
+        if (TryCaptureOutboundRpc(new GameRpcCapture
+            {
+                Method = nameof(rpcMsgNonGuaranteed),
+                Type = type,
+                Data = CopyRpcPayload(data)
+            }))
+            return;
+
         var rpcEvent = new RPCMsgNonGuaranteed();
         rpcEvent.Functor.Set(new object[] { type, data });
 
@@ -1156,6 +1239,17 @@ private void HandlePacket(ByteBuffer buffer)
     public void rpcMsgGuaranteedFragmented(uint type, ushort fragment, ushort fragmentId, ushort fragmentCount, ByteBuffer data)
     #region rpcMsgGuaranteedFragmented
     {
+        if (TryCaptureOutboundRpc(new GameRpcCapture
+            {
+                Method = nameof(rpcMsgGuaranteedFragmented),
+                Type = type,
+                Fragment = fragment,
+                FragmentId = fragmentId,
+                FragmentCount = fragmentCount,
+                Data = CopyRpcPayload(data)
+            }))
+            return;
+
         var rpcEvent = new RPCMsgGuaranteedFragmented();
         rpcEvent.Functor.Set(new object[] { type, fragment, fragmentId, fragmentCount, data });
 
@@ -1173,6 +1267,17 @@ private void HandlePacket(ByteBuffer buffer)
     public void rpcMsgGuaranteedOrderedFragmented(uint type, ushort fragment, ushort fragmentId, ushort fragmentCount, ByteBuffer data)
     #region rpcMsgGuaranteedOrderedFragmented
     {
+        if (TryCaptureOutboundRpc(new GameRpcCapture
+            {
+                Method = nameof(rpcMsgGuaranteedOrderedFragmented),
+                Type = type,
+                Fragment = fragment,
+                FragmentId = fragmentId,
+                FragmentCount = fragmentCount,
+                Data = CopyRpcPayload(data)
+            }))
+            return;
+
         var rpcEvent = new RPCMsgGuaranteedOrderedFragmented();
         rpcEvent.Functor.Set(new object[] { type, fragment, fragmentId, fragmentCount, data });
 
@@ -1190,6 +1295,17 @@ private void HandlePacket(ByteBuffer buffer)
     public void rpcMsgNonGuaranteedFragmented(uint type, ushort fragment, ushort fragmentId, ushort fragmentCount, ByteBuffer data)
     #region rpcMsgNonGuaranteedFragmented
     {
+        if (TryCaptureOutboundRpc(new GameRpcCapture
+            {
+                Method = nameof(rpcMsgNonGuaranteedFragmented),
+                Type = type,
+                Fragment = fragment,
+                FragmentId = fragmentId,
+                FragmentCount = fragmentCount,
+                Data = CopyRpcPayload(data)
+            }))
+            return;
+
         var rpcEvent = new RPCMsgNonGuaranteedFragmented();
         rpcEvent.Functor.Set(new object[] { type, fragment, fragmentId, fragmentCount, data });
 
@@ -1312,7 +1428,13 @@ private void HandlePacket(ByteBuffer buffer)
             SetGhostFrom(true);
             // Re-apply rate floor now that DoesGhostFrom() is true (ctor negotiated without ghost).
             SetFixedRateParameters(50, 50, 40000, 40000);
-            ActivateGhosting();
+            // Do not ActivateGhosting here. Client rpcStartGhosting_remote (0x00781300)
+            // immediately replies rpcReadyForNormalGhosts with no Stage1/2/3 / FAM-load
+            // check; FUN_008078B0 then applies foreign ghosts before game packets.
+            // Normal ghosting starts after Stage3 ack + local Creates.
+            GameLog.Info("SectorGhostingDeferredForWorldEntry",
+                ("SessionId", SessionId),
+                ("ConnectionId", GetPlayerCOID()));
             Logger.WriteLog(LogType.Network,
                 "Sector ghost rates: period={0}ms packetSize={1}B (floor bw={2} B/s period≤{3}ms)",
                 NegotiatedPacketSendPeriodMs, NegotiatedPacketSendSizeBytes,
@@ -1391,6 +1513,16 @@ private void HandlePacket(ByteBuffer buffer)
         {
             CurrentCharacter = null;
             return;
+        }
+
+        AbortPendingMapTransferHandshake("disconnect");
+        _loginStage3Offered = false;
+
+        if (DoesGhostFrom() && !Scoping)
+        {
+            GameLog.Info("SectorGhostingDisconnectBeforeActivation",
+                ("SessionId", SessionId),
+                ("CharacterId", character.ObjectId.Coid));
         }
 
         // Persist before SetMap(null) so Map.ContinentId is still available.
@@ -1512,6 +1644,13 @@ private void HandlePacket(ByteBuffer buffer)
             sFragment.FragmentId = 0;
             sFragment.TotalSize = 0;
             sFragment.MapFragments.Clear();
+
+            if (TestReassembledBufferSink != null)
+            {
+                var copy = new byte[combined.GetBufferSize()];
+                Array.Copy(combined.GetBuffer(), 0, copy, 0, copy.Length);
+                TestReassembledBufferSink(copy);
+            }
 
             HandlePacket(combined);
         }

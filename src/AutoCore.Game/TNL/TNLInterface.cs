@@ -12,6 +12,10 @@ public class TNLInterface : NetInterface
     private readonly object _lock = new();
 
     public bool DoGhosting { get; private set; }
+    /// <summary>
+    /// Client <c>TNLInterface+0xAC</c>: both the maximum unfragmented game-RPC size
+    /// and the fragment chunk size (retail default 220).
+    /// </summary>
     public ushort FragmentSize { get; private set; }
     public long ConnectionId { get; private set; }
     public Dictionary<long, TNLConnection> MapConnections { get; } = new();

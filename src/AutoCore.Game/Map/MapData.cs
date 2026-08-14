@@ -52,6 +52,13 @@ public class MapData
     public int NumOfImports { get; private set; }
     public Vector4 EntryPoint { get; private set; }
     public int NumModulePlacements { get; private set; }
+
+    /// <summary>
+    /// MapInfo 24-byte overlays derived from FAM module placements.
+    /// Retail shipped FAMs all have count 0; the list is the data-driven source for
+    /// <see cref="Packets.Sector.MapInfoPacket.ModulePlacements"/>.
+    /// </summary>
+    public List<Packets.Sector.MapInfoModulePlacement> ModulePlacements { get; } = new();
     public int NumOfVOGOs { get; private set; }
     public int NumOfClientVOGOs { get; private set; }
     public int HighestCoid { get; private set; }
@@ -67,6 +74,13 @@ public class MapData
         CreatorLoadTrigger = creatorLoad;
         OnKillTrigger = onKill;
         LastTeamTrigger = lastTeam;
+    }
+
+    /// <summary>Test helper: set FAM header fields that MapInfo copies without loading a .fam.</summary>
+    internal void SetMapInfoHeaderForTests(int iterationVersion = 0, byte tileSet = 0)
+    {
+        IterationVersion = iterationVersion;
+        TileSet = tileSet;
     }
 
     public string WeatherStrEffect { get; private set; }
@@ -178,6 +192,9 @@ public class MapData
             ReadSeaPlaneData(reader);
         #endregion
 
+        // Retail maps1-4.glm + misc.glm: all 112 FAMs have NumModulePlacements == 0
+        // and no .mod members. A non-zero count would be full CVOGMapModulePlacement
+        // objects (not the 24-byte MapInfo overlay). Do not invent a parser.
         Debug.Assert(NumModulePlacements == 0, "There are modules???");
 
         for (var i = 0; i < NumOfClientVOGOs + NumOfVOGOs; ++i)

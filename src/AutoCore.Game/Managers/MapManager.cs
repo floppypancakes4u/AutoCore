@@ -475,6 +475,7 @@ public class MapManager : Singleton<MapManager>
     {
         var continentId = map.ContinentId;
         var connection = character.OwningConnection;
+        var sourceContinentId = character.Map?.ContinentId ?? 0;
 
         var mapInfoPacket = new MapInfoPacket();
         map.Fill(mapInfoPacket);
@@ -485,8 +486,8 @@ public class MapManager : Singleton<MapManager>
 
         // SS-51: close the world-entry gate before the character lands on the new map. EnterMap
         // runs ApplyMissionPhaseWorldState on SetMap, which would otherwise fire mission gates at
-        // a client whose create stream is still seconds away (ReestablishGhostingAfterMapTransfer
-        // below). CompleteWorldEntry at the end of SendLocalPlayerCreatePackets flushes it once.
+        // a client still loading the destination FAM. CompleteWorldEntry runs when Stage3 ack
+        // releases SendLocalPlayerCreatePackets.
         character.BeginWorldEntry();
 
         // Move server-side state onto the destination map before restarting ghosting,
@@ -504,16 +505,14 @@ public class MapManager : Singleton<MapManager>
         // Keep LastTownId + pose DBData current so logout/relogin resumes on this map.
         character.CaptureWorldStateToDb();
 
+        // Old-map foreign CreateVehicle holds must die with ResetGhosting even though
+        // destination Creates wait for the client's Stage2/Stage3 handshake.
+        connection.ClearGlobalVehicleCreateTracking();
+        connection.BeginPendingMapTransferHandshake(character, continentId, sourceContinentId);
         connection.SendGamePacket(mapInfoPacket, skipOpcode: true);
 
-        // Restart ghosting, re-scope self/vehicle, and re-send create packets.
-        // ResetGhosting alone leaves Ghosting/Scoping off permanently until this runs.
-        connection.ReestablishGhostingAfterMapTransfer(
-            character,
-            sendCreatePackets: !SuppressCreatePacketsForTests);
-
         Logger.WriteLog(LogType.Network,
-            $"Transferred character {character.ObjectId.Coid} to map {continentId} and re-established ghosting.");
+            $"Transferred character {character.ObjectId.Coid} to map {continentId}; waiting for Stage2.");
 
         transferOperation.Complete();
         return true;

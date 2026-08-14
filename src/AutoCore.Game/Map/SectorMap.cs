@@ -250,7 +250,10 @@ public class SectorMap
         packet.Coid = ContinentId;
         packet.TemporalRandomSeed = 123456789;
         packet.CoidMap = ContinentId;
-        packet.NumModulePlacements = 0;
+        packet.ModulePlacements.Clear();
+        foreach (var placement in MapData.ModulePlacements)
+            packet.ModulePlacements.Add(placement);
+        packet.NumModulePlacements = (short)packet.ModulePlacements.Count;
         packet.PositionX = 0.0f;
         packet.PositionY = 0.0f;
         packet.PositionZ = 0.0f;

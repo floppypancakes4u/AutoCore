@@ -28,7 +28,7 @@ public class GameConfigTests
               "PublicAddress": "10.0.0.5",
               "Port": 26880,
               "AllowVersionMismatch": true,
-              "ExpectedVersion": 149,
+              "ExpectedVersion": 175,
               "AllowMissingCBID": true
             }
             """;
@@ -38,7 +38,7 @@ public class GameConfigTests
         Assert.AreEqual("10.0.0.5", config.PublicAddress);
         Assert.AreEqual(26880, config.Port);
         Assert.IsTrue(config.AllowVersionMismatch);
-        Assert.AreEqual(149, config.ExpectedVersion);
+        Assert.AreEqual(175, config.ExpectedVersion);
         Assert.IsTrue(config.AllowMissingCBID);
     }
 

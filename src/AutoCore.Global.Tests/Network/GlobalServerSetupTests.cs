@@ -51,7 +51,7 @@ public class GlobalServerSetupTests
             gamePort: 0,
             publicAddress: "10.1.2.3",
             allowVersionMismatch: true,
-            expectedVersion: 149);
+            expectedVersion: TNLInterface.Version);
 
         _server.Setup(config);
 
@@ -59,7 +59,24 @@ public class GlobalServerSetupTests
         AssertPublicAddress(_server, "10.1.2.3");
         Assert.IsNotNull(_server.Interface);
         Assert.IsTrue(_server.Interface.AllowVersionMismatch);
-        Assert.AreEqual(149, _server.Interface.ExpectedVersion);
+        Assert.AreEqual(TNLInterface.Version, _server.Interface.ExpectedVersion);
+    }
+
+    [TestMethod]
+    public void Setup_StockClientVersion_Expects175WithoutAllowingMismatch()
+    {
+        _server = CreateServer();
+        var config = CreateSetupConfig(
+            gamePort: 0,
+            allowVersionMismatch: false,
+            expectedVersion: 175);
+
+        _server.Setup(config);
+
+        Assert.AreEqual(175, TNLInterface.Version);
+        Assert.AreEqual(175, _server.Interface.ExpectedVersion);
+        Assert.AreEqual(TNLInterface.Version, _server.Interface.ExpectedVersion);
+        Assert.IsFalse(_server.Interface.AllowVersionMismatch);
     }
 
     [TestMethod]

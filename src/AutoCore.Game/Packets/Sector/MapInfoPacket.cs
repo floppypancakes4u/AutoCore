@@ -25,12 +25,13 @@ public class MapInfoPacket : BasePacket
     public int TemporalRandomSeed { get; set; }
     public long CoidMap { get; set; }
     public short NumModulePlacements { get; set; }
+    public List<MapInfoModulePlacement> ModulePlacements { get; } = new();
     public float PositionX { get; set; }
     public float PositionY { get; set; }
     public float PositionZ { get; set; }
     public short WeatherUpdateSize { get; set; }
 
-    // NOTE: this is not the real layout of the packing, but it is manually packed!
+    // Form A skipOpcode bitstream. Layout matches client FUN_00637990 (Pass 2/16).
     public override void Read(BinaryReader reader)
     {
         RegionId = reader.ReadInt32();
@@ -64,8 +65,19 @@ public class MapInfoPacket : BasePacket
         CoidMap = reader.ReadInt64();
         NumModulePlacements = reader.ReadInt16();
 
+        ModulePlacements.Clear();
         for (var i = 0; i < NumModulePlacements; ++i)
-            reader.BaseStream.Position += 24;
+        {
+            ModulePlacements.Add(new MapInfoModulePlacement
+            {
+                PlacementCoidLow = reader.ReadInt32(),
+                PlacementCoidHigh = reader.ReadInt32(),
+                RebaseCoidLow = reader.ReadInt32(),
+                RebaseCoidHigh = reader.ReadInt32(),
+                ModuleId = reader.ReadInt32(),
+                Unknown14 = reader.ReadInt32(),
+            });
+        }
 
         PositionX = reader.ReadSingle();
         PositionY = reader.ReadSingle();
@@ -76,7 +88,7 @@ public class MapInfoPacket : BasePacket
         reader.BaseStream.Position += WeatherUpdateSize;
     }
 
-    // NOTE: this is not the real layout of the packing, but it is manually packed!
+    // Form A skipOpcode bitstream. Layout matches client FUN_00637990 (Pass 2/16).
     public override void Write(BinaryWriter writer)
     {
         writer.Write(RegionId);
@@ -108,10 +120,18 @@ public class MapInfoPacket : BasePacket
 
         writer.Write(TemporalRandomSeed);
         writer.Write(CoidMap);
+        NumModulePlacements = (short)ModulePlacements.Count;
         writer.Write(NumModulePlacements);
 
-        for (var i = 0; i < NumModulePlacements; ++i)
-            writer.BaseStream.Position += 24;
+        foreach (var placement in ModulePlacements)
+        {
+            writer.Write(placement.PlacementCoidLow);
+            writer.Write(placement.PlacementCoidHigh);
+            writer.Write(placement.RebaseCoidLow);
+            writer.Write(placement.RebaseCoidHigh);
+            writer.Write(placement.ModuleId);
+            writer.Write(placement.Unknown14);
+        }
 
         writer.Write(PositionX);
         writer.Write(PositionY);

@@ -43,7 +43,7 @@ public class SectorServerSetupTests
                 Port = port,
                 PublicAddress = "127.0.0.1",
                 AllowVersionMismatch = true,
-                ExpectedVersion = 161,
+                ExpectedVersion = TNLInterface.Version,
                 EnableDevControl = false
             }
         };
@@ -54,7 +54,7 @@ public class SectorServerSetupTests
         Assert.AreEqual(IPAddress.Parse("127.0.0.1"), host.Server.PublicAddress);
         Assert.IsNotNull(host.Server.Interface);
         Assert.IsTrue(host.Server.Interface.AllowVersionMismatch);
-        Assert.AreEqual(161, host.Server.Interface.ExpectedVersion);
+        Assert.AreEqual(TNLInterface.Version, host.Server.Interface.ExpectedVersion);
         Assert.IsFalse(host.Server.IsRunning, "Setup must not start the main loop.");
     }
 
@@ -72,6 +72,27 @@ public class SectorServerSetupTests
             }
         });
 
+        Assert.AreEqual(TNLInterface.Version, host.Server.Interface.ExpectedVersion);
+        Assert.IsFalse(host.Server.Interface.AllowVersionMismatch);
+    }
+
+    [TestMethod]
+    public void Setup_StockClientVersion_Expects175WithoutAllowingMismatch()
+    {
+        using var host = new SectorServerHost();
+        host.Server.Setup(new SectorConfig
+        {
+            GameConfig = new GameConfig
+            {
+                Port = GetFreeUdpPort(),
+                PublicAddress = "127.0.0.1",
+                AllowVersionMismatch = false,
+                ExpectedVersion = 175
+            }
+        });
+
+        Assert.AreEqual(175, TNLInterface.Version);
+        Assert.AreEqual(175, host.Server.Interface.ExpectedVersion);
         Assert.AreEqual(TNLInterface.Version, host.Server.Interface.ExpectedVersion);
         Assert.IsFalse(host.Server.Interface.AllowVersionMismatch);
     }

@@ -217,19 +217,43 @@ public partial class TNLConnection
         var character = ObjectManager.Instance.GetCharacter(packet.CharacterCoid);
         if (character == null)
         {
-            Disconnect("Invalid character");
+            if (TransferPhase != SectorTransferPhase.None)
+            {
+                LogStaleTransferStage("UnknownCoidStage2", packet.CharacterCoid);
+                return;
+            }
 
+            Disconnect("Invalid character");
             return;
         }
 
-        SendGamePacket(new TransferFromGlobalStage3Packet
+        if (TransferPhase == SectorTransferPhase.WaitingForStage2
+            && IsCurrentTransferHandshake(packet.CharacterCoid))
         {
-            SecurityKey = packet.SecurityKey,
-            CharacterCoid = packet.CharacterCoid,
-            PositionX = character.Position.X,
-            PositionY = character.Position.Y,
-            PositionZ = character.Position.Z
-        });
+            SendTransferStage3(character, packet.SecurityKey);
+            TransferPhase = SectorTransferPhase.WaitingForStage3Ack;
+            AutoCore.Utils.Logging.GameLog.Info("MapTransferStage2Received",
+                TransferHandshakeLogProps());
+            AutoCore.Utils.Logging.GameLog.Info("MapTransferStage3Sent",
+                TransferHandshakeLogProps());
+            return;
+        }
+
+        if (TransferPhase == SectorTransferPhase.WaitingForStage3Ack
+            && packet.CharacterCoid == TransferHandshakeCharacterCoid)
+        {
+            LogStaleTransferStage("DuplicateStage2", packet.CharacterCoid);
+            return;
+        }
+
+        if (TransferPhase != SectorTransferPhase.None)
+        {
+            LogStaleTransferStage("WrongCoidStage2", packet.CharacterCoid);
+            return;
+        }
+
+        _loginStage3Offered = true;
+        SendTransferStage3(character, packet.SecurityKey);
     }
 
     /// <summary>
@@ -246,38 +270,95 @@ public partial class TNLConnection
         var character = ObjectManager.Instance.GetCharacter(packet.CharacterCoid);
         if (character == null)
         {
-            Disconnect("Invalid character");
+            if (TransferPhase != SectorTransferPhase.None)
+            {
+                LogStaleTransferStage("UnknownCoidStage3", packet.CharacterCoid);
+                return;
+            }
 
+            Disconnect("Invalid character");
             return;
         }
 
-        // OnConnectionEstablished already ActivateGhosting when DoGhosting. That leaves
-        // Scoping=true and Ghosting=false until rpcReadyForNormalGhosts. Calling ActivateGhosting
-        // again here (old `if (!Ghosting)`) bumps GhostingSequence and orphans the client's ready
-        // reply → Ghosting stuck false → zero GhostPacks / CreateVehicle thrash without owner.
-        EnsureSectorGhostingStarted();
+        if (TransferPhase == SectorTransferPhase.WaitingForStage3Ack
+            && IsCurrentTransferHandshake(packet.CharacterCoid))
+        {
+            AutoCore.Utils.Logging.GameLog.Info("MapTransferStage3AckReceived",
+                TransferHandshakeLogProps());
+            TransferPhase = SectorTransferPhase.None;
+            CompletePendingMapTransferWorldEntry(character);
+            return;
+        }
 
-        character.CreateGhost();
-        character.CurrentVehicle.CreateGhost();
+        if (TransferPhase == SectorTransferPhase.WaitingForStage2)
+        {
+            LogStaleTransferStage("Stage3BeforeStage2", packet.CharacterCoid);
+            return;
+        }
 
-        SetScopeObject(character.Ghost);
+        if (TransferPhase != SectorTransferPhase.None)
+        {
+            LogStaleTransferStage("WrongCoidStage3", packet.CharacterCoid);
+            return;
+        }
 
-        // Local character always in scope.
-        ObjectLocalScopeAlways(character.Ghost);
+        if (character.WorldEntryComplete)
+        {
+            LogStaleTransferStage("DuplicateStage3Ack", packet.CharacterCoid);
+            AutoCore.Utils.Logging.GameLog.Info("SectorGhostingDuplicateActivationPrevented",
+                ("SessionId", SessionId),
+                ("CharacterId", packet.CharacterCoid));
+            return;
+        }
 
-        SendLocalPlayerCreatePackets(character);
+        if (!_loginStage3Offered)
+        {
+            LogStaleTransferStage("Stage3BeforeStage2", packet.CharacterCoid);
+            return;
+        }
 
-        // Scope the local vehicle after CreateVehicleExtended so combat ghost masks
-        // (Heat/Shield/HP/Power) can reach the owner. GhostVehicle.PackUpdate uses an
-        // owner-combat initial profile (no equipment/pose) to avoid clearing +0x258.
-        if (character.CurrentVehicle?.Ghost != null)
-            ObjectLocalScopeAlways(character.CurrentVehicle.Ghost);
+        CompleteInitialWorldEntry(character);
 
         AutoCore.Utils.Logging.GameLog.Info("CharacterSpawned",
             ("SessionId", SessionId),
             ("CharacterId", character.ObjectId.Coid),
             ("CharacterName", character.Name),
             ("AccountId", Account?.Id));
+    }
+
+    /// <summary>
+    /// Login Stage3 finalizer: local Creates, then the first ghost lifecycle.
+    /// Client FUN_008078B0 applies foreign ghosts immediately and is Stage-unaware;
+    /// Creates must land before rpcStartGhosting.
+    /// </summary>
+    private void CompleteInitialWorldEntry(Character character)
+    {
+        var skipCreates = SuppressCreatePacketsForTests
+            || MapManager.Instance.SuppressCreatePacketsForTests;
+        if (!skipCreates)
+        {
+            SendLocalPlayerCreatePackets(character);
+        }
+        else
+        {
+            WorldEntryOpsForTests.Add("CreateVehicleExtended");
+            WorldEntryOpsForTests.Add("CreateCharacterExtended");
+            character.CompleteWorldEntry();
+        }
+
+        character.CreateGhost();
+        character.CurrentVehicle.CreateGhost();
+
+        var seqBefore = GetGhostingSequence();
+        EnsureSectorGhostingStarted();
+        ScopeLocalPlayerGhosts(character);
+
+        if (GetGhostingSequence() > seqBefore)
+        {
+            AutoCore.Utils.Logging.GameLog.Info("SectorGhostingActivatedAfterWorldEntry",
+                ("SessionId", SessionId),
+                ("CharacterId", character.ObjectId.Coid));
+        }
     }
 
     /// <summary>
@@ -297,8 +378,7 @@ public partial class TNLConnection
         // Create local ghosts and forget old-map global-vehicle tracking, but do not
         // ActivateGhosting yet. rpcStartGhosting would let nearby giver CreateCreature
         // land before CreateCharacterExtended restores the client's completed-mission hash
-        // (interact icon states 6/7). Login Stage3 still activates first — the client is
-        // usually still loading then.
+        // (interact icon states 6/7). Login Stage3 uses the same Creates-then-activate order.
         ClearGlobalVehicleCreateTracking();
         character.CreateGhost();
         character.CurrentVehicle.CreateGhost();
@@ -329,6 +409,18 @@ public partial class TNLConnection
     /// local create (or its suppressed stand-in) before <c>ActivateGhosting</c>.
     /// </summary>
     public bool LocalCreateSentBeforeActivateGhostingForTests { get; private set; }
+
+    /// <summary>
+    /// Ordered world-entry operations for login/transfer tests. Appended at the
+    /// exact send/activate sites; not a wire capture.
+    /// </summary>
+    internal List<string> WorldEntryOpsForTests { get; } = new();
+
+    /// <summary>
+    /// Set when login Stage2 offers S2C Stage3. Login Stage3 ack is ignored until then
+    /// so a hostile Stage3-before-Stage2 cannot start Creates or ghosting.
+    /// </summary>
+    private bool _loginStage3Offered;
 
     /// <summary>
     /// Same-map owner teleport: tear down client ghosts and re-send local create packets so the
@@ -408,6 +500,107 @@ public partial class TNLConnection
             return;
 
         ActivateGhosting();
+        WorldEntryOpsForTests.Add("ActivateGhosting");
+    }
+
+    internal void BeginPendingMapTransferHandshake(
+        Character character,
+        int destinationContinentId,
+        int sourceContinentId = 0)
+    {
+        if (character == null)
+            throw new ArgumentNullException(nameof(character));
+
+        if (TransferPhase != SectorTransferPhase.None)
+        {
+            AutoCore.Utils.Logging.GameLog.Info("MapTransferHandshakeAborted",
+                TransferHandshakeLogProps(("Reason", "superseded")));
+        }
+
+        TransferHandshakeGeneration++;
+        TransferPhase = SectorTransferPhase.WaitingForStage2;
+        TransferHandshakeCharacterCoid = character.ObjectId.Coid;
+        TransferHandshakeDestinationContinentId = destinationContinentId;
+        TransferHandshakeSourceContinentId = sourceContinentId;
+
+        AutoCore.Utils.Logging.GameLog.Info("MapTransferHandshakeWaiting",
+            TransferHandshakeLogProps());
+    }
+
+    internal void AbortPendingMapTransferHandshake(string reason)
+    {
+        if (TransferPhase == SectorTransferPhase.None)
+            return;
+
+        AutoCore.Utils.Logging.GameLog.Info("MapTransferHandshakeAborted",
+            TransferHandshakeLogProps(("Reason", reason)));
+        TransferPhase = SectorTransferPhase.None;
+        TransferHandshakeCharacterCoid = 0;
+        TransferHandshakeDestinationContinentId = 0;
+        TransferHandshakeSourceContinentId = 0;
+    }
+
+    internal void CompletePendingMapTransferWorldEntry(Character character)
+    {
+        if (character == null)
+            throw new ArgumentNullException(nameof(character));
+
+        var skipCreates = SuppressCreatePacketsForTests
+            || MapManager.Instance.SuppressCreatePacketsForTests;
+        if (!skipCreates)
+            SendLocalPlayerCreatePackets(character);
+        else
+            character.CompleteWorldEntry();
+
+        ReestablishGhostingAfterMapTransfer(character, sendCreatePackets: false);
+
+        AutoCore.Utils.Logging.GameLog.Info("MapTransferCreatesReleased",
+            TransferHandshakeLogProps());
+        AutoCore.Utils.Logging.GameLog.Info("MapTransferGhostingActivated",
+            TransferHandshakeLogProps());
+    }
+
+    private void SendTransferStage3(Character character, uint securityKey)
+    {
+        SendGamePacket(new TransferFromGlobalStage3Packet
+        {
+            SecurityKey = securityKey,
+            CharacterCoid = character.ObjectId.Coid,
+            PositionX = character.Position.X,
+            PositionY = character.Position.Y,
+            PositionZ = character.Position.Z
+        });
+    }
+
+    private bool IsCurrentTransferHandshake(long characterCoid)
+    {
+        return CurrentCharacter != null
+            && characterCoid == TransferHandshakeCharacterCoid
+            && characterCoid == CurrentCharacter.ObjectId.Coid;
+    }
+
+    private void LogStaleTransferStage(string reason, long packetCharacterCoid)
+    {
+        AutoCore.Utils.Logging.GameLog.Info("MapTransferStaleStagePacket",
+            TransferHandshakeLogProps(
+                ("Reason", reason),
+                ("PacketCharacterId", packetCharacterCoid)));
+    }
+
+    private (string, object)[] TransferHandshakeLogProps(params (string, object)[] extra)
+    {
+        var props = new List<(string, object)>(8 + extra.Length)
+        {
+            ("SessionId", SessionId),
+            ("CharacterId", TransferHandshakeCharacterCoid),
+            ("ToMapId", TransferHandshakeDestinationContinentId),
+            ("TransferPhase", TransferPhase.ToString()),
+            ("TransferGeneration", TransferHandshakeGeneration),
+        };
+        if (TransferHandshakeSourceContinentId != 0)
+            props.Add(("FromMapId", TransferHandshakeSourceContinentId));
+        props.AddRange(extra);
+        return props.ToArray();
     }
 
     /// <summary>
@@ -465,7 +658,9 @@ public partial class TNLConnection
         character.CurrentVehicle.WriteToPacket(vehiclePacket);
 
         SendInventoryLoginObjectPackets(character);
+        WorldEntryOpsForTests.Add("CreateVehicleExtended");
         SendGamePacket(vehiclePacket);
+        WorldEntryOpsForTests.Add("CreateCharacterExtended");
         SendGamePacket(charPacket);
         SendGamePacket(InventoryPacketFactory.CreateCargoSendAll(character.Inventory));
 
@@ -716,6 +911,20 @@ public partial class TNLConnection
                         vehicle.ObjectId.Coid,
                         vehicle.CBID,
                         vehicle.TemplateId);
+                    break;
+                }
+                case Character character:
+                {
+                    // Character : Creature. Must precede the Creature case — client
+                    // FUN_008078B0 / Client_RecvCreateCharacter expects 0x2015 (0x1A8),
+                    // not CreateCreature 0x2013 (0x130).
+                    var packet = new CreateCharacterPacket();
+                    character.WriteToPacket(packet);
+                    SendGamePacket(packet);
+                    Logger.WriteLog(LogType.Debug,
+                        "RequestObject: resent CreateCharacter coid={0} cbid={1}",
+                        character.ObjectId.Coid,
+                        character.CBID);
                     break;
                 }
                 case Creature creature:

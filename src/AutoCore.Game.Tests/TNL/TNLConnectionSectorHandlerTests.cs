@@ -1,6 +1,9 @@
 using System.Net;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using AutoCore.Database.World.Models;
+using AutoCore.Game.CloneBases;
+using AutoCore.Game.CloneBases.Specifics;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Extensions;
@@ -107,6 +110,23 @@ public class TNLConnectionSectorHandlerTests
         character.SetMap(map);
         vehicle.SetMap(map);
         return character;
+    }
+
+    private static CloneBaseObject MakeCharacterCloneBase()
+    {
+        var clone = (CloneBaseObject)RuntimeHelpers.GetUninitializedObject(typeof(CloneBaseObject));
+        clone.CloneBaseSpecific = new CloneBaseSpecific
+        {
+            CloneBaseId = 1,
+            Type = (int)CloneBaseObjectType.Character,
+            BaseValue = 0,
+        };
+        clone.SimpleObjectSpecific = new SimpleObjectSpecific
+        {
+            MaxHitPoint = 100,
+            MaxUses = 0,
+        };
+        return clone;
     }
 
     // --- Skill / attribute / quickbar / cast ---
@@ -336,6 +356,39 @@ public class TNLConnectionSectorHandlerTests
         var client = CreateClient(character);
         InvokeHandler(client, "HandleRequestObjectPacket", BuildRequestObjectBody(1, 0, true));
         Assert.AreEqual(0, _sent.Count);
+    }
+
+    /// <summary>
+    /// PDB Pass 7. Client <c>FUN_008078B0</c> RequestObject recovery for a character
+    /// ghost applies <c>Client_RecvCreateCharacter</c> (<c>0x2015</c>, size <c>0x1A8</c>).
+    /// <see cref="Character"/> is a <see cref="Creature"/> subclass, so a Creature-first
+    /// switch sends <c>0x2013</c> and the character createFromPacket reads past the
+    /// creature tail.
+    /// </summary>
+    [TestMethod]
+    public void HandleRequestObject_Character_ResendsCreateCharacter_NotCreateCreature()
+    {
+        var viewer = CreateCharacterOnMap(out var map, coid: 8001);
+        var client = CreateClient(viewer);
+
+        var other = new Character();
+        other.SetCoid(9201, true);
+        other.AttachTestDataForTests("OtherPilot");
+        other.AssignCloneBaseForTests(MakeCharacterCloneBase());
+        other.Position = new Vector3(3, 0, 3);
+        other.SetMap(map);
+
+        InvokeHandler(client, "HandleRequestObjectPacket", BuildRequestObjectBody(1, 9201, true));
+
+        Assert.IsFalse(_sent.OfType<CreateCreaturePacket>().Any(),
+            "Character RequestObject must not use CreateCreature 0x2013.");
+        var packet = _sent.OfType<CreateCharacterPacket>().SingleOrDefault();
+        Assert.IsNotNull(packet, "FUN_008078B0 character recovery expects 0x2015.");
+        Assert.IsFalse(packet is CreateCharacterExtendedPacket,
+            "RequestObject recovery is base CreateCharacter, not Extended.");
+        Assert.AreEqual(GameOpcode.CreateCharacter, packet.Opcode);
+        Assert.AreEqual(9201L, packet.ObjectId.Coid);
+        Assert.AreEqual("OtherPilot", packet.Name);
     }
 
     private static byte[] BuildRequestObjectBody(byte count, long coid, bool global)

@@ -49,7 +49,7 @@ public class SectorConfigTests
                     "Port": 27011,
                     "PublicAddress": "10.0.0.5",
                     "AllowVersionMismatch": true,
-                    "ExpectedVersion": 161,
+                    "ExpectedVersion": 175,
                     "EnableDevControl": false,
                     "DevControlPort": 28001
                   },
@@ -69,7 +69,7 @@ public class SectorConfigTests
             Assert.AreEqual(27011, config.GameConfig.Port);
             Assert.AreEqual("10.0.0.5", config.GameConfig.PublicAddress);
             Assert.IsTrue(config.GameConfig.AllowVersionMismatch);
-            Assert.AreEqual(161, config.GameConfig.ExpectedVersion);
+            Assert.AreEqual(175, config.GameConfig.ExpectedVersion);
             Assert.IsFalse(config.GameConfig.EnableDevControl);
             Assert.AreEqual(28001, config.GameConfig.DevControlPort);
             Assert.AreEqual("Server=char;", config.CharDatabaseConnectionString);

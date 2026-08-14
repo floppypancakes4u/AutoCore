@@ -132,7 +132,7 @@ public class ProgramConfigValidationTests
         {
             PublicAddress = "127.0.0.1",
             Port = 26880,
-            ExpectedVersion = 149
+            ExpectedVersion = 175
         },
         ServerInfoConfig = new ServerInfoConfig
         {

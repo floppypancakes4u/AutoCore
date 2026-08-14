@@ -20,6 +20,7 @@ public class TNLInterfaceTests
 
         Assert.IsTrue(iface.DoGhosting);
         Assert.AreEqual(TNLInterface.Version, iface.ExpectedVersion);
+        Assert.AreEqual(220, iface.FragmentSize);
         Assert.IsFalse(iface.AllowVersionMismatch);
         Assert.AreEqual(0L, iface.ConnectionId);
         Assert.AreEqual(0, iface.MapConnections.Count);
