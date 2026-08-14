@@ -72,5 +72,7 @@ public sealed class DefaultLauncherGameBootstrap : ILauncherGameBootstrap
         AutoCore.Game.Diagnostics.WireIsolationLevers.ApplyFromEnvironmentAndConfigFiles();
         // After wire levers so log.filters.json can quiet WireDiag / GhostObjectDiag without rebuild.
         AutoCore.Game.Diagnostics.LogFilters.ApplyFromConfigFiles();
+        // ...but an explicit env override outranks the file, or AUTOCORE_WIRE_DIAG is dead here.
+        AutoCore.Game.Diagnostics.WireIsolationLevers.ApplyEnvironmentDiagOverrides();
     }
 }

@@ -343,6 +343,12 @@ public partial class TNLConnection
     /// </summary>
     private void CompleteInitialWorldEntry(Character character)
     {
+        // Same marker as the transfer path: a login entry is the natural "known good" baseline to
+        // diff a suspect re-entry against.
+        Diagnostics.WireDiag.BeginSegment(
+            $"world-entry login map={character.Map?.ContinentId ?? 0} "
+            + $"resets={character.Map?.LocalWorldResetCount ?? -1} char={character.ObjectId.Coid}");
+
         var skipCreates = SuppressCreatePacketsForTests
             || MapManager.Instance.SuppressCreatePacketsForTests;
         if (!skipCreates)
@@ -369,6 +375,8 @@ public partial class TNLConnection
                 ("SessionId", SessionId),
                 ("CharacterId", character.ObjectId.Coid));
         }
+
+        MarkWorldEntryCompleted(MapTransferHandshakeClock());
     }
 
     /// <summary>
@@ -569,6 +577,12 @@ public partial class TNLConnection
         if (character == null)
             throw new ArgumentNullException(nameof(character));
 
+        // Delimit this entry's create/ghost stream so it can be diffed against another entry into
+        // the same map. resets= is the discriminator the Back Range freeze correlates with.
+        Diagnostics.WireDiag.BeginSegment(
+            $"world-entry transfer map={character.Map?.ContinentId ?? 0} "
+            + $"resets={character.Map?.LocalWorldResetCount ?? -1} char={character.ObjectId.Coid}");
+
         // The Creates below are what actually place the local player, and they are written
         // from live entity pose. Restore the latched spawn pose first so anything that moved
         // the entities since MapInfo cannot leak into the destination placement.
@@ -583,8 +597,13 @@ public partial class TNLConnection
 
         ReestablishGhostingAfterMapTransfer(character, sendCreatePackets: false);
 
+        MarkWorldEntryCompleted(MapTransferHandshakeClock());
+
         AutoCore.Utils.Logging.GameLog.Info("MapTransferCreatesReleased",
             TransferHandshakeLogProps());
+        // NB: emitted unconditionally — EnsureSectorGhostingStarted skips ActivateGhosting when
+        // Scoping is already set, so this event does not prove the client was asked to ghost.
+        // ReportGhostingNeverStarted is what actually observes the outcome.
         AutoCore.Utils.Logging.GameLog.Info("MapTransferGhostingActivated",
             TransferHandshakeLogProps());
     }
@@ -739,6 +758,72 @@ public partial class TNLConnection
             waitingFor,
             TransferHandshakeDestinationContinentId,
             TransferHandshakeSourceContinentId);
+
+        return true;
+    }
+
+    /// <summary>Arms <see cref="ReportGhostingNeverStarted"/> for the entry that just finished.</summary>
+    private void MarkWorldEntryCompleted(long nowMs)
+    {
+        _worldEntryCompletedMs = nowMs;
+        _ghostingStallBandsReported = 0;
+    }
+
+    /// <summary>
+    /// Log-only watchdog for the second half of world entry. Creates going out is not the end of
+    /// it: TNL only starts shipping ghosts once the client answers <c>rpcStartGhosting(seq)</c>
+    /// with <c>rpcReadyForNormalGhosts(seq)</c>, and that reply is dropped without a word when the
+    /// sequence has moved on (<c>GhostConnection.rpcReadyForNormalGhosts_remote</c> — an
+    /// <c>if</c> with no <c>else</c>). The connection then scopes forever into a stream the client
+    /// is not consuming, which is what the player sees as a loading bar that never clears.
+    /// <para>
+    /// Reports <c>Scoping</c> and the sequence because those separate the two ways this ends up
+    /// stuck: <c>Scoping=false</c> means <c>ActivateGhosting</c> never ran, <c>Scoping=true</c>
+    /// means it ran and the client's answer never matched.
+    /// </para>
+    /// </summary>
+    /// <returns>True when this call emitted a report.</returns>
+    public bool ReportGhostingNeverStarted(long nowMs)
+    {
+        if (_worldEntryCompletedMs == 0 || IsGhosting())
+            return false;
+
+        var stalledForMs = nowMs - _worldEntryCompletedMs;
+        if (stalledForMs < GhostingStartWarnMs)
+            return false;
+
+        var band = stalledForMs / GhostingStartWarnMs;
+        if (band <= _ghostingStallBandsReported)
+            return false;
+
+        _ghostingStallBandsReported = band;
+
+        var mapId = CurrentCharacter?.Map?.ContinentId ?? 0;
+        var resets = CurrentCharacter?.Map?.LocalWorldResetCount ?? -1;
+
+        AutoCore.Utils.Logging.GameLog.Warn("GhostingNeverStartedAfterWorldEntry", "NET-006",
+            ("SessionId", SessionId),
+            ("CharacterId", CurrentCharacter?.ObjectId.Coid ?? 0),
+            ("MapId", mapId),
+            ("MapResetCount", resets),
+            ("StalledForMs", stalledForMs),
+            ("Scoping", Scoping),
+            ("Ghosting", IsGhosting()),
+            ("GhostingSequence", GetGhostingSequence()));
+
+        Logger.WriteLog(LogType.Error,
+            "GHOSTING NEVER STARTED: character {0} completed world entry on map {1} (map resets={2}) "
+            + "{3}ms ago but Ghosting is still false (scoping={4}, ghostingSequence={5}). "
+            + "{6} The client is parked on a loading screen.",
+            CurrentCharacter?.ObjectId.Coid ?? 0,
+            mapId,
+            resets,
+            stalledForMs,
+            Scoping,
+            GetGhostingSequence(),
+            Scoping
+                ? "ActivateGhosting ran, so the client's rpcReadyForNormalGhosts never matched this sequence."
+                : "ActivateGhosting never ran, so the client was never asked to start ghosting.");
 
         return true;
     }

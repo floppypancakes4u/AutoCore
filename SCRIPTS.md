@@ -41,6 +41,7 @@ Game-data tools default to `C:\Program Files (x86)\NetDevil\Auto Assault`; overr
 | [`check-id-collisions.ps1`](scripts/check-id-collisions.ps1) | Read-only health check for the COID/`simple_object` identity-collision corruption classes in [`docs/id-collisions.md`](docs/id-collisions.md) (character/vehicle identity clobbered by another allocation, inventory pointing at a character/vehicle COID, orphan `Type=0` placeholder rows). Prints offending rows and counts; exits 1 if any query finds rows (CI-friendly), 0 if clean. Never writes to the database. |
 | [`setup-client.ps1`](scripts/setup-client.ps1) | Adds or removes a Windows hosts-file entry so the retail Auto Assault client points at a local auth server (run as Administrator). |
 | [`tail-mission-log.ps1`](scripts/tail-mission-log.ps1) | Tails `server-live.log` and prints only mission-related diagnostic lines (MISSION-DIAG, AutoPatrol, grant/fail, pad hits, etc.). |
+| [`diff-worldentry-wire.ps1`](scripts/diff-worldentry-wire.ps1) | Slices `log-sector.txt` on `WireDiag.BeginSegment` world-entry markers and diffs the create/ghost stream of two entries. Use `-List` to see the segments (label carries `map=` and `resets=`), then `-Left/-Right` to compare a working entry against a frozen one. Needs the server started with `AUTOCORE_WIRE_DIAG=1`. |
 
 ---
 

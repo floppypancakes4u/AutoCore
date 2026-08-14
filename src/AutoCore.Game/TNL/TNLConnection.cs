@@ -168,6 +168,31 @@ public partial class TNLConnection : GhostConnection
     internal static Func<long> MapTransferHandshakeClock = static () => Environment.TickCount64;
 
     /// <summary>
+    /// Monotonic ms stamp of the last completed world entry (login or map transfer). Zero before
+    /// the first one. Arms <see cref="ReportGhostingNeverStarted"/>.
+    /// </summary>
+    private long _worldEntryCompletedMs;
+
+    /// <summary>Bands of <see cref="GhostingStartWarnMs"/> already reported for this world entry.</summary>
+    private long _ghostingStallBandsReported;
+
+    /// <summary>
+    /// How long after world entry the client may go without acknowledging ghosting before the
+    /// watchdog logs it. Generous: the Creates are large and the client applies them before
+    /// replying.
+    /// </summary>
+    internal const int GhostingStartWarnMs = 15_000;
+
+    /// <summary>Test seam: stamp a world entry without running the create/ghost pipeline.</summary>
+    internal void MarkWorldEntryCompletedForTests(long nowMs) => MarkWorldEntryCompleted(nowMs);
+
+    /// <summary>Test seam: run TNL's real <c>ActivateGhosting</c> (sets Scoping, bumps sequence).</summary>
+    internal void ActivateGhostingForTests() => ActivateGhosting();
+
+    /// <summary>Test seam: force TNL's <c>Ghosting</c> flag, normally set by the client ready RPC.</summary>
+    internal void ForceGhostingForTests(bool value) => Ghosting = value;
+
+    /// <summary>
     /// Spawn pose <see cref="Managers.MapTransferSpawn"/> resolved for the pending transfer,
     /// latched at MapInfo time. The handshake hands control of the timeline to the client
     /// (MapInfo → FAM load → Stage2 → Stage3 → ack), so live entity pose is not a safe source

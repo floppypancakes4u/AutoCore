@@ -72,6 +72,8 @@ public class Program : ExitableProgram
 
         WireIsolationLevers.ApplyFromEnvironmentAndConfigFiles();
         LogFilters.ApplyFromConfigFiles();
+        // An explicit AUTOCORE_WIRE_DIAG / AUTOCORE_GHOST_OBJECT_DIAG outranks log.filters.json.
+        WireIsolationLevers.ApplyEnvironmentDiagOverrides();
 
         if (!AssetManager.Instance.Initialize(config.GamePath, ServerType.Sector, false))
         {

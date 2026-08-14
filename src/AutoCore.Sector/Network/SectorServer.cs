@@ -225,7 +225,15 @@ public partial class SectorServer : BaseServer, ILoopable
                 {
                     var nowMs = Environment.TickCount64;
                     foreach (var kvp in Interface.MapConnections)
-                        kvp.Value?.ReportMapTransferHandshakeStall(nowMs);
+                    {
+                        var conn = kvp.Value;
+                        if (conn == null)
+                            continue;
+
+                        conn.ReportMapTransferHandshakeStall(nowMs);
+                        // Creates landing is only half of world entry — ghosting still has to start.
+                        conn.ReportGhostingNeverStarted(nowMs);
+                    }
                 });
 
                 // Delayed map-prop corpse despawn (ram wrecks stay ~12.5s then DestroyObject).

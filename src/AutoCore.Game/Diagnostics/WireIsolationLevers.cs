@@ -66,6 +66,23 @@ public static class WireIsolationLevers
             () => GhostVehicle.EnableClientSidePathVisual, v => GhostVehicle.EnableClientSidePathVisual = v, envSuffix: "CLIENT_PATH_VISUAL"),
     };
 
+    /// <summary>
+    /// Re-applies the standalone <c>AUTOCORE_WIRE_DIAG</c> / <c>AUTOCORE_GHOST_OBJECT_DIAG</c>
+    /// aliases. Call after <see cref="LogFilters.ApplyFromConfigFiles"/>, which deliberately runs
+    /// last so a checked-in <c>log.filters.json</c> can quiet diag spam without a rebuild — but
+    /// which therefore also overwrote an explicit per-run environment override, leaving the
+    /// operator with a silently dead env var and an empty capture.
+    /// <para>
+    /// Precedence is compiled default &lt; config file &lt; environment. Both calls no-op when the
+    /// variable is unset, so the config file still wins whenever nobody asked otherwise.
+    /// </para>
+    /// </summary>
+    public static void ApplyEnvironmentDiagOverrides()
+    {
+        WireDiag.TryEnableFromEnvironment();
+        GhostObjectDiag.TryEnableFromEnvironment();
+    }
+
     /// <summary>Load JSON (if present) then env overrides. Call once at process start.</summary>
     public static void ApplyFromEnvironmentAndConfigFiles(string contentRoot = null)
     {
@@ -97,9 +114,9 @@ public static class WireIsolationLevers
         }
 
         ApplyFromEnvironmentVariables();
-        // Standalone env aliases (same tokens as lever DIGs when set).
-        WireDiag.TryEnableFromEnvironment();
-        GhostObjectDiag.TryEnableFromEnvironment();
+        // Standalone env aliases (same tokens as lever DIGs when set). Re-applied by
+        // ApplyEnvironmentDiagOverrides after LogFilters, which would otherwise undo them.
+        ApplyEnvironmentDiagOverrides();
         Logger.WriteLog(LogType.Network, "WireIsolationLevers active:\n" + FormatStatus());
 
         // SS-50: a levers file silently rewrites wire behaviour. Say exactly what it changed,

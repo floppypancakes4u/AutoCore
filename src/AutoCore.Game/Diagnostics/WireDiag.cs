@@ -65,6 +65,34 @@ public static class WireDiag
             return Entries.ToList();
     }
 
+    /// <summary>
+    /// Marks a boundary in the wire stream and gives every COID its partial-pack budget back.
+    /// Two world entries in one capture are only comparable if they are delimited and throttled
+    /// alike — otherwise the second entry logs fewer packs purely because the first exhausted
+    /// <see cref="MaxPartialGhostPacksPerCoid"/>, and the diff shows differences that are not real.
+    /// </summary>
+    /// <param name="label">Free-text segment identity, e.g. <c>"world-entry map=693 resets=1"</c>.</param>
+    public static void BeginSegment(string label)
+    {
+        if (!Enabled)
+            return;
+
+        PartialGhostCounts.Clear();
+
+        Append(new WireDiagEntry
+        {
+            Kind = WireDiagKind.Segment,
+            Name = "Segment",
+            Coid = 0,
+            Bytes = -1,
+            Bits = -1,
+            Mask = 0,
+            Initial = false,
+            PlayerCoid = 0,
+            Detail = $"===== {label ?? "(unlabelled)"} =====",
+        });
+    }
+
     public static void RecordGamePacket(
         string name,
         long coid,
@@ -247,6 +275,9 @@ public enum WireDiagKind
 {
     GamePacket,
     GhostPack,
+
+    /// <summary>Boundary marker written by <see cref="WireDiag.BeginSegment"/>.</summary>
+    Segment,
 }
 
 public sealed class WireDiagEntry

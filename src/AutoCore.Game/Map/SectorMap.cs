@@ -1557,6 +1557,14 @@ public class SectorMap
     }
 
     /// <summary>
+    /// How many times <see cref="ResetLocalWorldToAuthored"/> has actually rebuilt this map since
+    /// the process started (skipped resets do not count). Live Back Range freezes correlate 6/6
+    /// with this being non-zero on arrival, so world entry reports it — see
+    /// <c>SharedMapReentryTests</c>.
+    /// </summary>
+    public int LocalWorldResetCount { get; private set; }
+
+    /// <summary>
     /// Rebuild map-local objects from fam-authored state. Call when the last player leaves so
     /// Create/Delete reaction side-effects do not persist for the next visit.
     /// </summary>
@@ -1596,10 +1604,12 @@ public class SectorMap
             }
 
             InitializeLocalObjects();
+            LocalWorldResetCount++;
 
             Logger.WriteLog(LogType.Debug,
-                "SectorMap {0}: reset local world to fam-authored state (last player left)",
-                ContinentId);
+                "SectorMap {0}: reset local world to fam-authored state (last player left, reset #{1})",
+                ContinentId,
+                LocalWorldResetCount);
         }
         finally
         {
