@@ -326,3 +326,4 @@ scripts/*
 !scripts/run-mission-live.ps1
 !scripts/add_mission_to_registry.py
 AutoCore.DevTool/
+PROMPT.md

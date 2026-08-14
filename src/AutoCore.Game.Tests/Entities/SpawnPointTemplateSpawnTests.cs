@@ -551,13 +551,14 @@ public class SpawnPointTemplateSpawnTests
         {
             SpawnType = vehicleCbid,
             IsTemplate = false,
+            LowerNumberOfSpawns = 2,
+            UpperNumberOfSpawns = 2,
         });
 
         var spawnPoint = new SpawnPoint(template);
         spawnPoint.SetCoid(template.COID, false);
         spawnPoint.SetMap(map);
 
-        Assert.IsTrue(spawnPoint.Spawn());
         Assert.IsTrue(spawnPoint.Spawn());
 
         var vehicles = map.Objects.Values.OfType<Vehicle>().OrderBy(v => v.ObjectId.Coid).ToList();
@@ -998,11 +999,8 @@ public class SpawnPointTemplateSpawnTests
         create.SetCoid(createRx, false);
         create.SetMap(map);
 
-        Assert.IsTrue(create.TriggerIfPossible(playerVehicle));
-        var marker = map.GetObjectByCoid(spawnCoid) as SpawnPoint;
-        Assert.IsNotNull(marker);
-        Assert.IsFalse(marker.HasLiveSpawn(), "personal Create must leave template combat marker-only");
-
+        // Retail FAM places Create+Activate together (Gunny 14139/14142). Create stays
+        // marker-only only when that Activate already exists on the map.
         var actTpl = new ReactionTemplate
         {
             COID = (int)actRx,
@@ -1012,6 +1010,11 @@ public class SpawnPointTemplateSpawnTests
         var activate = new Reaction(actTpl);
         activate.SetCoid(actRx, false);
         activate.SetMap(map);
+
+        Assert.IsTrue(create.TriggerIfPossible(playerVehicle));
+        var marker = map.GetObjectByCoid(spawnCoid) as SpawnPoint;
+        Assert.IsNotNull(marker);
+        Assert.IsFalse(marker.HasLiveSpawn(), "personal Create must leave template combat marker-only");
 
         Assert.IsTrue(activate.TriggerIfPossible(playerVehicle));
         Assert.IsTrue(marker.HasLiveSpawn(), "Activate must materialize combat children");

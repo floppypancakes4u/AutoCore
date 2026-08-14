@@ -23,6 +23,18 @@ public class SpawnPoint : ClonedObjectBase
     /// </summary>
     public long LastSpawnedCoid { get; private set; }
 
+    /// <summary>Last spawn-failure reason (missing template, unsupported clone, etc.).</summary>
+    public string LastFailureDiagnostic { get; private set; }
+
+    /// <summary>Absolute <see cref="Environment.TickCount64"/> when the next refill may run.</summary>
+    public long? RespawnDueAtMs { get; private set; }
+
+    /// <summary>True when a RespawnTime heartbeat is waiting.</summary>
+    public bool HasScheduledRespawn => RespawnDueAtMs != null;
+
+    /// <summary>Retail <c>FUN_005635e0</c> clamps computed delays at this many milliseconds.</summary>
+    internal const int RetailRespawnDelayCapMs = 120_000;
+
     /// <summary>
     /// True when the last <see cref="Spawn"/> call requested TriggerEvents fire
     /// (Create/Activate only; map load leaves this false).
@@ -59,6 +71,19 @@ public class SpawnPoint : ClonedObjectBase
     /// </summary>
     internal const float CreaturePhysicsFootOffset = 1.1803f;
 
+    /// <summary>
+    /// Retail <c>DAT_009cc4a8</c> = 2/65535. <c>FUN_004e9720</c> maps a ushort table
+    /// sample to [-1, +1] via <c>ushort * scale - 1</c>, then multiplies by Radius.
+    /// Independent X and Z — an axis-aligned square of half-side Radius, not a disk.
+    /// </summary>
+    internal const float RetailScatterUShortScale = 2f / 65535f;
+
+    /// <summary>
+    /// Test hook for deterministic <c>FUN_004e9720</c> XZ samples. Production
+    /// <see cref="Spawn"/> uses a fresh <see cref="Random"/> per call.
+    /// </summary>
+    internal static Random TestScatterRandom { get; set; }
+
     public override int GetBareTeamFaction() => Faction;
     public override int GetCurrentHP() => CloneBaseObject.SimpleObjectSpecific.MaxHitPoint;
     public override int GetMaximumHP() => CloneBaseObject.SimpleObjectSpecific.MaxHitPoint;
@@ -73,13 +98,71 @@ public class SpawnPoint : ClonedObjectBase
         // NO GHOST!
     }
 
-    /// <summary>True when <see cref="LastSpawnedCoid"/> still resolves to an object on the current map.</summary>
+    /// <summary>True when any owned child (or the last-spawned COID) is still on the map.</summary>
     public bool HasLiveSpawn()
     {
-        if (LastSpawnedCoid == 0 || Map == null)
+        if (Map == null)
             return false;
 
-        return Map.GetObjectByCoid(LastSpawnedCoid) != null;
+        if (LastSpawnedCoid != 0 && Map.GetObjectByCoid(LastSpawnedCoid) != null)
+            return true;
+
+        return CountOwnedChildren() > 0;
+    }
+
+    /// <summary>Authored minimum live children (sum of per-slot Lower, 0/0 → 1).</summary>
+    public int AuthoredMinimumPopulation => Template?.ExpectedMinimumChildren() ?? 0;
+
+    /// <summary>Live creatures/vehicles that list this spawn as owner.</summary>
+    public int CountOwnedChildren()
+    {
+        if (Map == null)
+            return 0;
+
+        var spawnCoid = ObjectId?.Coid ?? Template?.COID ?? 0;
+        var count = 0;
+        foreach (var kvp in Map.Objects)
+        {
+            var obj = kvp.Value;
+            if (obj is Creature creature && creature is not Character && creature.SpawnOwner == spawnCoid)
+                count++;
+            else if (obj is Vehicle vehicle && vehicle.SpawnOwnerCoid == spawnCoid)
+                count++;
+        }
+
+        return count;
+    }
+
+    int CountLiveChildrenForSlot(SpawnPointTemplate.SpawnList slot)
+    {
+        if (Map == null || slot == null)
+            return 0;
+
+        var spawnCoid = ObjectId?.Coid ?? Template?.COID ?? 0;
+        var count = 0;
+        foreach (var kvp in Map.Objects)
+        {
+            var obj = kvp.Value;
+            if (slot.IsTemplate)
+            {
+                if (obj is Vehicle vehicle
+                    && vehicle.SpawnOwnerCoid == spawnCoid
+                    && vehicle.TemplateId == slot.SpawnType)
+                    count++;
+            }
+            else if (obj is Creature creature && creature is not Character
+                     && creature.SpawnOwner == spawnCoid
+                     && creature.CBID == slot.SpawnType)
+            {
+                count++;
+            }
+            else if (obj is Vehicle raw && raw.SpawnOwnerCoid == spawnCoid && raw.CBID == slot.SpawnType)
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     /// <summary>Unit-test helper when spawn runs without clonebase-backed <see cref="Spawn"/>.</summary>
@@ -133,49 +216,110 @@ public class SpawnPoint : ClonedObjectBase
     public bool Spawn(bool fireTriggerEvents = false, ClonedObjectBase triggerActivator = null)
     {
         LastSpawnRequestedFireTriggerEvents = fireTriggerEvents;
+        LastFailureDiagnostic = null;
 
-        var spawnList = Template.GetSpawn();
-        if (spawnList == null)
+        if (Template == null)
+        {
+            RecordFailure("SpawnPoint has no template");
             return false;
+        }
 
+        var any = false;
+        ClonedObjectBase lastChild = null;
+        var rng = new Random();
+        var scatterRng = TestScatterRandom ?? rng;
+        for (var i = 0; i < Template.Spawns.Count; i++)
+        {
+            var spawnList = Template.Spawns[i];
+            var target = SpawnPointTemplate.ResolveSlotPopulationTarget(spawnList, rng);
+            if (target <= 0)
+                continue;
+
+            var current = CountLiveChildrenForSlot(spawnList);
+            var needed = target - current;
+            for (var n = 0; n < needed; n++)
+            {
+                var child = MaterializeSlot(spawnList, scatterRng);
+                if (child == null)
+                    continue;
+
+                lastChild = child;
+                LastSpawnedCoid = child.ObjectId.Coid;
+                any = true;
+            }
+        }
+
+        if (!any && LastFailureDiagnostic == null && AuthoredMinimumPopulation == 0)
+        {
+            RecordFailure(DescribeEmptySlotFailure());
+            return false;
+        }
+
+        if (any && fireTriggerEvents)
+        {
+            MaterializedByReaction = true;
+            FireAuthoredTriggerEvents(triggerActivator ?? lastChild);
+        }
+
+        return any || CountOwnedChildren() > 0;
+    }
+
+    ClonedObjectBase MaterializeSlot(SpawnPointTemplate.SpawnList spawnList, Random scatterRng)
+    {
         if (spawnList.IsTemplate)
         {
             var vehicleTemplate = AssetManager.Instance.GetVehicleTemplate(spawnList.SpawnType);
             if (vehicleTemplate == null)
-                return false;
-
-            var templateVehicle = SpawnTemplateVehicle(vehicleTemplate, spawnList);
-            if (templateVehicle == null)
-                return false;
-
-            LastSpawnedCoid = templateVehicle.ObjectId.Coid;
-            if (fireTriggerEvents)
             {
-                MaterializedByReaction = true;
-                FireAuthoredTriggerEvents(triggerActivator ?? templateVehicle);
+                RecordFailure(
+                    $"template missing map={Map?.ContinentId} coid={Template.COID} childCbid={spawnList.SpawnType} " +
+                    $"clone type=VehicleTemplate reason={AssetManager.Instance.DescribeVehicleTemplateLookupFailure(spawnList.SpawnType)}");
+                return null;
             }
 
-            return true;
+            var templateVehicle = SpawnTemplateVehicle(vehicleTemplate, spawnList, scatterRng);
+            if (templateVehicle == null)
+            {
+                RecordFailure(
+                    $"allocation failed map={Map?.ContinentId} coid={Template.COID} childCbid={spawnList.SpawnType} clone type=VehicleTemplate");
+                return null;
+            }
+
+            return templateVehicle;
         }
 
         var cloneBase = AssetManager.Instance.GetCloneBase(spawnList.SpawnType);
         if (cloneBase == null)
-            return false;
+        {
+            RecordFailure(
+                $"template missing map={Map?.ContinentId} coid={Template.COID} childCbid={spawnList.SpawnType} clone type=unknown");
+            return null;
+        }
 
         if (cloneBase.Type == CloneBaseObjectType.Creature)
         {
-            var creature = SpawnCreature(cloneBase.CloneBaseSpecific.CloneBaseId, spawnList);
+            var creature = SpawnCreature(cloneBase.CloneBaseSpecific.CloneBaseId, spawnList, scatterRng);
             if (creature == null)
-                return false;
-
-            LastSpawnedCoid = creature.ObjectId.Coid;
-            if (fireTriggerEvents)
             {
-                MaterializedByReaction = true;
-                FireAuthoredTriggerEvents(triggerActivator ?? creature);
+                RecordFailure(
+                    $"allocation failed map={Map?.ContinentId} coid={Template.COID} childCbid={spawnList.SpawnType} clone type={cloneBase.Type}");
+                return null;
             }
 
-            return true;
+            if (creature.Map == null)
+            {
+                RecordFailure(
+                    $"SetMap failed map={Map?.ContinentId} coid={Template.COID} childCbid={spawnList.SpawnType} clone type=Creature");
+                return null;
+            }
+
+            if (creature.Ghost == null)
+            {
+                RecordFailure(
+                    $"ghost creation failed map={Map?.ContinentId} coid={Template.COID} childCbid={spawnList.SpawnType} clone type=Creature");
+            }
+
+            return creature;
         }
 
         if (cloneBase.Type == CloneBaseObjectType.Vehicle)
@@ -185,23 +329,84 @@ public class SpawnPoint : ClonedObjectBase
             // chassis, delegate to the template path (weapons, BaseHp, SpawnOwnerCoid, driver).
             var chassisCbid = cloneBase.CloneBaseSpecific.CloneBaseId;
             var vehicle = AssetManager.Instance.TryGetVehicleTemplateByVehicleCbid(chassisCbid, out var resolved)
-                ? SpawnTemplateVehicle(resolved, spawnList)
-                : SpawnVehicle(chassisCbid, spawnList);
+                ? SpawnTemplateVehicle(resolved, spawnList, scatterRng)
+                : SpawnVehicle(chassisCbid, spawnList, scatterRng);
             if (vehicle == null)
-                return false;
-
-            LastSpawnedCoid = vehicle.ObjectId.Coid;
-            if (fireTriggerEvents)
             {
-                MaterializedByReaction = true;
-                FireAuthoredTriggerEvents(triggerActivator ?? vehicle);
+                RecordFailure(
+                    $"allocation failed map={Map?.ContinentId} coid={Template.COID} childCbid={spawnList.SpawnType} clone type={cloneBase.Type}");
+                return null;
             }
 
-            return true;
+            return vehicle;
         }
 
-        Logger.WriteLog(LogType.Error, $"SpawnPoint {Template.COID} wants to spawn object with type {cloneBase.Type}!");
-        return false;
+        RecordFailure(
+            $"unsupported clone type map={Map?.ContinentId} coid={Template.COID} childCbid={spawnList.SpawnType} clone type={cloneBase.Type}");
+        return null;
+    }
+
+    void RecordFailure(string diagnostic)
+    {
+        LastFailureDiagnostic = diagnostic;
+        Logger.WriteLog(LogType.Warning, "SpawnPoint: {0}", diagnostic);
+    }
+
+    /// <summary>
+    /// Map, pose, and slot breakdown when Spawn ran but every slot is empty or retail-skipped.
+    /// A bare COID is not enough to find the FAM row or tell empty-marker from Upper=0 skip.
+    /// </summary>
+    string DescribeEmptySlotFailure()
+    {
+        var mapFile = Map?.ContinentObject?.MapFileName ?? "?";
+        return FormattableString.Invariant(
+            $"no filled spawn slots map={Map?.ContinentId} mapFile={mapFile} coid={Template.COID} pos=({Position.X:0.##},{Position.Y:0.##},{Position.Z:0.##}) active={Template.OriginalIsActive}/{Template.IsActive} {Template.DescribeUnfilledSlots()}");
+    }
+
+    /// <summary>
+    /// Retail <c>FUN_005635e0</c>: delay = RespawnTime ms + jitter, clamped to 120s.
+    /// <c>RespawnTime &lt;= -1</c> means no heartbeat.
+    /// </summary>
+    internal static int? ComputeRespawnDelayMs(float respawnTime, int jitterMs)
+    {
+        if (respawnTime <= -1f || float.IsNaN(respawnTime))
+            return null;
+
+        var delay = (int)respawnTime + jitterMs;
+        if (delay >= 119_999)
+            return RetailRespawnDelayCapMs;
+        if (delay < 0)
+            return 0;
+        return delay;
+    }
+
+    /// <summary>Schedule or fire the refill heartbeat. Safe to call from tests with an explicit now.</summary>
+    public void TickRespawn(long nowMs)
+    {
+        if (RespawnDueAtMs == null || nowMs < RespawnDueAtMs.Value)
+            return;
+
+        RespawnDueAtMs = null;
+        Map?.UnregisterSpawnRespawn(this);
+        if (Template == null || Template.RespawnTime <= -1f)
+            return;
+
+        Spawn();
+    }
+
+    void ScheduleRespawnIfNeeded()
+    {
+        if (Template == null || Template.RespawnTime <= -1f)
+            return;
+        if (HasScheduledRespawn)
+            return;
+
+        var delay = ComputeRespawnDelayMs(Template.RespawnTime, Random.Shared.Next(1000, 3000));
+        if (delay == null)
+            return;
+
+        RespawnDueAtMs = Environment.TickCount64 + delay.Value;
+        Map?.RegisterSpawnRespawn(this);
     }
 
     /// <summary>Clear reaction-materialization bookkeeping after a hygiene despawn.</summary>
@@ -324,6 +529,11 @@ public class SpawnPoint : ClonedObjectBase
     /// </summary>
     public void NotifySpawnedChildDied(ClonedObjectBase dyingChild, ClonedObjectBase killerOrActivator)
     {
+        if (dyingChild?.ObjectId != null && LastSpawnedCoid == dyingChild.ObjectId.Coid)
+            LastSpawnedCoid = 0;
+
+        ScheduleRespawnIfNeeded();
+
         if (AuthoredTriggerEventsConsumed)
             return;
 
@@ -491,6 +701,69 @@ public class SpawnPoint : ClonedObjectBase
     }
 
     /// <summary>
+    /// Retail <c>FUN_004e9720</c> retry sample: <c>(ushort * (2/65535) - 1)</c> ∈ [-1, +1].
+    /// </summary>
+    internal static float RetailSignedUnitFromUInt16(ushort bits)
+        => bits * RetailScatterUShortScale - 1f;
+
+    /// <summary>
+    /// Horizontal scatter from <c>FUN_004e9720</c>: independent X/Z offsets of
+    /// <c>(ushort * (2/65535) - 1) * Radius</c>. Y is preserved — terrain/foot
+    /// run after this, matching CreateCreature / CreateTemplateVehicle.
+    /// </summary>
+    internal static Vector3 ScatterHorizontal(Vector3 origin, float radius, ushort xBits, ushort zBits)
+    {
+        if (radius == 0f || !float.IsFinite(radius))
+            return origin;
+
+        var dx = RetailSignedUnitFromUInt16(xBits) * radius;
+        var dz = RetailSignedUnitFromUInt16(zBits) * radius;
+        return new Vector3(origin.X + dx, origin.Y, origin.Z + dz);
+    }
+
+    /// <summary>Production sample of <see cref="ScatterHorizontal(Vector3, float, ushort, ushort)"/>.</summary>
+    internal static Vector3 ScatterHorizontal(Vector3 origin, float radius, Random rng)
+    {
+        rng ??= Random.Shared;
+        return ScatterHorizontal(origin, radius, (ushort)rng.Next(0, 65536), (ushort)rng.Next(0, 65536));
+    }
+
+    /// <summary>
+    /// CreateCreature (0x00564F60): scatter when RandomlyOffset AND IsNPC != 1.
+    /// The client also tests <c>Speed &gt; 0</c> at clone+0x4c0, but live FAM combat
+    /// CBIDs author Speed=0 and walk via <see cref="NpcTicker.DefaultFootSpeed"/> —
+    /// treating 0 as "stationary" would leave Scrap 13330 stacked despite Radius=35.
+    /// CreateTemplateVehicle (0x00564290): scatter when RandomlyOffset (no IsNPC gate).
+    /// Radius == 0 is a no-op even if the flag is set.
+    /// </summary>
+    internal static bool ShouldScatterSpawnPosition(
+        SpawnPointTemplate template,
+        bool isVehicle,
+        bool isInteractiveNpc,
+        float speed)
+    {
+        if (template == null || !template.RandomlyOffsetSpawnPosition)
+            return false;
+        if (!(template.Radius > 0f) || !float.IsFinite(template.Radius))
+            return false;
+        if (isVehicle)
+            return true;
+        if (isInteractiveNpc)
+            return false;
+        // speed is accepted for call-site documentation; 0 means default foot speed.
+        _ = speed;
+        return true;
+    }
+
+    Vector3 ChooseChildHorizontalPosition(bool isVehicle, bool isInteractiveNpc, float speed, Random scatterRng)
+    {
+        if (!ShouldScatterSpawnPosition(Template, isVehicle, isInteractiveNpc, speed))
+            return Position;
+
+        return ScatterHorizontal(Position, Template.Radius, TestScatterRandom ?? scatterRng ?? Random.Shared);
+    }
+
+    /// <summary>
     /// Elevates static interactive NPCs so the body origin sits above terrain.
     /// Combat (<c>IsNPC == 0</c>) is left at the map spawn Y (caller may pure-snap via
     /// <see cref="NpcTicker.SnapToTerrain"/>). See <c>Documentation/NPC_SPAWN_HEIGHT.md</c>.
@@ -530,7 +803,7 @@ public class SpawnPoint : ClonedObjectBase
         return 0f;
     }
 
-    private Creature SpawnCreature(int cbid, SpawnPointTemplate.SpawnList spawnList)
+    private Creature SpawnCreature(int cbid, SpawnPointTemplate.SpawnList spawnList, Random scatterRng)
     {
         var creature = new Creature();
         // Global=true + high COID range: see MapNpcIdentity (client crash 0x005D262A).
@@ -551,10 +824,17 @@ public class SpawnPoint : ClonedObjectBase
             var baseLevel = cloneBaseCreature.CreatureSpecific.BaseLevel;
             creature.Level = CalculateSpawnLevel(baseLevel, spawnList.LevelOffset);
             creature.ScaleHealthForLevel((byte)baseLevel);
+            var isInteractive = cloneBaseCreature.CreatureSpecific.IsNPC != 0;
+            var horizontal = ChooseChildHorizontalPosition(
+                isVehicle: false,
+                isInteractiveNpc: isInteractive,
+                cloneBaseCreature.CreatureSpecific.Speed,
+                scatterRng);
             // IsNPC: map spawn Y + foot (see ApplyStaticNpcSpawnHeight). Combat: pure heightfield
             // when present — no foot (server ghosts use XYZ as-is; +foot floats them).
+            // Retail order: FUN_004e9720 XZ first, then CastTerrainHeight + foot.
             creature.Position = ApplyStaticNpcSpawnHeight(
-                Position,
+                horizontal,
                 cloneBaseCreature.CreatureSpecific,
                 cloneBaseCreature.SimpleObjectSpecific.PhysicsName);
             if (cloneBaseCreature.CreatureSpecific.IsNPC == 0)
@@ -563,7 +843,8 @@ public class SpawnPoint : ClonedObjectBase
         else
         {
             creature.Level = 1;
-            creature.Position = NpcTicker.SnapToTerrain(Map, Position);
+            var horizontal = ChooseChildHorizontalPosition(false, false, 0f, scatterRng);
+            creature.Position = NpcTicker.SnapToTerrain(Map, horizontal);
             Logger.WriteLog(LogType.Error,
                 $"SpawnPoint.SpawnCreature: Creature CBID={cbid} is not a CloneBaseCreature, defaulting to level 1");
         }
@@ -590,7 +871,7 @@ public class SpawnPoint : ClonedObjectBase
         return creature;
     }
 
-    private Vehicle SpawnVehicle(int cbid, SpawnPointTemplate.SpawnList spawnList)
+    private Vehicle SpawnVehicle(int cbid, SpawnPointTemplate.SpawnList spawnList, Random scatterRng)
     {
         var vehicle = new Vehicle();
         var counter = Map.LocalCoidCounter;
@@ -603,8 +884,10 @@ public class SpawnPoint : ClonedObjectBase
         // this too). This branch only runs when no tVehicleTemplate row exists for the chassis.
         vehicle.SpawnOwnerCoid = ObjectId.Coid;
         vehicle.Layer = Layer;
-        // Pure terrain when heightfield present (CreateTemplateVehicle cast).
-        vehicle.Position = NpcTicker.SnapToTerrain(Map, Position);
+        // FUN_004e9720 XZ first (same Radius as creatures), then existing SnapToTerrain.
+        // Do not copy the client's +5.0/+0.5 search lift onto the final chassis Y.
+        var horizontal = ChooseChildHorizontalPosition(isVehicle: true, false, 0f, scatterRng);
+        vehicle.Position = NpcTicker.SnapToTerrain(Map, horizontal);
         vehicle.Rotation = Rotation;
         // Same as template path: chassis clonebase invincible bit must not block combat.
         vehicle.SetInvincible(false);
@@ -622,7 +905,7 @@ public class SpawnPoint : ClonedObjectBase
                 "SpawnPoint {0}: raw-CBID vehicle {1} has no template row and no default driver — it will not attack",
                 Template.COID, cbid);
         }
-        var driver = BuildDriver(0, defaultDriverCbid, spawnList.LevelOffset);
+        var driver = BuildDriver(0, defaultDriverCbid, spawnList.LevelOffset, vehicle.Position);
         if (driver != null)
         {
             vehicle.SetOwner(driver);
@@ -643,7 +926,7 @@ public class SpawnPoint : ClonedObjectBase
     /// Spawns a vehicle from a wad.xml <c>tVehicleTemplate</c> row (spawn-list SpawnType is the
     /// template id, not a vehicle CBID; see <see cref="SpawnPointTemplate.SpawnList.IsTemplate"/>).
     /// </summary>
-    private Vehicle SpawnTemplateVehicle(VehicleTemplate template, SpawnPointTemplate.SpawnList spawnList)
+    private Vehicle SpawnTemplateVehicle(VehicleTemplate template, SpawnPointTemplate.SpawnList spawnList, Random scatterRng)
     {
         var vehicle = new Vehicle();
         var counter = Map.LocalCoidCounter;
@@ -655,7 +938,8 @@ public class SpawnPoint : ClonedObjectBase
         vehicle.TemplateId = template.Id;
         vehicle.SpawnOwnerCoid = ObjectId.Coid;
         vehicle.Layer = Layer;
-        vehicle.Position = NpcTicker.SnapToTerrain(Map, Position);
+        var horizontal = ChooseChildHorizontalPosition(isVehicle: true, false, 0f, scatterRng);
+        vehicle.Position = NpcTicker.SnapToTerrain(Map, horizontal);
         vehicle.Rotation = Rotation;
         vehicle.ApplyTemplateBaseHp(template.BaseHp);
         // Clonebase may flag chassis as invincible; template NPC vehicles are combat targets
@@ -670,7 +954,7 @@ public class SpawnPoint : ClonedObjectBase
         EquipTemplateItem(vehicle, VehicleEquipmentSlot.Armor, template.ArmorCbid);
 
         var defaultDriverCbid = cloneBaseVehicle?.VehicleSpecific.DefaultDriver ?? 0;
-        var driver = BuildDriver(template.DriverCbid, defaultDriverCbid, spawnList.LevelOffset);
+        var driver = BuildDriver(template.DriverCbid, defaultDriverCbid, spawnList.LevelOffset, vehicle.Position);
         if (driver != null)
         {
             vehicle.SetOwner(driver);
@@ -693,7 +977,7 @@ public class SpawnPoint : ClonedObjectBase
     /// HBAIDriver contract from the vehicle owner's CBID + level (NPC.md §8.5).
     /// Returns null when no driver CBID is available (template nor clonebase default).
     /// </summary>
-    private Creature BuildDriver(int templateDriverCbid, int defaultDriverCbid, int levelOffset)
+    private Creature BuildDriver(int templateDriverCbid, int defaultDriverCbid, int levelOffset, Vector3 position)
     {
         var driverCbid = ResolveDriverCbid(templateDriverCbid, defaultDriverCbid);
         if (driverCbid <= 0)
@@ -709,7 +993,7 @@ public class SpawnPoint : ClonedObjectBase
 
         var baseLevel = (driver.CloneBaseObject as CloneBaseCreature)?.CreatureSpecific.BaseLevel ?? 1;
         driver.Level = CalculateSpawnLevel(baseLevel, levelOffset);
-        driver.Position = Position;
+        driver.Position = position;
         driver.Rotation = Rotation;
         driver.Layer = Layer;
 

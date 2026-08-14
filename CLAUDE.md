@@ -50,3 +50,7 @@ listener count and can fail when test assemblies run in parallel. It passes in i
 - Reusable scripts → `scripts/`, indexed in [`SCRIPTS.md`](SCRIPTS.md).
 - One-off probes → `tmp/` only. Never the repo root.
 - Docs index → [`docs/TOC.md`](docs/TOC.md).
+
+## Additional Instructions
+
+If present, read [`PROMPT.md`](PROMPT.md) in it's entity. [MANDATORY]

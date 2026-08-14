@@ -438,7 +438,24 @@ public class Reaction : ClonedObjectBase
                         "Activate reaction {0}: SpawnPoint coid={1} spawned children",
                         Template.COID,
                         objectCoid);
+                    if (!spawnPoint.HasLiveSpawn())
+                        MissionWorldStateLog.WarnCreateChildFailed(this, activator, objectCoid, spawnPoint);
                 }
+
+                continue;
+            }
+
+            if (map.MapData.Templates.TryGetValue(objectCoid, out var missingTpl)
+                && missingTpl is SpawnPointTemplate)
+            {
+                MissionWorldStateLog.WarnMissingTarget(this, activator, objectCoid, "Activate");
+                continue;
+            }
+
+            if (map.GetObjectByCoid(objectCoid) == null
+                && !map.MapData.Templates.ContainsKey(objectCoid))
+            {
+                MissionWorldStateLog.WarnMissingTarget(this, activator, objectCoid, "Activate");
             }
         }
     }
@@ -526,7 +543,8 @@ public class Reaction : ClonedObjectBase
                 // Template-vehicle combat stays marker-only under personal Create.
                 if (existing is SpawnPoint existingSpawn
                     && !existingSpawn.HasLiveSpawn()
-                    && (sharedWorld || SpawnListIsDialogNpc(existingSpawn.Template)))
+                    && (sharedWorld || SpawnListIsDialogNpc(existingSpawn.Template)
+                        || ShouldCreateSpawnTemplateVehicle(map, existingSpawn.Template, objectCoid)))
                 {
                     existingSpawn.Spawn(fireTriggerEvents: true, triggerActivator: activator);
                     Logger.WriteLog(LogType.Debug,
@@ -534,6 +552,8 @@ public class Reaction : ClonedObjectBase
                         Template.COID,
                         objectCoid,
                         sharedWorld ? 1 : 0);
+                    if (!existingSpawn.HasLiveSpawn())
+                        MissionWorldStateLog.WarnCreateChildFailed(this, activator, objectCoid, existingSpawn);
                 }
                 else
                 {
@@ -548,10 +568,7 @@ public class Reaction : ClonedObjectBase
 
             if (!map.MapData.Templates.TryGetValue(objectCoid, out var template) || template == null)
             {
-                Logger.WriteLog(LogType.Debug,
-                    "Create reaction {0}: no MapData template for coid={1} (client-side only)",
-                    Template.COID,
-                    objectCoid);
+                MissionWorldStateLog.WarnMissingTarget(this, activator, objectCoid, "Create");
                 continue;
             }
 
@@ -591,9 +608,12 @@ public class Reaction : ClonedObjectBase
             // Personal Create: materialize dialog/deliver NPCs (non-template) for UseObject;
             // template-vehicle combat remains marker-only (private combat / Activate path).
             if (obj is SpawnPoint spawnPoint
-                && (sharedWorld || SpawnListIsDialogNpc(spawnPoint.Template)))
+                && (sharedWorld || SpawnListIsDialogNpc(spawnPoint.Template)
+                    || ShouldCreateSpawnTemplateVehicle(map, spawnPoint.Template, objectCoid)))
             {
                 spawnPoint.Spawn(fireTriggerEvents: true, triggerActivator: activator);
+                if (!spawnPoint.HasLiveSpawn())
+                    MissionWorldStateLog.WarnCreateChildFailed(this, activator, objectCoid, spawnPoint);
             }
 
             Logger.WriteLog(LogType.Debug,
@@ -624,6 +644,43 @@ public class Reaction : ClonedObjectBase
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Create-only FAM combat graphs (Tierra Roja 3882 / Wastes 18609 / Canyon 23413) have no
+    /// sibling Activate. Personal Create must still run the normal Pass 17–19 spawn path.
+    /// If an Activate already lives on the map (Gunny 14142), leave the marker — Activate Spawns.
+    /// </summary>
+    static bool ShouldCreateSpawnTemplateVehicle(SectorMap map, SpawnPointTemplate template, long spawnCoid)
+    {
+        if (template?.Spawns == null || template.Spawns.Count == 0)
+            return false;
+
+        var isTemplate = false;
+        foreach (var entry in template.Spawns)
+        {
+            if (entry.SpawnType > 0 && entry.IsTemplate)
+            {
+                isTemplate = true;
+                break;
+            }
+        }
+
+        if (!isTemplate)
+            return false;
+
+        if (map?.Reactions == null)
+            return true;
+
+        foreach (var reaction in map.Reactions.Values)
+        {
+            if (reaction.Template?.ReactionType != ReactionType.Activate)
+                continue;
+            if (reaction.Template.Objects != null && reaction.Template.Objects.Contains(spawnCoid))
+                return false;
+        }
+
+        return true;
     }
 
     /// <summary>

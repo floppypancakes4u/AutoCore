@@ -738,6 +738,18 @@ public class AssetManager : Singleton<AssetManager>
         return null;
     }
 
+    /// <summary>Human-readable miss reason for spawn diagnostics (map / COID / template id already logged by the caller).</summary>
+    public string DescribeVehicleTemplateLookupFailure(int vehicleTemplateId)
+    {
+        if (_testVehicleTemplates != null && _testVehicleTemplates.ContainsKey(vehicleTemplateId))
+            return "internal: test catalog contained the id but GetVehicleTemplate returned null";
+
+        if (WorldDBLoader.VehicleTemplates == null)
+            return "tVehicleTemplate catalog not loaded";
+
+        return $"tVehicleTemplate row missing id={vehicleTemplateId}";
+    }
+
     // SS-43: reverse index chassis CBID → the tVehicleTemplate row that supplies its loadout.
     // SS-48: only UNAMBIGUOUS chassis are indexed. 114 of 407 shipped chassis carry several
     // template variants and 112 of those differ materially (chassis 2818: a 465-HP mob and a

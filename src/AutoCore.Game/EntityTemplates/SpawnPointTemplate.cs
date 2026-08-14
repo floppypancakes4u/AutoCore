@@ -121,6 +121,98 @@ public class SpawnPointTemplate : GraphicsObjectTemplate
         return realSpawns.Skip(TempRandom.Next(0, realSpawns.Count())).Take(1).FirstOrDefault();
     }
 
+    /// <summary>
+    /// Retail <c>FUN_00566490</c> population for one 12-byte spawn slot.
+    /// Upper==0 and Lower==0 is the unauthored C# default (one child).
+    /// Upper==0 with an authored Lower skips the slot. Both counts cap at 10.
+    /// </summary>
+    public static int ResolveSlotPopulationTarget(SpawnList slot, Random rng)
+    {
+        if (slot == null || slot.SpawnType == -1)
+            return 0;
+
+        var lower = (int)slot.LowerNumberOfSpawns;
+        var upper = (int)slot.UpperNumberOfSpawns;
+        if (upper == 0 && lower == 0)
+            return 1;
+        if (upper == 0)
+            return 0;
+
+        if (lower > 10)
+            lower = 10;
+        if (upper > 10)
+            upper = 10;
+        if (upper < lower)
+            upper = lower;
+        if (lower == upper)
+            return lower;
+
+        rng ??= Random.Shared;
+        return rng.Next(lower, upper + 1);
+    }
+
+    /// <summary>Sum of per-slot minima used for expected-vs-actual map counts.</summary>
+    public int ExpectedMinimumChildren()
+    {
+        var total = 0;
+        foreach (var slot in Spawns)
+        {
+            if (slot.SpawnType == -1)
+                continue;
+            if (slot.UpperNumberOfSpawns == 0 && slot.LowerNumberOfSpawns == 0)
+            {
+                total += 1;
+                continue;
+            }
+
+            if (slot.UpperNumberOfSpawns == 0)
+                continue;
+
+            total += Math.Min((int)slot.LowerNumberOfSpawns, 10);
+        }
+
+        return total;
+    }
+
+    /// <summary>
+    /// Why <see cref="ExpectedMinimumChildren"/> is 0 — for spawn-failure warnings.
+    /// Distinguishes an empty FAM list from typed slots that retail skips (Upper==0).
+    /// </summary>
+    public string DescribeUnfilledSlots()
+    {
+        if (Spawns.Count == 0)
+            return "reason=no spawn list slots=0 emptyType=0 skippedUpper0=0";
+
+        var emptyType = 0;
+        var skippedUpper0 = 0;
+        var typed = new List<string>();
+        foreach (var slot in Spawns)
+        {
+            if (slot.SpawnType == -1)
+            {
+                emptyType++;
+                continue;
+            }
+
+            if (slot.UpperNumberOfSpawns == 0 && slot.LowerNumberOfSpawns != 0)
+                skippedUpper0++;
+
+            typed.Add(
+                $"type={slot.SpawnType} template={slot.IsTemplate} lower={slot.LowerNumberOfSpawns} upper={slot.UpperNumberOfSpawns}");
+        }
+
+        string reason;
+        if (emptyType == Spawns.Count)
+            reason = "all slots SpawnType=-1";
+        else if (typed.Count > 0 && skippedUpper0 == typed.Count)
+            reason = "typed slots have Upper=0";
+        else
+            reason = "expected minimum is 0";
+
+        var typedPart = typed.Count == 0 ? string.Empty : " " + string.Join("; ", typed);
+        return $"reason={reason} slots={Spawns.Count} emptyType={emptyType} skippedUpper0={skippedUpper0}{typedPart}";
+    }
+
     public class SpawnList
     {
         public bool IsTemplate { get; set; }

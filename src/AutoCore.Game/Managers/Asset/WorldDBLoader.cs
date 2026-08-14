@@ -33,26 +33,36 @@ public class WorldDBLoader
     [ExcludeFromCodeCoverage(Justification = "World EF + live GamePath wad.xml bootstrap I/O; WadXmlWorldDataLoader unit-tested.")]
     public bool Load()
     {
-        using var worldContext = new WorldContext();
-
-        ContinentObjects = worldContext.ContinentObjects.Where(ContinentObjectValidator).ToDictionary(co => co.Id);
-
-        if (AssetManager.Instance.ServerType == ServerType.Global || AssetManager.Instance.ServerType == ServerType.Both)
+        // Pass 19: World DB I/O must not prevent wad.xml tVehicleTemplate (and sibling
+        // wad-only tables) from loading. A thrown WorldContext would previously leave
+        // VehicleTemplates null and drop every FAM IsTemplate spawn.
+        try
         {
-            ConfigNewCharacters = worldContext.ConfigNewCharacters.ToDictionary(cnc => Tuple.Create(cnc.Race, cnc.Class));
+            using var worldContext = new WorldContext();
+
+            ContinentObjects = worldContext.ContinentObjects.Where(ContinentObjectValidator).ToDictionary(co => co.Id);
+
+            if (AssetManager.Instance.ServerType == ServerType.Global || AssetManager.Instance.ServerType == ServerType.Both)
+            {
+                ConfigNewCharacters = worldContext.ConfigNewCharacters.ToDictionary(cnc => Tuple.Create(cnc.Race, cnc.Class));
+            }
+
+            if (AssetManager.Instance.ServerType == ServerType.Sector || AssetManager.Instance.ServerType == ServerType.Both)
+            {
+                ContinentAreas = worldContext.ContinentAreas.ToDictionary(ca => Tuple.Create(ca.ContinentObjectId, ca.Area));
+                ExperienceLevels = worldContext.ExperienceLevels.ToDictionary(el => el.Level);
+            }
         }
-
-        if (AssetManager.Instance.ServerType == ServerType.Sector || AssetManager.Instance.ServerType == ServerType.Both)
+        catch (Exception ex)
         {
-            ContinentAreas = worldContext.ContinentAreas.ToDictionary(ca => Tuple.Create(ca.ContinentObjectId, ca.Area));
-            ExperienceLevels = worldContext.ExperienceLevels.ToDictionary(el => el.Level);
+            Logger.WriteLog(LogType.Error, $"WorldDBLoader: World DB query failed: {ex}");
         }
 
         // If the World DB is empty (common for fresh setups), bootstrap core world data from `wad.xml` in GamePath.
         // AA-Server’s `wad.xml` contains authoritative tables like `tConfigNewCharacters`, `tContinentObject`, etc.
         try
         {
-            var wadXmlPath = Path.Combine(AssetManager.Instance.GamePath, "wad.xml");
+            var wadXmlPath = Path.Combine(AssetManager.Instance.GamePath ?? string.Empty, "wad.xml");
             if (File.Exists(wadXmlPath))
             {
                 if (ContinentObjects == null || ContinentObjects.Count == 0)

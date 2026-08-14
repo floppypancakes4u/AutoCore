@@ -155,6 +155,8 @@ public class MapManager : Singleton<MapManager>
             "NPC map tick",
             map =>
             {
+                // Heartbeats must run on persisted empty maps so camps refill before the next login.
+                map.TickSpawnRespawns(nowMs);
                 if (map.PlayerCount > 0)
                     Npc.NpcTicker.Tick(map, nowMs, deltaSeconds);
             },

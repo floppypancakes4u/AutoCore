@@ -199,3 +199,8 @@ Continue the **`SS-nn`** series:
 ### Static analysis
 
 `src/Directory.Build.props` + `src/.editorconfig` enable .NET analyzers as **warnings only** — `TreatWarningsAsErrors` is off and `<Nullable>` is untouched, so analysis cannot break the build. Fix what you surface or record it in the audit; do not blanket-suppress. CA1031 (broad catch) is intentionally a *suggestion*, because flagging every deliberate boundary would train people to suppress it.
+
+
+### Additional Instructions
+
+If present, read [`PROMPT.md`](PROMPT.md) in it's entity. [MANDATORY]

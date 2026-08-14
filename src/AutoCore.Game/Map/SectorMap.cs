@@ -82,6 +82,35 @@ public class SectorMap
     /// <summary>XZ spatial index of the map's entities, maintained by EnterMap/LeaveMap.</summary>
     public SpatialHashGrid Grid { get; private set; } = new();
 
+    List<SpawnPoint> _pendingSpawnRespawns;
+
+    /// <summary>SpawnPoints with a scheduled retail refill heartbeat.</summary>
+    List<SpawnPoint> PendingSpawnRespawns => _pendingSpawnRespawns ??= new List<SpawnPoint>();
+
+    internal void RegisterSpawnRespawn(SpawnPoint spawnPoint)
+    {
+        if (spawnPoint == null)
+            return;
+        if (!PendingSpawnRespawns.Contains(spawnPoint))
+            PendingSpawnRespawns.Add(spawnPoint);
+    }
+
+    internal void UnregisterSpawnRespawn(SpawnPoint spawnPoint)
+    {
+        _pendingSpawnRespawns?.Remove(spawnPoint);
+    }
+
+    /// <summary>Advance due spawn-point refill timers (retail <c>FUN_00566490</c> heartbeat).</summary>
+    internal void TickSpawnRespawns(long nowMs)
+    {
+        var pending = _pendingSpawnRespawns;
+        if (pending == null || pending.Count == 0)
+            return;
+
+        foreach (var spawn in pending.ToArray())
+            spawn.TickRespawn(nowMs);
+    }
+
     /// <summary>Production map bootstrap from live AssetManager map data (GLM/WAD templates).</summary>
     [ExcludeFromCodeCoverage(Justification = "Live map asset I/O; unit tests use CreateForTests.")]
     public SectorMap(int continentId)
@@ -497,7 +526,7 @@ public class SectorMap
             var coid = kvp.Key;
             if (GetObjectByCoid(coid) is SpawnPoint existing)
             {
-                if (!existing.HasLiveSpawn())
+                if (existing.CountOwnedChildren() < existing.AuthoredMinimumPopulation)
                 {
                     Logger.WriteLog(LogType.Debug,
                         "SectorMap {0}: hygiene re-Spawn fam-active spawn coid={1}",
@@ -627,6 +656,9 @@ public class SectorMap
             fired += FireMatchingCreates(activator, character, killType, firedCreateCoids, "kill target");
             // Create places the spawn marker; Activate materializes combat children (shared server AI).
             fired += FireMatchingActivates(activator, killType, firedCreateCoids);
+            // Create-only FAM graphs (Tierra Roja 3882 / Wastes 18609 / Canyon Run 23413)
+            // have no sibling Activate. Personal Create leaves a marker; spawn children here.
+            fired += EnsureKillTargetChildren(activator, character, killType);
         }
 
         // 4) Personal presence: suppress original givers when pad/deliver phase applies.
@@ -858,6 +890,53 @@ public class SectorMap
                 spawnTypeOrCbid);
             TriggerReactions(activator, new List<long> { coid });
             fired++;
+        }
+
+        return fired;
+    }
+
+    /// <summary>
+    /// After Create/Activate replay, materialize any still-empty fam-inactive spawn whose
+    /// authored slot matches the active kill type. Covers Create-only FAM graphs that never
+    /// authored a sibling Activate (Champion 3882, Helena 18609, Canyon crevice 23413).
+    /// </summary>
+    private int EnsureKillTargetChildren(ClonedObjectBase activator, Character character, int spawnTypeOrCbid)
+    {
+        var fired = 0;
+        foreach (var kvp in MapData.Templates)
+        {
+            if (kvp.Value is not SpawnPointTemplate tpl || tpl.OriginalIsActive)
+                continue;
+
+            if (!tpl.Spawns.Any(s => s.SpawnType == spawnTypeOrCbid && s.SpawnType != -1))
+                continue;
+
+            var spawn = GetObjectByCoid(kvp.Key) as SpawnPoint;
+            if (spawn == null)
+            {
+                MissionWorldStateLog.WarnMissingTarget(
+                    character, ContinentId, kvp.Key, "Create", "kill-target spawn marker missing");
+                continue;
+            }
+
+            if (spawn.HasLiveSpawn())
+                continue;
+
+            spawn.Spawn(fireTriggerEvents: true, triggerActivator: activator);
+            fired++;
+            if (!spawn.HasLiveSpawn())
+            {
+                MissionWorldStateLog.WarnCreateChildFailed(
+                    character, ContinentId, kvp.Key, spawn.LastFailureDiagnostic);
+            }
+            else
+            {
+                Logger.WriteLog(LogType.Debug,
+                    "SectorMap {0}: kill-target spawn {1} type={2} materialized children",
+                    ContinentId,
+                    kvp.Key,
+                    spawnTypeOrCbid);
+            }
         }
 
         return fired;

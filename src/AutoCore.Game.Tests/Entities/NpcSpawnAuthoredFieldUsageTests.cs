@@ -12,13 +12,11 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace AutoCore.Game.Tests.Entities;
 
 /// <summary>
-/// Characterization of authored spawn-control fields versus what
-/// <see cref="SpawnPoint.Spawn"/> / <see cref="SpawnPointTemplate.GetSpawn"/> /
-/// <see cref="SectorMap.InitializeLocalObjects"/> actually apply.
+/// Authored spawn-control fields versus <see cref="SpawnPoint.Spawn"/> /
+/// <see cref="SectorMap.InitializeLocalObjects"/>.
 /// Client <c>FUN_00566490</c> refills every eligible slot independently
 /// (sum of per-slot Lower..Upper) and rolls SpawnChance/RespawnTime on a heartbeat.
-/// The server materializes one child of one slot at map load (or Create/Activate)
-/// and never re-enters that loop.
+/// Pass 17 makes map-load / Activate honor that population.
 /// </summary>
 [TestClass]
 public class NpcSpawnAuthoredFieldUsageTests
@@ -70,11 +68,10 @@ public class NpcSpawnAuthoredFieldUsageTests
         Assert.IsTrue(spawnPoint.Spawn());
 
         var children = map.Objects.Values.OfType<Creature>().Where(c => c is not Character).ToList();
-        Assert.AreEqual(1, children.Count,
-            "server Spawn() materializes one child; client would keep 2–3 of type A plus 1–2 of type B");
-        Assert.IsTrue(
-            children[0].CBID == CreatureCbid || children[0].CBID == otherCbid,
-            "the single child comes from one of the filled slots");
+        Assert.IsTrue(children.Count >= 3 && children.Count <= 5,
+            "retail FUN_00566490 keeps both slots (2–3 of A plus 1–2 of B)");
+        Assert.IsTrue(children.Any(c => c.CBID == CreatureCbid));
+        Assert.IsTrue(children.Any(c => c.CBID == otherCbid));
     }
 
     [TestMethod]
@@ -96,8 +93,8 @@ public class NpcSpawnAuthoredFieldUsageTests
         Assert.IsTrue(spawnPoint.Spawn());
 
         var children = map.Objects.Values.OfType<Creature>().Count(c => c is not Character);
-        Assert.AreEqual(1, children,
-            "Spawn() must create one child per call even when the fam slot authors Lower=4 Upper=8");
+        Assert.IsTrue(children >= 4 && children <= 8,
+            "Spawn() must honor authored Lower=4 Upper=8 (retail FUN_00566490)");
         Assert.IsTrue(spawnPoint.HasLiveSpawn());
     }
 
@@ -123,7 +120,7 @@ public class NpcSpawnAuthoredFieldUsageTests
     }
 
     [TestMethod]
-    public void Spawn_IgnoresRadiusAndRandomOffset_PlacesAtSpawnPoint()
+    public void Spawn_RandomOffset_PlacesCombatChildInsideAuthoredSquare()
     {
         var map = CreateTestMap(ContinentId + 1);
         AssetManagerTestHelper.RegisterCreatureCloneBase(CreatureCbid, isNpc: 0);
@@ -146,8 +143,8 @@ public class NpcSpawnAuthoredFieldUsageTests
         Assert.IsTrue(spawnPoint.Spawn());
 
         var creature = map.Objects.Values.OfType<Creature>().Single(c => c is not Character);
-        Assert.AreEqual(12f, creature.Position.X, 0.001f);
-        Assert.AreEqual(44f, creature.Position.Z, 0.001f);
+        Assert.IsTrue(MathF.Abs(creature.Position.X - 12f) <= 80f + 1e-4f);
+        Assert.IsTrue(MathF.Abs(creature.Position.Z - 44f) <= 80f + 1e-4f);
     }
 
     [TestMethod]
@@ -180,8 +177,8 @@ public class NpcSpawnAuthoredFieldUsageTests
         var spawn = map.GetObjectByCoid(template.COID) as SpawnPoint;
         Assert.IsNotNull(spawn);
         Assert.IsTrue(spawn!.HasLiveSpawn());
-        Assert.AreEqual(1, map.Objects.Values.OfType<Creature>().Count(c => c is not Character),
-            "Map load calls Spawn() once; it does not loop to UpperNumberOfSpawns");
+        Assert.AreEqual(3, map.Objects.Values.OfType<Creature>().Count(c => c is not Character),
+            "Map load must materialize authored Lower=Upper=3 children");
     }
 
     [TestMethod]
@@ -293,12 +290,13 @@ public class NpcSpawnAuthoredFieldUsageTests
         spawnPoint.SetMap(map);
 
         Assert.IsTrue(spawnPoint.Spawn());
-        Assert.AreEqual(1, map.Objects.Values.OfType<Creature>().Count(c => c is not Character),
-            "shipped Read populated Lower=4 Upper=8; shipped Spawn still creates one body");
-        var creature = map.Objects.Values.OfType<Creature>().Single(c => c is not Character);
+        var creatures = map.Objects.Values.OfType<Creature>().Where(c => c is not Character).ToList();
+        Assert.IsTrue(creatures.Count >= 4 && creatures.Count <= 8,
+            "shipped Read populated Lower=4 Upper=8; Spawn must honor that range");
+        var creature = creatures[0];
         Assert.AreEqual((byte)8, creature.Level, "LevelOffset from the parsed slot is applied");
-        Assert.AreEqual(10f, creature.Position.X, 0.001f, "Radius/offset parsed but position stays on the marker");
-        Assert.AreEqual(20f, creature.Position.Z, 0.001f);
+        Assert.IsTrue(MathF.Abs(creature.Position.X - 10f) <= 80f + 1e-4f);
+        Assert.IsTrue(MathF.Abs(creature.Position.Z - 20f) <= 80f + 1e-4f);
     }
 
     [TestMethod]
@@ -343,8 +341,8 @@ public class NpcSpawnAuthoredFieldUsageTests
         Assert.IsTrue(activate.TriggerIfPossible(player));
 
         Assert.IsTrue(spawn.HasLiveSpawn());
-        Assert.AreEqual(1, map.Objects.Values.OfType<Creature>().Count(c => c is not Character),
-            "Activate calls Spawn() once; it does not honor UpperNumberOfSpawns=3");
+        Assert.AreEqual(3, map.Objects.Values.OfType<Creature>().Count(c => c is not Character),
+            "Activate must honor authored UpperNumberOfSpawns=3");
         Assert.IsFalse(template.OriginalIsActive, "Activate must not mutate fam OriginalIsActive");
     }
 
