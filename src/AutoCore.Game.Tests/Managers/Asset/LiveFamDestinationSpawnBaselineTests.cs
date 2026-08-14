@@ -29,6 +29,14 @@ public class LiveFamDestinationSpawnBaselineTests
         ("sec_f_h_map_tut_j2_arkbaytutorial", "Hestia Ark Bay 313", 707),
     };
 
+    /// <summary>
+    /// Unload the retail catalog this suite loaded into the process-wide
+    /// <see cref="AssetManager"/>. Without it every later test in the assembly resolves
+    /// against real WAD data instead of its own fixtures. See <c>LiveAssetIsolationTests</c>.
+    /// </summary>
+    [ClassCleanup(ClassCleanupBehavior.EndOfClass)]
+    public static void UnloadLiveAssets() => AssetManager.Instance.ClearLiveAssetsForTests();
+
     [TestMethod]
     public void RealFam_ExpectedAndActualSpawnCountsMatch()
     {

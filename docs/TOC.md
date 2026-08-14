@@ -28,7 +28,7 @@
 
 ## Testing
 
-- [Full test suite report (2026-08-14)](full-test-suite-report-2026-08-14.md) — `fix-packets` snapshot: 25 failures, 7 skipped, no fixes applied
+- [Full test suite report (2026-08-14)](full-test-suite-report-2026-08-14.md) — `fix-packets` / `3893c979b`: 25 failures, 7 skipped (rerun after transfer/opcode commit; same 25 red)
 
 ## Client reverse engineering
 

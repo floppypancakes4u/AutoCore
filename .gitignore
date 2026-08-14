@@ -317,7 +317,9 @@ src/AutoCore.Launcher/appsettings.discord.json
 .config/
 .cursor/
 Documentation/
-docs/
+docs/*
+# Tracked: LogEventCatalogSyncTests asserts this file matches production GameLog events.
+!docs/logging-event-catalog.md
 tmp-map/
 tools/*
 !tools/mission-live/

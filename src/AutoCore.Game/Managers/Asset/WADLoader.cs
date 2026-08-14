@@ -19,6 +19,24 @@ public class WADLoader
     public Dictionary<int, PrefixBase> OrnamentPrefixes { get; } = new();
     public Dictionary<int, PrefixBase> RaceItemPrefixes { get; } = new();
 
+    /// <summary>
+    /// Drops every parsed catalog table so the loader is back to its post-construction state.
+    /// Used both before a re-load and by live-asset tests, which share one process-wide
+    /// <see cref="AssetManager"/> and must not leave the retail catalog behind for the next test.
+    /// </summary>
+    public void Clear()
+    {
+        CloneBases.Clear();
+        Missions.Clear();
+        Skills.Clear();
+        ArmorPrefixes.Clear();
+        PowerPlantPrefixes.Clear();
+        WeaponPrefixes.Clear();
+        VehiclePrefixes.Clear();
+        OrnamentPrefixes.Clear();
+        RaceItemPrefixes.Clear();
+    }
+
     public bool Load(string filePath)
     {
         try

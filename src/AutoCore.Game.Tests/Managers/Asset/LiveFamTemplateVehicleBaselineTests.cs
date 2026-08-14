@@ -22,6 +22,7 @@ namespace AutoCore.Game.Tests.Managers.Asset;
 public class LiveFamTemplateVehicleBaselineTests
 {
     private const string InstallPath = @"C:\Program Files (x86)\NetDevil\Auto Assault";
+
     private const string WadXmlPath = InstallPath + @"\wad.xml";
     private const string ScrapFam = "sec_f_b_map_hwy_a2_1_scrapvalley";
     private const string TocadoFam = "sec_f_m_map_town_c7_1_tocado_01";
@@ -36,6 +37,14 @@ public class LiveFamTemplateVehicleBaselineTests
         (ArkBayFam, "Hestia Ark Bay 313", 707),
         (MalachiteFam, "Malachite", 399),
     };
+
+    /// <summary>
+    /// Unload the retail catalog this suite loaded into the process-wide
+    /// <see cref="AssetManager"/>. Without it every later test in the assembly resolves
+    /// against real WAD data instead of its own fixtures. See <c>LiveAssetIsolationTests</c>.
+    /// </summary>
+    [ClassCleanup(ClassCleanupBehavior.EndOfClass)]
+    public static void UnloadLiveAssets() => AssetManager.Instance.ClearLiveAssetsForTests();
 
     [TestMethod]
     public void RealFam_AllReferencedVehicleTemplateIdsResolve()

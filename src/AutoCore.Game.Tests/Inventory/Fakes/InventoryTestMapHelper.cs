@@ -215,15 +215,21 @@ public static class AssetManagerTestHelper
         Registered.Clear();
     }
 
-    private static Dictionary<int, CloneBase> GetCloneBasesDictionary()
-    {
-        var wadLoader = typeof(AssetManager)
+    /// <summary>The singleton's private <see cref="WADLoader"/>, for live-asset isolation checks.</summary>
+    public static WADLoader GetWadLoader() =>
+        (WADLoader)typeof(AssetManager)
             .GetProperty("WADLoader", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetValue(AssetManager.Instance);
+            .GetValue(AssetManager.Instance)!;
 
-        return (Dictionary<int, CloneBase>)wadLoader!
-            .GetType()
-            .GetProperty(nameof(WADLoader.CloneBases))!
-            .GetValue(wadLoader)!;
-    }
+    public static bool GetDataLoaded() =>
+        (bool)typeof(AssetManager)
+            .GetProperty("DataLoaded", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(AssetManager.Instance)!;
+
+    public static void SetDataLoaded(bool value) =>
+        typeof(AssetManager)
+            .GetProperty("DataLoaded", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(AssetManager.Instance, value);
+
+    private static Dictionary<int, CloneBase> GetCloneBasesDictionary() => GetWadLoader().CloneBases;
 }

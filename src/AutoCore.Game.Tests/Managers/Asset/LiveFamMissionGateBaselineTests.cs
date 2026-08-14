@@ -27,6 +27,14 @@ public class LiveFamMissionGateBaselineTests
         ("sec_f_b_map_mis_a2_1_canyonrun_01", "The Canyon Run", 399),
     };
 
+    /// <summary>
+    /// Unload the retail catalog this suite loaded into the process-wide
+    /// <see cref="AssetManager"/>. Without it every later test in the assembly resolves
+    /// against real WAD data instead of its own fixtures. See <c>LiveAssetIsolationTests</c>.
+    /// </summary>
+    [ClassCleanup(ClassCleanupBehavior.EndOfClass)]
+    public static void UnloadLiveAssets() => AssetManager.Instance.ClearLiveAssetsForTests();
+
     [TestMethod]
     public void RealMissionMaps_DumpConditionGatedGraphics()
     {

@@ -153,6 +153,11 @@ public class LogEventCatalogSyncTests
 
     private static string FindRepoRoot()
     {
+        // Two failure modes look identical from the caller, so report them separately: a
+        // missing catalog used to surface as "could not locate repo root", which reads like a
+        // harness/path bug and hides the real cause (the doc was deleted or left untracked).
+        string srcOnlyRoot = null;
+
         foreach (var start in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
         {
             var dir = new DirectoryInfo(start);
@@ -160,11 +165,23 @@ public class LogEventCatalogSyncTests
             {
                 var catalog = Path.Combine(dir.FullName, "docs", "logging-event-catalog.md");
                 var src = Path.Combine(dir.FullName, "src");
-                if (File.Exists(catalog) && Directory.Exists(src))
-                    return dir.FullName;
+                if (Directory.Exists(src))
+                {
+                    if (File.Exists(catalog))
+                        return dir.FullName;
+                    srcOnlyRoot ??= dir.FullName;
+                }
                 dir = dir.Parent;
             }
         }
-        throw new InvalidOperationException("Could not locate repo root for catalog sync.");
+
+        if (srcOnlyRoot != null)
+            throw new InvalidOperationException(
+                $"Found repo root '{srcOnlyRoot}' but no docs/logging-event-catalog.md. " +
+                "The catalog is a tracked file (see .gitignore); restore it rather than skipping the drift guard.");
+
+        throw new InvalidOperationException(
+            $"Could not locate repo root for catalog sync from '{AppContext.BaseDirectory}' " +
+            $"or '{Directory.GetCurrentDirectory()}' (looking for a directory containing src/).");
     }
 }

@@ -899,6 +899,30 @@ public class AssetManager : Singleton<AssetManager>
         _testConsumables.AddRange(consumables);
     }
 
+    /// <summary>
+    /// Test-only: unload live WAD/GLM-backed catalog data from this process-wide singleton.
+    /// </summary>
+    /// <remarks>
+    /// The live-asset suites (<c>LiveFam*</c>, live map baselines) load the retail
+    /// <c>clonebase.wad</c> straight into <see cref="AssetManager.Instance"/>. Without this
+    /// unload every later test in the assembly resolves against the retail catalog instead of
+    /// its own fixtures — retail item footprints break cargo-grid placement, absent-ID lookups
+    /// stop returning null, and seeded loot/mission tables are drowned out by ~1400 real items.
+    /// Covered by <c>LiveAssetIsolationTests</c>.
+    /// </remarks>
+    internal void ClearLiveAssetsForTests()
+    {
+        WADLoader.Clear();
+        WorldDBLoader.VehicleTemplates = null;
+        WorldDBLoader.CreatureAiProfiles = null;
+        WorldDBLoader.LootTables = null;
+        WorldDBLoader.LootWeights = null;
+        WorldDBLoader.Consumables = null;
+        MapDataLoader.MapDatas.Clear();
+        _vehicleTemplateByVehicleCbid = null;
+        DataLoaded = false;
+    }
+
     internal void ClearTestNpcData()
     {
         _testVehicleTemplates = null;
