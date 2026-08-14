@@ -218,6 +218,11 @@ public class RespawnManager : Singleton<RespawnManager>
         vehicle.SetPosition(position);
         vehicle.Rotation = rotation;
         DirtyHealthAndPosition(character, vehicle);
+
+        // Cross-map respawn repositions AFTER MapManager latched the destination EnterPoint pose
+        // for the pending Stage2/Stage3 handshake. Re-latch so the client preloads and creates at
+        // the repair station instead of being dragged back to the map's generic entry point.
+        character.OwningConnection?.UpdatePendingMapTransferSpawnPose(position, rotation);
     }
 
     private static void DirtyHealthAndPosition(Character character, Vehicle vehicle)

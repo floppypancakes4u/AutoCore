@@ -506,7 +506,9 @@ public partial class TNLConnection
     internal void BeginPendingMapTransferHandshake(
         Character character,
         int destinationContinentId,
-        int sourceContinentId = 0)
+        int sourceContinentId = 0,
+        Vector3 spawnPosition = default,
+        Quaternion spawnRotation = default)
     {
         if (character == null)
             throw new ArgumentNullException(nameof(character));
@@ -522,9 +524,16 @@ public partial class TNLConnection
         TransferHandshakeCharacterCoid = character.ObjectId.Coid;
         TransferHandshakeDestinationContinentId = destinationContinentId;
         TransferHandshakeSourceContinentId = sourceContinentId;
+        TransferHandshakeSpawnPosition = spawnPosition;
+        // default(Quaternion) is all-zero, which is not a rotation — treat it as identity.
+        TransferHandshakeSpawnRotation = IsZero(spawnRotation) ? Quaternion.Default : spawnRotation;
+        _transferSpawnPoseLatched = true;
 
         AutoCore.Utils.Logging.GameLog.Info("MapTransferHandshakeWaiting",
-            TransferHandshakeLogProps());
+            TransferHandshakeLogProps(
+                ("SpawnX", spawnPosition.X),
+                ("SpawnY", spawnPosition.Y),
+                ("SpawnZ", spawnPosition.Z)));
     }
 
     internal void AbortPendingMapTransferHandshake(string reason)
@@ -538,12 +547,20 @@ public partial class TNLConnection
         TransferHandshakeCharacterCoid = 0;
         TransferHandshakeDestinationContinentId = 0;
         TransferHandshakeSourceContinentId = 0;
+        TransferHandshakeSpawnPosition = default;
+        TransferHandshakeSpawnRotation = Quaternion.Default;
+        _transferSpawnPoseLatched = false;
     }
 
     internal void CompletePendingMapTransferWorldEntry(Character character)
     {
         if (character == null)
             throw new ArgumentNullException(nameof(character));
+
+        // The Creates below are what actually place the local player, and they are written
+        // from live entity pose. Restore the latched spawn pose first so anything that moved
+        // the entities since MapInfo cannot leak into the destination placement.
+        ApplyLatchedTransferSpawnPose(character);
 
         var skipCreates = SuppressCreatePacketsForTests
             || MapManager.Instance.SuppressCreatePacketsForTests;
@@ -560,15 +577,84 @@ public partial class TNLConnection
             TransferHandshakeLogProps());
     }
 
+    /// <summary>
+    /// True between <see cref="BeginPendingMapTransferHandshake"/> and the pose being consumed
+    /// or the handshake being abandoned. Tracked separately from <see cref="TransferPhase"/>
+    /// because the Stage3 ack clears the phase before releasing the Creates.
+    /// </summary>
+    private bool _transferSpawnPoseLatched;
+
+    private static bool IsZero(Quaternion q) => q.X == 0f && q.Y == 0f && q.Z == 0f && q.W == 0f;
+
+    /// <summary>
+    /// Replaces the latched transfer spawn pose when the server authoritatively repositions the
+    /// player after the transfer started but before the client finishes loading — cross-map
+    /// respawn puts the player at their repair station rather than the map's EnterPoint.
+    /// No-op when no transfer is in flight.
+    /// </summary>
+    internal void UpdatePendingMapTransferSpawnPose(Vector3 position, Quaternion rotation)
+    {
+        if (!_transferSpawnPoseLatched)
+            return;
+
+        TransferHandshakeSpawnPosition = position;
+        TransferHandshakeSpawnRotation = IsZero(rotation) ? Quaternion.Default : rotation;
+
+        Logger.WriteLog(LogType.Debug,
+            "Map transfer spawn pose re-latched for character {0} to ({1}, {2}, {3})",
+            TransferHandshakeCharacterCoid,
+            position.X,
+            position.Y,
+            position.Z);
+    }
+
+    /// <summary>
+    /// Puts the character and its vehicle back on the latched transfer spawn pose and consumes
+    /// the latch. No-op for login and for any path that did not latch a pose.
+    /// </summary>
+    private void ApplyLatchedTransferSpawnPose(Character character)
+    {
+        if (!_transferSpawnPoseLatched)
+            return;
+
+        _transferSpawnPoseLatched = false;
+
+        var position = TransferHandshakeSpawnPosition;
+        var rotation = TransferHandshakeSpawnRotation;
+
+        character.Position = position;
+        character.Rotation = rotation;
+
+        var vehicle = character.CurrentVehicle;
+        if (vehicle != null)
+        {
+            // Discontinuous placement — drop any sim body so the next Apply rebuilds at the pose.
+            vehicle.ClearPhysicsInstance();
+            vehicle.SetPosition(position);
+            vehicle.Rotation = rotation;
+        }
+    }
+
+    /// <summary>
+    /// Stage3 is not just an ack token: the client writes this position into its culling system
+    /// and calls <c>CVOGCullingSystem::JumpstartPreloader</c> before draining the load queue
+    /// (<c>Process_EMSG_Sector_TransferFromGlobal_Stage3</c> @0x00809AD0), so it decides which
+    /// terrain is resident when the player is created. Send the pose the transfer resolved, not
+    /// live entity pose — during a transfer the latter can still be old-map data.
+    /// </summary>
     private void SendTransferStage3(Character character, uint securityKey)
     {
+        var position = _transferSpawnPoseLatched
+            ? TransferHandshakeSpawnPosition
+            : character.Position;
+
         SendGamePacket(new TransferFromGlobalStage3Packet
         {
             SecurityKey = securityKey,
             CharacterCoid = character.ObjectId.Coid,
-            PositionX = character.Position.X,
-            PositionY = character.Position.Y,
-            PositionZ = character.Position.Z
+            PositionX = position.X,
+            PositionY = position.Y,
+            PositionZ = position.Z
         });
     }
 
@@ -738,6 +824,9 @@ public partial class TNLConnection
         var packet = new CreatureMovedPacket();
         packet.Read(reader);
 
+        if (DropStaleMoveDuringMapTransfer("CreatureMoved"))
+            return;
+
         character.HandleMovement(packet);
     }
 
@@ -752,8 +841,37 @@ public partial class TNLConnection
         var packet = new VehicleMovedPacket();
         packet.Read(reader);
 
+        if (DropStaleMoveDuringMapTransfer("VehicleMoved"))
+            return;
+
         vehicle.HandleMovement(packet);
     }
+
+    /// <summary>
+    /// Between the destination MapInfo and the Stage3 ack the client has no local player —
+    /// <c>Process_EMSG_Sector_MapInfo</c> @0x008153B0 runs DestroyCharacterArray / CleanupCOList /
+    /// ReInitPhysics the moment it processes MapInfo. Move packets that reach us in that window
+    /// were produced on the OLD map before the client saw MapInfo and are still in flight;
+    /// applying them writes old-map coordinates over the resolved spawn pose, which then ships
+    /// to the client as the Stage3 preload position and the destination Create pose.
+    /// The packet is still fully read (stream stays aligned) before it is dropped.
+    /// </summary>
+    private bool DropStaleMoveDuringMapTransfer(string opcodeName)
+    {
+        if (!IsMapTransferHandshakePending)
+            return false;
+
+        StaleMoveDropsDuringMapTransferForTests++;
+        Logger.WriteLog(LogType.Debug,
+            "Dropping in-flight {0} during map transfer (phase {1}, character {2})",
+            opcodeName,
+            TransferPhase,
+            TransferHandshakeCharacterCoid);
+        return true;
+    }
+
+    /// <summary>Count of move packets dropped by <see cref="DropStaleMoveDuringMapTransfer"/>.</summary>
+    internal int StaleMoveDropsDuringMapTransferForTests { get; private set; }
 
     private void HandleUseObjectPacket(BinaryReader reader)
     {

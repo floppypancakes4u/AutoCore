@@ -146,6 +146,28 @@ public partial class TNLConnection : GhostConnection
 
     internal uint TransferHandshakeGeneration { get; private set; }
 
+    /// <summary>
+    /// Spawn pose <see cref="Managers.MapTransferSpawn"/> resolved for the pending transfer,
+    /// latched at MapInfo time. The handshake hands control of the timeline to the client
+    /// (MapInfo → FAM load → Stage2 → Stage3 → ack), so live entity pose is not a safe source
+    /// for either the Stage3 preload position or the destination Creates — a single in-flight
+    /// old-map move packet would replace it. Valid until the pose is consumed by the Creates or
+    /// the handshake is abandoned, which outlives <see cref="TransferPhase"/> by design: the
+    /// Stage3 ack clears the phase before releasing the Creates.
+    /// </summary>
+    internal AutoCore.Game.Structures.Vector3 TransferHandshakeSpawnPosition { get; private set; }
+
+    /// <inheritdoc cref="TransferHandshakeSpawnPosition"/>
+    internal AutoCore.Game.Structures.Quaternion TransferHandshakeSpawnRotation { get; private set; }
+        = AutoCore.Game.Structures.Quaternion.Default;
+
+    /// <summary>
+    /// True while the client owns an in-flight destination load and therefore has no local
+    /// player object to move (it destroys the old one when it processes MapInfo). Any C2S move
+    /// packet seen in this window is old-map data still in flight.
+    /// </summary>
+    internal bool IsMapTransferHandshakePending => TransferPhase != SectorTransferPhase.None;
+
     /// <summary>Test view of TNL <c>Scoping</c> (set by <c>ActivateGhosting</c>, cleared by <c>ResetGhosting</c>).</summary>
     internal bool IsScopingForTests => Scoping;
 

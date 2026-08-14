@@ -800,6 +800,65 @@ public class RespawnManagerTests
         Assert.IsTrue(reason.Contains("no map"));
     }
 
+    /// <summary>
+    /// Cross-map respawn deliberately overrides the transfer's EnterPoint pose with the repair
+    /// station pose AFTER the transfer starts. The transfer latches a spawn pose for the
+    /// Stage3 preload and the destination Creates, so that later authoritative reposition must
+    /// re-latch — otherwise finishing the handshake would airlift the player back to the map's
+    /// generic entry point instead of their repair station.
+    /// </summary>
+    [TestMethod]
+    public void TryRespawnInSector_CrossMap_RespawnPoseSurvivesStage3Ack()
+    {
+        var current = CreateMap(200, new Vector4(0, 0, 0, 0));
+        var dest = CreateMap(201, new Vector4(10f, 20f, 30f, 0f));
+        var character = CreateCharacterWithVehicle(320, 321);
+        character.SetMap(current);
+        character.CurrentVehicle.SetMap(current);
+        character.SetLastRepairStation(1, 201, new Vector3(40f, 50f, 60f), Quaternion.Default);
+
+        var connection = character.OwningConnection;
+        connection.SetNetAddress(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 0));
+        connection.CurrentCharacter = character;
+        ObjectManager.Instance.Add(character);
+
+        var previousResolver = RespawnManager.Instance.ResolveMapForTests;
+        var previousMapResolver = MapManager.Instance.ResolveMapForTests;
+        var previousSuppress = MapManager.Instance.SuppressCreatePacketsForTests;
+        var previousSink = TNLConnection.TestPacketSink;
+        var previousFlush = TNLConnection.MissionFlushForTests;
+        try
+        {
+            TNLConnection.TestPacketSink = (_, _) => { };
+            TNLConnection.MissionFlushForTests = () => { };
+            RespawnManager.Instance.ResolveMapForTests = id => id == 201 ? dest : current;
+            MapManager.Instance.ResolveMapForTests = id => id == 201 ? dest : current;
+            MapManager.Instance.SuppressCreatePacketsForTests = true;
+
+            Assert.IsTrue(RespawnManager.Instance.TryRespawnInSector(
+                character, character.ObjectId.Coid, out var reason));
+            Assert.IsNull(reason);
+            Assert.AreEqual(40f, character.Position.X, 0.001f, "respawn pose applied after transfer");
+
+            connection.CompletePendingMapTransferWorldEntry(character);
+
+            Assert.AreEqual(40f, character.Position.X, 0.001f, "character X must stay at the repair station");
+            Assert.AreEqual(50f, character.Position.Y, 0.001f, "character Y must stay at the repair station");
+            Assert.AreEqual(60f, character.Position.Z, 0.001f, "character Z must stay at the repair station");
+            Assert.AreEqual(40f, character.CurrentVehicle.Position.X, 0.001f, "vehicle X must stay at the repair station");
+            Assert.AreEqual(60f, character.CurrentVehicle.Position.Z, 0.001f, "vehicle Z must stay at the repair station");
+        }
+        finally
+        {
+            RespawnManager.Instance.ResolveMapForTests = previousResolver;
+            MapManager.Instance.ResolveMapForTests = previousMapResolver;
+            MapManager.Instance.SuppressCreatePacketsForTests = previousSuppress;
+            TNLConnection.TestPacketSink = previousSink;
+            TNLConnection.MissionFlushForTests = previousFlush;
+            ObjectManager.Instance.Remove(320);
+        }
+    }
+
     [TestMethod]
     public void TryRespawnInSector_CrossMapTransferFails_ReturnsFalse()
     {

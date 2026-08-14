@@ -510,7 +510,16 @@ public class MapManager : Singleton<MapManager>
         // Old-map foreign CreateVehicle holds must die with ResetGhosting even though
         // destination Creates wait for the client's Stage2/Stage3 handshake.
         connection.ClearGlobalVehicleCreateTracking();
-        connection.BeginPendingMapTransferHandshake(character, continentId, sourceContinentId);
+
+        // Latch the resolved spawn pose. Everything the client needs it for now happens on the
+        // client's own schedule — Stage3 (terrain preload) and the destination Creates — so the
+        // pose cannot be re-read from live entity state at those points.
+        connection.BeginPendingMapTransferHandshake(
+            character,
+            continentId,
+            sourceContinentId,
+            spawnPos,
+            spawnRot);
         connection.SendGamePacket(mapInfoPacket, skipOpcode: true);
 
         Logger.WriteLog(LogType.Network,
