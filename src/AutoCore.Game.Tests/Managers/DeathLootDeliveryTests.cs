@@ -547,6 +547,9 @@ public class DeathLootDeliveryTests
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
         connection.SetGhostTo(false);
+        // Ground-loot creates are only delivered to a ghosting (fully loaded) client; a
+        // mid-map-load player is caught up by the scope query instead.
+        connection.BeginGhostingForTests();
 
         var character = new Character();
         character.SetCoid(characterCoid, true);

@@ -43,6 +43,14 @@ public class SimpleObject : GraphicsObject
     /// (PossibleMissionItem / IsMissionItem). Set for Collect kill-to-loot drops.
     /// </summary>
     public bool PossibleMissionItem { get; set; }
+
+    /// <summary>
+    /// World ground-pickup item spawned by <see cref="Managers.LootManager"/>. These carry no
+    /// ghost (a GhostObject for a local item AVs the retail client at 0x005B0EFF), so the normal
+    /// ghost scope query cannot deliver them; <see cref="Map.SectorMap.PerformScopeQuery"/> uses
+    /// this flag to hand out their creates on approach instead.
+    /// </summary>
+    public bool IsGroundLoot { get; set; }
     #endregion
 
     public override int GetCurrentHP() => HP;
@@ -136,6 +144,8 @@ public class SimpleObject : GraphicsObject
             IsCorpse = false;
             DeathType = DeathType.Silent;
             Murderer = new TFID();
+            // A revived entity starts a fresh fight: the previous tagger must not keep loot credit.
+            ClearLootAttribution();
             increased = true;
         }
 

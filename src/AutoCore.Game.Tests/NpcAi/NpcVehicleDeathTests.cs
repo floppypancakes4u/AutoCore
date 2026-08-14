@@ -76,6 +76,11 @@ public class NpcVehicleDeathTests
         vehicle.InitializeHealthForTests(50);
         vehicle.SetMap(map);
 
+        // Template loot requires player-initiated combat, so the player has to actually fight it.
+        var player = map.Objects.Values.OfType<Character>().First();
+        vehicle.TakeDamage(1, player);
+        vehicle.SetMurderer(player);
+
         vehicle.OnDeath(DeathType.Violent);
 
         Assert.IsTrue(vehicle.IsCorpse, "death must mark the vehicle a corpse");
@@ -89,6 +94,42 @@ public class NpcVehicleDeathTests
         Assert.IsTrue(
             _sent.OfType<CreateSimpleObjectPacket>().Any(p => p.CBID == LootItemCbid),
             "template loot must be rolled and spawned; sent=" + string.Join(',', _sent.Select(p => p.Opcode)));
+    }
+
+    /// <summary>
+    /// Same scene, but no player ever fights the vehicle — an NPC destroyed it. Loot is credited
+    /// to player-initiated combat only, so nothing may drop. Without this gate every NPC-vs-NPC
+    /// skirmish littered the map with loot piles.
+    /// </summary>
+    [TestMethod]
+    public void NpcVehicleDeath_WithoutPlayerInvolvement_DropsNoTemplateLoot()
+    {
+        var map = CreateFieldMapWithPlayer();
+
+        AssetManagerTestHelper.RegisterCloneBase(LootItemCbid, CloneBaseObjectType.Item);
+        LootManager.Instance.SeedGeneratableItemForTests(CloneBaseObjectType.Item, rarity: 0, cbid: LootItemCbid, requiredLevel: 1);
+        AssetManager.Instance.SetTestLootTables(new[]
+        {
+            new LootTable { Id = LootTableId, ChanceOther = 1, ChanceRarity0 = 1, DropLevelOffset = 0f, MaxLevelOffset = 0 },
+        });
+        AssetManager.Instance.SetTestVehicleTemplates(new[]
+        {
+            new VehicleTemplate { Id = TemplateId, LootTableId = LootTableId, LootChance = 255, LootRolls = 1 },
+        });
+
+        var vehicle = new Vehicle();
+        vehicle.SetCoid(VehicleCoid, true);
+        vehicle.Position = new Vector3(15f, 0f, 15f);
+        vehicle.TemplateId = TemplateId;
+        vehicle.NpcAi = new NpcAiState();
+        vehicle.InitializeHealthForTests(50);
+        vehicle.SetMap(map);
+
+        vehicle.OnDeath(DeathType.Violent);
+
+        Assert.IsFalse(
+            _sent.OfType<CreateSimpleObjectPacket>().Any(p => p.CBID == LootItemCbid),
+            "an NPC vehicle destroyed without any player involvement must not drop loot");
     }
 
     [TestMethod]
@@ -135,6 +176,8 @@ public class NpcVehicleDeathTests
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
         connection.SetGhostTo(false);
+        // Ground-loot creates only go to a ghosting (fully loaded) client.
+        connection.BeginGhostingForTests();
 
         var character = new Character();
         character.SetCoid(851_900, true);

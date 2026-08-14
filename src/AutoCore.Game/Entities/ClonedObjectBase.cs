@@ -44,6 +44,59 @@ public abstract class ClonedObjectBase
         if (murderer?.ObjectId != null)
             Murderer = new TFID(murderer.ObjectId.Coid, murderer.ObjectId.Global);
     }
+
+    /// <summary>
+    /// Character COID of the player who first landed damage on this entity during its current
+    /// life ("tagged" it), or null when no player has. Loot attribution requires a player to have
+    /// taken part in the fight: without this, an NPC killing another NPC dropped a full loot pile
+    /// that every player on the map then watched appear. The first tagger keeps the credit so a
+    /// fight the player started still rewards them when an NPC lands the killing blow.
+    /// Cleared on revive alongside <see cref="Murderer"/>.
+    /// </summary>
+    public TFID LootTaggedBy { get; private set; }
+
+    /// <summary>
+    /// Records the player who initiated combat against this entity. First tagger wins; calls with
+    /// a non-player attacker (NPC vs NPC) are ignored so they never make the victim lootable.
+    /// </summary>
+    public void TagLootAttribution(ClonedObjectBase attacker)
+    {
+        if (LootTaggedBy != null || attacker == null)
+            return;
+
+        // Summons count: a player's pet fighting on their behalf is still player-initiated.
+        var character = attacker.GetSuperCharacter(true);
+        if (character?.ObjectId == null)
+            return;
+
+        LootTaggedBy = new TFID(character.ObjectId.Coid, character.ObjectId.Global);
+    }
+
+    /// <summary>Clears loot tagging (revive / respawn reuse of the same entity).</summary>
+    public void ClearLootAttribution() => LootTaggedBy = null;
+
+    /// <summary>
+    /// The player credited with this entity's death for loot purposes: the killing blow when a
+    /// player landed it, otherwise the player who initiated the fight (<see cref="LootTaggedBy"/>).
+    /// Null means no player took part — the caller must not generate loot at all.
+    /// </summary>
+    public Character ResolveLootCreditCharacter()
+        => ResolveCharacterByTfid(Murderer) ?? ResolveCharacterByTfid(LootTaggedBy);
+
+    /// <summary>
+    /// Resolves a TFID to its owning player. Looks on this entity's own map first (exact TFID, so
+    /// it is immune to the global/local COID-space overlap that <c>GetObjectByCoid</c> warns
+    /// about) and falls back to the global object table. Null when the id names no live player —
+    /// an NPC attacker, or a player who has since logged out.
+    /// </summary>
+    private Character ResolveCharacterByTfid(TFID id)
+    {
+        if (id is not { Coid: > 0 })
+            return null;
+
+        var found = Map?.GetObjectByTfid(id) ?? ObjectManager.Instance.GetObject(id);
+        return found?.GetSuperCharacter(false);
+    }
     //public TFID LastMurderer { get; protected set; }
     //public float DamageByMurderer { get; protected set; }
     public Vector3 Position { get; set; }
@@ -146,7 +199,12 @@ public abstract class ClonedObjectBase
     {
         var actual = TakeDamage(damage);
         if (actual > 0 && attacker != null)
+        {
+            // Loot attribution: landing real damage is what makes this a fight the attacker
+            // started. Must precede OnDeath so a lethal hit is already tagged.
+            TagLootAttribution(attacker);
             Npc.NpcCombatAi.OnDamaged(this, attacker);
+        }
 
         // High-fidelity /reportbug: damage involving a player (as victim or attacker).
         if (actual > 0)

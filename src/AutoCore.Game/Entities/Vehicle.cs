@@ -2663,9 +2663,9 @@ public class Vehicle : SimpleObject
         if (map == null)
             return;
 
-        Character killerCharacter = null;
-        if (Murderer.Coid > 0)
-            killerCharacter = ObjectManager.Instance.GetObject(Murderer)?.GetSuperCharacter(false);
+        // Killing blow if a player landed it, else the player who initiated the fight. Null when
+        // no player took part, which gates template loot off (see GenerateAndSpawnTemplateLoot).
+        var killerCharacter = ResolveLootCreditCharacter();
 
         if (killerCharacter != null)
         {
@@ -2707,6 +2707,12 @@ public class Vehicle : SimpleObject
     private void GenerateAndSpawnTemplateLoot(Character killerCharacter)
     {
         if (TemplateId < 0)
+            return;
+
+        // Player-initiated combat only: an NPC vehicle destroyed by another NPC drops nothing.
+        // This path rolls template loot directly rather than through ProcessDeathLoot, so it
+        // needs the same attribution gate.
+        if (killerCharacter == null)
             return;
 
         var template = AssetManager.Instance.GetVehicleTemplate(TemplateId);

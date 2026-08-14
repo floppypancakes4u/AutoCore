@@ -11,6 +11,12 @@ public sealed class CharacterMapPresence
     readonly HashSet<long> _suppressed = new();
     readonly HashSet<long> _materialized = new();
     readonly HashSet<long> _ownedCombat = new();
+    /// <summary>
+    /// Ground-loot COIDs this character has already received a CreateSimpleObject for. Ground loot
+    /// carries no ghost, so TNL's own scope bookkeeping cannot dedupe it — without this ledger the
+    /// per-packet scope query would re-create every nearby item forever.
+    /// </summary>
+    readonly HashSet<long> _groundLootDelivered = new();
     /// <summary>Deliver CBIDs that already received Create+CreateCreature this continent visit.</summary>
     readonly HashSet<int> _deliverTurnInReady = new();
     /// <summary>
@@ -61,6 +67,7 @@ public sealed class CharacterMapPresence
         _deliverTurnInReady.Clear();
         _stalePatrolResyncedMissions.Clear();
         _autoPatrolHandled.Clear();
+        _groundLootDelivered.Clear();
     }
 
     public void Clear()
@@ -73,6 +80,7 @@ public sealed class CharacterMapPresence
         _deliverTurnInReady.Clear();
         _stalePatrolResyncedMissions.Clear();
         _autoPatrolHandled.Clear();
+        _groundLootDelivered.Clear();
     }
 
     /// <summary>
@@ -120,6 +128,18 @@ public sealed class CharacterMapPresence
         if (missionId > 0)
             _stalePatrolResyncedMissions.Add(missionId);
     }
+
+    /// <summary>True once this character has been sent the create for a ground-loot COID.</summary>
+    public bool HasGroundLootDelivered(long coid) => _groundLootDelivered.Contains(coid);
+
+    public void MarkGroundLootDelivered(long coid) => _groundLootDelivered.Add(coid);
+
+    /// <summary>
+    /// Forgets a ground-loot COID (picked up, despawned, or otherwise off the map). Required
+    /// because map teardown rewinds the map-local coid counter, so a stale entry would suppress
+    /// the create for a genuinely new item that later reuses the COID.
+    /// </summary>
+    public void ForgetGroundLoot(long coid) => _groundLootDelivered.Remove(coid);
 
     public bool IsSuppressed(long coid) => coid > 0 && _suppressed.Contains(coid);
 

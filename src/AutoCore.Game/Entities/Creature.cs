@@ -124,13 +124,9 @@ public class Creature : SimpleObject
         var creatureObjectId = ObjectId;
         var map = Map;
 
-        // Try to find the killer character early (for loot and chat notification)
-        Character killerCharacter = null;
-        if (Murderer.Coid > 0)
-        {
-            var murdererObj = ObjectManager.Instance.GetObject(Murderer);
-            killerCharacter = murdererObj?.GetSuperCharacter(false);
-        }
+        // Killing blow if a player landed it, else the player who initiated the fight. Null when
+        // no player took part, which gates loot off entirely (see ProcessDeathLoot).
+        var killerCharacter = ResolveLootCreditCharacter();
 
         if (killerCharacter != null)
         {

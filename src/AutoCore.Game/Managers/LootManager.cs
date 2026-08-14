@@ -414,6 +414,23 @@ public class LootManager : Singleton<LootManager>
         if (!_initialized || request?.Map == null)
             return;
 
+        // Loot requires player-initiated combat. Callers resolve Killer as "killing blow, else
+        // the player who tagged the victim" (ClonedObjectBase.ResolveLootCreditCharacter); a null
+        // Killer therefore means no player was ever involved. Previously this ran anyway, so
+        // NPC-vs-NPC kills scattered loot across the whole map.
+        if (request.Killer == null)
+        {
+            if (DEBUG_MSG)
+            {
+                LogFilters.WriteIf(
+                    LogFilters.Loot,
+                    LogType.Debug,
+                    "LootManager.ProcessDeathLoot: skipped victimCbid={0} — no player involvement",
+                    request.VictimCbid);
+            }
+            return;
+        }
+
         var lootCbids = new List<int>();
         var killerRace = ResolveKillerRace(request.Killer);
         var junkWeightCount = AssetManager.Instance.GetLootWeightsForDestroyed(request.VictimCbid)?.Count ?? 0;
@@ -1155,6 +1172,9 @@ public class LootManager : Singleton<LootManager>
         if (possibleMissionItem)
             simpleObject.PossibleMissionItem = true;
 
+        // Marks this as an approach-deliverable world pickup for the scope query.
+        simpleObject.IsGroundLoot = true;
+
         var createPacket = BuildGroundLootCreatePacket(simpleObject);
 
         // #region agent log
@@ -1174,7 +1194,7 @@ public class LootManager : Singleton<LootManager>
             "post-fix");
         // #endregion
 
-        BroadcastPacketToMap(map, createPacket);
+        SendGroundLootCreateInRange(map, simpleObject, createPacket);
 
         var itemName = AssetManager.Instance.GetCloneBase(cbid)?.CloneBaseSpecific.UniqueName ?? "Unknown";
         if (DEBUG_MSG)
@@ -1201,25 +1221,46 @@ public class LootManager : Singleton<LootManager>
         return createPacket;
     }
 
-    private void BroadcastPacketToMap(SectorMap map, BasePacket packet)
+    /// <summary>
+    /// Sends a ground-loot create to the players who can actually see the drop.
+    /// <para>
+    /// This used to go to every character on the map unconditionally, which is why players watched
+    /// loot appear continent-wide from fights they were never part of. Ground loot has no ghost, so
+    /// it cannot ride the normal interest query; instead it reuses that query's own add radius
+    /// (<see cref="InterestSelector.BaseScopeAddRadius"/>) rather than inventing a second distance
+    /// policy. Players outside the radius are caught up by
+    /// <see cref="SectorMap.DeliverGroundLootInRange"/> when they approach.
+    /// </para>
+    /// </summary>
+    private static void SendGroundLootCreateInRange(SectorMap map, SimpleObject loot, BasePacket packet)
     {
-        if (map == null || packet == null)
+        if (map == null || loot == null || packet == null)
             return;
 
-        var charactersInMap = map.Objects.Values
-            .OfType<Character>()
-            .Where(c => c.OwningConnection != null)
-            .ToList();
-
-        foreach (var character in charactersInMap)
+        foreach (var character in map.Objects.Values.OfType<Character>().ToList())
         {
+            if (character.OwningConnection == null)
+                continue;
+
+            // Mid-map-load clients cannot use this yet, and marking it delivered would suppress
+            // the only other send. PerformScopeQuery hands it over once ghosting is live.
+            if (!character.OwningConnection.IsGhosting())
+                continue;
+
+            if (!SectorMap.IsWithinGroundLootRange(character, loot.Position))
+                continue;
+
             try
             {
                 character.OwningConnection.SendGamePacket(packet);
+                character.MapPresence.MarkGroundLootDelivered(loot.ObjectId.Coid);
             }
             catch (Exception ex)
             {
-                Logger.WriteException(LogType.Error, $"LootManager.BroadcastPacketToMap: Failed to send packet to character {character.Name}", ex);
+                Logger.WriteException(
+                    LogType.Error,
+                    $"LootManager.SendGroundLootCreateInRange: failed to send loot create to {character.Name}",
+                    ex);
             }
         }
     }

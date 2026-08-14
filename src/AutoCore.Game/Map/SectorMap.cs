@@ -248,6 +248,65 @@ public class SectorMap
     public ClonedObjectBase GetObjectByTfid(TFID id)
         => id != null && Objects.TryGetValue(id, out var value) ? value : null;
 
+    /// <summary>
+    /// Ground-loot visibility test: is <paramref name="position"/> inside the same add radius the
+    /// interest query uses for ghosted entities? Measured from the player's vehicle when mounted,
+    /// matching <see cref="PerformScopeQuery"/>'s scope centre.
+    /// </summary>
+    public static bool IsWithinGroundLootRange(Character character, Vector3 position)
+    {
+        if (character == null)
+            return false;
+
+        var center = character.CurrentVehicle?.Position ?? character.Position;
+        var dx = center.X - position.X;
+        var dy = center.Y - position.Y;
+        var dz = center.Z - position.Z;
+        var radius = InterestSelector.BaseScopeAddRadius;
+        return (dx * dx) + (dy * dy) + (dz * dz) <= radius * radius;
+    }
+
+    /// <summary>
+    /// Delivers creates for ground loot that <paramref name="self"/> has come within range of but
+    /// has not been told about yet. Ground loot carries no ghost, so the interest query cannot
+    /// scope it and the spawn-time create is the only other delivery — without this, loot dropped
+    /// before a player arrived (or beyond their radius) would stay invisible forever.
+    /// </summary>
+    private void DeliverGroundLootInRange(Character self, IReadOnlyList<ClonedObjectBase> nearby)
+    {
+        if (self?.OwningConnection == null || nearby == null)
+            return;
+
+        foreach (var entity in nearby)
+        {
+            if (entity is not SimpleObject { IsGroundLoot: true } loot)
+                continue;
+
+            var coid = loot.ObjectId.Coid;
+            if (self.MapPresence.HasGroundLootDelivered(coid))
+                continue;
+
+            if (!IsWithinGroundLootRange(self, loot.Position))
+                continue;
+
+            try
+            {
+                self.OwningConnection.SendGamePacket(
+                    Managers.LootManager.BuildGroundLootCreatePacket(loot));
+                self.MapPresence.MarkGroundLootDelivered(coid);
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLog(LogType.Error,
+                    "SectorMap {0}: ground loot create coid={1} → char={2} failed: {3}",
+                    ContinentId,
+                    coid,
+                    self.ObjectId?.Coid ?? -1,
+                    ex.Message);
+            }
+        }
+    }
+
     public ClonedObjectBase GetObjectByCoid(long coid)
     {
         // Search by COID only, ignoring the Global flag. Ambiguous when a global entity and an
@@ -454,6 +513,16 @@ public class SectorMap
         // Map?.UnregisterSpawnRespawn cannot do it — Map is already null by then.
         if (clonedObject is SpawnPoint spawnPoint)
             UnregisterSpawnRespawn(spawnPoint);
+
+        // Ground loot that has been picked up or despawned must drop out of every player's
+        // delivered-ledger. Map teardown rewinds LocalCoidCounter, so a stale entry would
+        // suppress the create for a different item that later reuses the same COID.
+        if (clonedObject is SimpleObject { IsGroundLoot: true } groundLoot)
+        {
+            var lootCoid = groundLoot.ObjectId.Coid;
+            foreach (var player in Players)
+                player.MapPresence.ForgetGroundLoot(lootCoid);
+        }
 
         if (clonedObject is Character character)
         {
@@ -1713,6 +1782,10 @@ public class SectorMap
             if (entity is Creature { IsMissionGiver: true } and not Character)
                 _scopeMissionGivers.Add(entity);
         }
+
+        // Ghost-less ground loot rides the same grid pull but not InterestSelector (no ghost to
+        // scope), so hand out its creates here for anything newly in range.
+        DeliverGroundLootInRange(self, _scopeNearby);
 
         // List<Character> flows in as IReadOnlyList<ClonedObjectBase> via covariance — no copy.
         InterestSelector.Select(

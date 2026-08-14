@@ -239,7 +239,10 @@ public class LootAttributionTests
 
     private static Creature CreateCreature(SectorMap map, int cbid, long coid)
     {
-        AssetManagerTestHelper.RegisterCreatureCloneBase(cbid, baseLevel: 1);
+        // Re-registering would overwrite a clonebase already seeded with a loot table.
+        if (AssetManager.Instance.GetCloneBase(cbid) == null)
+            AssetManagerTestHelper.RegisterCreatureCloneBase(cbid, baseLevel: 1);
+
         var creature = new Creature();
         creature.SetCoid(coid, true);
         creature.LoadCloneBase(cbid);

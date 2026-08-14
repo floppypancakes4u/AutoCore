@@ -228,13 +228,13 @@ public class GraphicsObject : ClonedObjectBase
     {
         try
         {
-            Character killer = null;
             ClonedObjectBase murdererObj = null;
             if (Murderer.Coid > 0)
-            {
                 murdererObj = Managers.ObjectManager.Instance.GetObject(Murderer);
-                killer = murdererObj?.GetSuperCharacter(false);
-            }
+
+            // Killing blow if a player landed it, else whoever started hitting this prop. Null
+            // means an NPC wrecked it on its own and ProcessDeathLoot will drop nothing.
+            var killer = ResolveLootCreditCharacter();
 
             // Prefer killer level for commodity level bands; fall back to map min level.
             byte level = 1;
