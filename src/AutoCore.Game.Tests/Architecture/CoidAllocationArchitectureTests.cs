@@ -47,6 +47,11 @@ public class CoidAllocationArchitectureTests
         // the same local-counter allocation policy as SectorMap's spawn path.
         "AutoCore.Game/Map/MapNpcIdentity.cs",
 
+        // Ground-loot identity space (0x2000_0000+). Comment-only: explains why loot stopped
+        // minting from Map.LocalCoidCounter (teardown rewinds it, and a repeated local COID makes
+        // the retail client update the previous object instead of creating the new drop).
+        "AutoCore.Game/Map/MapLootIdentity.cs",
+
         // World spawn point allocation: reads/advances Map.LocalCoidCounter for spawned NPC
         // simple-object coids, scoped to the map instance.
         "AutoCore.Game/Entities/SpawnPoint.cs",
@@ -54,9 +59,6 @@ public class CoidAllocationArchitectureTests
         // Vehicle world-spawn coid allocation follows the same map-local offset-allocator
         // pattern as SpawnPoint.
         "AutoCore.Game/Entities/Vehicle.cs",
-
-        // Loot drop coid allocation: map-local simple-object identity for dropped loot piles.
-        "AutoCore.Game/Managers/LootManager.cs",
 
         // Vendor store slot instance coid allocation (map-scoped, not the persistent
         // StoreSlotIdentity.CoidBase display-slot policy).

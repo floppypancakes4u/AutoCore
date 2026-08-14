@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text;
 using AutoCore.Database.World.Models;
+using AutoCore.Game.CloneBases;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.EntityTemplates;
@@ -367,6 +368,100 @@ public class LiveFamMissionWorldBaselineTests
 
             Assert.IsTrue(spawn.HasLiveSpawn(),
                 $"Create-only Champion car 3882 must spawn template 587 (mission {killMission.Id}); diag={spawn.LastFailureDiagnostic}");
+        });
+    }
+
+    [TestMethod]
+    public void BackRange_MissionGiverSpawns_HaveNoAuthoredTriggers()
+    {
+        // Retail CVOGSectorMap::CreateMissionFlow synthesizes a GiveMissionDialog trigger
+        // only when the creature has no authored TriggerEvents (all −1). These town givers
+        // are that case: interact icons come from CreateMissionFlow, not FAM triggers.
+        WithLiveAssets((glm, wad) =>
+        {
+            var mapData = ReadFam(glm, "sec_f_h_map_hwy_j2_backrange", "The Hestia Back Range", 693);
+            var giverCbids = new HashSet<int>
+            {
+                11786, 11787, 11788, 11789, 11790, 11791, 11792, 11793, 11794, 11795,
+                12468, 2469, 2470, 2472,
+            };
+            var found = 0;
+            foreach (var spawn in mapData.Templates.Values.OfType<SpawnPointTemplate>())
+            {
+                if (!spawn.Spawns.Any(s => s.SpawnType > 0 && giverCbids.Contains(s.SpawnType)))
+                    continue;
+                found++;
+                Assert.IsTrue(spawn.OriginalIsActive, $"giver spawn {spawn.COID} should be fam-active");
+                var raw = spawn.TriggerEvents ?? Array.Empty<long>();
+                Assert.AreEqual(3, raw.Length);
+                Assert.IsTrue(raw.All(t => t == -1),
+                    $"giver spawn {spawn.COID} must have no authored TriggerEvents so CreateMissionFlow can attach one");
+            }
+
+            Assert.IsTrue(found >= 14, $"expected the 14 town giver CBIDs, found {found}");
+        });
+    }
+
+    [TestMethod]
+    public void BackRange_Givers_AreNpcsAndStillHaveOffersAfterTbagSet()
+    {
+        // CreateMissionFlow @0x004d4040 no-ops unless clonebase wbIsNPC==1.
+        // CheckForAvailableMissionsByObject then requires an incomplete continent-693
+        // mission on that CBID whose prereqs TBAG already satisfies.
+        var tbagCompleted = new HashSet<int>
+        {
+            554, 2943, 2944, 3032, 3035, 3036, 3037, 3040, 3041, 3050, 3052, 3055,
+            3094, 3979, 3980, 3981,
+        };
+        var giverCbids = new[]
+        {
+            11786, 11787, 11788, 11789, 11790, 11791, 11792, 11793, 11794, 11795,
+            12468, 2469, 2470, 2472,
+        };
+
+        WithLiveAssets((_, wad) =>
+        {
+            foreach (var cbid in giverCbids)
+            {
+                Assert.IsTrue(wad.CloneBases.TryGetValue(cbid, out var clone),
+                    $"missing clonebase {cbid}");
+                Assert.IsInstanceOfType(clone, typeof(CloneBaseCreature),
+                    $"giver {cbid} must be a creature");
+                Assert.AreEqual(1, ((CloneBaseCreature)clone).CreatureSpecific.IsNPC,
+                    $"CreateMissionFlow requires wbIsNPC==1 on {cbid}");
+            }
+
+            var offersByNpc = new Dictionary<int, List<int>>();
+            foreach (var mission in wad.Missions.Values)
+            {
+                if (mission.Continent != 693 || mission.NPC <= 0)
+                    continue;
+                if (!giverCbids.Contains(mission.NPC))
+                    continue;
+                if (tbagCompleted.Contains(mission.Id) && mission.IsRepeatable == 0)
+                    continue;
+                if (mission.ReqLevelMin > 4)
+                    continue;
+                if (mission.ReqLevelMax > 0 && 4 > mission.ReqLevelMax)
+                    continue;
+                if (!MissionWorldPhaseRules.MeetsMissionPrerequisites(
+                        mission.ReqMissionId, mission.RequirementsOred, tbagCompleted))
+                    continue;
+
+                if (!offersByNpc.TryGetValue(mission.NPC, out var list))
+                {
+                    list = new List<int>();
+                    offersByNpc[mission.NPC] = list;
+                }
+
+                list.Add(mission.Id);
+            }
+
+            Assert.IsTrue(offersByNpc.Count >= 3,
+                "TBAG should still have offerable Back Range missions on several givers; " +
+                $"found {offersByNpc.Count}: " +
+                string.Join("; ", offersByNpc.Select(kv =>
+                    $"{kv.Key}=[{string.Join(',', kv.Value.OrderBy(x => x))}]")));
         });
     }
 

@@ -5,6 +5,7 @@ using System.Linq;
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Managers;
+using AutoCore.Game.Map;
 using AutoCore.Game.Npc;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
@@ -48,6 +49,15 @@ public class Creature : SimpleObject
 
     /// <summary>Whether interacting with this NPC can open the mission dialog.</summary>
     public bool IsMissionGiver { get; set; }
+
+    /// <summary>
+    /// Local COID of the synthetic on-use trigger CreateMissionFlow attaches.
+    /// −1 = unset; CreateCreature +0x128 must be non-−1 for the client to call it.
+    /// </summary>
+    public int OnUseTriggerCoid { get; set; } = -1;
+
+    /// <summary>Local COID of the synthetic GiveMissionDialog reaction. CreateCreature +0x12C.</summary>
+    public int OnUseReactionCoid { get; set; } = -1;
     #endregion
 
     public Creature()
@@ -103,6 +113,9 @@ public class Creature : SimpleObject
             creaturePacket.DoesntCountAsSummon = false;
             creaturePacket.IsElite = false;
             // CoidCurrentVehicle is set by the caller (foreign vehicle scope) when linking to a chassis.
+            MissionFlowIdentity.TryEnsure(this);
+            creaturePacket.CoidOnUseTrigger = OnUseTriggerCoid;
+            creaturePacket.CoidOnUseReaction = OnUseReactionCoid;
         }
     }
 

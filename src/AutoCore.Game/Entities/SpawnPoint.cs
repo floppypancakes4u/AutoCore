@@ -852,6 +852,7 @@ public class SpawnPoint : ClonedObjectBase
         creature.Layer = Layer;
         creature.Rotation = Rotation;
         creature.SpawnOwner = ObjectId.Coid;
+        MissionFlowIdentity.TryEnsure(creature);
 
         // Static/interactive NPCs (IsNPC != 0) don't patrol or run combat AI; combat creatures do.
         if (cloneBaseCreature != null && cloneBaseCreature.CreatureSpecific.IsNPC == 0)

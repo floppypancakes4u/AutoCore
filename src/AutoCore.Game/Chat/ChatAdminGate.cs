@@ -83,6 +83,7 @@ public static class ChatAdminGate
         "/porttome", "/portToMe",
         "/getcbid",
         "/getnearbycbids",
+        "/getpos", "/GetPos",
 
         // Accounts / server
         "/addplayer", "/newaccount", "/player",

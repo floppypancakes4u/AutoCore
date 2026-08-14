@@ -60,6 +60,22 @@ public class CreateCreatureClientOffsetTests
     }
 
     [TestMethod]
+    public void Write_OnUseIds_LandAtClientCreateMissionFlowOffsets()
+    {
+        // FUN_004c82b0 calls CreateMissionFlow when +0x128 != −1.
+        var bytes = SerializeWithRootOpcode(new CreateCreaturePacket
+        {
+            CBID = 11788,
+            ObjectId = new TFID(0x5000_0100L, true),
+            CoidOnUseTrigger = 0x70BA0,
+            CoidOnUseReaction = 0x70BA1,
+        });
+
+        Assert.AreEqual(0x70BA0, BitConverter.ToInt32(bytes, ClientOnUseTriggerOffset));
+        Assert.AreEqual(0x70BA1, BitConverter.ToInt32(bytes, ClientOnUseReactionOffset));
+    }
+
+    [TestMethod]
     public void Write_BodyOnly_PadsToClientBodySize()
     {
         var packet = new CreateCreaturePacket

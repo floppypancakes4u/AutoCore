@@ -5,7 +5,6 @@ using System.Linq;
 using AutoCore.Database.World.Models;
 using AutoCore.Game.CloneBases;
 using AutoCore.Game.Constants;
-using AutoCore.Game.AgentDebug;
 using AutoCore.Game.Diagnostics;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Inventory;
@@ -1135,15 +1134,10 @@ public class LootManager : Singleton<LootManager>
         var cloneBase = AssetManager.Instance.GetCloneBase(cbid);
         var cloneType = cloneBase?.Type ?? CloneBaseObjectType.Object;
 
-        // #region agent log
-        TossDebugLogger.Log(
-            "H1",
-            "LootManager.TrySpawnLootItem:allocate",
-            "spawn item allocated",
-            new { cbid, cloneType = cloneType.ToString(), runtimeType = item.GetType().Name });
-        // #endregion
-
-        spawnedCoid = map.LocalCoidCounter++;
+        // Dedicated never-rewound loot identity range: a repeated local COID makes the retail
+        // client treat the create as an update of whatever it already has under that COID, which
+        // renders the new drop under the previous item's name. See MapLootIdentity.
+        spawnedCoid = MapLootIdentity.AllocateCoid();
         item.SetCoid(spawnedCoid, false);
         item.LoadCloneBase(cbid);
         item.Position = position;
@@ -1176,23 +1170,6 @@ public class LootManager : Singleton<LootManager>
         simpleObject.IsGroundLoot = true;
 
         var createPacket = BuildGroundLootCreatePacket(simpleObject);
-
-        // #region agent log
-        TossDebugLogger.Log(
-            "H1",
-            "LootManager.TrySpawnLootItem:packet",
-            "broadcast create packet",
-            new
-            {
-                cbid,
-                cloneType = cloneType.ToString(),
-                packetOpcode = createPacket.Opcode.ToString(),
-                packetRuntimeType = createPacket.GetType().Name,
-                position = new { position.X, position.Y, position.Z },
-                spawnedCoid
-            },
-            "post-fix");
-        // #endregion
 
         SendGroundLootCreateInRange(map, simpleObject, createPacket);
 

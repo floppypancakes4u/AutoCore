@@ -145,6 +145,10 @@ public sealed class ChatCommandService
             case "/seedcompleted":
                 return SeedCompleted(character, parts);
 
+            case "/getpos":
+            case "/GetPos":
+                return GetPos(character);
+
             case "/teleporttopos":
                 return TeleportToPos(character, parts);
 
@@ -239,6 +243,9 @@ public sealed class ChatCommandService
 
                 if (cmd is "/unban")
                     return Unban(character, parts);
+
+                if (cmd is "/getpos")
+                    return GetPos(character);
 
                 return new ChatCommandExecutionResult(false, string.Empty);
             }
@@ -703,6 +710,33 @@ public sealed class ChatCommandService
         return new ChatCommandExecutionResult(
             true,
             $"Completed mission {missionId} (removed from active + client sync).");
+    }
+
+    /// <summary>
+    /// GM: print the caller's current map name, continent id, and world X Y Z
+    /// to game chat and the server console.
+    /// Usage: <c>/getpos</c>.
+    /// </summary>
+    private static ChatCommandExecutionResult GetPos(Character character)
+    {
+        if (character == null)
+            return new ChatCommandExecutionResult(true, "No character loaded.");
+
+        if (character.Map == null)
+            return new ChatCommandExecutionResult(true, "You are not in a map!");
+
+        var pos = character.CurrentVehicle?.Position ?? character.Position;
+        var map = character.Map;
+        var mapName = map.ContinentObject?.DisplayName;
+        if (string.IsNullOrWhiteSpace(mapName))
+            mapName = map.ContinentObject?.MapFileName;
+        if (string.IsNullOrWhiteSpace(mapName))
+            mapName = "Unnamed";
+
+        var message =
+            $"Map: {mapName}  Id: {map.ContinentId}  X: {pos.X:F2}  Y: {pos.Y:F2}  Z: {pos.Z:F2}";
+        Logger.WriteLog(LogType.Command, message);
+        return new ChatCommandExecutionResult(true, message);
     }
 
     /// <summary>

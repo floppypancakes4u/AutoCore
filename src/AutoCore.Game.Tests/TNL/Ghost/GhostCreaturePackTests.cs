@@ -144,6 +144,23 @@ public class GhostCreaturePackTests
         Assert.IsFalse(stream.ReadFlag()); // SpawnOwner absent
     }
 
+    [TestMethod]
+    public void PackUpdate_Initial_WritesOnUseIdsWhenAssigned()
+    {
+        var creature = MakeCreature(5005);
+        creature.OnUseTriggerCoid = 0x70BA0;
+        creature.OnUseReactionCoid = 0x70BA1;
+        creature.InitializeHealthForTests(10);
+        var stream = Pack(creature, GhostObject.InitialMask, initial: true);
+
+        SkipPackCommon(stream);
+        Assert.IsFalse(stream.ReadFlag()); // Enhancement
+        Assert.IsTrue(stream.ReadFlag(), "OnUseTrigger must be present so CreateMissionFlow runs.");
+        Assert.AreEqual(0x70BA0u, stream.ReadInt(20));
+        Assert.IsTrue(stream.ReadFlag());
+        Assert.AreEqual(0x70BA1u, stream.ReadInt(20));
+    }
+
     private static Creature MakeCreature(long coid)
     {
         var creature = new Creature();

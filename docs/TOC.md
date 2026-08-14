@@ -32,6 +32,7 @@
 
 ## Client reverse engineering
 
+- [Physics exploration / vehicle recreation guide](physicsExploration.md) — Havok vehicle pipeline, formulas, tuning offsets, collisions, and networking
 - [Mission journal / ConvoyMissions semantic fix (pass 25)](pdbmissionjournal25.md) — retail live mission deltas and removal of solo `0x8010` misuse
 - [Opcode certification closure](pdbopcodeclosure.md) — dispositions for the leftover production PARTIAL opcodes; 94/94 have a precise verdict
 - [Exhaustive opcode audit](pdbopcodeexhaustiveaudit.md) — full GameOpcode ledger vs the loaded client

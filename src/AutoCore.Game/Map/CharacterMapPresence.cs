@@ -135,9 +135,9 @@ public sealed class CharacterMapPresence
     public void MarkGroundLootDelivered(long coid) => _groundLootDelivered.Add(coid);
 
     /// <summary>
-    /// Forgets a ground-loot COID (picked up, despawned, or otherwise off the map). Required
-    /// because map teardown rewinds the map-local coid counter, so a stale entry would suppress
-    /// the create for a genuinely new item that later reuses the COID.
+    /// Forgets a ground-loot COID (picked up, despawned, or otherwise off the map). Loot COIDs are
+    /// never reissued (see <see cref="MapLootIdentity"/>), so this is about keeping the ledger from
+    /// growing without bound for the life of a map visit rather than about COID reuse.
     /// </summary>
     public void ForgetGroundLoot(long coid) => _groundLootDelivered.Remove(coid);
 

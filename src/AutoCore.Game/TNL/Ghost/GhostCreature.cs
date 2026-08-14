@@ -39,11 +39,11 @@ public class GhostCreature : GhostObject
             if (stream.WriteFlag(creature.EnhancementId != -1)) // EnhancementId != -1
                 stream.WriteInt((uint)creature.EnhancementId, 20); // EnhancementId
 
-            if (stream.WriteFlag(false)) // CoidOnUseTrigger != -1
-                stream.WriteInt(0, 20); // CoidOnUseTrigger
+            if (stream.WriteFlag(creature.OnUseTriggerCoid != -1))
+                stream.WriteInt((uint)creature.OnUseTriggerCoid, 20);
 
-            if (stream.WriteFlag(false)) // CoidOnUseReaction != -1
-                stream.WriteInt(0, 20); // CoidOnUseReaction
+            if (stream.WriteFlag(creature.OnUseReactionCoid != -1))
+                stream.WriteInt((uint)creature.OnUseReactionCoid, 20);
 
             if (stream.WriteFlag(false)) // CreatureSummoner TFID != (-1, false)
             {

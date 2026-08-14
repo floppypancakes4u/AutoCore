@@ -62,6 +62,12 @@ public class CreateCreaturePacket : CreateSimpleObjectPacket
     public bool DoesntCountAsSummon { get; set; }
     public bool IsElite { get; set; }
 
+    /// <summary>CreateCreature +0x128. Non-−1 makes the client call CreateMissionFlow.</summary>
+    public int CoidOnUseTrigger { get; set; } = -1;
+
+    /// <summary>CreateCreature +0x12C. Synthetic GiveMissionDialog reaction COID.</summary>
+    public int CoidOnUseReaction { get; set; } = -1;
+
     public override void Write(BinaryWriter writer)
     {
         var bodyStart = writer.BaseStream.Position;
@@ -91,8 +97,8 @@ public class CreateCreaturePacket : CreateSimpleObjectPacket
         writer.Write(false); // +0x125 bPathIsRoad
         writer.Write(IsElite); // +0x126 bIsElite
         writer.Write((byte)0); // +0x127 AI state
-        writer.Write(-1); // +0x128 on-use trigger
-        writer.Write(-1); // +0x12C on-use reaction
+        writer.Write(CoidOnUseTrigger); // +0x128 on-use trigger (CreateMissionFlow)
+        writer.Write(CoidOnUseReaction); // +0x12C on-use reaction
 
         var written = (int)(writer.BaseStream.Position - bodyStart);
         var pad = PadBytesNeeded(written, BodySize);
