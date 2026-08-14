@@ -70,7 +70,7 @@ public class GlobalVehicleScopeTests
 
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
 
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);
@@ -124,7 +124,7 @@ public class GlobalVehicleScopeTests
         self.SetCurrentVehicleForTests(new Vehicle { Position = self.Position });
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);
 
@@ -159,7 +159,7 @@ public class GlobalVehicleScopeTests
 
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
 
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);
@@ -226,7 +226,7 @@ public class GlobalVehicleScopeTests
         self.SetCurrentVehicleForTests(new Vehicle { Position = self.Position });
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);
 
@@ -260,6 +260,15 @@ public class GlobalVehicleScopeTests
         connection.ResetGhosting();
         connection.EnsureGhostsAndScopeAfterMapTransfer(self);
 
+        // ActivateGhosting has gone out but the client has not answered rpcStartGhosting yet, so
+        // nothing can be ghosted and the scope query must stay quiet — re-sending here is what
+        // buried the ready RPC under thousands of creates and froze the client on its loading bar.
+        map.PerformScopeQuery(null, self, connection);
+        Assert.AreEqual(1, packets.OfType<CreateVehiclePacket>().Count(),
+            "no create may go out while waiting for the client's ready RPC");
+
+        // Client answers: ghosting is live, and the create must now be re-sent for the new session.
+        connection.ForceGhostingForTests(true);
         map.PerformScopeQuery(null, self, connection);
         Assert.AreEqual(2, packets.OfType<CreateVehiclePacket>().Count(),
             "a fresh map session must clear the sent-create tracking so the create is re-sent");
@@ -393,7 +402,7 @@ public class GlobalVehicleScopeTests
 
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
 
         SectorMap.ScopeGlobalVehicles = false;
         map.PerformScopeQuery(null, self, connection);
@@ -427,7 +436,7 @@ public class GlobalVehicleScopeTests
 
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
 
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);

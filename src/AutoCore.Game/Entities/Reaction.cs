@@ -1133,14 +1133,8 @@ public class Reaction : ClonedObjectBase
             missionId,
             character.ObjectId.Coid);
 
-        // Mission cargo before journal resync (same order as dialog GrantMission).
+        // Mission cargo before the enclosing reaction batch sends GiveMission (0x206C).
         Mission.MissionCargoService.EnsureAndSend(character, quest);
-
-        // 0x206C still tells the client to apply GiveMission; also push journal/objective
-        // state so sector UI matches server authority even if the reaction batch is dropped.
-        var conn = character.OwningConnection;
-        if (conn != null)
-            NpcInteractHandler.ResyncActiveMissionToClient(conn, character, quest);
 
         TriggerManager.Instance.OnMissionStateChanged(character.CurrentVehicle ?? (ClonedObjectBase)character);
         return true;
@@ -1178,12 +1172,8 @@ public class Reaction : ClonedObjectBase
                     quest.ActiveObjectiveSequence = objective.Sequence;
                     MissionPersistence.Instance.OnQuestChanged(character, quest);
                     TriggerManager.Instance.OnMissionStateChanged(character.CurrentVehicle ?? (ClonedObjectBase)character);
-
-                    IncompleteHandlerLog.Warn(
-                        "Reaction.SetActiveObjective",
-                        $"coid={Template.COID} mission={mission.Id} objective={objectiveId} seq={objective.Sequence} charCoid={character.ObjectId.Coid}",
-                        "Server updated ActiveObjectiveSequence but did not send ObjectiveState / CompleteDynamicObjective / ConvoyMissionsResponse",
-                        "After sequence change: send ObjectiveState (slots/bitmask), refresh journal packet, ensure login persistence of active sequence.");
+                    // Returning true makes SectorMap send this SetActiveObjective reaction in
+                    // GroupReactionCall (0x206C), which is the retail live-client update.
                 }
                 else
                 {

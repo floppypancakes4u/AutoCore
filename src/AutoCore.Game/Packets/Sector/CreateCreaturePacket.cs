@@ -25,6 +25,12 @@ public class CreateCreaturePacket : CreateSimpleObjectPacket
     /// <summary>Client offset of Level as uint32 (includes root opcode).</summary>
     public const int ClientLevelOffset = 0x114;
 
+    /// <summary>Client offset of current path COID (includes root opcode). Unset = −1.</summary>
+    public const int ClientPathIdOffset = 0x118;
+
+    /// <summary>Client offset of bIsElite (PDB SMSG_Sector_CreateCreature).</summary>
+    public const int ClientIsEliteOffset = 0x126;
+
     /// <summary>Client offset of spawn-owner COID (includes root opcode). Unset = −1.</summary>
     public const int ClientSpawnOwnerOffset = 0x108;
 
@@ -78,8 +84,12 @@ public class CreateCreaturePacket : CreateSimpleObjectPacket
         writer.Write((byte)0); // +0x10C skill count
         writer.WriteZeros(0x114 - 0x10D); // +0x10D..0x113
         writer.Write((int)Level); // +0x114
-        writer.Write(IsElite); // +0x118
-        writer.WriteZeros(0x127 - 0x119); // +0x119..0x126
+        writer.Write(-1); // +0x118 coidCurrentPathID (PDB)
+        writer.Write(-1); // +0x11C lExtraPathID
+        writer.Write(0f); // +0x120 fPatrolDistance
+        writer.Write(false); // +0x124 bPathReversing
+        writer.Write(false); // +0x125 bPathIsRoad
+        writer.Write(IsElite); // +0x126 bIsElite
         writer.Write((byte)0); // +0x127 AI state
         writer.Write(-1); // +0x128 on-use trigger
         writer.Write(-1); // +0x12C on-use reaction

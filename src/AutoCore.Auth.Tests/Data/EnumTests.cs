@@ -30,6 +30,7 @@ public class EnumTests
         Assert.AreEqual(0x08, (byte)ServerOpcode.AccountKicked);
         Assert.AreEqual(0x09, (byte)ServerOpcode.BlockedAccountWithMessage);
         Assert.AreEqual(0x0A, (byte)ServerOpcode.SCCheckReq);
+        Assert.AreEqual(0x0B, (byte)ServerOpcode.Unknown1);
         Assert.AreEqual(0x0C, (byte)ServerOpcode.HandOffToQueue);
         Assert.AreEqual(0x0E, (byte)ServerOpcode.HandoffToGame);
     }

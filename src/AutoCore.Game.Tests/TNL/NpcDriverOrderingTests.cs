@@ -133,7 +133,7 @@ public class NpcDriverOrderingTests
         observer.SetCurrentVehicleForTests(new Vehicle { Position = observer.Position });
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);
 
@@ -172,7 +172,7 @@ public class NpcDriverOrderingTests
         var connection = new TNLConnection();
         connection.CurrentCharacter = observer;
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         TNLConnection.TestPacketSink = (_, _) => { };
 
         map.PerformScopeQuery(null, observer, connection);
@@ -382,7 +382,7 @@ public class NpcDriverOrderingTests
         var connection = new TNLConnection();
         connection.CurrentCharacter = observer;
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
 
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);

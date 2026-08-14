@@ -6,6 +6,8 @@ using AutoCore.Game.Entities;
 using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Map;
+using AutoCore.Game.Packets.Global;
+using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Game.Tests.Mission.Infrastructure;
 using Vector3 = AutoCore.Game.Structures.Vector3;
@@ -62,10 +64,36 @@ public class TriggerCascadeContractTests
         TriggerManager.Instance.FireTriggerReactions(player.Vehicle, trigger);
         Assert.AreEqual(1, player.Character.CurrentQuests.Count);
         Assert.AreEqual(1, trigger.FireCount);
+        Assert.AreEqual(1, _fx.Sent.OfType<GroupReactionCallPacket>().Single().Count);
+        Assert.AreEqual(0, _fx.CountPackets<ObjectiveStatePacket>());
+        Assert.AreEqual(0, _fx.CountPackets<ConvoyMissionsResponsePacket>());
 
         TriggerManager.Instance.FireTriggerReactions(player.Vehicle, trigger);
         Assert.AreEqual(1, trigger.FireCount, "ActivationCount=1 must not fire again");
         Assert.AreEqual(1, player.Character.CurrentQuests.Count);
+    }
+
+    [TestMethod]
+    [TestCategory("MissionCritical")]
+    [TestCategory("MissionContract")]
+    public void FireTriggerReactions_SetActiveObjective_UsesGroupReactionCall()
+    {
+        var o0 = _fx.CreateSimpleObjective(ObjectiveId, 0, MissionId);
+        var o1 = _fx.CreateSimpleObjective(ObjectiveId + 1, 1, MissionId);
+        _fx.SeedMission(MissionId, 0, o0, o1);
+        var player = _fx.CreatePlayer();
+        _fx.GiveQuest(player.Character, MissionId);
+        var reactionCoid = _fx.NextCoid();
+        _fx.PlaceReaction(player.Map, reactionCoid, ReactionType.SetActiveObjective, ObjectiveId + 1);
+        var trigger = PlaceTrigger(player.Map, _fx.NextCoid(), reactionCoid, activationCount: 1);
+
+        TriggerManager.Instance.FireTriggerReactions(player.Vehicle, trigger);
+
+        Assert.AreEqual(1, player.Character.CurrentQuests.Single().ActiveObjectiveSequence);
+        Assert.AreEqual(1, _fx.Sent.OfType<GroupReactionCallPacket>().Single().Count);
+        Assert.AreEqual(0, _fx.CountPackets<ObjectiveStatePacket>());
+        Assert.AreEqual(0, _fx.CountPackets<CompleteDynamicObjectivePacket>());
+        Assert.AreEqual(0, _fx.CountPackets<ConvoyMissionsResponsePacket>());
     }
 
     [TestMethod]

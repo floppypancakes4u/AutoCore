@@ -319,7 +319,7 @@ public class NpcPathPaceRegressionTests
         connection.SetGhostFrom(true);
         connection.SetGhostTo(false);
         patrol.CreateGhost();
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         connection.ObjectLocalScopeAlways(patrol.Ghost);
 
         var ghostInfo = patrol.Ghost.GetFirstObjectRef();

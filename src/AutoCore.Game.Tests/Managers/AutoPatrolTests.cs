@@ -91,7 +91,7 @@ public class AutoPatrolTests
         Assert.AreEqual(0, character.CurrentQuests.Count);
         Assert.IsTrue(character.CompletedMissionIds.Contains(MissionId));
         Assert.IsTrue(_sent.OfType<CompleteDynamicObjectivePacket>().Any(p => p.ObjectiveId == ObjectiveIdA));
-        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
+        Assert.IsFalse(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
     }
 
     [TestMethod]

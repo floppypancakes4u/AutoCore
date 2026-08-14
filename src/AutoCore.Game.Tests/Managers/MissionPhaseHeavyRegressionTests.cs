@@ -712,7 +712,7 @@ public class MissionPhaseHeavyRegressionTests
         _sent.Clear();
         pending();
         Assert.IsTrue(_sent.OfType<CompleteDynamicObjectivePacket>().Any());
-        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
+        Assert.IsFalse(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
     }
 
     [TestMethod]
@@ -914,7 +914,7 @@ public class MissionPhaseHeavyRegressionTests
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
         connection.SetGhostTo(false);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         var character = new Character();
         character.SetCoid(1800, true);
         character.SetOwningConnection(connection);

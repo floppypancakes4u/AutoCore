@@ -118,7 +118,7 @@ public class DeliverTurnInForceCompleteTests
         var complete = _sent.OfType<CompleteDynamicObjectivePacket>().FirstOrDefault();
         Assert.IsNotNull(complete, "Delayed follow-up must force-complete client objective (clear AutoPatrol)");
         Assert.AreEqual(ObjectiveId, complete.ObjectiveId);
-        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
+        Assert.IsFalse(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
     }
 
     [TestMethod]

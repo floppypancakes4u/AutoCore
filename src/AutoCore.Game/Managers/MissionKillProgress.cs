@@ -102,7 +102,6 @@ public static class MissionKillProgress
             if (statePacket != null)
                 conn.SendGamePacket(statePacket);
             MissionPersistence.Instance.OnQuestChanged(killer, quest);
-            NpcInteractHandler.PushJournalMissionList(conn, killer);
             TriggerManager.Instance.OnMissionStateChanged(
                 killer.CurrentVehicle ?? (ClonedObjectBase)killer);
 

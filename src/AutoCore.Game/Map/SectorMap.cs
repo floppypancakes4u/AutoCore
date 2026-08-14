@@ -1683,6 +1683,24 @@ public class SectorMap
         ArgumentNullException.ThrowIfNull(self);
         ArgumentNullException.ThrowIfNull(connection);
 
+        // Nothing this query produces can reach the client until ghosting is live:
+        // GhostConnection.WritePacket writes ghost data only `if (Ghosting && ScopeObject != null)`.
+        // Running it anyway is what froze map transfers. ResetGhosting clears Ghosting for the whole
+        // client map load; during that window the ghosts we scope are never transmitted, so
+        // IsGhostedTo keeps reverting to false and the foreign-create branch below re-sends
+        // CreateCreature for every creature on every packet (live capture: 3,966 creates, 61 per
+        // COID). Those are guaranteed-ordered events, and they buried rpcStartGhosting 10,833 deep
+        // — the one RPC whose reply sets Ghosting true. The flood existed because ghosting was off,
+        // and ghosting stayed off because the flood buried its own cure.
+        //
+        // Gating the whole query (rather than de-duplicating creates) is deliberate: client-side,
+        // Process_EMSG_Sector_CreateCreature @0080af70 is the only thing that binds a parked ghost
+        // to its object (via AssignPendingGhostObject @00807550), so a create must keep travelling
+        // with its ghost. Skipping both together preserves that pairing; suppressing creates alone
+        // would strand ghosts with m_pParent == NULL, whose every update unpackUpdate discards.
+        if (!connection.IsGhosting())
+            return;
+
         var center = self.CurrentVehicle?.Position ?? self.Position;
 
         // One grid pull covers both tiers; mission givers may sit out to the extended drop radius.

@@ -89,15 +89,11 @@ public class MissionPacketCoverageTests
     }
 
     [TestMethod]
-    public void ConvoyMissionsResponse_Write_IncludesQuestBlob()
+    public void ConvoyMissionsResponse_Write_IncludesMissionIdOnly()
     {
-        var q = new CharacterQuest(91001, 0);
-        q.ObjectiveProgress[0] = 1;
-        q.ObjectiveMax[0] = 2;
-
         var packet = new ConvoyMissionsResponsePacket
         {
-            CurrentQuests = [q],
+            MissionIds = [1001],
         };
 
         using var ms = new MemoryStream();
@@ -105,11 +101,15 @@ public class MissionPacketCoverageTests
         packet.Write(writer);
 
         Assert.AreEqual(GameOpcode.ConvoyMissionsResponse, packet.Opcode);
+        Assert.AreEqual(22, ms.Length);
         ms.Position = 0;
         using var reader = new BinaryReader(ms);
-        Assert.AreEqual(1, reader.ReadInt32());
-        Assert.AreEqual(91001, reader.ReadInt32());
-        Assert.AreEqual(0, reader.ReadByte());
+        Assert.AreEqual(0, reader.ReadInt32());
+        Assert.AreEqual(0L, reader.ReadInt64());
+        Assert.AreEqual((ushort)1, reader.ReadUInt16());
+        Assert.AreEqual((ushort)0, reader.ReadUInt16());
+        Assert.AreEqual(0, reader.ReadInt32());
+        Assert.AreEqual((ushort)1001, reader.ReadUInt16());
     }
 
     [TestMethod]

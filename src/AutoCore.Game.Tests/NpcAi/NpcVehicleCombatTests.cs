@@ -478,7 +478,7 @@ public class NpcVehicleCombatTests
         var observer = new TNLConnection();
         observer.SetGhostFrom(true);
         observer.SetGhostTo(false);
-        observer.ActivateGhosting();
+        observer.BeginGhostingForTests();
         observer.ObjectInScope(npc.Ghost!);
         NetObject.CollapseDirtyList();
 
@@ -702,7 +702,7 @@ public class NpcVehicleCombatTests
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
         connection.SetGhostTo(false);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         connection.ObjectInScope(vehicle.Ghost!);
         connection.ObjectLocalScopeAlways(vehicle.Ghost!);
     }

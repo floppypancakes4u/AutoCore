@@ -290,7 +290,7 @@ public class ForeignRemountContractTests
         var connection = new TNLConnection();
         connection.CurrentCharacter = observer;
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
 
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);

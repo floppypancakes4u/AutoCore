@@ -113,7 +113,8 @@ public class GhostCharacter : GhostObject
             }
             else
             {
-                stream.Write((long)0);
+                // Retail cfidEmpty.coid == -1 (GhostCharacter::packUpdate @ 0x0060a230).
+                stream.Write((long)-1);
                 stream.WriteFlag(false);
             }
         }

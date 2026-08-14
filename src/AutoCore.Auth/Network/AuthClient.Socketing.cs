@@ -93,7 +93,7 @@ public partial class AuthClient
             if (!TryCreatePacket((ClientOpcode)rawOpcode, out packet))
             {
                 Logger.WriteLog(LogType.Warning,
-                    $"AuthClient {DescribePeer()} sent unknown opcode 0x{rawOpcode:X2}; dropping packet.");
+                    $"AuthClient {DescribePeer()} sent unknown opcode 0x{rawOpcode:X2} ({length} bytes); dropping packet.");
                 return;
             }
 

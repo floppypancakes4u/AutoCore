@@ -548,7 +548,8 @@ public class GhostVehicle : GhostObject
             }
             else
             {
-                stream.Write((long)0);
+                // Retail cfidEmpty.coid == -1 (GhostVehicle::packUpdate @ 0x005f5de0).
+                stream.Write((long)-1);
                 stream.WriteFlag(false);
             }
         }

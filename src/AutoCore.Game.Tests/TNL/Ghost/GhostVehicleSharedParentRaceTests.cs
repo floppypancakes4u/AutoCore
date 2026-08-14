@@ -67,11 +67,11 @@ public class GhostVehicleSharedParentRaceTests
         var connA = new TNLConnection();
         connA.SetGhostFrom(true);
         connA.SetGhostTo(false);
-        connA.ActivateGhosting();
+        connA.BeginGhostingForTests();
         var connB = new TNLConnection();
         connB.SetGhostFrom(true);
         connB.SetGhostTo(false);
-        connB.ActivateGhosting();
+        connB.BeginGhostingForTests();
 
         connA.ObjectInScope(ghost);
         connB.ObjectInScope(ghost);
@@ -175,7 +175,7 @@ public class GhostVehicleSharedParentRaceTests
 
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
 
         return (map, npcVehicle, self, connection);
     }

@@ -76,7 +76,12 @@ public class CreateCreatureLayoutTests
         Assert.AreEqual(1, bytes[CreateCreaturePacket.ClientDoesntCountAsSummonOffset]);
         Assert.AreEqual(5L, BitConverter.ToInt64(bytes, ClientVehicleCoidOffset));
         Assert.AreEqual(2, BitConverter.ToInt32(bytes, ClientLevelOffset));
-        Assert.AreEqual(1, bytes[0x118], "IsElite at client +0x118");
+        // PDB SMSG_Sector_CreateCreature: +0x118 coidCurrentPathID, +0x126 bIsElite.
+        Assert.AreEqual(-1, BitConverter.ToInt32(bytes, CreateCreaturePacket.ClientPathIdOffset),
+            "Unset path id must be −1 (not IsElite).");
+        Assert.AreEqual(1, bytes[CreateCreaturePacket.ClientIsEliteOffset],
+            "PDB bIsElite at +0x126.");
+        Assert.AreEqual(0, bytes[CreateCreaturePacket.ClientAiStateOffset]);
         Assert.AreEqual(ClientCreateCreatureSize, bytes.Length);
     }
 

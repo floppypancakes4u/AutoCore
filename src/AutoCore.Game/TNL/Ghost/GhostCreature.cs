@@ -114,7 +114,8 @@ public class GhostCreature : GhostObject
             }
             else
             {
-                stream.Write((long)0);
+                // Retail cfidEmpty.coid == -1 (GhostCreature::packUpdate @ 0x005d2800).
+                stream.Write((long)-1);
                 stream.WriteFlag(false);
             }
         }

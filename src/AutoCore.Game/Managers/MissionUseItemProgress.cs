@@ -127,7 +127,6 @@ public static class MissionUseItemProgress
                 if (partial != null)
                     conn?.SendGamePacket(partial);
 
-                NpcInteractHandler.PushJournalMissionList(conn, character);
                 TriggerManager.Instance.OnMissionStateChanged(
                     character.CurrentVehicle ?? (ClonedObjectBase)character);
                 return true;

@@ -645,6 +645,8 @@ public class MissionPersistenceTests
 
             Assert.IsTrue(result.Handled);
             StringAssert.Contains(result.Message, "554");
+            StringAssert.Contains(result.Message, "relog",
+                "an out-of-band GM grant has no generic retail live-add packet");
             Assert.AreEqual(1, character.CurrentQuests.Count);
             Assert.AreEqual(554, character.CurrentQuests[0].MissionId);
 
@@ -653,10 +655,10 @@ public class MissionPersistenceTests
                 new[] { (7400L, 554, QuestPersistKind.Upsert) },
                 writes);
 
-            Assert.IsTrue(sent.OfType<ConvoyMissionsResponsePacket>().Any(),
-                "client journal must be pushed");
             Assert.IsTrue(sent.OfType<ObjectiveStatePacket>().Any(),
                 "active objective state must be pushed");
+            Assert.IsFalse(sent.OfType<ConvoyMissionsResponsePacket>().Any(),
+                "solo mission accept must not use the convoy-member list");
         }
         finally
         {
@@ -717,7 +719,8 @@ public class MissionPersistenceTests
             Assert.IsTrue(result.Handled);
             Assert.AreEqual(1, character.CurrentQuests.Count);
             StringAssert.Contains(result.Message, "already active");
-            Assert.IsTrue(sent.OfType<ConvoyMissionsResponsePacket>().Any());
+            Assert.IsTrue(sent.OfType<ObjectiveStatePacket>().Any());
+            Assert.IsFalse(sent.OfType<ConvoyMissionsResponsePacket>().Any());
         }
         finally
         {
@@ -760,8 +763,8 @@ public class MissionPersistenceTests
 
             Assert.IsTrue(sent.OfType<CompleteDynamicObjectivePacket>().Any(),
                 "client complete-objective packet required");
-            Assert.IsTrue(sent.OfType<ConvoyMissionsResponsePacket>().Any(),
-                "client journal must be pushed");
+            Assert.IsFalse(sent.OfType<ConvoyMissionsResponsePacket>().Any(),
+                "mission completion must not use the convoy-member list");
         }
         finally
         {

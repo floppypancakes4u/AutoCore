@@ -70,6 +70,23 @@ public class AuthClientHandlerTests
     }
 
     [TestMethod]
+    public void HandlePacket_SCCheck_DoesNotReply()
+    {
+        var db = Guid.NewGuid().ToString("N");
+        var (server, client, sent) = CreateHarness(db);
+        try
+        {
+            client.HandlePacket(new SCCheckPacket { UserId = 42, CardValue = 99 });
+            Assert.AreEqual(0, sent.Count);
+            Assert.AreNotEqual(ClientState.Disconnected, client.State);
+        }
+        finally
+        {
+            server.Shutdown();
+        }
+    }
+
+    [TestMethod]
     public void HandlePacket_NonAuthPacket_IsIgnored()
     {
         var db = Guid.NewGuid().ToString("N");

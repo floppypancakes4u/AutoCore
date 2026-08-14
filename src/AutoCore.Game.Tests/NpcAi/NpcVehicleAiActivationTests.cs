@@ -723,7 +723,7 @@ public class NpcVehicleAiActivationTests
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
         connection.SetGhostTo(false);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         connection.ObjectInScope(vehicle.Ghost!);
         connection.ObjectLocalScopeAlways(vehicle.Ghost!);
     }

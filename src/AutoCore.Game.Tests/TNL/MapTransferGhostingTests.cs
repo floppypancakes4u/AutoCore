@@ -125,7 +125,7 @@ public class MapTransferGhostingTests
         var connection = CreateGhostingConnection();
         connection.SuppressCreatePacketsForTests = true;
         var character = CreateCharacterWithVehicle(connection);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
 
         connection.ReestablishGhostingAfterMapTransfer(character, sendCreatePackets: true);
 
@@ -174,7 +174,7 @@ public class MapTransferGhostingTests
     public void EnsureSectorGhostingStarted_AfterReset_RestartsSequence()
     {
         var connection = CreateGhostingConnection();
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         var seq = connection.GetGhostingSequence();
         connection.ResetGhosting();
 

@@ -74,7 +74,7 @@ public class MissionKillProgressTests
         Assert.IsFalse(character.CompletedMissionIds.Contains(MissionId));
         Assert.IsFalse(_sent.OfType<CompleteDynamicObjectivePacket>().Any());
         Assert.IsTrue(_sent.OfType<ObjectiveStatePacket>().Any(p => p.ObjectiveId == ObjectiveId));
-        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
+        Assert.IsFalse(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
         // Map props leave a corpse for a delay before despawn — still present until flush.
         Assert.IsNotNull(map.GetObjectByCoid(PropCoid));
         Assert.IsTrue(MapPropCorpseDespawn.PendingCountForTests >= 1);

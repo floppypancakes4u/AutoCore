@@ -119,7 +119,7 @@ public class DeliverNpcCreateCreatureTests
         self.SetCurrentVehicleForTests(new Vehicle { Position = self.Position });
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);
 
@@ -224,7 +224,7 @@ public class DeliverNpcCreateCreatureTests
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
         connection.SetGhostTo(false);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
 
         var character = new Character();
         character.SetCoid(600, true);

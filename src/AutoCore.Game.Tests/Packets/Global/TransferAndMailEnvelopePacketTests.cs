@@ -124,20 +124,25 @@ public class TransferAndMailEnvelopePacketTests
         using (var writer = new BinaryWriter(ms))
         {
             empty.Write(writer);
-            Assert.AreEqual(0, BitConverter.ToInt32(ms.ToArray(), 0));
+            var emptyBytes = ms.ToArray();
+            Assert.AreEqual(20, emptyBytes.Length);
+            Assert.AreEqual(0, BitConverter.ToInt32(emptyBytes, 0));
+            Assert.AreEqual((ushort)0, BitConverter.ToUInt16(emptyBytes, 12));
         }
 
         var packet = new ConvoyMissionsResponsePacket
         {
-            CurrentQuests = [new CharacterQuest(1001)]
+            CoidMember = 55,
+            MissionIds = [1001]
         };
         using var outMs = new MemoryStream();
         using var outWriter = new BinaryWriter(outMs);
         packet.Write(outWriter);
 
         var bytes = outMs.ToArray();
-        Assert.AreEqual(1, BitConverter.ToInt32(bytes, 0));
-        Assert.AreEqual(1001, BitConverter.ToInt32(bytes, 4));
-        Assert.AreEqual(4 + CharacterQuest.StructureSize, bytes.Length);
+        Assert.AreEqual(22, bytes.Length);
+        Assert.AreEqual(55L, BitConverter.ToInt64(bytes, 4));
+        Assert.AreEqual((ushort)1, BitConverter.ToUInt16(bytes, 12));
+        Assert.AreEqual((ushort)1001, BitConverter.ToUInt16(bytes, 20));
     }
 }

@@ -535,7 +535,7 @@ public class NpcInteractUseObjectTests
         // Client already ran CompleteObjective on dialog button; 0x2070 would force-complete again
         // and rebuild UI (client AV @ 0x007B6DB0 MSXML Release during re-entrant interface load).
         Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
-        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
+        Assert.IsFalse(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
     }
 
     /// <summary>
@@ -1061,9 +1061,9 @@ public class NpcInteractUseObjectTests
 
         Assert.AreEqual(0, character.CurrentQuests.Count);
         Assert.IsTrue(character.CompletedMissionIds.Contains(MissionA));
-        // Dialog turn-in: journal resync only — no 0x2070 (client already completed locally).
+        // Dialog turn-in needs no delta — the client already completed locally.
         Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
-        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
+        Assert.IsFalse(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
     }
 
     [TestMethod]
@@ -1292,16 +1292,16 @@ public class NpcInteractUseObjectTests
 
         Assert.IsTrue(character.CompletedMissionIds.Contains(MissionA));
         Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
-        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
+        Assert.IsFalse(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
         Assert.IsFalse(
             _sent.OfType<NpcMissionDialogPacket>().Any(d => d.MissionIds.Contains(MissionB)),
             "Must not auto-open follow-up offer dialog on the same turn-in flush");
     }
 
     [TestMethod]
-    public void HandleMissionDialogResponse_TurnIn_DefersJournalUntilScheduledFollowup()
+    public void HandleMissionDialogResponse_TurnIn_DefersMissionStateReevaluationUntilScheduledFollowup()
     {
-        // Production waits before journal/re-eval so client dialog + interact FX MSXML can settle.
+        // Production waits before re-eval so client dialog + interact FX MSXML can settle.
         SeedDeliverMission(MissionA, ObjectiveA, NpcCbid);
         var (conn, character, map) = CreatePlayer();
         PlaceNpc(map, NpcCoid, NpcCbid, new Vector3(5f, 0f, 0f));
@@ -1331,13 +1331,13 @@ public class NpcInteractUseObjectTests
             "GroupReactionCall soft-pedal must arm on dialog turn-in");
         Assert.IsTrue(MissionClientSoftPedal.ShouldSuppressGroupReactionCall(character.ObjectId.Coid));
         Assert.AreEqual(0, _sent.OfType<ConvoyMissionsResponsePacket>().Count(),
-            "Journal must wait for delayed follow-up");
+            "Dialog turn-in must not use the convoy-member list");
         Assert.AreEqual(0, _sent.OfType<CompleteDynamicObjectivePacket>().Count());
 
         pending();
 
-        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any(),
-            "Journal sends after delayed follow-up runs");
+        Assert.AreEqual(0, _sent.OfType<ConvoyMissionsResponsePacket>().Count(),
+            "Delayed mission-state reevaluation must not use the convoy-member list");
     }
 
     [TestMethod]
@@ -1389,8 +1389,8 @@ public class NpcInteractUseObjectTests
 
         Assert.AreEqual(1, character.CurrentQuests.Count);
         Assert.AreEqual(MissionB, character.CurrentQuests[0].MissionId);
-        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
         Assert.IsTrue(_sent.OfType<ObjectiveStatePacket>().Any(p => p.ObjectiveId == ObjectiveB));
+        Assert.IsFalse(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
     }
 
     [TestMethod]
@@ -1440,11 +1440,11 @@ public class NpcInteractUseObjectTests
         Assert.AreEqual(1, character.CurrentQuests.Count);
         Assert.AreEqual(MissionB, character.CurrentQuests[0].MissionId);
         Assert.IsTrue(_sent.OfType<ObjectiveStatePacket>().Any(p => p.ObjectiveId == ObjectiveB));
-        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
+        Assert.IsFalse(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
     }
 
     [TestMethod]
-    public void HandleMissionDialogResponse_AlreadyActive_ResyncsClientJournal()
+    public void HandleMissionDialogResponse_AlreadyActive_ResyncsObjectiveState()
     {
         SeedOfferMission(MissionB, NpcCbid, reqMissionId: MissionA, continentId: ContinentId, objectiveId: ObjectiveB);
 
@@ -1462,9 +1462,8 @@ public class NpcInteractUseObjectTests
         });
 
         Assert.AreEqual(1, character.CurrentQuests.Count, "Must not duplicate the active quest");
-        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any(),
-            "Already-active accept must still push journal so client shows the mission");
         Assert.IsTrue(_sent.OfType<ObjectiveStatePacket>().Any(p => p.ObjectiveId == ObjectiveB));
+        Assert.IsFalse(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
     }
 
     [TestMethod]

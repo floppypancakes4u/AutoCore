@@ -173,7 +173,7 @@ public class GhostLifetimeOrderingTests
         var (character, connection) = CreateTransferableOnSourceMap();
         var npc = PlaceWalkingNpc(character.Map, NpcCoid);
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         character.CreateGhost();
         connection.SetScopeObject(character.Ghost);
 
@@ -300,7 +300,7 @@ public class GhostLifetimeOrderingTests
         connection.CurrentCharacter = observer;
         observer.SetOwningConnection(connection);
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
 
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);
@@ -325,7 +325,7 @@ public class GhostLifetimeOrderingTests
         var connection = new TNLConnection();
         connection.CurrentCharacter = observer;
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
 
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);

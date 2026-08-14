@@ -322,7 +322,7 @@ public class VehicleWrapperLifetimeTests
         var (character, connection) = CreateTransferableOnSourceMap();
         var npc = PlaceNpcVehicle(character.Map, VehicleCoid);
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         character.CreateGhost();
         connection.SetScopeObject(character.Ghost);
 
@@ -395,7 +395,7 @@ public class VehicleWrapperLifetimeTests
         connection.CurrentCharacter = observer;
         observer.SetOwningConnection(connection);
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
 
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);

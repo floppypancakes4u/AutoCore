@@ -99,6 +99,9 @@ public class GhostingNeverStartedWatchdogTests
         Assert.AreEqual((long)TNLConnection.GhostingStartWarnMs, Property(record, "StalledForMs"));
         Assert.IsNotNull(Property(record, "GhostingSequence"),
             "the sequence is what the client's ready RPC has to match — report it");
+        Assert.IsNotNull(Property(record, "EventsWaiting"),
+            "a backlog separates 'rpcStartGhosting never got transmitted' from "
+            + "'it arrived and the client did not answer'");
     }
 
     [TestMethod]

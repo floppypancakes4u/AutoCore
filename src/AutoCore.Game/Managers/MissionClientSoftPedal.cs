@@ -17,7 +17,7 @@ using AutoCore.Utils.Reliability;
 ///   → FUN_007b6c70 COM Release (crash PC 0x007B6DB0).
 ///
 /// Completing a mission client-side already unlocks next core offers; stacking GroupReactionCall
-/// (0x206C) / journal during that window races MSXML. This type arms a per-character suppress
+/// (0x206C) during that window races MSXML. This type arms a per-character suppress
 /// window for 0x206C sends while server reactions still execute.
 ///
 /// Suppressed 0x206C packets are <b>queued</b> and flushed when the window ends so gate

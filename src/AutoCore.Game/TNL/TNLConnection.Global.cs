@@ -126,7 +126,7 @@ public partial class TNLConnection
 
     private void HandleConvoyMissionsRequest(BinaryReader reader)
     {
-        // The request payload format is not yet reverse engineered; log & ignore any remaining bytes.
+        // Retail request is opcode-only. Drain leftover bytes so a padded client frame stays framed.
         var remaining = (int)(reader.BaseStream.Length - reader.BaseStream.Position);
         if (remaining > 0)
             _ = reader.ReadBytes(remaining);
@@ -139,7 +139,8 @@ public partial class TNLConnection
 
         SendGamePacket(new ConvoyMissionsResponsePacket
         {
-            CurrentQuests = CurrentCharacter.CurrentQuests.ToList()
+            CoidMember = CurrentCharacter.ObjectId.Coid,
+            MissionIds = CurrentCharacter.CurrentQuests.Select(q => q.MissionId).ToList()
         });
     }
 }

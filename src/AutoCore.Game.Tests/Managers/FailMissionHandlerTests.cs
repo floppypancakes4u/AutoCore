@@ -49,7 +49,7 @@ public class FailMissionHandlerTests
         var fail = _fx.Sent.OfType<FailMissionPacket>().Single();
         Assert.AreEqual(18374L, fail.CharacterCoid);
         Assert.AreEqual(MissionId, fail.MissionId);
-        Assert.IsTrue(_fx.Sent.OfType<ConvoyMissionsResponsePacket>().Any());
+        Assert.IsFalse(_fx.Sent.OfType<ConvoyMissionsResponsePacket>().Any());
     }
 
     [TestMethod]

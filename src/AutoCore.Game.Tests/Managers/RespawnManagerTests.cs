@@ -643,7 +643,7 @@ public class RespawnManagerTests
     {
         var character = CreateCharacterWithVehicle(230, 231);
         character.CreateGhost();
-        character.OwningConnection.ActivateGhosting();
+        character.OwningConnection.BeginGhostingForTests();
         var vehicle = character.CurrentVehicle;
         vehicle.SetHPForTests(0);
 

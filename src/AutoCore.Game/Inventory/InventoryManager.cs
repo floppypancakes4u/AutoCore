@@ -1273,6 +1273,8 @@ public sealed class InventoryManager
 
         PersistCargoUpsert(character.ObjectId.Coid, inventoryItem);
 
+        // bNewItem (AddToExistingItem) must stay false: client Process_EMSG_Sector_InventoryGrab_Response
+        // treats true as a stack-split and reads fidNewItem @+0x28 as a new COID (SMSG size 0x40).
         IReadOnlyList<BasePacket> packets = new BasePacket[]
         {
             InventoryPacketFactory.CreateCargoSendAll(this),
@@ -1282,7 +1284,7 @@ public sealed class InventoryManager
                 ItemGlobal = source.SourceGlobal,
                 InventoryType = packet.InventoryType,
                 Quantity = inventoryItem.Quantity,
-                AddToExistingItem = true,
+                AddToExistingItem = false,
                 InventoryPositionX = x,
                 InventoryPositionY = y,
                 WasSuccessful = true
@@ -1455,6 +1457,7 @@ public sealed class InventoryManager
                 InventoryPositionX = movedItem.InventoryPositionX,
                 InventoryPositionY = movedItem.InventoryPositionY,
                 InventoryType = inventoryType,
+                Quantity = Math.Max(1, movedItem.Quantity),
                 WasSuccessful = true,
                 HasSwappedOrConcatenatedItem = false
             }
@@ -1797,6 +1800,7 @@ public sealed class InventoryManager
                 InventoryPositionX = inventoryItem.InventoryPositionX,
                 InventoryPositionY = inventoryItem.InventoryPositionY,
                 InventoryType = packet.InventoryType,
+                Quantity = Math.Max(1, inventoryItem.Quantity),
                 WasSuccessful = true,
                 HasSwappedOrConcatenatedItem = false
             }

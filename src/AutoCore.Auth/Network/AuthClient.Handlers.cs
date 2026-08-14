@@ -45,6 +45,12 @@ public partial class AuthClient
                 case ClientOpcode.ServerListExt:
                     MsgServerListExt((authPacket as ServerListExtPacket)!);
                     break;
+
+                case ClientOpcode.SCCheck:
+                    Logger.WriteLog(LogType.Debug,
+                        "AuthClient {0} SCCheck ignored (anti-cheat handshake unused).",
+                        DescribePeer());
+                    break;
             }
         });
     }

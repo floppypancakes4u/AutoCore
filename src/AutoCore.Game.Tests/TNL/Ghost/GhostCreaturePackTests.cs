@@ -112,6 +112,7 @@ public class GhostCreaturePackTests
     [TestMethod]
     public void PackUpdate_TargetMask_NullTarget()
     {
+        // Client GhostCreature::packUpdate writes cfidEmpty (coid=-1) when target is null.
         var creature = MakeCreature(5003);
         creature.InitializeHealthForTests(10);
         var stream = Pack(creature, GhostObject.TargetMask, initial: false);
@@ -123,7 +124,7 @@ public class GhostCreaturePackTests
         Assert.IsFalse(stream.ReadFlag()); // Position
         Assert.IsTrue(stream.ReadFlag());  // Target
         stream.Read(out long coid);
-        Assert.AreEqual(0L, coid);
+        Assert.AreEqual(-1L, coid);
         Assert.IsFalse(stream.ReadFlag());
     }
 

@@ -809,11 +809,23 @@ public partial class TNLConnection
             ("StalledForMs", stalledForMs),
             ("Scoping", Scoping),
             ("Ghosting", IsGhosting()),
-            ("GhostingSequence", GetGhostingSequence()));
+            ("GhostingSequence", GetGhostingSequence()),
+            // rpcStartGhosting is posted behind the whole create burst on the guaranteed-ordered
+            // queue (126-event window). A backlog that never drains means it was never put on the
+            // wire; a drained queue means it arrived and the client did not answer.
+            ("EventsWaiting", NumEventsWaiting),
+            ("SendQueueDepth", DiagSendQueueDepth),
+            ("LastAckedEventSeq", DiagLastAckedEventSeq),
+            ("NextSendEventSeq", DiagNextSendEventSeq),
+            // Non-zero and never clearing = the ordered inbound stream is wedged behind a gap, so
+            // the client's ready RPC is parked rather than dispatched.
+            ("PendingOutOfOrderEvents", DiagPendingOutOfOrderEvents),
+            ("NextRecvEventSeq", DiagNextRecvEventSeq));
 
         Logger.WriteLog(LogType.Error,
             "GHOSTING NEVER STARTED: character {0} completed world entry on map {1} (map resets={2}) "
-            + "{3}ms ago but Ghosting is still false (scoping={4}, ghostingSequence={5}). "
+            + "{3}ms ago but Ghosting is still false (scoping={4}, ghostingSequence={5}, "
+            + "eventsWaiting={7} sendQueue={8} ackedSeq={9}/{10} inboundParked={11} nextRecvSeq={12}). "
             + "{6} The client is parked on a loading screen.",
             CurrentCharacter?.ObjectId.Coid ?? 0,
             mapId,
@@ -822,8 +834,15 @@ public partial class TNLConnection
             Scoping,
             GetGhostingSequence(),
             Scoping
-                ? "ActivateGhosting ran, so the client's rpcReadyForNormalGhosts never matched this sequence."
-                : "ActivateGhosting never ran, so the client was never asked to start ghosting.");
+                ? "ActivateGhosting ran; check the [Ghosting] trace for whether the client answered "
+                  + "with a stale sequence or never answered at all."
+                : "ActivateGhosting never ran, so the client was never asked to start ghosting.",
+            NumEventsWaiting,
+            DiagSendQueueDepth,
+            DiagLastAckedEventSeq,
+            DiagNextSendEventSeq,
+            DiagPendingOutOfOrderEvents,
+            DiagNextRecvEventSeq);
 
         return true;
     }
@@ -1258,8 +1277,10 @@ public partial class TNLConnection
     }
 
     /// <summary>
-    /// C2S Firing (0x2022): fire state without a full VehicleMoved. Layout mirrors the VehicleMoved
-    /// fire/target tail: u8 firing, u16 reserved, TFID target (best-effort; extra trailing bytes ignored).
+    /// C2S Firing (0x2022): compatibility reader only. The retail named struct is 24 bytes
+    /// with fidWeapon at +8; this client build has no proven live C2S emitter. Ordinary fire
+    /// travels on VehicleMoved (0x200A). Do not replace this heuristic without a capture.
+    /// Layout assumed here: u8 firing, optional u16 reserved + TFID target.
     /// </summary>
     private void HandleFiringPacket(BinaryReader reader)
     {

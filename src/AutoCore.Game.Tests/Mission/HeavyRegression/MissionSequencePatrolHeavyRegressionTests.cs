@@ -53,7 +53,7 @@ public class MissionSequencePatrolHeavyRegressionTests
         Assert.AreEqual(1, ch.CurrentQuests[0].ActiveObjectiveSequence);
         Assert.AreEqual(1, _fx.CountComplete(O0));
         Assert.IsTrue(_fx.Sent.OfType<ObjectiveStatePacket>().Any(p => p.ObjectiveId == O1));
-        Assert.IsTrue(_fx.Sent.OfType<ConvoyMissionsResponsePacket>().Any());
+        Assert.IsFalse(_fx.Sent.OfType<ConvoyMissionsResponsePacket>().Any());
     }
 
     [TestMethod]

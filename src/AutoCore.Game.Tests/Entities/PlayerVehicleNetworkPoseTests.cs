@@ -470,7 +470,7 @@ public class PlayerVehicleNetworkPoseTests
         vehicle = new Vehicle();
         vehicle.SetCoid(coid, true);
         vehicle.CreateGhost();
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         connection.ObjectLocalScopeAlways(vehicle.Ghost);
 
         var ghostInfo = vehicle.Ghost.GetFirstObjectRef();

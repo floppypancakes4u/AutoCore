@@ -94,8 +94,9 @@ public class GhostCharacterPackTests
     }
 
     [TestMethod]
-    public void PackUpdate_TargetMask_NullTarget_WritesZero()
+    public void PackUpdate_TargetMask_NullTarget_WritesRetailEmptyCoid()
     {
+        // Client GhostCharacter::packUpdate writes cfidEmpty (coid=-1) when m_pTargetObject is null.
         var character = MakeCharacter(1003, "PilotC");
         var stream = Pack(character, GhostObject.TargetMask, initial: false);
 
@@ -105,7 +106,7 @@ public class GhostCharacterPackTests
         Assert.IsFalse(stream.ReadFlag()); // Position
         Assert.IsTrue(stream.ReadFlag());  // Target
         stream.Read(out long coid);
-        Assert.AreEqual(0L, coid);
+        Assert.AreEqual(-1L, coid);
         Assert.IsFalse(stream.ReadFlag());
     }
 

@@ -13,7 +13,7 @@ public enum ServerOpcode : byte
     AccountKicked             = 0x08,
     BlockedAccountWithMessage = 0x09,
     SCCheckReq                = 0x0A, // null
-    Unknown1                  = 0x0B, // null, or in different vTable
+    Unknown1                  = 0x0B, // dead enum; no client handler
     HandOffToQueue            = 0x0C,
-    HandoffToGame             = 0x0E
+    HandoffToGame             = 0x0E  // dead enum; no client handler
 }

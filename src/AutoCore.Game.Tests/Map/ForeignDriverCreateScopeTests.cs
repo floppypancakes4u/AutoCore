@@ -72,7 +72,7 @@ public class ForeignDriverCreateScopeTests
         self.SetCurrentVehicleForTests(new Vehicle { Position = self.Position });
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);
 
@@ -117,7 +117,7 @@ public class ForeignDriverCreateScopeTests
         self.SetCurrentVehicleForTests(new Vehicle { Position = self.Position });
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);
 
@@ -155,7 +155,7 @@ public class ForeignDriverCreateScopeTests
         self.SetCurrentVehicleForTests(new Vehicle { Position = self.Position });
         var connection = new TNLConnection();
         connection.SetGhostFrom(true);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         var packets = new List<BasePacket>();
         TNLConnection.TestPacketSink = (_, packet) => packets.Add(packet);
 

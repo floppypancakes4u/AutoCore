@@ -21,7 +21,7 @@ public class ObjectInScopeChainWalkTests
         var connection = new ScopeProbeConnection();
         connection.SetGhostFrom(true);
         connection.SetGhostTo(false);
-        connection.ActivateGhosting(); // sets Scoping = true
+        connection.BeginGhostingForTests(); // sets Scoping = true
 
         var creature = new Creature();
         creature.SetCoid(1, true);

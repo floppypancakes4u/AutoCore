@@ -718,7 +718,7 @@ public class GhostVehicleWireRegressionTests
     }
 
     [TestMethod]
-    public void PackUpdate_NonInitial_TargetNull_WritesZeroCoid()
+    public void PackUpdate_NonInitial_TargetNull_WritesRetailEmptyCoid()
     {
         var vehicle = CreateVehicleWithMap(20_060);
         vehicle.SetTargetObject(null);
@@ -728,7 +728,8 @@ public class GhostVehicleWireRegressionTests
             Assert.IsFalse(stream.ReadFlag());
         Assert.IsTrue(stream.ReadFlag()); // Target
         stream.Read(out long coid);
-        Assert.AreEqual(0L, coid);
+        // Retail empty TFID is cfidEmpty (coid=-1), not 0.
+        Assert.AreEqual(-1L, coid);
         Assert.IsFalse(stream.ReadFlag());
     }
 

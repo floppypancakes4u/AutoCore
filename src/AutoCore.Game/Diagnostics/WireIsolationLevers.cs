@@ -81,6 +81,19 @@ public static class WireIsolationLevers
     {
         WireDiag.TryEnableFromEnvironment();
         GhostObjectDiag.TryEnableFromEnvironment();
+        AttachGhostingHandshakeDiagnostics();
+    }
+
+    /// <summary>
+    /// Routes TNL's ghosting-handshake trace into the server log. Always on: these lines are a few
+    /// per world entry, and the handshake's failure mode (a ready RPC dropped for a stale sequence)
+    /// is otherwise completely invisible — the client just never leaves the loading screen.
+    /// </summary>
+    public static void AttachGhostingHandshakeDiagnostics()
+    {
+        // global:: — bare "TNL" binds to AutoCore.Game.TNL from inside this namespace.
+        global::TNL.Entities.GhostConnection.GhostingDiagnostics = static message =>
+            Logger.WriteLog(LogType.Network, "[Ghosting] {0}", message);
     }
 
     /// <summary>Load JSON (if present) then env overrides. Call once at process start.</summary>

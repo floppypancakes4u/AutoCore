@@ -102,7 +102,7 @@ public class MapManagerCoverageTests
         var connection = new ScopeProbeConnection();
         connection.SetGhostFrom(true);
         connection.SetGhostTo(false);
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         connection.ObjectInScope(pathVeh.Ghost!);
 
         Assert.AreEqual(1, MapManager.Instance.ForcePathVehiclePoseDirty());

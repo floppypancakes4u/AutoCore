@@ -195,7 +195,6 @@ public static class MissionCollectProgress
                 conn.SendGamePacket(statePacket);
 
             MissionPersistence.Instance.OnQuestChanged(character, quest);
-            NpcInteractHandler.PushJournalMissionList(conn, character);
             TriggerManager.Instance.OnMissionStateChanged(
                 character.CurrentVehicle ?? (ClonedObjectBase)character);
         }

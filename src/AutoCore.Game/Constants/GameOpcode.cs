@@ -54,7 +54,7 @@ public enum GameOpcode : uint
     CreateBullet = 0x201F,
     DestroyObject = 0x2020,
     Broadcast = 0x2021,
-    Firing = 0x2022,
+    Firing = 0x2022, // leftover named packet; live fire is VehicleMoved 0x200A
     Damage = 0x2023,
     StoreOpen = 0x2024,
     StoreOpenResponse = 0x2025,

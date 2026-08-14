@@ -181,7 +181,7 @@ public class NpcCombatAiTests
         npc.Rotation = new Quaternion(0f, 0f, 0f, 1f);
         EquipFrontWeapon(npc, rangeMax: 50f);
         npc.CreateGhost();
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         connection.ObjectLocalScopeAlways(npc.Ghost);
         var ghostInfo = npc.Ghost.GetFirstObjectRef();
         Assert.IsNotNull(ghostInfo);
@@ -215,7 +215,7 @@ public class NpcCombatAiTests
         npc.Rotation = new Quaternion(0f, 0f, 0f, 1f);
         EquipFrontWeapon(npc, rangeMax: 10f);
         npc.CreateGhost();
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         connection.ObjectLocalScopeAlways(npc.Ghost);
         var ghostInfo = npc.Ghost.GetFirstObjectRef();
         Assert.IsNotNull(ghostInfo);
@@ -419,7 +419,7 @@ public class NpcCombatAiTests
 
         var npc = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: 3, visionRange: 60f);
         npc.CreateGhost();
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         connection.ObjectLocalScopeAlways(npc.Ghost);
         var ghostInfo = npc.Ghost.GetFirstObjectRef();
         Assert.IsNotNull(ghostInfo);
@@ -476,7 +476,7 @@ public class NpcCombatAiTests
         var npc = PlaceNpcVehicle(map, new Vector3(0f, 0f, 0f), driverFaction: 3, visionRange: 60f);
         var driver = (Creature)npc.Owner;
         npc.CreateGhost();
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         connection.ObjectLocalScopeAlways(npc.Ghost);
         var ghostInfo = npc.Ghost.GetFirstObjectRef();
         Assert.IsNotNull(ghostInfo, "expected the NPC vehicle ghost to be scoped");

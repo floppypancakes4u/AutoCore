@@ -18,6 +18,25 @@ using AutoCore.Game.Diagnostics;
 [TestClass]
 public class DiagEnvOverridePrecedenceTests
 {
+    /// <summary>
+    /// TNL's ghosting handshake fails silently — a ready RPC for a stale sequence is dropped with
+    /// no trace and the client waits on a loading screen forever. The trace sink must be attached
+    /// as part of normal startup, not left to an operator flag.
+    /// </summary>
+    [TestMethod]
+    public void ApplyEnvironmentDiagOverrides_AttachesGhostingHandshakeTrace()
+    {
+        global::TNL.Entities.GhostConnection.GhostingDiagnostics = null;
+
+        WireIsolationLevers.ApplyEnvironmentDiagOverrides();
+
+        Assert.IsNotNull(global::TNL.Entities.GhostConnection.GhostingDiagnostics,
+            "the ghosting handshake trace must be wired up at startup");
+
+        // Total, like every other logging path: a diagnostic must not be able to break ghosting.
+        global::TNL.Entities.GhostConnection.GhostingDiagnostics("probe");
+    }
+
     private string _previousWire;
     private string _previousGhost;
 

@@ -74,7 +74,7 @@ public class NpcVehicleSafetyTests
 
         // Establish a real GhostInfo ref so SetMaskBits has somewhere to deliver to
         // (mirrors TNLConnection.EnsureGhostsAndScopeAfterMapTransfer).
-        connection.ActivateGhosting();
+        connection.BeginGhostingForTests();
         connection.ObjectLocalScopeAlways(vehicle.Ghost);
 
         var ghostInfo = vehicle.Ghost.GetFirstObjectRef();
@@ -160,7 +160,7 @@ public class NpcVehicleSafetyTests
             vehicle.CoidCurrentPath = 42;
             vehicle.NpcAi = new NpcAiState { CombatState = HBAICombatState.IdlePatrol };
             vehicle.CreateGhost();
-            connection.ActivateGhosting();
+            connection.BeginGhostingForTests();
             connection.ObjectLocalScopeAlways(vehicle.Ghost);
 
             var ghostInfo = vehicle.Ghost.GetFirstObjectRef();
@@ -195,7 +195,7 @@ public class NpcVehicleSafetyTests
             vehicle.CoidCurrentPath = 42;
             vehicle.NpcAi = new NpcAiState { CombatState = HBAICombatState.Engage };
             vehicle.CreateGhost();
-            connection.ActivateGhosting();
+            connection.BeginGhostingForTests();
             connection.ObjectLocalScopeAlways(vehicle.Ghost);
 
             var ghostInfo = vehicle.Ghost.GetFirstObjectRef();

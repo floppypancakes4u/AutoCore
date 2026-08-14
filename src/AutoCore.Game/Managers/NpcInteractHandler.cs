@@ -7,7 +7,6 @@ using AutoCore.Game.Inventory;
 using AutoCore.Game.Map;
 using AutoCore.Game.Mission;
 using AutoCore.Game.Mission.Requirements;
-using AutoCore.Game.Packets.Global;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Structures;
 using AutoCore.Game.TNL;
@@ -31,7 +30,7 @@ public static class NpcInteractHandler
     private const float MaxMissionInteractGrace = 150f;
 
     /// <summary>
-    /// Delay before journal + OnMissionStateChanged after dialog deliver turn-in.
+    /// Delay before OnMissionStateChanged after dialog deliver turn-in.
     /// Gives the client time to finish local CompleteObjective / dialog teardown / MSXML UI
     /// loads (and interact FX for new core offers) before we push more mission packets
     /// (mitigates AV @ 0x007B6DB0). Set to 0 in unit tests for synchronous follow-up.
@@ -136,7 +135,7 @@ public static class NpcInteractHandler
     }
 
     /// <summary>
-    /// After dialog deliver: wait briefly, then journal resync + mission-state trigger re-eval.
+    /// After dialog deliver: wait briefly, then run mission-state trigger re-evaluation.
     /// Server state (quest removed / completed) is already applied before this is scheduled.
     /// </summary>
     private static void ScheduleDialogTurnInFollowup(
@@ -194,7 +193,6 @@ public static class NpcInteractHandler
                             objectiveId);
                     }
 
-                    PushJournalMissionList(conn, character);
                     var phaseActivator = character.CurrentVehicle ?? (ClonedObjectBase)character;
                     TriggerManager.Instance.OnMissionStateChanged(phaseActivator);
                     // Keep pad form / suppress original giver after turn-in (personal presence).
@@ -967,8 +965,8 @@ public static class NpcInteractHandler
             || IsActiveObjectiveIdForDeliver(character, resolvedOfferMissionId, npcCbid))
             return;
 
-        // Already active: resync journal/objective so the client shows "accepted" even when
-        // create-packet restore or a prior grant left UI empty, then re-eval map triggers.
+        // Already active: resync ObjectiveState so the client requirement UI matches server
+        // authority, then re-evaluate map triggers.
         var activeQuest = character.CurrentQuests.FirstOrDefault(q => q.MissionId == resolvedOfferMissionId);
         if (activeQuest != null)
         {
@@ -1037,7 +1035,7 @@ public static class NpcInteractHandler
         return byObjective?.Id ?? packetMissionId;
     }
 
-    /// <summary>Push journal + active objective state for a quest the server already tracks.</summary>
+    /// <summary>Push active objective state for a quest the server already tracks.</summary>
     internal static void ResyncActiveMissionToClient(TNLConnection conn, Character character, CharacterQuest quest)
     {
         if (conn == null || character == null || quest == null)
@@ -1051,7 +1049,6 @@ public static class NpcInteractHandler
                 conn.SendGamePacket(resyncState);
         }
 
-        PushJournalMissionList(conn, character);
     }
 
     private static List<int> ResolveDialogResponseMissions(Character character, int packetMissionId, int npcCbid)
@@ -1420,7 +1417,7 @@ public static class NpcInteractHandler
         character.CurrentQuests.Add(quest);
         MissionPersistence.Instance.OnQuestChanged(character, quest);
 
-        // Mission cargo (deliver/useitem GiveAtStart) before journal resync so the client has
+        // Mission cargo (deliver/useitem GiveAtStart) before ObjectiveState so the client has
         // CreateSimpleObject packets for quest items before UI binds mission inventory.
         MissionCargoService.EnsureAndSend(character, quest);
 
@@ -1444,7 +1441,7 @@ public static class NpcInteractHandler
 
     /// <summary>
     /// Force-complete an active mission: drop from CurrentQuests, record completed, persist,
-    /// and push CompleteDynamicObjective + journal to the client. Used by /completeMission.
+    /// and push CompleteDynamicObjective to the client. Used by /completeMission.
     /// </summary>
     internal static void ForceCompleteMission(TNLConnection conn, Character character, int missionId)
     {
@@ -1469,7 +1466,6 @@ public static class NpcInteractHandler
                 MissionId = missionId,
                 ObjectiveId = objectiveId,
             });
-            PushJournalMissionList(conn, character);
         }
 
         Logger.WriteLog(LogType.Debug,
@@ -1483,8 +1479,8 @@ public static class NpcInteractHandler
 
     /// <summary>
     /// Seed completed-mission ids for harness / GM prereq setup. Removes any active row for
-    /// those ids, stamps <see cref="Character.CompletedMissionIds"/> + persistence, syncs the
-    /// client journal — <b>no</b> complete rewards. Returns newly seeded ids (already-complete
+    /// those ids, stamps <see cref="Character.CompletedMissionIds"/> + persistence, and completes
+    /// an active client objective through 0x2070 — <b>no</b> server rewards. Returns newly seeded ids (already-complete
     /// ids are skipped).
     /// </summary>
     internal static List<int> MarkMissionsCompletedForSeed(
@@ -1508,6 +1504,16 @@ public static class NpcInteractHandler
             var active = character.CurrentQuests.FirstOrDefault(q => q.MissionId == missionId);
             if (active != null)
             {
+                var activeObjective = GetActiveObjective(active);
+                if (conn != null && activeObjective != null)
+                {
+                    conn.SendGamePacket(new CompleteDynamicObjectivePacket
+                    {
+                        MissionId = missionId,
+                        ObjectiveId = activeObjective.ObjectiveId,
+                    });
+                }
+
                 character.CurrentQuests.Remove(active);
                 MissionPersistence.Instance.OnMissionRemoved(character.ObjectId.Coid, missionId);
             }
@@ -1517,9 +1523,6 @@ public static class NpcInteractHandler
             seeded.Add(missionId);
             changed = true;
         }
-
-        if (changed && conn != null)
-            PushJournalMissionList(conn, character);
 
         if (changed)
         {
@@ -1553,7 +1556,7 @@ public static class NpcInteractHandler
 
     /// <summary>
     /// Fail or abandon an active mission: remove from CurrentQuests, delete active DB row
-    /// (not completed), strip mission cargo, send S2C FailMission (0x20B2) + journal.
+    /// (not completed), strip mission cargo, and send S2C FailMission (0x20B2).
     /// Shared by C2S abandon and ReactionType.FailMission.
     /// </summary>
     internal static void FailMission(TNLConnection conn, Character character, int missionId)
@@ -1584,7 +1587,6 @@ public static class NpcInteractHandler
                 CharacterCoid = character.ObjectId.Coid,
                 MissionId = missionId,
             });
-            PushJournalMissionList(conn, character);
         }
 
         Logger.WriteLog(LogType.Debug,
@@ -2046,8 +2048,8 @@ public static class NpcInteractHandler
         var hasLaterObjectives = mission.Objectives.Values.Any(o => o.Sequence > seq);
 
         // Shared advance/complete path. Dialog turn-in must not send immediate 0x2070
-        // (client already ran CVOGReaction_CompleteObjective); stacking 0x2070 / journal /
-        // GroupReactionCall during that window → AV @ 0x007B6DB0. Soft-pedal defers journal +
+        // (client already ran CVOGReaction_CompleteObjective); stacking 0x2070 /
+        // GroupReactionCall during that window → AV @ 0x007B6DB0. Soft-pedal defers
         // OnMissionStateChanged; multi-req final may force delayed 0x2070 after the window.
         AdvanceOrCompleteObjective(
             conn,
@@ -2382,7 +2384,7 @@ public static class NpcInteractHandler
 
     /// <summary>
     /// Client still AutoPatrols a pad from a finished objective sequence. Send 0x2070 for that
-    /// patrol objective + journal/active ObjectiveState so the client leaves the waypoint UI.
+    /// patrol objective + active ObjectiveState so the client leaves the waypoint UI.
     /// One-shot per mission per continent (client spam).
     /// </summary>
     private static bool TryResyncClientPastPatrol(
@@ -2624,8 +2626,8 @@ public static class NpcInteractHandler
             return true;
 
         // Mid-route: absolute pad count only (client GetTarget casts slot float to int).
-        // Do not PushJournal here — CharacterQuest.Write uses 0..1 ratios which would
-        // overwrite absolute pad indices and freeze the tracker on pad 0.
+        // ObjectiveState must retain absolute pad indices; ratio-shaped state would freeze
+        // the tracker on pad 0.
         var padState = ObjectiveStateBuilder.BuildPatrolPadCount(
             objective,
             patrol,
@@ -2761,7 +2763,7 @@ public static class NpcInteractHandler
     /// so the client force-completes and retargets UI. Dialog deliver must pass
     /// <paramref name="sendCompleteDynamicObjective"/> = false — the client already completed
     /// locally — and usually <paramref name="syncClientImmediately"/> = false so soft-pedal
-    /// can defer journal / phase replay (see <see cref="TryCompleteDeliverFromDialog"/>).
+    /// can defer phase replay (see <see cref="TryCompleteDeliverFromDialog"/>).
     /// </summary>
     internal static void AdvanceOrCompleteObjective(
         TNLConnection conn,
@@ -2891,8 +2893,6 @@ public static class NpcInteractHandler
 
             if (syncClientImmediately)
             {
-                if (conn != null)
-                    PushJournalMissionList(conn, character);
                 var phaseActivator = character.CurrentVehicle ?? (ClonedObjectBase)character;
                 TriggerManager.Instance.OnMissionStateChanged(phaseActivator);
                 // Kill→deliver (or any advance): re-apply Create for new active deliver/kill targets
@@ -2935,8 +2935,6 @@ public static class NpcInteractHandler
 
         if (syncClientImmediately)
         {
-            if (conn != null)
-                PushJournalMissionList(conn, character);
             var completeActivator = character.CurrentVehicle ?? (ClonedObjectBase)character;
             TriggerManager.Instance.OnMissionStateChanged(completeActivator);
             // Post-complete pad form / giver suppress (personal presence).
@@ -3127,14 +3125,6 @@ public static class NpcInteractHandler
 
         var packet = CurrencySync.CreateAbsoluteCurrencyPacket(character, absoluteCredits);
         character.OwningConnection.SendGamePacket(packet);
-    }
-
-    internal static void PushJournalMissionList(TNLConnection conn, Character character)
-    {
-        conn.SendGamePacket(new ConvoyMissionsResponsePacket
-        {
-            CurrentQuests = character.CurrentQuests.ToList()
-        });
     }
 
     private static Creature FindNpcByCoid(Character character, SectorMap map, long coid)

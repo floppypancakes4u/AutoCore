@@ -217,9 +217,9 @@ public class MissionSiblingAndReconcileHeavyRegressionTests
         _fx.AutoPatrol(conn, P0);
         Assert.IsTrue(
             _fx.Sent.OfType<CompleteDynamicObjectivePacket>().Any(p => p.ObjectiveId == O0)
-            || _fx.Sent.OfType<ObjectiveStatePacket>().Any()
-            || _fx.Sent.OfType<ConvoyMissionsResponsePacket>().Any(),
+            || _fx.Sent.OfType<ObjectiveStatePacket>().Any(),
             "stale pad should force client resync path");
+        Assert.IsFalse(_fx.Sent.OfType<ConvoyMissionsResponsePacket>().Any());
     }
 
     [TestMethod]

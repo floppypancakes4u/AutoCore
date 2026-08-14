@@ -75,7 +75,7 @@ public class LiveAndDirectPatrolRegressionTests
         Assert.IsTrue(_sent.OfType<CompleteDynamicObjectivePacket>().Any(p =>
             p.MissionId == MissionId && p.ObjectiveId == Obj0));
         Assert.IsTrue(_sent.OfType<ObjectiveStatePacket>().Any(p => p.ObjectiveId == Obj1));
-        Assert.IsTrue(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
+        Assert.IsFalse(_sent.OfType<ConvoyMissionsResponsePacket>().Any());
     }
 
     [TestMethod]

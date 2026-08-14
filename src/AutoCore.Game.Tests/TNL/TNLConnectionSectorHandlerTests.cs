@@ -673,9 +673,14 @@ public class TNLConnectionSectorHandlerTests
         foreach (var op in new[]
                  {
                      GameOpcode.GetFriends, GameOpcode.GetEnemies, GameOpcode.GetIgnored,
+                     GameOpcode.AddFriend, GameOpcode.AddEnemy, GameOpcode.AddIgnore,
+                     GameOpcode.RemoveFriend, GameOpcode.RemoveEnemy, GameOpcode.RemoveIgnore,
+                     GameOpcode.RequestClanInfo,
                  })
         {
             InvokeHandlePacket(client, (uint)op, Array.Empty<byte>());
+            InvokeHandlePacket(client, (uint)op, new byte[1]);
+            InvokeHandlePacket(client, (uint)op, new byte[0x40]);
         }
     }
 

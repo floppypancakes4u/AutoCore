@@ -607,7 +607,7 @@ public sealed class ChatCommandService
 
     /// <summary>
     /// Abandon an active mission by id (FailMission path) and/or erase it from completed.
-    /// Full wipe for that mission id: active + completed memory and DB rows, client journal sync.
+    /// Full wipe for that mission id: active + completed memory and DB rows.
     /// Usage: <c>/removeMission &lt;id&gt;</c>
     /// </summary>
     private static ChatCommandExecutionResult RemoveMission(Character character, string[] parts)
@@ -633,10 +633,6 @@ public sealed class ChatCommandService
         // Ensure active + completed DB rows are dropped even when only completed (FailMission no-ops).
         MissionPersistence.Instance.OnMissionRemoved(character.ObjectId.Coid, missionId);
 
-        // FailMission already pushed journal when active; completed-only still needs a resync.
-        if (!wasActive && character.OwningConnection != null)
-            NpcInteractHandler.PushJournalMissionList(character.OwningConnection, character);
-
         var partsDesc = (wasActive, wasCompleted) switch
         {
             (true, true) => "active + completed",
@@ -653,12 +649,13 @@ public sealed class ChatCommandService
 
         return new ChatCommandExecutionResult(
             true,
-            $"Removed mission {missionId} ({partsDesc}; memory + DB). Client journal updated.{relogWarning}");
+            $"Removed mission {missionId} ({partsDesc}; memory + DB).{relogWarning}");
     }
 
     /// <summary>
-    /// Force-grant a mission by id onto this character's active list and push journal/objective
-    /// state to the client. Uses the same path as NPC dialog acceptance.
+    /// Force-grant a mission by id onto this character's active list. ObjectiveState can resync
+    /// an existing client objective, but retail has no generic live-add packet for an arbitrary
+    /// GM grant; a new grant therefore becomes visible through the next create snapshot.
     /// </summary>
     private static ChatCommandExecutionResult GiveMission(Character character, string[] parts)
     {
@@ -678,12 +675,12 @@ public sealed class ChatCommandService
             true,
             alreadyActive
                 ? $"Mission {missionId} already active; resent to client."
-                : $"Granted mission {missionId} (active + client sync).");
+                : $"Granted mission {missionId} (active + persisted); relog to load it into the client journal.");
     }
 
     /// <summary>
-    /// Force-complete an active mission by id: move to completed, persist, and push client
-    /// complete + journal packets.
+    /// Force-complete an active mission by id: move to completed, persist, and push the client
+    /// CompleteDynamicObjective packet.
     /// </summary>
     private static ChatCommandExecutionResult CompleteMission(Character character, string[] parts)
     {

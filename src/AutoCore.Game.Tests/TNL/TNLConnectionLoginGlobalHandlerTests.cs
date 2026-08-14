@@ -7,6 +7,7 @@ using AutoCore.Game.Managers;
 using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Global;
 using AutoCore.Game.Packets.Login;
+using AutoCore.Game.Structures;
 using AutoCore.Game.TNL;
 using AutoCore.Utils.Extensions;
 using Microsoft.EntityFrameworkCore;
@@ -169,12 +170,16 @@ public class TNLConnectionLoginGlobalHandlerTests
         var client = CreateClient();
         var character = new AutoCore.Game.Entities.Character();
         character.SetCoid(9001, true);
+        character.CurrentQuests.Add(new CharacterQuest(1001));
+        character.CurrentQuests.Add(new CharacterQuest(874));
         client.CurrentCharacter = character;
 
         InvokeHandler(client, "HandleConvoyMissionsRequest", new byte[] { 0x01, 0x02 });
 
         var response = _sent.OfType<ConvoyMissionsResponsePacket>().Single();
-        Assert.IsNotNull(response.CurrentQuests);
+        Assert.IsNotNull(response.MissionIds);
+        CollectionAssert.AreEqual(new[] { 1001, 874 }, response.MissionIds);
+        Assert.AreEqual(9001L, response.CoidMember);
     }
 
     [TestMethod]
