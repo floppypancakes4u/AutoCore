@@ -1,6 +1,7 @@
 ﻿namespace AutoCore.Game.Managers;
 
 using AutoCore.Game.Entities;
+using AutoCore.Game.EntityTemplates;
 using AutoCore.Game.Structures;
 using AutoCore.Utils;
 using AutoCore.Utils.Memory;
@@ -376,12 +377,17 @@ public class TriggerManager : Singleton<TriggerManager>
             CheckTriggersFor(activator);
 
         FireMissionConditionTriggers(activator);
+        // Shared with world-entry: journal-true graphics/gates apply remotely;
+        // collision SpawnPoint Creates and Activate cascades wait for the volume.
+        ReplayPersistedMissionWorldReactions(activator);
     }
 
     /// <summary>
-    /// Fire latched condition-passing triggers for mission state (types 9/10/11/12), including
-    /// collision+conditional gate openers outside volume. Used by OnMissionStateChanged and
-    /// login/world-phase replay so Create+Delete reaction lists run once per actor.
+    /// Fire condition-passing triggers for mission state (types 9/10/11/12).
+    /// Collision-authored triggers only fire here when the activator is already inside
+    /// the volume (retail <c>DoCollisionTrigger</c> + <c>DoPhantomCollisions</c>).
+    /// Persistent graphics outside volume are applied by
+    /// <see cref="ReplayPersistedMissionWorldReactions"/>, not by consuming FireCount.
     /// </summary>
     public void FireMissionConditionTriggers(ClonedObjectBase activator)
         => ReevaluateConditionalTriggers(activator, watchVarId: null);
@@ -485,9 +491,10 @@ public class TriggerManager : Singleton<TriggerManager>
         var character = activator.GetAsCharacter() ?? activator.GetSuperCharacter(false);
         var actorCoid = character?.ObjectId.Coid ?? activator.ObjectId.Coid;
 
-        // Mission re-eval (watchVarId null): also open collision+conditional *gate* triggers
-        // (Create/Delete/Death) outside volume — Biomek Dunlap type-9 complete, Human door
-        // type-11 accept. Pure Activate cascade volumes (Gunny initiate) stay movement-only.
+        // Mission re-eval (watchVarId null):
+        //   collision + in volume  → full FireTriggerReactions (retail phantom overlap)
+        //   collision + out of volume → skip here; persist replay applies graphics only
+        //   non-collision scale<=2 → full fire (condition-only watchers)
         // Variable-watch path stays remote-only so large volumes are not mass-fired.
         var missionStateReeval = !watchVarId.HasValue;
 
@@ -513,19 +520,14 @@ public class TriggerManager : Singleton<TriggerManager>
             {
                 if (trigger.Template.DoCollision)
                 {
-                    // SS-51: on world entry a collision gate must actually contain the player.
-                    // Without this, entering a map fires every condition-passing gate on the
-                    // continent (live: map 661 opened 68 of them for a fresh character standing
-                    // at the spawn pad). Out-of-volume opening stays available for genuine
-                    // mid-play state changes below (dialog turn-in gates etc.).
-                    if (_entryScopedReeval)
+                    // Retail CVOGTrigger::DoCollisionTrigger requires an actual overlap.
+                    // Out-of-volume mission changes must not consume FireCount or spawn
+                    // encounters. Persistent graphics are restored separately.
+                    if (activator.Position.DistSq(trigger.Position) > trigger.Scale * trigger.Scale)
                     {
-                        if (activator.Position.DistSq(trigger.Position) > trigger.Scale * trigger.Scale)
-                            continue;
-                    }
-                    // Outside-volume mission fire only for gate openers (Create/Delete/Death).
-                    else if (!HasWorldMutatingGateReactions(map, trigger))
+                        LogDeferredCollisionEncounter(map, trigger, character);
                         continue;
+                    }
                 }
                 else if (trigger.Scale > 2.0f)
                 {
@@ -576,11 +578,37 @@ public class TriggerManager : Singleton<TriggerManager>
     }
 
     /// <summary>
-    /// True when the trigger's reaction list includes Create/Delete/Death (map gate openers).
-    /// Pure Activate cascade volumes (e.g. Gunny initiate → rem initiator) are excluded so
-    /// mission re-eval does not start combat from outside the initiate sphere.
+    /// Debug-only: a collision encounter was eligible by journal but is waiting for volume.
+    /// Graphics-only gates are silent here — persist replay applies them.
     /// </summary>
-    private static bool HasWorldMutatingGateReactions(Map.SectorMap map, Trigger trigger)
+    private static void LogDeferredCollisionEncounter(
+        Map.SectorMap map, Trigger trigger, Character character)
+    {
+        if (map == null || trigger?.Template?.Reactions == null)
+            return;
+
+        if (!HasCollisionEncounterSideEffects(map, trigger))
+            return;
+
+        Logger.WriteLog(LogType.Debug,
+            "TriggerManager: defer collision encounter map={0} trigger={1} reactions={2} reason=awaiting-volume {3}",
+            map.ContinentId,
+            trigger.ObjectId.Coid,
+            trigger.Template.Reactions.Count,
+            character != null ? MissionFlowDiag.QuestSummary(character) : "mission=-");
+        MissionFlowDiag.Log(
+            "DEFER-VOLUME trigger={0} name='{1}' map={2} reactions={3} reason=awaiting-volume",
+            trigger.ObjectId.Coid,
+            trigger.Template.Name ?? string.Empty,
+            map.ContinentId,
+            trigger.Template.Reactions.Count);
+    }
+
+    /// <summary>
+    /// True when firing the trigger would spawn or wake an encounter (SpawnPoint Create
+    /// or Activate cascade). Persistent graphics Create/Delete/Death are not encounters.
+    /// </summary>
+    private static bool HasCollisionEncounterSideEffects(Map.SectorMap map, Trigger trigger)
     {
         if (map == null || trigger?.Template?.Reactions == null)
             return false;
@@ -590,16 +618,198 @@ public class TriggerManager : Singleton<TriggerManager>
             if (map.GetObjectByCoid(coid) is not Reaction reaction)
                 continue;
 
-            switch (reaction.Template.ReactionType)
+            var type = reaction.Template.ReactionType;
+            if (type == ReactionType.Activate || type == ReactionType.Deactivate)
+                return true;
+
+            if (type != ReactionType.Create)
+                continue;
+
+            if (reaction.Template.Objects == null)
+                continue;
+
+            foreach (var targetCoid in reaction.Template.Objects)
             {
-                case ReactionType.Create:
-                case ReactionType.Delete:
-                case ReactionType.Death:
+                var live = map.GetObjectByCoid(targetCoid);
+                map.MapData.Templates.TryGetValue(targetCoid, out var template);
+                if (live is SpawnPoint || template is SpawnPointTemplate)
                     return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Replay only deterministic FAM graphics/gate reactions whose condition is already
+    /// true from persisted journal state (type 9/10/11/12). Used on world-entry flush so
+    /// closed doors / mission barriers restore without re-entering the original volume.
+    /// Does not fire Activate cascades or Create targeting SpawnPoints (ambushes).
+    /// </summary>
+    internal int ReplayPersistedMissionWorldReactions(ClonedObjectBase activator)
+    {
+        var map = activator?.Map;
+        if (map == null)
+            return 0;
+
+        var character = activator.GetAsCharacter() ?? activator.GetSuperCharacter(false);
+        if (character == null)
+            return 0;
+
+        character.EnsureLogicVariables();
+        var actorCoid = character.ObjectId.Coid;
+        var fired = 0;
+
+        foreach (var kvp in map.Triggers.ToList())
+        {
+            var trigger = kvp.Value;
+            if (trigger?.Template == null || trigger.Template.Conditions.Count == 0)
+                continue;
+
+            if (trigger.Template.DoOnActivate && !trigger.Template.DoConditionals)
+                continue;
+
+            if (!trigger.Template.DoConditionals)
+                continue;
+
+            var key = (map.InstanceSerial, actorCoid, kvp.Key.Coid);
+            if (_firedConditionalTriggers.ContainsKey(key))
+                continue;
+
+            if (!HasPersistedMissionProgressCondition(map, trigger, character))
+                continue;
+
+            if (!trigger.ConditionsPass(activator))
+                continue;
+
+            var safe = CollectPersistedGateReactions(map, trigger, activator, character);
+            if (safe.Count == 0)
+                continue;
+
+            _firedConditionalTriggers[key] = true;
+            MissionFlowDiag.Log(
+                "PERSIST-GATE FIRE trigger={0} name='{1}' actor={2} reactions=[{3}]",
+                kvp.Key.Coid,
+                trigger.Template.Name ?? string.Empty,
+                actorCoid,
+                string.Join(',', safe));
+            map.TriggerReactions(activator, safe);
+            fired += safe.Count;
+        }
+
+        return fired;
+    }
+
+    /// <summary>
+    /// True when the trigger has a type 9/10/11/12 condition that is already true from
+    /// the character's persisted journal (completed / active mission or objective).
+    /// Default-true type-0 latches and "has NOT completed" comparisons are excluded so
+    /// SS-51 still blocks the map-661 mass-open storm.
+    /// </summary>
+    private static bool HasPersistedMissionProgressCondition(
+        Map.SectorMap map, Trigger trigger, Character character)
+    {
+        var store = character.EnsureLogicVariables();
+        if (store == null)
+            return false;
+
+        foreach (var condition in trigger.Template.Conditions)
+        {
+            if (!map.MapData.Variables.TryGetValue(condition.LeftId, out var def) || def == null)
+                continue;
+
+            if (def.Type != LogicVariableStore.TypeHasCompletedMission
+                && def.Type != LogicVariableStore.TypeHasCompletedObjective
+                && def.Type != LogicVariableStore.TypeHasActiveMission
+                && def.Type != LogicVariableStore.TypeHasActiveObjective)
+            {
+                continue;
+            }
+
+            if (store.Get(condition.LeftId) == 1.0f)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Create/Delete/Death reactions whose targets are FAM graphics (or missing client-only
+    /// statics). SpawnPoint Creates are ambushes — never selected here.
+    /// </summary>
+    private static List<long> CollectPersistedGateReactions(
+        Map.SectorMap map,
+        Trigger trigger,
+        ClonedObjectBase activator,
+        Character character)
+    {
+        var selected = new List<long>();
+        var encounter = HasCollisionEncounterSideEffects(map, trigger);
+        foreach (var rxCoid in trigger.Template.Reactions)
+        {
+            if (map.GetObjectByCoid(rxCoid) is not Reaction reaction)
+                continue;
+
+            var type = reaction.Template.ReactionType;
+            if (type is not (ReactionType.Create or ReactionType.Delete or ReactionType.Death))
+                continue;
+
+            // Mixed ambush graphs (Wastes 18585) Create encounter FX next to SpawnPoint
+            // Creates. Those Creates wait for the volume; only Delete/Death restore gates.
+            if (type == ReactionType.Create && encounter)
+                continue;
+
+            if (!ReactionTargetsPersistentGraphics(map, reaction, activator, character, type))
+                continue;
+
+            selected.Add(rxCoid);
+        }
+
+        return selected;
+    }
+
+    private static bool ReactionTargetsPersistentGraphics(
+        Map.SectorMap map,
+        Reaction reaction,
+        ClonedObjectBase activator,
+        Character character,
+        ReactionType type)
+    {
+        if (reaction.Template.Objects == null || reaction.Template.Objects.Count == 0)
+            return false;
+
+        var anyGraphics = false;
+        foreach (var targetCoid in reaction.Template.Objects)
+        {
+            var live = map.GetObjectByCoid(targetCoid);
+            map.MapData.Templates.TryGetValue(targetCoid, out var template);
+
+            if (live is SpawnPoint || template is SpawnPointTemplate)
+                return false;
+
+            if (live is Trigger || template is TriggerTemplate)
+                continue;
+
+            if (live is GraphicsObject || template is GraphicsObjectTemplate)
+            {
+                anyGraphics = true;
+                continue;
+            }
+
+            if (live == null && template == null)
+            {
+                MissionWorldStateLog.WarnMissingTarget(
+                    character,
+                    map.ContinentId,
+                    targetCoid,
+                    type.ToString(),
+                    $"reaction={reaction.Template.COID} trigger-persist");
+                if (type is ReactionType.Delete or ReactionType.Death)
+                    anyGraphics = true;
+            }
+        }
+
+        return anyGraphics;
     }
 
     private static void LogPlayerTrigger(ClonedObjectBase activator, Trigger trigger)

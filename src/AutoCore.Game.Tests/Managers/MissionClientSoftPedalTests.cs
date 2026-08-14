@@ -114,7 +114,7 @@ public class MissionClientSoftPedalTests
 
     /// <summary>
     /// Biomek Dunlap-class: type-9 complete during soft-pedal must still deliver gate Delete
-    /// 0x206C after the window (not drop ActivationCount one-shot forever).
+    /// 0x206C after the window. Persist replay applies the graphics without consuming FireCount.
     /// </summary>
     [TestMethod]
     public void MissionGateOpen_DuringSoftPedal_FlushesCreateDeleteToClient()
@@ -196,7 +196,8 @@ public class MissionClientSoftPedalTests
 
         Assert.IsTrue(_sent.OfType<GroupReactionCallPacket>().Any(),
             "Client must receive gate Delete after soft-pedal flush");
-        Assert.AreEqual(1, trigger.FireCount, "One-shot ActivationCount must not need a second fire");
+        Assert.AreEqual(0, trigger.FireCount,
+            "Persist-replay graphics must not consume collision FireCount / ActivationCount");
 
         AssetManager.Instance.ClearTestMissions();
         TriggerManager.Instance.ClearAllForTests();

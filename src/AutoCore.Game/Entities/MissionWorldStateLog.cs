@@ -63,6 +63,20 @@ internal static class MissionWorldStateLog
             diagnostic ?? "(none)");
     }
 
+    public static void WarnUnsupportedPersistentReaction(
+        Character character,
+        int mapId,
+        long triggerCoid,
+        string triggerName)
+    {
+        Logger.WriteLog(LogType.Warning,
+            "MissionWorldState unsupported persistent reaction map={0} triggerCoid={1} name='{2}' action=PersistReplay {3}",
+            mapId,
+            triggerCoid,
+            triggerName ?? string.Empty,
+            DescribeQuest(character));
+    }
+
     public static void WarnUnsupportedAction(
         Reaction reaction,
         ClonedObjectBase activator,

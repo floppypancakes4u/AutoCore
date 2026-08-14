@@ -637,6 +637,9 @@ public class SectorMap
         // (OnMissionStateChanged + this) does not double-fire. Callers that only need a deliver
         // NPC (AutoPatrol) should use EnsureDeliverTurnInNpc instead.
         TriggerManager.Instance.FireMissionConditionTriggers(activator);
+        // Persisted journal → FAM graphics/gates (Create/Delete/Death only). Does not
+        // fake TriggerEnter and does not replay volume-only ambush Creates.
+        fired += TriggerManager.Instance.ReplayPersistedMissionWorldReactions(activator);
 
         // 2) Deliver-CBID pad/turn-in NPCs (active alternate-form + active deliver only).
         foreach (var deliverCbid in deliverCbids)

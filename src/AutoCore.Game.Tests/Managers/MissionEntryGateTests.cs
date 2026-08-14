@@ -91,10 +91,10 @@ public class MissionEntryGateTests
         // The 661 storm in miniature: a large collision gate whose conditions pass for a fresh
         // character standing far away must NOT fire just because they entered the map.
         var (character, vehicle, map) = CreatePlayer();
-        SeedMissionVars(map);
-        PlaceConditionalTrigger(map, VolumeTriggerCoid, scale: 25f, reactionCoid: DeleteReactionCoid);
+        SeedAlwaysTrueLatch(map);
+        PlaceConditionalTrigger(map, VolumeTriggerCoid, scale: 25f, reactionCoid: DeleteReactionCoid,
+            leftVar: VarConstOne, rightVar: VarConstOne);
         PlaceDeletableObject(map, GateObjectCoid);
-        GiveActiveQuest(character);
         vehicle.Position = new Vector3(500, 0, 500);
         character.Position = vehicle.Position;
 
@@ -202,10 +202,10 @@ public class MissionEntryGateTests
     {
         // The live 661 shape: quest-holding character enters, gate volume is far away.
         var (character, vehicle, map) = CreatePlayer();
-        SeedMissionVars(map);
-        PlaceConditionalTrigger(map, VolumeTriggerCoid, scale: 25f, reactionCoid: DeleteReactionCoid);
+        SeedAlwaysTrueLatch(map);
+        PlaceConditionalTrigger(map, VolumeTriggerCoid, scale: 25f, reactionCoid: DeleteReactionCoid,
+            leftVar: VarConstOne, rightVar: VarConstOne);
         PlaceDeletableObject(map, GateObjectCoid);
-        GiveActiveQuest(character);
         vehicle.Position = new Vector3(500, 0, 500);
         character.Position = vehicle.Position;
 
@@ -248,11 +248,23 @@ public class MissionEntryGateTests
             VarConstOne, LogicVariableStore.TypeConstant, 1f, 1f, "one");
     }
 
+    /// <summary>
+    /// Type-0 == type-0 is true for every player. Pins the SS-51 continent-wide storm
+    /// without overlapping Pass 21 persisted journal-gate restore.
+    /// </summary>
+    private static void SeedAlwaysTrueLatch(SectorMap map)
+    {
+        map.MapData.Variables[VarConstOne] = Variable.CreateForTests(
+            VarConstOne, LogicVariableStore.TypeConstant, 1f, 1f, "one");
+    }
+
     private static void PlaceConditionalTrigger(
         SectorMap map,
         long triggerCoid,
         float scale,
-        long reactionCoid)
+        long reactionCoid,
+        int leftVar = VarActiveMission,
+        int rightVar = VarConstOne)
     {
         PlaceDeleteReaction(map, reactionCoid, GateObjectCoid);
 
@@ -269,8 +281,8 @@ public class MissionEntryGateTests
         tpl.Reactions.Add(reactionCoid);
         tpl.Conditions.Add(new TriggerConditional
         {
-            LeftId = VarActiveMission,
-            RightId = VarConstOne,
+            LeftId = leftVar,
+            RightId = rightVar,
             Type = ConditionalType.EqualTo,
         });
 
