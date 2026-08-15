@@ -208,7 +208,10 @@ public abstract class ClonedObjectBase
 
         // High-fidelity /reportbug: damage involving a player (as victim or attacker).
         if (actual > 0)
+        {
+            Combat.AbsoluteHealthSync.Send(this, attacker);
             Diagnostics.PlayerCombatTrace.OnDamage(this, attacker, actual);
+        }
 
         return actual;
     }

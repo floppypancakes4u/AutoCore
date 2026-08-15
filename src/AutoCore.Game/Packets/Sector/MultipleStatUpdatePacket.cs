@@ -93,6 +93,19 @@ public class MultipleStatUpdatePacket : BasePacket
         return packet;
     }
 
+    /// <summary>
+    /// Absolute current HP (retail type 2 → FUN_0080B3A0 → vtbl+0x240 SetCurrentHP).
+    /// Target-frame bar/text read this field; 0x2023 only queues combat text.
+    /// </summary>
+    public static MultipleStatUpdatePacket ForObjectHealth(TFID objectId, int currentHealth)
+    {
+        var packet = new MultipleStatUpdatePacket();
+        packet.Objects.Add(new ObjectStats(
+            objectId,
+            new StatEntry(StatType.Health, currentHealth)));
+        return packet;
+    }
+
     public static MultipleStatUpdatePacket ForVehicleShieldAndMax(
         TFID vehicleId,
         int currentShield,

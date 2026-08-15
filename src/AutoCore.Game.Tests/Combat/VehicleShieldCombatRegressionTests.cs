@@ -136,11 +136,17 @@ public class VehicleShieldCombatRegressionTests
         Assert.AreEqual(400, level.Health);
         Assert.AreEqual(500, level.HealthMaximum);
 
-        var stat = sent.OfType<MultipleStatUpdatePacket>().Single();
-        Assert.AreEqual(1, stat.Objects.Count);
-        Assert.AreEqual(vehicle.ObjectId.Coid, stat.Objects[0].ObjectId.Coid);
-        Assert.AreEqual(MultipleStatUpdatePacket.StatType.Shield, stat.Objects[0].Stats[0].Type);
-        Assert.AreEqual(110f, stat.Objects[0].Stats[0].Value);
+        var shield = sent.OfType<MultipleStatUpdatePacket>()
+            .SelectMany(p => p.Objects)
+            .SelectMany(o => o.Stats)
+            .Single(s => s.Type == MultipleStatUpdatePacket.StatType.Shield);
+        Assert.AreEqual(110f, shield.Value);
+
+        var health = sent.OfType<MultipleStatUpdatePacket>()
+            .SelectMany(p => p.Objects)
+            .SelectMany(o => o.Stats)
+            .Single(s => s.Type == MultipleStatUpdatePacket.StatType.Health);
+        Assert.AreEqual(400f, health.Value);
 
         Assert.IsFalse(
             typeof(CharacterLevelPacket).GetProperties().Any(p => p.Name.Contains("Shield", System.StringComparison.OrdinalIgnoreCase)),
@@ -300,11 +306,19 @@ public class VehicleShieldCombatRegressionTests
         var (vehicle, _, sent) = MakeOwnedVehicleWithSink(
             maxHp: 100, hp: 100, maxShield: 0, shield: 0, coid: 91_070);
 
-        vehicle.TakeDamage(15);
+        vehicle.TakeDamage(15, attacker: null);
         Assert.AreEqual(85, vehicle.GetCurrentHP());
         Assert.AreEqual(0, vehicle.CurrentShield);
-        Assert.AreEqual(0, sent.OfType<MultipleStatUpdatePacket>().Count(),
-            "no shield change → no MultipleStatUpdate");
+        Assert.IsFalse(sent.OfType<MultipleStatUpdatePacket>()
+            .SelectMany(p => p.Objects)
+            .SelectMany(o => o.Stats)
+            .Any(s => s.Type == MultipleStatUpdatePacket.StatType.Shield),
+            "no shield change → no type=1");
+        var health = sent.OfType<MultipleStatUpdatePacket>()
+            .SelectMany(p => p.Objects)
+            .SelectMany(o => o.Stats)
+            .Single(s => s.Type == MultipleStatUpdatePacket.StatType.Health);
+        Assert.AreEqual(85f, health.Value);
     }
 
     [TestMethod]

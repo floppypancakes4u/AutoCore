@@ -212,12 +212,16 @@ public class VehicleShieldDamageTests
             Assert.AreEqual(400, level.Health, "owner HUD must re-assert absolute HP after shield absorb");
             Assert.AreEqual(500, level.HealthMaximum);
 
-            var stat = sent.OfType<MultipleStatUpdatePacket>().Single();
-            Assert.AreEqual(1, stat.Objects.Count);
-            Assert.AreEqual(90_010L, stat.Objects[0].ObjectId.Coid);
-            Assert.AreEqual(1, stat.Objects[0].Stats.Count);
-            Assert.AreEqual(MultipleStatUpdatePacket.StatType.Shield, stat.Objects[0].Stats[0].Type);
-            Assert.AreEqual(110f, stat.Objects[0].Stats[0].Value);
+            var stats = sent.OfType<MultipleStatUpdatePacket>()
+                .SelectMany(p => p.Objects)
+                .SelectMany(o => o.Stats.Select(s => (o.ObjectId, s)))
+                .ToList();
+            var shield = stats.Single(x => x.s.Type == MultipleStatUpdatePacket.StatType.Shield);
+            Assert.AreEqual(90_010L, shield.ObjectId.Coid);
+            Assert.AreEqual(110f, shield.s.Value);
+            var health = stats.Single(x => x.s.Type == MultipleStatUpdatePacket.StatType.Health);
+            Assert.AreEqual(90_010L, health.ObjectId.Coid);
+            Assert.AreEqual(400f, health.s.Value);
         }
         finally
         {

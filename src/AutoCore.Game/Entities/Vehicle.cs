@@ -268,10 +268,11 @@ public class Vehicle : SimpleObject
     /// </summary>
     /// <remarks>
     /// Retail client <c>FUN_004f62e0</c> also drains shield before HP when MaxShield &gt; 0.
-    /// <c>EMSG_Sector_Damage</c> (0x2023) can apply local HP prediction via
-    /// <c>FUN_00812A60</c>; after any hit we push absolute owner Health (CharacterLevel +
-    /// HealthMask) so shield-absorbed damage does not leave the HP bar stuck low, and we
-    /// re-dirty ShieldMax+Shield so the client race-item shield gauge tracks server state.
+    /// <c>EMSG_Sector_Damage</c> (0x2023) only queues combat text
+    /// (<c>Process_EMSG_Sector_Damage</c> @ 0x00812A60). After any hit we push absolute
+    /// Health via 0x2010 type=2 + CharacterLevel + HealthMask so the target frame and
+    /// owner HUD match server HP, and we re-dirty ShieldMax+Shield so the client
+    /// race-item shield gauge tracks server state.
     /// </remarks>
     public override int TakeDamage(int damage)
     {
@@ -301,11 +302,12 @@ public class Vehicle : SimpleObject
         }
 
         // Shield-only hits skip SimpleObject.TakeDamage (no CharacterLevel / HealthMask).
-        // Client DamagePacket prediction still lowers local HP — push absolute truth.
+        // 0x2023 does not apply HP; push absolute Health (0x2010 type=2) plus CharacterLevel.
         if (shieldAbsorb > 0 && hpDamage == 0)
         {
             DirtyHealthMasks(GhostObject.HealthMask);
             NotifyOwnerHealthHud();
+            AbsoluteHealthSync.Send(this, attacker: null);
         }
 
         if (shieldAbsorb > 0 || hpDamage > 0)
@@ -2532,7 +2534,7 @@ public class Vehicle : SimpleObject
                 roll,
                 hit);
             if (!hit)
-                return;
+                return; // miss: no 0x2023 floater and no 0x2010 Health — client shows neither
         }
 
         short[] resists = null;

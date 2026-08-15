@@ -43,6 +43,30 @@ public class MultipleStatUpdatePacketTests
     }
 
     [TestMethod]
+    public void ForObjectHealth_WireBytes_MatchClientFun0080B3A0_Type2()
+    {
+        var packet = MultipleStatUpdatePacket.ForObjectHealth(new TFID(18452, true), 77);
+
+        using var ms = new MemoryStream();
+        using (var w = new BinaryWriter(ms))
+            packet.Write(w);
+
+        var bytes = ms.ToArray();
+        Assert.AreEqual(2 + 16 + 1 + 12, bytes.Length);
+
+        using var br = new BinaryReader(new MemoryStream(bytes));
+        Assert.AreEqual(1, br.ReadUInt16(), "object count");
+        Assert.AreEqual(18452L, br.ReadInt64(), "coid");
+        Assert.AreEqual(1, br.ReadByte(), "global");
+        br.ReadBytes(7);
+        Assert.AreEqual(1, br.ReadByte(), "numStats");
+        Assert.AreEqual((byte)MultipleStatUpdatePacket.StatType.Health, br.ReadByte(), "type=health");
+        br.ReadBytes(7);
+        Assert.AreEqual(77f, br.ReadSingle(), "current HP as float");
+        Assert.AreEqual(bytes.Length, (int)br.BaseStream.Position, "no trailing junk");
+    }
+
+    [TestMethod]
     public void Write_EmptyObjects_WritesZeroCount()
     {
         var packet = new MultipleStatUpdatePacket();
