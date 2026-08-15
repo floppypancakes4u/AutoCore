@@ -9,7 +9,9 @@ using AutoCore.Game.Managers;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Skills;
 using AutoCore.Game.Tests.Inventory.Fakes;
+using AutoCore.Game.TNL.Ghost;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using TNL.Entities;
 
 namespace AutoCore.Game.Tests.Skills;
 
@@ -178,6 +180,28 @@ public class CharacterAttributeServiceTests
         Assert.AreEqual(2, character.AttributeTheory);
         Assert.AreEqual(1, _persistCalls);
     }
+
+    [TestMethod]
+    public void TryIncrement_DirtiesGhostVehicleAttributeMask()
+    {
+        var (character, vehicle) = MakeCharacterWithVehicle(9, tech: 5, attributePoints: 1);
+        vehicle.CreateGhost();
+        vehicle.Ghost.ClearDirtyMaskBitsForTests();
+
+        Assert.IsTrue(CharacterAttributeService.Instance.TryIncrement(
+            character, CharacterAttributeKind.Combat.ToMask(), out _));
+
+        var dirty = GetDirtyMaskBits(vehicle.Ghost);
+        Assert.AreNotEqual(0UL, dirty & GhostVehicle.AttributeMask,
+            "observers must receive assigned-attribute ghost updates");
+    }
+
+    private static readonly FieldInfo DirtyMaskBitsField =
+        typeof(NetObject).GetField("_dirtyMaskBits", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("NetObject._dirtyMaskBits missing.");
+
+    private static ulong GetDirtyMaskBits(NetObject obj) =>
+        (ulong)DirtyMaskBitsField.GetValue(obj)!;
 
     private static Character MakeCharacter(long coid, short attributePoints = 0)
     {

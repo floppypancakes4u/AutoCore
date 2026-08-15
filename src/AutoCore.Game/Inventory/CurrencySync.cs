@@ -42,38 +42,16 @@ public static class CurrencySync
 
     /// <summary>
     /// Build the CharacterLevel absolute packet used by <c>/credits</c>, <c>/currency</c>, and login restore.
-    /// Includes full progress fields so the client apply path does not wipe XP/points.
+    /// Uses the canonical full snapshot so the client apply path does not wipe XP/points/assigned attrs/HP.
     /// </summary>
     public static CharacterLevelPacket CreateAbsoluteCurrencyPacket(Character character, long absoluteCredits)
     {
         if (character == null)
             throw new ArgumentNullException(nameof(character));
 
-        short currentMana = 100;
-        short maxMana = 100;
-        var coid = ResolveCharacterCoid(character);
-        if (coid > 0)
-        {
-            var mana = CharacterLevelManager.Instance.GetOrCreate(coid);
-            lock (mana)
-            {
-                currentMana = mana.CurrentMana;
-                maxMana = mana.MaxMana;
-            }
-        }
-
-        return new CharacterLevelPacket
-        {
-            CharacterId = character.ObjectId,
-            Level = character.Level,
-            Currency = absoluteCredits,
-            Experience = character.Experience,
-            SkillPoints = character.SkillPoints,
-            AttributePoints = character.AttributePoints,
-            ResearchPoints = character.ResearchPoints,
-            CurrentMana = currentMana,
-            MaxMana = maxMana
-        };
+        var packet = CharacterLevelManager.Instance.BuildPacket(character);
+        packet.Currency = absoluteCredits;
+        return packet;
     }
 
     /// <summary>

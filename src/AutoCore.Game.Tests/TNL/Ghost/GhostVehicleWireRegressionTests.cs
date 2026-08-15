@@ -1492,6 +1492,10 @@ public class GhostVehicleWireRegressionTests
     {
         var vehicle = CreateVehicleWithMap(20_062);
         var character = CreateTestCharacter(20_063);
+        character.SetAttributeCombat(7);
+        character.SetAttributePerception(5);
+        character.SetAttributeTech(9);
+        character.SetAttributeTheory(3);
         vehicle.SetOwner(character);
 
         // Owner block sent at initial → delta attribute gating is satisfied.
@@ -1502,8 +1506,67 @@ public class GhostVehicleWireRegressionTests
         for (var i = 0; i < 17; ++i)
             Assert.IsFalse(stream.ReadFlag());
         Assert.IsTrue(stream.ReadFlag(), "Attribute packs for character owner on delta");
-        for (var i = 0; i < 4; ++i)
-            stream.Read(out uint _);
+        stream.Read(out uint combat);
+        stream.Read(out uint perception);
+        stream.Read(out uint tech);
+        stream.Read(out uint theory);
+        Assert.AreEqual(7u, combat);
+        Assert.AreEqual(5u, perception);
+        Assert.AreEqual(9u, tech);
+        Assert.AreEqual(3u, theory);
+    }
+
+    [TestMethod]
+    public void PackInitial_AttributeMask_WritesOwnerAssignedAttributes()
+    {
+        var vehicle = CreateVehicleWithMap(20_066);
+        var character = CreateTestCharacter(20_067);
+        character.SetAttributeCombat(11);
+        character.SetAttributePerception(12);
+        character.SetAttributeTech(13);
+        character.SetAttributeTheory(14);
+        vehicle.SetOwner(character);
+
+        var stream = PackInitial(vehicle, GhostObject.InitialMask | GhostVehicle.AttributeMask);
+        SkipPackCommonAndMultipliers(stream);
+        Assert.IsFalse(stream.ReadFlag()); // path
+        Assert.IsFalse(stream.ReadFlag()); // template
+        Assert.IsFalse(stream.ReadFlag()); // spawn
+        stream.ReadInt(8);
+        Assert.IsFalse(stream.ReadFlag()); // trailer
+        Assert.IsTrue(stream.ReadFlag(), "owner");
+        stream.Read(out long _);
+        stream.ReadFlag();
+        stream.ReadInt(20);
+        Assert.IsTrue(stream.ReadFlag()); // is character
+        stream.ReadString(out string _);
+        stream.ReadString(out string _);
+        stream.Read(out byte _);
+        Assert.IsFalse(stream.ReadFlag()); // possess
+        stream.ReadString(out string _);
+        for (var i = 0; i < 8; ++i)
+            stream.ReadInt(16);
+
+        for (var i = 0; i < 7; ++i)
+            Assert.IsFalse(stream.ReadFlag()); // equipment skipped on initial
+        Assert.IsFalse(stream.ReadFlag()); // GM
+        Assert.IsFalse(stream.ReadFlag()); // Clan
+        Assert.IsFalse(stream.ReadFlag()); // Pet
+        Assert.IsFalse(stream.ReadFlag()); // Murderer
+        Assert.IsFalse(stream.ReadFlag()); // Health
+        Assert.IsFalse(stream.ReadFlag()); // HealthMax
+        Assert.IsFalse(stream.ReadFlag()); // State
+        Assert.IsFalse(stream.ReadFlag()); // Position
+        Assert.IsFalse(stream.ReadFlag()); // Target
+        Assert.IsTrue(stream.ReadFlag(), "Attribute packs on initial");
+        stream.Read(out uint combat);
+        stream.Read(out uint perception);
+        stream.Read(out uint tech);
+        stream.Read(out uint theory);
+        Assert.AreEqual(11u, combat);
+        Assert.AreEqual(12u, perception);
+        Assert.AreEqual(13u, tech);
+        Assert.AreEqual(14u, theory);
     }
 
     [TestMethod]

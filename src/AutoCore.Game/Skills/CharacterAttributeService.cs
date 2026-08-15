@@ -3,6 +3,7 @@ namespace AutoCore.Game.Skills;
 using AutoCore.Game.Constants;
 using AutoCore.Game.Entities;
 using AutoCore.Game.Experience;
+using AutoCore.Game.TNL.Ghost;
 
 /// <summary>
 /// Handles C2S <c>AttributeIncrement</c> (0x205A): spend one unspent attribute point.
@@ -55,6 +56,8 @@ public sealed class CharacterAttributeService
 
         character.SetAttributePoints((short)(character.AttributePoints - 1));
         Persist(character);
+
+        character.CurrentVehicle?.EnsureGhostMaskDelivery(GhostVehicle.AttributeMask);
 
         if (kind == CharacterAttributeKind.Tech)
             ApplyTechCombatSideEffects(character);

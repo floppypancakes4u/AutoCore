@@ -2987,6 +2987,21 @@ public static class NpcInteractHandler
             var xpAmount = Experience.ExperienceService.Instance.ComputeMissionXp(mission, objective);
             Experience.GiveXpResult xpResult = null;
 
+            // Apply skill/attrib pools before GiveXp so its single persist + CharacterLevel
+            // snapshot include the mission rewards (not the pre-reward pools).
+            var poolsChanged = false;
+            if (objective.SkillPoints != 0)
+            {
+                character.SetSkillPoints((short)Math.Min(short.MaxValue, character.SkillPoints + objective.SkillPoints));
+                poolsChanged = true;
+            }
+
+            if (objective.AttribPoints != 0)
+            {
+                character.SetAttributePoints((short)Math.Min(short.MaxValue, character.AttributePoints + objective.AttribPoints));
+                poolsChanged = true;
+            }
+
             if (xpAmount != 0)
             {
                 xpResult = Experience.ExperienceService.Instance.GiveXp(
@@ -3067,19 +3082,6 @@ public static class NpcInteractHandler
                         creditAmount,
                         creditEx.Message);
                 }
-            }
-
-            var poolsChanged = false;
-            if (objective.SkillPoints != 0)
-            {
-                character.SetSkillPoints((short)Math.Min(short.MaxValue, character.SkillPoints + objective.SkillPoints));
-                poolsChanged = true;
-            }
-
-            if (objective.AttribPoints != 0)
-            {
-                character.SetAttributePoints((short)Math.Min(short.MaxValue, character.AttributePoints + objective.AttribPoints));
-                poolsChanged = true;
             }
 
             // Persist pools when XP was zero (GiveXp already persists when amount != 0).

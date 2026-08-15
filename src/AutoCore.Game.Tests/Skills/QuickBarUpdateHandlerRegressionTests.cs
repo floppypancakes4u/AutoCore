@@ -5,6 +5,7 @@ using AutoCore.Game.Entities;
 using AutoCore.Game.Inventory;
 using AutoCore.Game.Managers;
 using AutoCore.Game.Skills;
+using AutoCore.Game.Structures;
 using AutoCore.Game.TNL;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -212,11 +213,100 @@ public class QuickBarUpdateHandlerRegressionTests
         Assert.AreEqual(-1L, character.QuickBarItemCoids[99]);
     }
 
-    private static Character MakeCharacter(long coid)
+    [TestMethod]
+    public void FirstRankTrain_QuickBarBeforeSkillIncrement_DefersThenPersists()
+    {
+        // Retail CDlgSkills::AssignSkillPoint sends 0x2062 before 0x2059 for first-rank skills.
+        RegisterLearnableSkill(559);
+        var connection = new TNLConnection();
+        var character = MakeCharacter(9120, skillPoints: 1);
+        connection.CurrentCharacter = character;
+        _persistCalls = 0;
+
+        InvokeHandler(connection, BuildBody(slot: 1, isItem: 0, value: 559));
+
+        Assert.AreEqual(0, character.QuickBarSkills[1], "must not apply before skill is learned");
+        Assert.AreEqual(0, _persistCalls, "must not persist while deferred");
+        Assert.IsFalse(character.LearnedSkills.ContainsKey(559));
+
+        InvokeSkillIncrement(connection, 559);
+
+        Assert.AreEqual(1, character.LearnedSkills[559]);
+        Assert.AreEqual(559, character.QuickBarSkills[1]);
+        Assert.AreEqual(-1L, character.QuickBarItemCoids[1]);
+        Assert.IsTrue(_persistCalls >= 2, "skill learn + quickbar apply must both persist");
+    }
+
+    [TestMethod]
+    public void FirstRankTrain_MatchingSkillIncrementFails_DiscardsPending()
+    {
+        RegisterLearnableSkill(560);
+        var connection = new TNLConnection();
+        var character = MakeCharacter(9121, skillPoints: 0); // increment fails: no points
+        connection.CurrentCharacter = character;
+        _persistCalls = 0;
+
+        InvokeHandler(connection, BuildBody(slot: 2, isItem: 0, value: 560));
+        InvokeSkillIncrement(connection, 560);
+
+        Assert.IsFalse(character.LearnedSkills.ContainsKey(560));
+        Assert.AreEqual(0, character.QuickBarSkills[2]);
+        Assert.AreEqual(0, _persistCalls);
+    }
+
+    [TestMethod]
+    public void FirstRankTrain_NonMatchingSkillIncrement_DoesNotApplyPending()
+    {
+        RegisterLearnableSkill(561);
+        RegisterLearnableSkill(562);
+        var connection = new TNLConnection();
+        var character = MakeCharacter(9122, skillPoints: 1);
+        connection.CurrentCharacter = character;
+        _persistCalls = 0;
+
+        InvokeHandler(connection, BuildBody(slot: 3, isItem: 0, value: 561));
+        InvokeSkillIncrement(connection, 562);
+
+        Assert.AreEqual(1, character.LearnedSkills[562]);
+        Assert.IsFalse(character.LearnedSkills.ContainsKey(561));
+        Assert.AreEqual(0, character.QuickBarSkills[3], "pending 561 must not apply on unrelated increment");
+    }
+
+    [TestMethod]
+    public void FirstRankTrain_ReplacementPending_OnlyLatestApplies()
+    {
+        RegisterLearnableSkill(563);
+        RegisterLearnableSkill(564);
+        var connection = new TNLConnection();
+        var character = MakeCharacter(9123, skillPoints: 1);
+        connection.CurrentCharacter = character;
+
+        InvokeHandler(connection, BuildBody(slot: 4, isItem: 0, value: 563));
+        InvokeHandler(connection, BuildBody(slot: 5, isItem: 0, value: 564));
+        InvokeSkillIncrement(connection, 564);
+
+        Assert.AreEqual(0, character.QuickBarSkills[4]);
+        Assert.AreEqual(564, character.QuickBarSkills[5]);
+        Assert.IsFalse(character.LearnedSkills.ContainsKey(563));
+        Assert.AreEqual(1, character.LearnedSkills[564]);
+    }
+
+    private static void RegisterLearnableSkill(int skillId)
+    {
+        AssetManager.Instance.SetTestSkill(new Skill
+        {
+            Id = skillId,
+            Name = $"skill_{skillId}",
+            MinimumLevel = 1,
+            MaxSkillLevel = 3,
+        });
+    }
+
+    private static Character MakeCharacter(long coid, short skillPoints = 0)
     {
         var character = new Character();
         character.SetCoid(coid, true);
-        var dbData = new CharacterData { Coid = coid, Name = "QB", Level = 5, SkillPoints = 0 };
+        var dbData = new CharacterData { Coid = coid, Name = "QB", Level = 5, SkillPoints = skillPoints };
         typeof(Character)
             .GetProperty("DBData", BindingFlags.Instance | BindingFlags.NonPublic)!
             .SetValue(character, dbData);
@@ -242,6 +332,17 @@ public class QuickBarUpdateHandlerRegressionTests
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.IsNotNull(method, "HandleQuickBarUpdatePacket must exist on TNLConnection");
         using var stream = new MemoryStream(body);
+        using var reader = new BinaryReader(stream);
+        method.Invoke(connection, new object[] { reader });
+    }
+
+    private static void InvokeSkillIncrement(TNLConnection connection, int skillId)
+    {
+        var method = typeof(TNLConnection).GetMethod(
+            "HandleSkillIncrementPacket",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.IsNotNull(method, "HandleSkillIncrementPacket must exist on TNLConnection");
+        using var stream = new MemoryStream(BitConverter.GetBytes(skillId));
         using var reader = new BinaryReader(stream);
         method.Invoke(connection, new object[] { reader });
     }

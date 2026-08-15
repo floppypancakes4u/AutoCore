@@ -163,15 +163,19 @@ public class TNLConnectionSectorHandlerTests
     }
 
     [TestMethod]
-    public void HandleAttributeIncrement_RejectedMask_NoSend()
+    public void HandleAttributeIncrement_RejectedMask_SendsAuthoritativeLevelPacket()
     {
+        // Client applies the spend optimistically before 0x205A; rejection must roll back.
         var character = CreateCharacterOnMap(out _);
         character.SetAttributePoints(0);
+        character.SetAttributeCombat(3);
         var client = CreateClient(character);
 
         InvokeHandler(client, "HandleAttributeIncrementPacket", BitConverter.GetBytes(1u));
 
-        Assert.IsFalse(_sent.OfType<CharacterLevelPacket>().Any());
+        var level = _sent.OfType<CharacterLevelPacket>().Single();
+        Assert.AreEqual((short)0, level.AttributePoints);
+        Assert.AreEqual(3, level.AttributeCombat);
     }
 
     [TestMethod]

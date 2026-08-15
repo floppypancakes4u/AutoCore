@@ -19,6 +19,13 @@ using AutoCore.Utils;
 
 public partial class TNLConnection
 {
+    /// <summary>
+    /// Retail trains first-rank skills by sending QuickBarUpdate (0x2062) before SkillIncrement (0x2059).
+    /// Hold one pending skill-slot assignment until the matching increment succeeds.
+    /// </summary>
+    private int? _pendingQuickBarSkillId;
+    private byte _pendingQuickBarSlot;
+
     private void HandleSkillIncrementPacket(BinaryReader reader)
     {
         var packet = new SkillIncrementPacket();
@@ -28,10 +35,18 @@ public partial class TNLConnection
             Logger.WriteLog(LogType.Network, "SkillIncrement capture: bodyLength={0} body={1}", packet.RawBody.Length, Convert.ToHexString(packet.RawBody));
             return;
         }
-        if (!CharacterSkillService.Instance.TryIncrement(CurrentCharacter, packet.SkillId.Value, out var error))
-            Logger.WriteLog(LogType.Debug, "Rejected skill increment {0}: {1}", packet.SkillId, error);
-        else
-            SendGamePacket(CharacterLevelManager.Instance.BuildPacket(CurrentCharacter));
+
+        var skillId = packet.SkillId.Value;
+        if (!CharacterSkillService.Instance.TryIncrement(CurrentCharacter, skillId, out var error))
+        {
+            Logger.WriteLog(LogType.Debug, "Rejected skill increment {0}: {1}", skillId, error);
+            if (_pendingQuickBarSkillId == skillId)
+                ClearPendingQuickBarSkill();
+            return;
+        }
+
+        SendGamePacket(CharacterLevelManager.Instance.BuildPacket(CurrentCharacter));
+        TryApplyPendingQuickBarAfterSkillLearn(skillId);
     }
 
     private void HandleAttributeIncrementPacket(BinaryReader reader)
@@ -45,12 +60,9 @@ public partial class TNLConnection
         }
 
         if (!CharacterAttributeService.Instance.TryIncrement(CurrentCharacter, packet.AttributeMask, out var error))
-        {
             Logger.WriteLog(LogType.Debug, "Rejected attribute increment mask=0x{0:X8}: {1}", packet.AttributeMask, error);
-            return;
-        }
 
-        // Client already applied optimistically; push absolute CharacterLevel (attrs + HP).
+        // Client applies optimistically; always push absolute CharacterLevel (success sync or reject rollback).
         SendGamePacket(CharacterLevelManager.Instance.BuildPacket(CurrentCharacter));
     }
 
@@ -134,6 +146,21 @@ public partial class TNLConnection
         if (CurrentCharacter == null)
             return;
 
+        // Retail first-rank train: client places the skill on the quickbar before SkillIncrement.
+        // Defer known-but-unlearned skill placements; apply after the matching increment succeeds.
+        if (!packet.IsItem
+            && packet.SkillId > 0
+            && !CurrentCharacter.LearnedSkills.ContainsKey(packet.SkillId)
+            && AssetManager.Instance.GetSkill(packet.SkillId) != null)
+        {
+            _pendingQuickBarSkillId = packet.SkillId;
+            _pendingQuickBarSlot = packet.Slot;
+            Logger.WriteLog(LogType.Network,
+                "QuickBarUpdate deferred (awaiting SkillIncrement): slot={0} skill={1}",
+                packet.Slot, packet.SkillId);
+            return;
+        }
+
         // Mutual exclusivity: skill place clears item; item place/clear clears skill.
         if (!CharacterSkillService.Instance.TryUpdateQuickBar(
                 CurrentCharacter, packet.Slot, packet.ItemCoid, packet.SkillId, out var error))
@@ -142,6 +169,34 @@ public partial class TNLConnection
         else
             Logger.WriteLog(LogType.Network, "QuickBarUpdate applied: slot={0} isItem={1} skill={2} item={3}",
                 packet.Slot, packet.IsItem, packet.SkillId, packet.ItemCoid);
+    }
+
+    private void TryApplyPendingQuickBarAfterSkillLearn(int learnedSkillId)
+    {
+        if (_pendingQuickBarSkillId != learnedSkillId || CurrentCharacter == null)
+            return;
+
+        var slot = _pendingQuickBarSlot;
+        ClearPendingQuickBarSkill();
+
+        if (!CharacterSkillService.Instance.TryUpdateQuickBar(
+                CurrentCharacter, slot, itemCoid: -1, skillId: learnedSkillId, out var error))
+        {
+            Logger.WriteLog(LogType.Debug,
+                "Deferred QuickBarUpdate failed after skill learn slot={0} skill={1}: {2}",
+                slot, learnedSkillId, error);
+            return;
+        }
+
+        Logger.WriteLog(LogType.Network,
+            "QuickBarUpdate applied after SkillIncrement: slot={0} skill={1}",
+            slot, learnedSkillId);
+    }
+
+    private void ClearPendingQuickBarSkill()
+    {
+        _pendingQuickBarSkillId = null;
+        _pendingQuickBarSlot = 0;
     }
 
     /// <summary>

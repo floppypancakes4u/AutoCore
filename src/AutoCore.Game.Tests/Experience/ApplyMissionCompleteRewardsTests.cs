@@ -170,6 +170,49 @@ public class ApplyMissionCompleteRewardsTests
     }
 
     [TestMethod]
+    public void Apply_XpPlusPools_PersistsAndSyncsFinalPools()
+    {
+        // GiveXp persists before pools were applied → save/client snapshot missed mission points.
+        var mission = GameMission.CreateForTests(221);
+        mission.TargetLevel = 5;
+        var objective = GameMissionObjective.CreateForTests(1, 0, 221);
+        SetObjectiveFields(objective, xpIndex: 5, skill: 3, attrib: 4);
+
+        var character = MakeCharacter(6023, xp: 0, level: 1);
+        character.SetSkillPoints(1);
+        character.SetAttributePoints(2);
+
+        var sent = new List<BasePacket>();
+        var previous = TNLConnection.TestPacketSink;
+        var previousSend = _svc.SendPacketsOnGrant;
+        try
+        {
+            _svc.SendPacketsOnGrant = true;
+            TNLConnection.TestPacketSink = (_, p) => sent.Add(p);
+            character.SetOwningConnection(new TNLConnection());
+
+            NpcInteractHandler.ApplyMissionCompleteRewards(character, mission, objective);
+
+            Assert.AreEqual(320, character.Experience);
+            Assert.AreEqual(4, character.SkillPoints);
+            Assert.AreEqual(6, character.AttributePoints);
+            Assert.AreEqual(1, _persist.Saves.Count, "single GiveXp persist must include final pools");
+            Assert.AreEqual(4, _persist.Saves[0].Progress.SkillPoints);
+            Assert.AreEqual(6, _persist.Saves[0].Progress.AttributePoints);
+            Assert.AreEqual(320, _persist.Saves[0].Progress.Experience);
+
+            var level = sent.OfType<CharacterLevelPacket>().Single();
+            Assert.AreEqual((short)4, level.SkillPoints);
+            Assert.AreEqual((short)6, level.AttributePoints);
+        }
+        finally
+        {
+            _svc.SendPacketsOnGrant = previousSend;
+            TNLConnection.TestPacketSink = previous;
+        }
+    }
+
+    [TestMethod]
     public void Apply_NullObjective_UsesMaxSequenceFromMission()
     {
         var obj1 = GameMissionObjective.CreateForTests(1, 0, 204);
@@ -371,6 +414,10 @@ public class ApplyMissionCompleteRewardsTests
         var inventory = new InventoryManager(invPersist);
         var character = MakeCharacter(6017, xp: 55_000, level: 7, inventory: inventory);
         character.SetSkillPoints(9);
+        character.SetAttributeTech(6);
+        character.SetAttributeCombat(7);
+        character.SetAttributeTheory(8);
+        character.SetAttributePerception(9);
 
         var sent = new List<BasePacket>();
         var previous = TNLConnection.TestPacketSink;
@@ -386,6 +433,10 @@ public class ApplyMissionCompleteRewardsTests
             Assert.AreEqual(55_000, level.Experience);
             Assert.AreEqual((byte)7, level.Level);
             Assert.AreEqual((short)9, level.SkillPoints);
+            Assert.AreEqual((short)6, level.AttributeTech);
+            Assert.AreEqual((short)7, level.AttributeCombat);
+            Assert.AreEqual((short)8, level.AttributeTheory);
+            Assert.AreEqual((short)9, level.AttributePerception);
         }
         finally
         {

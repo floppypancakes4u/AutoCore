@@ -113,6 +113,26 @@ public class CurrencySyncTests
     }
 
     [TestMethod]
+    public void CreateAbsoluteCurrencyPacket_PreservesAssignedAttributesAndHealth()
+    {
+        // CharacterLevel is a full client snapshot — omitting Tech/Combat/Theory/Perception
+        // or HP zeros those fields on apply (FUN_00810f00 / DecodeLevelPacket).
+        var character = CreateCharacter(coid: 8, startingCredits: 100);
+        character.SetAttributeTech(6);
+        character.SetAttributeCombat(7);
+        character.SetAttributeTheory(8);
+        character.SetAttributePerception(9);
+
+        var packet = CurrencySync.CreateAbsoluteCurrencyPacket(character, 250L);
+
+        Assert.AreEqual(250L, packet.Currency);
+        Assert.AreEqual((short)6, packet.AttributeTech);
+        Assert.AreEqual((short)7, packet.AttributeCombat);
+        Assert.AreEqual((short)8, packet.AttributeTheory);
+        Assert.AreEqual((short)9, packet.AttributePerception);
+    }
+
+    [TestMethod]
     public void CreateAbsoluteCurrencyPacket_Null_Throws()
     {
         Assert.ThrowsException<ArgumentNullException>(() =>

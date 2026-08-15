@@ -556,10 +556,11 @@ public class GhostVehicle : GhostObject
 
         if (stream.WriteFlag(characterOwner != null && clientHasOwner && (updateMask & AttributeMask) != 0))
         {
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // AttribCombat
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // AttribPerception
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // AttribTech
-            stream.WriteBits(32, BitConverter.GetBytes(0)); // AttribTheory
+            // Retail GhostVehicle::unpackUpdate @ 0x005F7720 order: Combat, Perception, Tech, Theory.
+            stream.WriteBits(32, BitConverter.GetBytes((int)characterOwner.AttributeCombat));
+            stream.WriteBits(32, BitConverter.GetBytes((int)characterOwner.AttributePerception));
+            stream.WriteBits(32, BitConverter.GetBytes((int)characterOwner.AttributeTech));
+            stream.WriteBits(32, BitConverter.GetBytes((int)characterOwner.AttributeTheory));
         }
 
         if (stream.WriteFlag((updateMask & HeatMask) != 0))
