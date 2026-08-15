@@ -458,26 +458,15 @@ public sealed class ExperienceService : Singleton<ExperienceService>
     }
 
     /// <summary>
-    /// Push login progress to the client after CreateCharacterExtended.
-    /// Create leaves client cumulative XP at 0. Strategy:
-    /// 1) GiveXP(total) first — always applies to local player (no TFID); 0→total.
-    /// 2) CharacterLevel absolute — sets Level/Currency/Experience/points when TFID resolves;
-    ///    Experience field absolute-overwrites to the same total (no double-count).
+    /// Push login / map-join progress after CreateCharacterExtended.
+    /// Create already assigned m_lXP from CreateCharacterExtended.XP (absolute).
+    /// CharacterLevel (0x2017) confirms Level / currency / XP / points. Do not send
+    /// GiveXP here — that packet is AddXP (0x205F) and walks IncrementLevel.
     /// </summary>
     public void SendLoginProgressToClient(Character character)
     {
         if (character?.OwningConnection == null)
             return;
-
-        var xp = character.Experience;
-        if (xp > 0)
-        {
-            character.OwningConnection.SendGamePacket(new GiveXPPacket
-            {
-                Amount = xp,
-                LevelHint = -1
-            });
-        }
 
         var packet = BuildCharacterLevelPacket(character);
         character.OwningConnection.SendGamePacket(packet);
@@ -485,7 +474,7 @@ public sealed class ExperienceService : Singleton<ExperienceService>
         Logger.WriteLog(
             LogType.Network,
             $"Login progress sent: coid={character.ObjectId.Coid} level={packet.Level} xp={packet.Experience} " +
-            $"credits={packet.Currency} giveXpSeed={(xp > 0 ? xp : 0)}");
+            $"credits={packet.Currency}");
     }
 
     // --- Formulas (docs/XP.md) ---

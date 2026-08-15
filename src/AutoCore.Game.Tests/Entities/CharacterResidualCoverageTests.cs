@@ -254,6 +254,8 @@ public class CharacterResidualCoverageTests
     {
         var character = MakeCharacterWithCloneBase(5, "Ext");
         character.SetCredits(5000);
+        character.SetExperience(2500);
+        character.SetLevel(2);
         character.SetSkillPoints(3);
         character.SetAttributePoints(4);
         character.LearnedSkills[10] = 2;
@@ -266,6 +268,9 @@ public class CharacterResidualCoverageTests
         character.WriteToPacket(packet);
 
         Assert.AreEqual(0L, packet.Credits, "login path clears credits on create packet");
+        Assert.AreEqual(2500, packet.XP,
+            "Create decode assigns m_lXP absolutely then AddXP(0). Leaving 0 makes the HUD interpolate 0→total.");
+        Assert.AreEqual((byte)2, packet.Level);
         Assert.AreEqual((short)3, packet.SkillPoints);
         Assert.AreEqual((short)4, packet.AttributePoints);
         Assert.AreEqual(2, packet.NumSkills);

@@ -116,10 +116,13 @@ public class CreateCharacterClientOffsetTests
         };
         packet.InventoryCoids[0] = 0x1111L;
         packet.InventoryCoids[311] = 0x2222L;
+        packet.XP = 0x13579BDF;
 
         var bytes = SerializeWithRootOpcode(packet);
         Assert.AreEqual(CreateCharacterExtendedPacket.FixedPacketSizeIncludingOpcode, bytes.Length);
         Assert.AreEqual((uint)GameOpcode.CreateCharacterExtended, BitConverter.ToUInt32(bytes, 0));
+        Assert.AreEqual(0x13579BDF, BitConverter.ToInt32(bytes, 0x8D0),
+            "SMSG_Sector_CreateCharacterExtended.lXP @ 2256. DecodePacket assigns m_lXP then AddXP(0).");
         Assert.AreEqual(0x1111L, BitConverter.ToInt64(bytes, 0x960),
             "Client serialize zeros 312 i64s at param_2+600 (0x960) then fills locker COIDs.");
         Assert.AreEqual(0x2222L, BitConverter.ToInt64(bytes, 0x960 + 311 * 8));

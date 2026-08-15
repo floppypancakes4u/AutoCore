@@ -554,6 +554,10 @@ public partial class Character : Creature
             // the retail client. Restore after spawn via CurrencySync / CharacterLevel.
             CurrencySync.ClearCreateCharacterCredits(extendedCharPacket);
 
+            // Cumulative XP is safe: DecodePacket assigns m_lXP absolutely then AddXP(0).
+            // Leaving 0 makes CDlgGauges interpolate the bar from empty through every level.
+            extendedCharPacket.XP = Experience;
+
             extendedCharPacket.AttributePoints = AttributePoints;
             extendedCharPacket.AttributeTech = AttributeTech;
             extendedCharPacket.AttributeCombat = AttributeCombat;

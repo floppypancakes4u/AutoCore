@@ -127,18 +127,19 @@ public class ExperienceServiceCoverageGapTests
     }
 
     [TestMethod]
-    public void SendLoginProgressToClient_WithXp_SendsGiveXpSeedThenCharacterLevel()
+    public void SendLoginProgressToClient_WithXp_SendsOnlyAbsoluteCharacterLevel()
     {
         var character = MakeCharacterWithConnection(7004, xp: 2500, level: 2);
         _sent.Clear();
 
         _svc.SendLoginProgressToClient(character);
 
-        Assert.AreEqual(1, _sent.OfType<GiveXPPacket>().Count());
-        Assert.AreEqual(2500, _sent.OfType<GiveXPPacket>().Single().Amount);
-        Assert.AreEqual((sbyte)-1, _sent.OfType<GiveXPPacket>().Single().LevelHint);
-        Assert.AreEqual(1, _sent.OfType<CharacterLevelPacket>().Count());
-        Assert.AreEqual(2500, _sent.OfType<CharacterLevelPacket>().Single().Experience);
+        Assert.AreEqual(0, _sent.OfType<GiveXPPacket>().Count(),
+            "GiveXP is a grant (AddXP + IncrementLevel). Login must not feed lifetime XP through it.");
+        var level = _sent.OfType<CharacterLevelPacket>().Single();
+        Assert.AreEqual(2500, level.Experience);
+        Assert.AreEqual(2, level.Level);
+        Assert.AreEqual(character.ObjectId, level.CharacterId);
     }
 
     [TestMethod]

@@ -960,7 +960,7 @@ public partial class TNLConnection
         character.Map?.ApplyMissionPhaseWorldState(
             character.CurrentVehicle ?? (ClonedObjectBase)character);
 
-        // Always push Level/XP/currency/points after create (client XP starts at 0).
+        // Absolute CharacterLevel snapshot after create (do not GiveXP the lifetime total).
         xpSvc.SendLoginProgressToClient(character);
 
         // SS-51: the client now has its own objects. Open the world-entry gate and flush the
