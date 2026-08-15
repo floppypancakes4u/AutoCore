@@ -104,18 +104,31 @@ public partial class TNLConnection
                 packet.TargetPosition,
                 out var response))
         {
+            // Every reject must answer: the client queued this cast in m_plistSkillsQueue and
+            // CanCast (0x51a790) refuses all further casts while that queue is non-empty. Only
+            // OnDeath, a successful Skill_GenericCast and this packet's handler pop it.
+            //
+            // A cooldown reject goes out as CancelledActive (0x11) rather than Recharge, because
+            // Process_EMSG_Sector_SkillStatusEffect (0x811170) treats any other non-zero status as
+            // "Aborting cooldown": it destroys the optimistic CVOGHBOKToCastAgain heartbeat and so
+            // erases the hotbar sweep the client is already running. 0x11 pops the queue and leaves
+            // that heartbeat alone.
+            var wireStatus = response == SkillResponse.Recharge
+                ? SkillResponse.CancelledActive
+                : response;
             SendGamePacket(new SkillStatusEffectPacket
             {
                 SkillId = packet.SkillId,
                 SkillLevel = rank,
                 ApplyPower = 0,
-                Status = (byte)response,
+                Status = (byte)wireStatus,
                 Caster = CurrentCharacter.ObjectId,
                 PosX = packet.TargetPosition.X,
                 PosY = packet.TargetPosition.Y,
                 PosZ = packet.TargetPosition.Z,
                 Flag = 0,
             });
+
             // Client spent optimistically; server often did not (CD/range/power). Resync current.
             CharacterLevelManager.Instance.SyncCurrentPowerGhost(CurrentCharacter);
             Logger.WriteLog(LogType.Debug,

@@ -7,28 +7,34 @@ using AutoCore.Game.Structures;
 /// <summary>
 /// EMSG_Sector_SkillStatusEffect (0x2031).
 ///
-/// Layout reverse-engineered from client packer <c>CVOGReaction_CastSkillOnTarget</c> (0x4D09A0)
-/// and consumer <c>Client_RecvSkillStatusEffect</c> (0x811170):
+/// Layout confirmed against the client PDB type <c>SMSG_Sector_SkillStatusEffect</c> (size 2464,
+/// <c>arrTargets</c> is a fixed <c>sSkillTargetInfo[100]</c>) and its consumer
+/// <c>Process_EMSG_Sector_SkillStatusEffect</c> (0x811170):
 ///
-///   +0x00 opcode 0x2031 (written by SendGamePacket)
-///   +0x04 size (int16) = targetCount * 0x18 + 0x58   ← NOT 0x40 + n*0x18
-///   +0x06 pad (int16)
-///   +0x08 skillId (int32) from skill+0x5FC
-///   +0x0C skillLevel (int16)
-///   +0x0E pad (int16)
-///   +0x10 applyPower (int32) — &lt; 1 → miss path; else skill-HB duration
-///   +0x14 status (byte) — 0 success, 0x63 ('c') alternate, 0x11 cancel
-///   +0x15 pad (3)
-///   +0x18 position XYZ (3×float)
-///   +0x24 pad (int32)
-///   +0x28 source-owner TFID (4 dwords / 16 bytes). For a learned player skill this is the
-///         character TFID, which the client matches to its local character and resolves to vehicle.
-///   +0x38 flag (byte) — packer sets (param5 == 0)
-///   +0x39 pad (3)
-///   +0x3C diceSeed (int32, optional)
-///   +0x40 targets[] each 0x18, then terminator TFID (-1,-1,0,0)
+///   +0x00 opcode 0x2031 (written by SendGamePacket; the PDB's leading padding dword)
+///   +0x04 uiSize (uint16) — Skill_GenericCast derives the target count as (uiSize - 0x40) / 0x18,
+///         so the count must include the terminator slot: 0x40 + (n + 1) * 0x18
+///   +0x08 lSkillID (int32)
+///   +0x0C iSkillLevel (int16) — compared against m_iSkillBoost + m_iSkillLevel; a mismatch makes
+///         the client call SetSkillLevel and recompute currentAttributes
+///   +0x10 lDelayTime (int32) — our ApplyPower. &lt; 1 fires the effect immediately; &gt;= 1 creates a
+///         wakeup heartbeat and defers the fire by that many ms
+///   +0x14 ucErrorCode (byte) — 0 success, 0x63 ('c') alternate, 0x11 quiet cancel
+///   +0x18 nduavTargetPosition (3×float, 12 bytes, padded to +0x28)
+///   +0x28 fidSource (TFID, 16 bytes). For a learned player skill this is the character TFID, which
+///         the client matches to its local character and resolves to the vehicle.
+///   +0x38 bIsItemSkill (bool) — our Flag. True selects the item-skill path (GetSkillBaseCopy plus
+///         AddRechargeGroup) instead of the learned-skill path; must be 0 for learned skills.
+///   +0x3C lDiceSeed (int32)
+///   +0x40 arrTargets[] — sSkillTargetInfo, 0x18 each, then a terminator TFID (-1,-1,0,0)
 ///
-/// Target entry (0x18): 4 dwords TFID region + int16 power + int16 aux + pad
+/// sSkillTargetInfo (0x18): TFID fid (16) + int16 lMana + int16 lMaxMana + pad.
+///
+/// This message carries no cooldown: the hotbar sweep is entirely client-local. RequestCastSkill
+/// (0x941590) calls StartRecastTimer on the click, and CVOGHBOKToCastAgain (0x51E240) sets
+/// CVOGSkillNode::m_bIsRecharging for ceil(lCoolDown * modifier) + iCastTime ms, which is what
+/// CBtnQuickBar::OnUpdateCooldownsNow (0x827AB0) draws. The server can only shorten that window by
+/// sending an aborting ucErrorCode.
 /// </summary>
 public class SkillStatusEffectPacket : BasePacket
 {
@@ -38,10 +44,13 @@ public class SkillStatusEffectPacket : BasePacket
 
     public short SkillLevel { get; set; } = 1;
 
-    /// <summary>If &lt; 1, miss path. If ≥ 1, skill heartbeat duration.</summary>
+    /// <summary>
+    /// Retail <c>lDelayTime</c>. If &lt; 1 the client fires the effect immediately; if ≥ 1 it defers
+    /// the fire behind a wakeup heartbeat for that many milliseconds.
+    /// </summary>
     public int ApplyPower { get; set; } = 1000;
 
-    /// <summary>0 = success. 0x63 ('c') = alternate cast. 0x11 = cancel.</summary>
+    /// <summary>Retail <c>ucErrorCode</c>. 0 = success, 0x63 ('c') = alternate cast, 0x11 = cancel.</summary>
     public byte Status { get; set; }
 
     public float PosX { get; set; }
@@ -50,7 +59,7 @@ public class SkillStatusEffectPacket : BasePacket
 
     public TFID Caster { get; set; } = new();
 
-    /// <summary>Packer sets this when a cast-related param is zero.</summary>
+    /// <summary>Retail <c>bIsItemSkill</c>. Must be 0 for a learned skill.</summary>
     public byte Flag { get; set; } = 1;
 
     public int DiceSeed { get; set; }

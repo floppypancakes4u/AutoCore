@@ -131,6 +131,10 @@ public static class SkillService
             }
         }
 
+        // Authored cooldown for everyone: cooldowns stay server-authoritative and identical for
+        // every account. A GM client caps its own hotbar sweep at 500 ms and so shows a ready button
+        // while this window is still open, earning quiet rejects — see SkillCooldownDiagnostics,
+        // which is logged on success so a playtest log records both windows.
         var cooldownMs = (long)MathF.Round(GetScalarElement(skill, SkillElementTypes.CoolDown, level));
         var nowMs = Environment.TickCount64;
         var cooldownKey = (character.ObjectId.Coid, skillId);
@@ -303,6 +307,17 @@ public static class SkillService
             powerDelta,
             target.GetCurrentHP(),
             target.GetMaximumHP());
+
+        if (cooldownReserved)
+        {
+            Logger.WriteLog(LogType.Debug,
+                "Skill cooldown started: skillId={0} serverMs={1} gmLevel={2} clientSweepMs={3}",
+                skill.Id,
+                cooldownMs,
+                character.GMLevel,
+                SkillCooldownDiagnostics.PredictClientSweepMs(cooldownMs, character.GMLevel));
+        }
+
         return true;
     }
 
