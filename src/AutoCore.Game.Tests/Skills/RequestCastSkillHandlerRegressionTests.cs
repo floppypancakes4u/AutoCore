@@ -6,14 +6,17 @@ using AutoCore.Game.Packets;
 using AutoCore.Game.Packets.Sector;
 using AutoCore.Game.Skills;
 using AutoCore.Game.Structures;
+using AutoCore.Game.Tests.Fakes;
 using AutoCore.Game.TNL;
 using AutoCore.Game.TNL.Ghost;
+using AutoCore.Utils.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using TNL.Entities;
 
 namespace AutoCore.Game.Tests.Skills;
 
 [TestClass]
+[DoNotParallelize]
 public class RequestCastSkillHandlerRegressionTests
 {
     private readonly List<BasePacket> _sent = new();
@@ -158,6 +161,93 @@ public class RequestCastSkillHandlerRegressionTests
         Assert.AreEqual(SkillResponse.Recharge, response);
     }
 
+    /// <summary>
+    /// Heavy regression for the exact live failure: a non-GM casts Psioptic Burst successfully,
+    /// then retries while the authored 12-second window is still active. This crosses the real
+    /// request handler, skill service, power pool, effect packet writer, rejection mapping, and
+    /// legacy-to-structured diagnostics pipeline.
+    ///
+    /// It catches the three production regressions that produced the misleading UI symptoms:
+    /// charging power twice, sending Recharge (which aborts the optimistic sweep) instead of the
+    /// quiet 0x11 response, or reporting a client sweep shorter than the server window for a
+    /// non-GM. The target deliberately survives so the client's dead-target no-op cannot obscure
+    /// the cooldown path.
+    /// </summary>
+    [TestMethod]
+    public void PsiopticBurst_NonGmSuccessThenRetry_PreservesFullClientSweepAndServerState()
+    {
+        const int skillId = 915;
+        const int authoredCooldownMs = 12_000;
+        RegisterDamageSkill(
+            id: skillId,
+            min: 8,
+            max: 8,
+            pen: 0,
+            range: 100,
+            cooldownMs: authoredCooldownMs,
+            cost: 31);
+        var (connection, character, target) = CreateCastScenario(skillId, gmLevel: 0);
+        target.SetMaximumHP(100_000, triggerGhostUpdate: false);
+        target.SetHPForTests(100_000);
+        CharacterLevelManager.Instance.SetPower(character, 41, sendPacket: false);
+
+        var sink = new InMemoryLogSink();
+        GameLog.ResetForTests();
+        GameLog.SetSinkForTests(sink);
+        GameLog.MinimumLevel = StructuredLogLevel.Debug;
+        try
+        {
+            var request = BuildRequestBody(target.ObjectId, skillId, target.Position);
+
+            InvokeHandler(connection, request);
+
+            Assert.AreEqual((10, 41), CharacterLevelManager.Instance.GetPower(character.ObjectId.Coid),
+                "the accepted cast spends the authored 31 power exactly once");
+            Assert.AreEqual(99_992, target.GetCurrentHP(),
+                "the surviving target proves the successful effect path completed");
+
+            InvokeHandler(connection, request);
+
+            Assert.AreEqual((10, 41), CharacterLevelManager.Instance.GetPower(character.ObjectId.Coid),
+                "the cooldown retry must not spend power a second time");
+            Assert.AreEqual(99_992, target.GetCurrentHP(),
+                "the cooldown retry must not apply the effect a second time");
+
+            var statusPackets = _sent.OfType<SkillStatusEffectPacket>().ToArray();
+            Assert.AreEqual(2, statusPackets.Length,
+                "both requests need an answer so the client's skill queue cannot strand");
+
+            var success = statusPackets[0];
+            Assert.AreEqual((byte)SkillResponse.Ok, success.Status);
+            Assert.AreEqual(0, success.ApplyPower,
+                "success resolves immediately; cooldown remains the click-started client heartbeat");
+            Assert.AreEqual((byte)0, success.Flag, "learned skills must not take the item-skill path");
+            Assert.AreEqual(character.ObjectId, success.Caster);
+            Assert.AreEqual(target.ObjectId, success.Targets.Single().Target);
+
+            var retry = statusPackets[1];
+            Assert.AreEqual((byte)SkillResponse.CancelledActive, retry.Status,
+                "0x11 pops the queued retry without aborting the optimistic cooldown sweep");
+            Assert.AreEqual(0, retry.ApplyPower);
+            Assert.AreEqual((byte)0, retry.Flag);
+            Assert.AreEqual(character.ObjectId, retry.Caster);
+            Assert.AreEqual(0, retry.Targets.Count);
+
+            AssertSkillStatusWire(success, expectedSize: 0x70, expectedStatus: 0);
+            AssertSkillStatusWire(retry, expectedSize: 0x58, expectedStatus: 0x11);
+
+            var cooldownLog = sink.Records.Single(record =>
+                record.Message?.Contains($"Skill cooldown started: skillId={skillId}") == true);
+            StringAssert.Contains(cooldownLog.Message, "serverMs=12000");
+            StringAssert.Contains(cooldownLog.Message, "gmLevel=0");
+            StringAssert.Contains(cooldownLog.Message, "clientSweepMs=12000");
+        }
+        finally
+        {
+            GameLog.ResetForTests();
+        }
+    }
+
     private static (TNLConnection Connection, Character Caster, Vehicle Target) CreateCastScenario(
         int skillId, byte gmLevel)
     {
@@ -253,5 +343,26 @@ public class RequestCastSkillHandlerRegressionTests
         using var stream = new MemoryStream(body);
         using var reader = new BinaryReader(stream);
         method.Invoke(connection, new object[] { reader });
+    }
+
+    private static void AssertSkillStatusWire(
+        SkillStatusEffectPacket packet,
+        short expectedSize,
+        byte expectedStatus)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        writer.Write((uint)packet.Opcode);
+        packet.Write(writer);
+        writer.Flush();
+        var bytes = stream.ToArray();
+
+        Assert.AreEqual(expectedSize, bytes.Length);
+        Assert.AreEqual(expectedSize, BitConverter.ToInt16(bytes, 0x04));
+        Assert.AreEqual(packet.SkillId, BitConverter.ToInt32(bytes, 0x08));
+        Assert.AreEqual(packet.SkillLevel, BitConverter.ToInt16(bytes, 0x0C));
+        Assert.AreEqual(0, BitConverter.ToInt32(bytes, 0x10));
+        Assert.AreEqual(expectedStatus, bytes[0x14]);
+        Assert.AreEqual(0, bytes[0x38], "learned skill must serialize bIsItemSkill=false");
     }
 }
