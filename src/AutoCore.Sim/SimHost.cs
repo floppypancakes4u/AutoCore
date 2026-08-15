@@ -1,7 +1,9 @@
 using AutoCore.Game.Chat;
 using AutoCore.Game.Entities;
+using AutoCore.Game.Managers;
 using AutoCore.Sim.Clone;
 using AutoCore.Utils;
+using AutoCore.Utils.Reliability;
 
 namespace AutoCore.Sim;
 
@@ -89,8 +91,21 @@ public sealed class SimHost
 
     public void Tick(long nowMs, float dt)
     {
+        // Start hull builds as soon as a player is on a map so turret LOS is ready
+        // before the first combat scan (GetOrRequest is otherwise first-hit and
+        // returned null → a clear shot through walls).
+        Guard.Run("sim: prefetch hull worlds", PrefetchHullWorlds);
         _cloneManager.Tick(nowMs, dt);
         _npcVehicles.Tick(nowMs, dt);
+    }
+
+    void PrefetchHullWorlds()
+    {
+        foreach (var map in MapManager.Instance.AllMaps())
+        {
+            if (map.PlayerCount > 0)
+                _collisionWorlds.GetOrRequest(map);
+        }
     }
 
     /// <summary>
@@ -193,5 +208,15 @@ public sealed class SimHost
         CloneCommandControl.TryStartPath = Instance.StartClonePath;
         CloneCommandControl.TrySetPathSpeed = Instance.SetPathSpeed;
         AutoCore.Game.Npc.NpcVehicleSimControl.TrySimDrive = Instance.TryAdoptNpcVehicle;
+        AutoCore.Game.Npc.NpcTurretLos.TryHasClearLos = Instance.HasTurretClearLos;
+    }
+
+    /// <summary>
+    /// Hull-world LOS for stationary turrets. Missing/building world degrades to clear so
+    /// turrets still shoot until the map's static collision is ready.
+    /// </summary>
+    internal bool HasTurretClearLos(Game.Map.SectorMap map, Game.Structures.Vector3 from, Game.Structures.Vector3 to)
+    {
+        return Collision.LineOfSight.TurretMayShoot(_collisionWorlds.GetOrRequest(map), from, to);
     }
 }

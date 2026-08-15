@@ -506,6 +506,8 @@ public static class NpcCombatAi
                 continue;
             if (!FactionHostility.IsHostile(myFaction, candidate.GetIDFaction()))
                 continue;
+            if (IsStationaryTurret(entity) && !NpcTurretLos.HasClearLos(map, entity, candidate))
+                continue;
 
             var sq = entity.Position.DistSq(candidate.Position);
             if (sq < bestSq)
@@ -518,13 +520,26 @@ public static class NpcCombatAi
         return best;
     }
 
-    /// <summary>Candidates are connected player vehicles or other live NPC AI entities.</summary>
+    /// <summary>
+    /// Candidates are connected player vehicles or other live NPC AI (wildlife, hostile NPCs,
+    /// other factions). Retail <c>IsEnemy</c> / FindTargetToAttack uses faction inequality only.
+    /// </summary>
     private static bool IsAggroCandidate(ClonedObjectBase candidate)
     {
         if (candidate is Vehicle vehicle && vehicle.GetSuperCharacter(false)?.OwningConnection != null)
             return true;
 
         return GetNpcAi(candidate) != null;
+    }
+
+    /// <summary>True for a foot creature whose clonebase authors a turret (no chassis, Speed 0).</summary>
+    internal static bool IsStationaryTurret(ClonedObjectBase entity)
+    {
+        if (entity is not Creature creature || creature is Character)
+            return false;
+        if (creature.CloneBaseObject is not CloneBaseCreature clone)
+            return false;
+        return clone.CreatureSpecific != null && clone.CreatureSpecific.HasTurret != 0;
     }
 
     /// <summary>
@@ -653,6 +668,8 @@ public static class NpcCombatAi
         long nowMs)
     {
         if (!inRange || npcAi == null || target == null)
+            return;
+        if (IsStationaryTurret(entity) && !NpcTurretLos.HasClearLos(entity.Map, entity, target))
             return;
 
         if (!TrySelectCreatureCombatSkill(entity, out var skillId, out var skillLevel, out var pauseMs))

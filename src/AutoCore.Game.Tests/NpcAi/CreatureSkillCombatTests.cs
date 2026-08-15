@@ -36,6 +36,7 @@ public class CreatureSkillCombatTests
         SkillService.ClearCooldownsForTests();
         Vehicle.ClearCombatThrottleForTests();
         AssetManager.Instance.SetTestCreatureAiProfiles(null);
+        NpcTurretLos.TryHasClearLos = null;
     }
 
     [TestCleanup]
@@ -47,6 +48,7 @@ public class CreatureSkillCombatTests
         Vehicle.ClearCombatThrottleForTests();
         AssetManager.Instance.ClearTestSkills();
         AssetManager.Instance.SetTestCreatureAiProfiles(null);
+        NpcTurretLos.TryHasClearLos = null;
         _sent.Clear();
     }
 
@@ -108,6 +110,62 @@ public class CreatureSkillCombatTests
         Assert.IsTrue(afterFirst < 1000);
         NpcCombatAi.Tick(map, turret, nowMs: 10_100, dt: 0.1f);
         Assert.AreEqual(afterFirst, mutant.GetCurrentHP(), "second tick inside 4s CD must not fire");
+    }
+
+    /// <summary>
+    /// Retail <c>IsEnemy</c> / FindTargetToAttack: Human (0) vs Wildlife (10) is hostile.
+    /// Guard turrets use the same creature scan (layer 17 includes unpossessed creatures).
+    /// </summary>
+    [TestMethod]
+    public void HumanTurret_AcquiresWildlifeWalker()
+    {
+        var map = CreateFieldMap();
+        RegisterPlasmaSkill();
+        var turret = PlaceTurret(map, new Vector3(0f, 0f, 0f), faction: 0);
+        var walker = PlaceWildlifeWalker(map, new Vector3(10f, 0f, 0f), faction: 10);
+
+        FireUntilCombat(map, turret, nowMs: 10_000);
+
+        Assert.AreSame(walker, turret.Target,
+            "human turret must auto-acquire wildlife (faction 10) in the open");
+        Assert.IsTrue(walker.GetCurrentHP() < 1000, "turret must shoot the wildlife walker");
+    }
+
+    /// <summary>
+    /// Turrets must not lock a target they cannot see (invis-physics / hull between them).
+    /// </summary>
+    [TestMethod]
+    public void HumanTurret_DoesNotAcquireTargetWithoutLos()
+    {
+        var map = CreateFieldMap();
+        RegisterPlasmaSkill();
+        NpcTurretLos.TryHasClearLos = (_, _, _) => false;
+        var turret = PlaceTurret(map, new Vector3(0f, 0f, 0f), faction: 0);
+        var walker = PlaceWildlifeWalker(map, new Vector3(10f, 0f, 0f), faction: 10);
+
+        FireUntilCombat(map, turret, nowMs: 10_000);
+
+        Assert.IsNull(turret.Target, "turret must skip candidates with no line of sight");
+        Assert.AreEqual(1000, walker.GetCurrentHP());
+    }
+
+    /// <summary>
+    /// A turret that already has a target must not fire through a wall.
+    /// </summary>
+    [TestMethod]
+    public void HumanTurret_DoesNotFireAtLockedTargetWithoutLos()
+    {
+        var map = CreateFieldMap();
+        RegisterPlasmaSkill();
+        var turret = PlaceTurret(map, new Vector3(0f, 0f, 0f), faction: 0);
+        var walker = PlaceWildlifeWalker(map, new Vector3(10f, 0f, 0f), faction: 10);
+        turret.SetTargetObject(walker);
+        turret.NpcAi.CombatState = HBAICombatState.Combat;
+        NpcTurretLos.TryHasClearLos = (_, _, _) => false;
+
+        NpcCombatAi.Tick(map, turret, nowMs: 10_000, dt: 0.1f);
+
+        Assert.AreEqual(1000, walker.GetCurrentHP(), "turret must not shoot without LOS");
     }
 
     /// <summary>
@@ -251,5 +309,37 @@ public class CreatureSkillCombatTests
         npc.SetHPForTests(1000);
         npc.SetMap(map);
         return npc;
+    }
+
+    private static Creature PlaceWildlifeWalker(SectorMap map, Vector3 position, int faction)
+    {
+        const int cbid = 2982;
+        const int aiId = 1;
+        AssetManagerTestHelper.RegisterCreatureCloneBase(cbid, aiBehaviorId: aiId, baseLevel: 16, faction: faction, isNpc: 0, hasTurret: 0);
+        var spec = AssetManager.Instance.GetCloneBase<CloneBaseCreature>(cbid).CreatureSpecific;
+        spec.VisionRange = 145f;
+        spec.HearingRange = 70f;
+        spec.Speed = 12f;
+        AssetManager.Instance.SetTestCreatureAiProfiles(new[]
+        {
+            new CreatureAiProfile { AiId = 21 },
+            new CreatureAiProfile { AiId = aiId }
+        });
+
+        var walker = new Creature();
+        walker.LoadCloneBase(cbid);
+        walker.SetCoid(map.LocalCoidCounter++, false);
+        walker.Faction = faction;
+        walker.Position = position;
+        walker.SetInvincible(false);
+        walker.SetMaximumHP(1000, triggerGhostUpdate: false);
+        walker.SetHPForTests(1000);
+        walker.NpcAi = new NpcAiState
+        {
+            Profile = AssetManager.Instance.GetCreatureAiProfile(aiId),
+            HomePosition = position,
+        };
+        walker.SetMap(map);
+        return walker;
     }
 }
