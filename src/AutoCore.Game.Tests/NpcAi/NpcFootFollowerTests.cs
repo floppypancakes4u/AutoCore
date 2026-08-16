@@ -17,9 +17,17 @@ using AutoCore.Game.Tests.Inventory.Fakes;
 /// Stage 9: <see cref="NpcTicker"/> drives foot creatures (no driver, no vehicle wrapper) over
 /// their idle-patrol path the same way it drives vehicles — same <see cref="NpcPathFollower.Step"/>
 /// call, same arrival-reaction path — but applies pose via
-/// <see cref="Creature.ApplyServerMove(Vector3, Quaternion, Vector3, Vector3)"/> (TargetPosition is
-/// the client interpolation goal — the current steer target) and falls back to a foot-speed default
-/// distinct from the vehicle default when the clonebase has none.
+/// <see cref="Creature.ApplyServerMove(Vector3, Quaternion, Vector3, Vector3)"/> and falls back to a
+/// foot-speed default distinct from the vehicle default when the clonebase has none.
+/// <para>
+/// TargetPosition is <b>not</b> a client interpolation goal, despite the name. RE (2026-08-15):
+/// <c>CVOGCreature::DoPositionUpdate</c> @004c6360 does store the wire value into
+/// <c>m_vMoveToTarget</c>, but the only reader is <c>CVOGCreature::DoMovement</c> @004c2f40, which
+/// delegates to <c>m_pAI-&gt;vtbl+0x30</c> and no-ops when <c>m_pAI == null</c> — and foreign
+/// server-driven NPCs have no client HBAI. Remote creature motion comes entirely from the pose
+/// snapshot plus dead reckoning, so sending a lookahead here would change nothing. Do not build on
+/// this field without re-verifying that reader.
+/// </para>
 /// </summary>
 [TestClass]
 public class NpcFootFollowerTests
@@ -63,7 +71,11 @@ public class NpcFootFollowerTests
 
         NpcTicker.Tick(map, nowMs: 10_000, dt: 0.5f);
 
-        // speed 5 * dt 0.5 = 2.5 step length, well short of the ~70.7 distance to the waypoint.
+        // speed 5 * dt 0.5 = 2.5 step, well short of the ~70.7 distance to the waypoint.
+        // Full clonebase speed, because that is the rate the client integrates the creature at:
+        // CVOGHBAICreatureBase::DoMovement @005cd3b0 uses min(distToGoal, GetCreatureSpeed) and
+        // only halves it while m_bWandering, which any server pose clears. Server and client must
+        // advance at the same rate or the client outruns the server and snaps back.
         const float expectedStep = 2.5f;
         const float dist = 70.71068f; // sqrt(50^2 + 50^2)
         var expectedX = 50f * (expectedStep / dist);
@@ -73,8 +85,12 @@ public class NpcFootFollowerTests
         Assert.AreEqual(expectedZ, creature.Position.Z, 0.01f, "creature must steer toward the waypoint in Z");
         Assert.AreNotEqual(0f, creature.Velocity.X, "velocity must be applied while moving");
         Assert.AreNotEqual(0f, creature.Velocity.Z, "velocity must be applied while moving");
+        // Default is server-authoritative (NpcPathFollower.PublishSteerGoal off): TargetPosition is
+        // the creature's own position, which parks the client AI so the server's pose stream is the
+        // only thing that moves it. Publishing a real goal makes the client walk the creature itself
+        // and it diverges from the server's path at every lookahead tried (p50 ~44 units).
         Assert.AreEqual(creature.Position, creature.TargetPosition,
-            "TargetPosition is the client interpolation goal and must track the current steer target");
+            "with client-driven motion off, the steer goal must be the creature's own position");
     }
 
     [TestMethod]
@@ -94,7 +110,8 @@ public class NpcFootFollowerTests
 
         NpcTicker.Tick(map, nowMs: 10_000, dt: 1f);
 
-        // Foot fallback is 2.5 u/s (distinct from the vehicle fallback of 12 u/s).
+        // Foot fallback is 2.5 u/s (distinct from the vehicle fallback of 12 u/s), applied at the
+        // rate the client integrates — see ClientMatchedFootSpeedScale.
         Assert.AreEqual(2.5f, creature.Position.X, 0.001f,
             "a foot creature with no clonebase speed must fall back to 2.5 u/s, not the vehicle default");
     }

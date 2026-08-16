@@ -169,12 +169,20 @@ public class MapManager : Singleton<MapManager>
     /// ~4 GhostPacks then silence — dirty list was going cold. This is the hard guarantee that
     /// path vehicles re-enter the TNL non-zero update queue every sector tick.
     /// </summary>
-    /// <returns>Number of vehicles force-dirtied this call.</returns>
+    /// <returns>Number of NPCs force-dirtied this call.</returns>
     /// <summary>
-    /// Force-dirty only path vehicles that are currently ghosted to at least one connection.
+    /// Force-dirty only path NPCs that are currently ghosted to at least one connection.
     /// Dirties on unghosted shells are no-ops for packing (CollapseDirtyList finds no GhostInfo).
+    /// <para>
+    /// Covers foot creatures as well as vehicles. Creatures were originally excluded, which left
+    /// humanoids and wildlife with no per-tick dirty guarantee at all: once their ghost fell out of
+    /// TNL's non-zero update list it stayed out until the entity moved again. That is directly
+    /// visible, because the client never blends — <c>CVOGPhysicsBase::DoPositionUpdate</c>
+    /// @0053eec0 holds one server snapshot, ignores drift under <c>cfMaxNetworkOffset</c>, and
+    /// hard-snaps above it. Longer pose gaps mean bigger snaps.
+    /// </para>
     /// </summary>
-    public int ForcePathVehiclePoseDirty()
+    public int ForcePathNpcPoseDirty()
     {
         var n = 0;
         foreach (var map in AllMaps())
@@ -184,22 +192,74 @@ public class MapManager : Singleton<MapManager>
 
             foreach (var entity in map.NpcAiEntities)
             {
-                if (entity is not Vehicle vehicle)
-                    continue;
-                if (vehicle.CoidCurrentPath <= 0 || vehicle.Ghost == null)
-                    continue;
-                if (vehicle.IsCorpse)
-                    continue;
-                // No connection has this ghost in scope → SetMaskBits cannot enqueue a pack.
-                if (vehicle.Ghost.GetFirstObjectRef() == null)
+                if (!IsPathNpcNeedingPoseDirty(entity))
                     continue;
 
-                vehicle.Ghost.SetMaskBits(GhostObject.PositionMask);
+                entity.Ghost.SetMaskBits(GhostObject.PositionMask);
                 n++;
             }
         }
 
         return n;
+    }
+
+    /// <summary>
+    /// Legacy name kept so existing callers/tests keep compiling; foot creatures are now included.
+    /// </summary>
+    public int ForcePathVehiclePoseDirty() => ForcePathNpcPoseDirty();
+
+    /// <summary>
+    /// Diagnostics denominator: creatures that are currently ghosted to someone <b>and</b> moving,
+    /// i.e. the population actually competing for <see cref="GhostObject.PositionMask"/> slots.
+    /// <para>
+    /// This is the number that decides how to fix creature pose gaps. TNL packs by descending
+    /// priority until the packet is full, so priority only ever decides <i>which</i> creature gets a
+    /// slot, never how many slots exist. If this count greatly exceeds the achieved pose-pack rate,
+    /// re-ranking cannot help and the population has to come down instead.
+    /// </para>
+    /// </summary>
+    public int CountMovingScopedCreatures()
+    {
+        var n = 0;
+        foreach (var map in AllMaps())
+        {
+            if (map.PlayerCount <= 0)
+                continue;
+
+            foreach (var entity in map.NpcAiEntities)
+            {
+                if (entity is not Creature creature || creature is Character || creature.IsCorpse)
+                    continue;
+                if (creature.Ghost == null || creature.Ghost.GetFirstObjectRef() == null)
+                    continue;
+
+                var v = creature.Velocity;
+                if ((v.X * v.X) + (v.Y * v.Y) + (v.Z * v.Z) > 1e-6f)
+                    n++;
+            }
+        }
+
+        return n;
+    }
+
+    /// <summary>
+    /// A pathing NPC whose ghost is actually scoped somewhere. Corpses have nothing to animate, and
+    /// dirtying an unscoped ghost cannot enqueue a pack — on a list that can hold hundreds of
+    /// creatures both are pure per-tick waste.
+    /// </summary>
+    private static bool IsPathNpcNeedingPoseDirty(ClonedObjectBase entity)
+    {
+        var pathCoid = entity switch
+        {
+            Vehicle vehicle => vehicle.CoidCurrentPath,
+            Creature creature => creature.CoidCurrentPath,
+            _ => 0L,
+        };
+
+        return pathCoid > 0
+            && entity.Ghost != null
+            && !entity.IsCorpse
+            && entity.Ghost.GetFirstObjectRef() != null;
     }
 
     /// <summary>Live SectorMap(continentId) bootstrap from AssetManager map data / GLM.</summary>

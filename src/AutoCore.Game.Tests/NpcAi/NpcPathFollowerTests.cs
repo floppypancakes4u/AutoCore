@@ -15,6 +15,29 @@ public class NpcPathFollowerTests
 {
     private const float Tolerance = 0.001f;
 
+    [TestCleanup]
+    public void TearDown() => NpcPathFollower.PublishSteerGoal = false;
+
+    /// <summary>
+    /// Default is server-authoritative: the goal is the creature's own position, which parks the
+    /// client AI so motion comes only from the server pose stream. Publishing a real goal makes the
+    /// client walk the creature itself and it diverges from the server's path — measured at p50 ~44
+    /// units of drift for every lookahead tried, against a server stream that was itself smooth.
+    /// </summary>
+    [TestMethod]
+    public void Step_ByDefault_PublishesPositionAsSteerGoal_ParkingTheClientAi()
+    {
+        var path = Path(false, new Vector3(500f, 0f, 0f));
+
+        var result = NpcPathFollower.Step(
+            new Vector3(0f, 0f, 0f), path, index: 0, direction: 1,
+            waitUntilMs: 0, nowMs: 1000, speed: 5f, dt: 0.05f);
+
+        Assert.AreEqual(result.NewPosition.X, result.SteerGoal.X, 0.001f,
+            "default goal must be the creature's own position so the client AI stays parked");
+        Assert.AreEqual(result.NewPosition.Z, result.SteerGoal.Z, 0.001f);
+    }
+
     private static MapPathTemplate Path(bool reverse, params Vector3[] points)
     {
         var path = new MapPathTemplate { ReverseDirection = reverse };
@@ -337,5 +360,172 @@ public class NpcPathFollowerTests
         Assert.IsTrue(result.Arrived);
         Assert.AreEqual(0, result.NewIndex);
         Assert.IsTrue(result.NewPosition.X > 0f && result.NewPosition.X < 5f);
+    }
+
+    /// <summary>
+    /// Facing pop: the non-steering return paths (exact arrival, waypoint hold, empty/zero-speed
+    /// path) all published <see cref="Quaternion.Default"/> — identity, i.e. world-forward — rather
+    /// than the facing the NPC already had. That ships as a real rotation on the next
+    /// <c>PositionMask</c> pack, and the client applies it verbatim:
+    /// <c>CVOGPhysicsBase::DoPositionUpdate</c> @0053eec0 writes the quaternion straight into its
+    /// last-server snapshot after an <c>hkQuaternion::isOk</c> check only. A patrolling NPC that
+    /// stops therefore snaps to face world-forward.
+    /// </summary>
+    [TestMethod]
+    public void Step_ExactArrival_PreservesCurrentFacing_NotIdentity()
+    {
+        var path = Path(false, new Vector3(10f, 0f, 0f));
+        var facing = new Quaternion(0f, 0.7071068f, 0f, 0.7071068f); // yaw 90°, clearly not identity
+
+        // Standing exactly on the waypoint: dist <= onPointEps, the true-arrival branch.
+        var result = NpcPathFollower.Step(
+            new Vector3(10f, 0f, 0f), path, index: 0, direction: 1,
+            waitUntilMs: 0, nowMs: 1000, speed: 18f, dt: 0.05f,
+            currentRotation: facing);
+
+        Assert.IsTrue(result.Arrived);
+        Assert.AreEqual(facing.Y, result.Rotation.Y, Tolerance,
+            "arriving on a waypoint must hold the NPC's existing facing, not snap to world-forward");
+        Assert.AreEqual(facing.W, result.Rotation.W, Tolerance);
+    }
+
+    /// <summary>Holding out a waypoint's WaitTime must not re-face the NPC either.</summary>
+    [TestMethod]
+    public void Step_HoldingForWaitTime_PreservesCurrentFacing()
+    {
+        var path = Path(false, new Vector3(100f, 0f, 0f));
+        var facing = new Quaternion(0f, 0.7071068f, 0f, 0.7071068f);
+
+        var result = NpcPathFollower.Step(
+            new Vector3(0f, 0f, 0f), path, index: 0, direction: 1,
+            waitUntilMs: 5000, nowMs: 1000, speed: 18f, dt: 0.05f,
+            currentRotation: facing);
+
+        Assert.AreEqual(facing.Y, result.Rotation.Y, Tolerance,
+            "a waiting NPC keeps its facing; identity here is a visible spin on the client");
+        Assert.AreEqual(facing.W, result.Rotation.W, Tolerance);
+    }
+
+    /// <summary>
+    /// The client walks the creature to the steer goal itself and stops within 1.0 unit of it, so the
+    /// goal bounds how far it can run ahead of the server. Publishing the raw waypoint put it 80-160
+    /// units out and the client ran that far ahead (measured: maxDrift 166 vs maxGoalDist 155),
+    /// tripping the 5.0 snap limit ~19x/second.
+    /// </summary>
+    [TestMethod]
+    public void Step_DistantWaypoint_ClampsSteerGoalToLookahead()
+    {
+        NpcPathFollower.PublishSteerGoal = true;   // client-driven mode is opt-in
+        var path = Path(false, new Vector3(500f, 0f, 0f));
+
+        var result = NpcPathFollower.Step(
+            new Vector3(0f, 0f, 0f), path, index: 0, direction: 1,
+            waitUntilMs: 0, nowMs: 1000, speed: 5f, dt: 0.05f);
+
+        // Measured from where the creature ENDS the tick — that is where the client measures from.
+        var goalDist = MathF.Sqrt(
+            MathF.Pow(result.SteerGoal.X - result.NewPosition.X, 2)
+            + MathF.Pow(result.SteerGoal.Z - result.NewPosition.Z, 2));
+
+        // speed 5 * 1.5s = 7.5, which dominates the 3.0 floor.
+        Assert.AreEqual(7.5f, goalDist, 0.01f,
+            "a 500-unit waypoint must not be published as the goal; the client would sprint to it");
+        Assert.IsTrue(goalDist > 1f,
+            "goal must clear the client's 1.0-unit arrival stop or the AI freezes the creature");
+        Assert.IsTrue(goalDist >= 5f,
+            "goal must lead by at least one second of travel or it throttles the client to "
+            + "min(distToGoal, speed) and the server outruns it");
+    }
+
+    /// <summary>
+    /// The client turns the goal into a VELOCITY, not a step:
+    /// <c>vel = dir * min(distToGoal, GetCreatureSpeed)</c>. A goal nearer than one second of travel
+    /// therefore throttles the client below the creature's real speed, so the server outruns it and
+    /// it is snapped forward — measured as ~8,000 overrides with every goal pinned at exactly 3.00.
+    /// The goal must always lead by at least the distance covered in a second.
+    /// </summary>
+    [TestMethod]
+    public void ResolveSteerGoal_LeadsByAtLeastOneSecondOfTravel()
+    {
+        NpcPathFollower.PublishSteerGoal = true;   // client-driven mode is opt-in
+        foreach (var speed in new[] { 2.5f, 5f, 12f, 27f })
+        {
+            var goal = NpcPathFollower.ResolveSteerGoal(
+                new Vector3(0f, 0f, 0f), new Vector3(1000f, 0f, 0f), 1000f, speed);
+
+            var dist = MathF.Sqrt((goal.X * goal.X) + (goal.Z * goal.Z));
+
+            Assert.IsTrue(dist >= speed,
+                $"speed {speed}: goal {dist:F2} is nearer than one second of travel, which caps the "
+                + "client's velocity at min(dist, speed) and lets the server outrun it");
+            Assert.IsTrue(dist > 1f, $"speed {speed}: goal must clear the 1.0 arrival stop");
+        }
+    }
+
+    /// <summary>
+    /// The clamp must apply to every steer goal the server publishes, not just the patrol path.
+    /// Combat pursuit briefly shipped the raw target — goals 100-200 units out — and the client
+    /// sprinted to them, which measured as 2,093 client-side hard snaps in one session.
+    /// </summary>
+    [TestMethod]
+    public void ResolveSteerGoal_DistantPursuitTarget_ClampsToLookahead()
+    {
+        NpcPathFollower.PublishSteerGoal = true;   // client-driven mode is opt-in
+        var from = new Vector3(0f, 0f, 0f);
+        var target = new Vector3(200f, 0f, 0f);
+
+        const float speed = 2f;   // slow: the floor lookahead dominates
+        var goal = NpcPathFollower.ResolveSteerGoal(from, target, 200f, speed);
+
+        var dist = MathF.Sqrt(
+            ((goal.X - from.X) * (goal.X - from.X)) + ((goal.Z - from.Z) * (goal.Z - from.Z)));
+        Assert.AreEqual(NpcPathFollower.ClientSteerLookahead, dist, 0.01f,
+            "a 200-unit pursuit target must not be published as the goal");
+        Assert.IsTrue(dist > 1f, "must clear the client's arrival stop");
+        Assert.IsTrue(dist >= speed, "must not throttle the client below creature speed");
+    }
+
+    /// <summary>A waypoint already inside the lookahead is the goal — no need to shorten it.</summary>
+    [TestMethod]
+    public void Step_NearWaypoint_UsesWaypointAsSteerGoal()
+    {
+        NpcPathFollower.PublishSteerGoal = true;   // client-driven mode is opt-in
+        var path = Path(false, new Vector3(2f, 0f, 0f));
+
+        var result = NpcPathFollower.Step(
+            new Vector3(0f, 0f, 0f), path, index: 0, direction: 1,
+            waitUntilMs: 0, nowMs: 1000, speed: 5f, dt: 0.05f);
+
+        Assert.AreEqual(2f, result.SteerGoal.X, 0.01f);
+    }
+
+    /// <summary>The goal must lead along the path, not trail behind the creature.</summary>
+    [TestMethod]
+    public void Step_SteerGoal_LeadsInTheTravelDirection()
+    {
+        NpcPathFollower.PublishSteerGoal = true;   // client-driven mode is opt-in
+        var path = Path(false, new Vector3(0f, 0f, 300f));
+
+        var result = NpcPathFollower.Step(
+            new Vector3(0f, 0f, 0f), path, index: 0, direction: 1,
+            waitUntilMs: 0, nowMs: 1000, speed: 5f, dt: 0.05f);
+
+        Assert.IsTrue(result.SteerGoal.Z > 0f,
+            $"goal must lead toward the waypoint, was Z={result.SteerGoal.Z}");
+        Assert.IsTrue(result.SteerGoal.Z > result.NewPosition.Z,
+            "goal must stay ahead of the position reached this tick");
+    }
+
+    /// <summary>Omitting the facing keeps the historical identity default for the pure-stepper tests.</summary>
+    [TestMethod]
+    public void Step_ExactArrival_WithoutCurrentRotation_StillDefaultsToIdentity()
+    {
+        var path = Path(false, new Vector3(10f, 0f, 0f));
+
+        var result = NpcPathFollower.Step(
+            new Vector3(10f, 0f, 0f), path, index: 0, direction: 1,
+            waitUntilMs: 0, nowMs: 1000, speed: 18f, dt: 0.05f);
+
+        Assert.AreEqual(Quaternion.Default.W, result.Rotation.W, Tolerance);
     }
 }

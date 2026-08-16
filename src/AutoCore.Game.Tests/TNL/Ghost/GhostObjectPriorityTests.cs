@@ -124,6 +124,54 @@ public class GhostObjectPriorityTests
             "The viewer's target must be pinned at priority 1 regardless of distance.");
     }
 
+    /// <summary>
+    /// The anti-starvation term must be type-neutral. It existed at 0.01/skip for everything except
+    /// moving vehicles, which got 0.05 — so at <b>equal</b> starvation a foreign NPC car outranked a
+    /// player, inverting the policy <see cref="GetUpdatePriority_PlayerStillOutranksForeignVehicle"/>
+    /// asserts (that test only covers the unstarved case). Base weight is the priority policy;
+    /// starvation recovery must not silently override it.
+    /// </summary>
+    [TestMethod]
+    public void GetUpdatePriority_EquallyStarvedPlayer_IsNotOutrankedByForeignVehicle()
+    {
+        var viewer = MakeCharacter(1, 0f);
+        var otherPlayer = MakeCharacter(2, 100f);
+        var vehicle = MakeVehicleGhost(3, 100f);
+        vehicle.ApplyServerMove(vehicle.Position, Quaternion.Default, new Vector3(12f, 0f, 0f), dt: 0.1f);
+
+        const int equalSkips = 10;
+        var playerPriority = otherPlayer.Ghost.GetUpdatePriority(viewer.Ghost, GhostObject.PositionMask, equalSkips);
+        var vehiclePriority = vehicle.Ghost.GetUpdatePriority(viewer.Ghost, GhostObject.PositionMask, equalSkips);
+
+        Assert.IsTrue(playerPriority >= vehiclePriority,
+            $"at equal starvation a player must not lose its slot to an NPC car "
+            + $"({playerPriority} vs {vehiclePriority})");
+    }
+
+    /// <summary>
+    /// The creature starvation trap. With a 5x smaller boost than vehicles, a creature's score fell
+    /// further behind with every skip, so it could not win a slot back while any vehicle stayed
+    /// dirty — and <c>ForcePathNpcPoseDirty</c> re-dirties path vehicles every 50 ms tick, so one
+    /// always is. A type-neutral boost restores round-robin: enough starvation and the creature
+    /// takes its turn.
+    /// </summary>
+    [TestMethod]
+    public void GetUpdatePriority_HeavilyStarvedCreature_OvertakesFreshlyPackedVehicle()
+    {
+        var viewer = MakeCharacter(1, 0f);
+        var creature = MakeCreatureGhost(2, 100f);
+        var vehicle = MakeVehicleGhost(3, 100f);
+        vehicle.ApplyServerMove(vehicle.Position, Quaternion.Default, new Vector3(12f, 0f, 0f), dt: 0.1f);
+
+        // The vehicle was packed two ticks ago; the creature has been passed over for 20 (~1 s).
+        var creaturePriority = creature.Ghost.GetUpdatePriority(viewer.Ghost, GhostObject.PositionMask, 20);
+        var vehiclePriority = vehicle.Ghost.GetUpdatePriority(viewer.Ghost, GhostObject.PositionMask, 2);
+
+        Assert.IsTrue(creaturePriority > vehiclePriority,
+            $"a creature starved for ~1 s must outrank a just-packed vehicle, or its pose gap grows "
+            + $"without bound ({creaturePriority} vs {vehiclePriority})");
+    }
+
     private static Character MakeCharacter(long coid, float x)
     {
         var character = new Character();

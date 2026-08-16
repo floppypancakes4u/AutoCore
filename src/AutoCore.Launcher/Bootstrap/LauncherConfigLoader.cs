@@ -3,7 +3,6 @@ using Microsoft.Extensions.Configuration;
 namespace AutoCore.Launcher.Bootstrap;
 
 using AutoCore.Auth.Config;
-using AutoCore.Discord.Config;
 using AutoCore.Global.Config;
 using AutoCore.Sector.Config;
 
@@ -18,8 +17,8 @@ public static class LauncherConfigLoader
     public const string GlobalEnvConfigFileName = "appsettings.global.env.json";
     public const string SectorConfigFileName = "appsettings.sector.json";
     public const string SectorEnvConfigFileName = "appsettings.sector.env.json";
-    public const string DiscordConfigFileName = "appsettings.discord.json";
-    public const string DiscordEnvConfigFileName = "appsettings.discord.env.json";
+    public const string BotBridgeConfigFileName = "appsettings.botbridge.json";
+    public const string BotBridgeEnvConfigFileName = "appsettings.botbridge.env.json";
 
     public static AuthConfig LoadAuthConfig(string? contentRoot = null)
         => LoadConfig<AuthConfig>(AuthConfigFileName, AuthEnvConfigFileName, contentRoot);
@@ -31,20 +30,20 @@ public static class LauncherConfigLoader
         => LoadConfig<SectorConfig>(SectorConfigFileName, SectorEnvConfigFileName, contentRoot);
 
     /// <summary>
-    /// Loads Discord config. Missing primary file yields defaults (module disabled) so existing
-    /// deployments without the optional module keep working.
+    /// Loads the optional bridge config to the external Auto Assault Crash Bot. Missing primary
+    /// file yields defaults (both bridge features disabled) so existing deployments keep working.
     /// </summary>
-    public static DiscordConfig LoadDiscordConfig(string? contentRoot = null)
+    public static BotBridgeConfig LoadBotBridgeConfig(string? contentRoot = null)
     {
         var root = string.IsNullOrWhiteSpace(contentRoot)
             ? Directory.GetCurrentDirectory()
             : contentRoot;
 
-        var primaryPath = Path.Combine(root, DiscordConfigFileName);
+        var primaryPath = Path.Combine(root, BotBridgeConfigFileName);
         if (!File.Exists(primaryPath))
-            return new DiscordConfig();
+            return new BotBridgeConfig();
 
-        return LoadConfig<DiscordConfig>(DiscordConfigFileName, DiscordEnvConfigFileName, contentRoot);
+        return LoadConfig<BotBridgeConfig>(BotBridgeConfigFileName, BotBridgeEnvConfigFileName, contentRoot);
     }
 
     /// <summary>

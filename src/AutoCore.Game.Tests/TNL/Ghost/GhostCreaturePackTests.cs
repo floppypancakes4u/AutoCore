@@ -161,6 +161,58 @@ public class GhostCreaturePackTests
         Assert.AreEqual(0x70BA1u, stream.ReadInt(20));
     }
 
+    /// <summary>
+    /// Creature pose packs must be counted the way <see cref="GhostVehicle.PosePacksSinceDiag"/>
+    /// counts vehicle ones, so the sector's 2 s <c>PathPoseForce</c> diag can report the achieved
+    /// creature pose rate. Without it creatures are invisible in that line, and the pose-gap
+    /// question ("are creatures starved, or are there simply more of them than packet slots?")
+    /// cannot be answered from a live session.
+    /// </summary>
+    [TestMethod]
+    public void PackUpdate_PositionMask_CountsCreaturePosePackForDiag()
+    {
+        var creature = MakeCreature(5006);
+        System.Threading.Interlocked.Exchange(ref GhostCreature.PosePacksSinceDiag, 0);
+
+        Pack(creature, GhostObject.PositionMask, initial: false);
+
+        Assert.AreEqual(1, System.Threading.Volatile.Read(ref GhostCreature.PosePacksSinceDiag),
+            "a PositionMask pack must register as one creature pose pack");
+    }
+
+    /// <summary>
+    /// Initial updates must be counted separately from pose deltas. A steady-state stream of
+    /// initials means creatures are churning in and out of interest scope, which crowds pose out of
+    /// the same packet budget — a scope problem wearing a pose problem's clothes.
+    /// </summary>
+    [TestMethod]
+    public void PackUpdate_Initial_CountsAsInitialNotPose()
+    {
+        var creature = MakeCreature(5008);
+        creature.InitializeHealthForTests(50);
+        System.Threading.Interlocked.Exchange(ref GhostCreature.InitialPacksSinceDiag, 0);
+        System.Threading.Interlocked.Exchange(ref GhostCreature.PosePacksSinceDiag, 0);
+
+        Pack(creature, GhostObject.InitialMask | GhostObject.PositionMask, initial: true);
+
+        Assert.AreEqual(1, System.Threading.Volatile.Read(ref GhostCreature.InitialPacksSinceDiag),
+            "an initial update must register as one initial");
+        Assert.AreEqual(0, System.Threading.Volatile.Read(ref GhostCreature.PosePacksSinceDiag),
+            "an initial update is not a pose delta, even though it carries position");
+    }
+
+    /// <summary>A pack with no PositionMask bit ships no pose and must not be counted as one.</summary>
+    [TestMethod]
+    public void PackUpdate_WithoutPositionMask_DoesNotCountPosePack()
+    {
+        var creature = MakeCreature(5007);
+        System.Threading.Interlocked.Exchange(ref GhostCreature.PosePacksSinceDiag, 0);
+
+        Pack(creature, GhostCreature.StateMask, initial: false);
+
+        Assert.AreEqual(0, System.Threading.Volatile.Read(ref GhostCreature.PosePacksSinceDiag));
+    }
+
     private static Creature MakeCreature(long coid)
     {
         var creature = new Creature();

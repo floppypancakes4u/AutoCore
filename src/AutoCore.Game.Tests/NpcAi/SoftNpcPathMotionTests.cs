@@ -19,6 +19,7 @@ public class SoftNpcPathMotionTests
         SoftNpcPathMotion.MaxBrake = 50f;
         SoftNpcPathMotion.LookAheadDistance = 22f;
         SoftNpcPathMotion.MaxLaneOffset = 3.5f;
+        SoftNpcPathMotion.MaxStaggerDelayMs = 0;
     }
 
     [TestMethod]
@@ -153,6 +154,64 @@ public class SoftNpcPathMotionTests
 
         var spd = MathF.Sqrt((soft.Velocity.X * soft.Velocity.X) + (soft.Velocity.Z * soft.Velocity.Z));
         Assert.IsTrue(spd > 5f, $"zero-wait carry, got {spd}");
+    }
+
+    /// <summary>
+    /// NPCs sharing a MapPath all latch to the same geometric-nearest waypoint (deliberately — see
+    /// <see cref="ResolveStaggeredPathIndex_IsAlwaysGeometricNearest"/>, which documents that
+    /// staggering the *index* made NPCs aim cross-country at a far node and circle without
+    /// arriving). Latching together means they also *depart* together and then travel in lockstep,
+    /// which is what produces the large clumps of humanoids running as one group.
+    /// <para>
+    /// Staggering the departure <b>time</b> spreads them along the same route without any far-index
+    /// aiming, so the old failure cannot recur: everyone still walks to their own nearest node.
+    /// Clumping is not merely cosmetic — a clump puts every member inside the interest radius at
+    /// once, which is what collapses per-creature pose rate (measured ~100 in-scope movers at
+    /// ~1 Hz) and pushes client drift past the 15-unit hard-teleport threshold.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public void ResolveStaggerDelayMs_DiffersAcrossCoids_AndIsBounded()
+    {
+        SoftNpcPathMotion.MaxStaggerDelayMs = 6000;
+        var seen = new HashSet<int>();
+        for (long coid = 1; coid <= 60; coid++)
+        {
+            var delay = SoftNpcPathMotion.ResolveStaggerDelayMs(coid);
+            Assert.IsTrue(delay >= 0 && delay < SoftNpcPathMotion.MaxStaggerDelayMs,
+                $"coid {coid} delay {delay} must fall inside [0, {SoftNpcPathMotion.MaxStaggerDelayMs})");
+            seen.Add(delay);
+        }
+
+        Assert.IsTrue(seen.Count > 40,
+            $"departure delays must actually spread NPCs out; only {seen.Count} distinct values in 60 coids");
+    }
+
+    [TestMethod]
+    public void ResolveStaggerDelayMs_IsDeterministicPerCoid()
+    {
+        SoftNpcPathMotion.MaxStaggerDelayMs = 6000;
+        Assert.AreEqual(
+            SoftNpcPathMotion.ResolveStaggerDelayMs(4242),
+            SoftNpcPathMotion.ResolveStaggerDelayMs(4242),
+            "a given NPC must always get the same offset, or it re-staggers every latch");
+    }
+
+    /// <summary>Zero disables the feature outright, for a live A/B against the clumped behaviour.</summary>
+    [TestMethod]
+    public void ResolveStaggerDelayMs_ZeroWindow_DisablesStagger()
+    {
+        var previous = SoftNpcPathMotion.MaxStaggerDelayMs;
+        try
+        {
+            SoftNpcPathMotion.MaxStaggerDelayMs = 0;
+            for (long coid = 1; coid <= 10; coid++)
+                Assert.AreEqual(0, SoftNpcPathMotion.ResolveStaggerDelayMs(coid));
+        }
+        finally
+        {
+            SoftNpcPathMotion.MaxStaggerDelayMs = previous;
+        }
     }
 
     [TestMethod]

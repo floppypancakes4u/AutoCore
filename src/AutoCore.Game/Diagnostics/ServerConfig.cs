@@ -1,5 +1,6 @@
 namespace AutoCore.Game.Diagnostics;
 
+using AutoCore.Game.Map;
 using AutoCore.Utils;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
@@ -202,6 +203,8 @@ public static class ServerConfig
         CompositeWheelCollisionEnabled = DefaultCompositeWheelCollisionEnabled;
         ChassisPointImpulsesEnabled = DefaultChassisPointImpulsesEnabled;
         EnableRamming = DefaultEnableRamming;
+        InterestSelector.ScopeAddRadius = InterestSelector.DefaultScopeAddRadius;
+        InterestSelector.ScopeDropRadius = InterestSelector.DefaultScopeDropRadius;
         SimNpcVehiclesEnabled = DefaultSimNpcVehiclesEnabled;
         SimDebugLogs = DefaultSimDebugLogs;
         InventoryDebugPackets = DefaultInventoryDebugPackets;
@@ -336,6 +339,44 @@ public static class ServerConfig
                 ChassisPointImpulsesEnabled = p.ChassisPointImpulsesEnabled.Value;
         }
 
+        var interest = root?.Interest;
+        if (interest != null)
+        {
+            if (interest.ScopeAddRadius.HasValue)
+            {
+                var add = interest.ScopeAddRadius.Value;
+                if (!(add > 0f) || float.IsNaN(add) || float.IsInfinity(add))
+                {
+                    error = $"interest.scopeAddRadius '{add}' must be a positive finite number";
+                    return false;
+                }
+
+                // Derive the drop radius unless one is given, preserving the shipped hysteresis band.
+                var drop = interest.ScopeDropRadius ?? (add * InterestSelector.DefaultDropRadiusRatio);
+                if (!(drop > add) || float.IsNaN(drop) || float.IsInfinity(drop))
+                {
+                    error = $"interest.scopeDropRadius '{drop}' must be greater than scopeAddRadius "
+                        + $"'{add}' — the gap is the hysteresis band that prevents scope flicker";
+                    return false;
+                }
+
+                InterestSelector.ScopeAddRadius = add;
+                InterestSelector.ScopeDropRadius = drop;
+            }
+            else if (interest.ScopeDropRadius.HasValue)
+            {
+                var drop = interest.ScopeDropRadius.Value;
+                if (!(drop > InterestSelector.ScopeAddRadius))
+                {
+                    error = $"interest.scopeDropRadius '{drop}' must be greater than scopeAddRadius "
+                        + $"'{InterestSelector.ScopeAddRadius}'";
+                    return false;
+                }
+
+                InterestSelector.ScopeDropRadius = drop;
+            }
+        }
+
         var sim = root?.Sim;
         if (sim != null)
         {
@@ -397,9 +438,16 @@ public static class ServerConfig
     {
         public bool? EnableRamming { get; set; }
         public NpcVehiclePhysicsDto NpcVehiclePhysics { get; set; }
+        public InterestDto Interest { get; set; }
         public SimDto Sim { get; set; }
         public InventoryDto Inventory { get; set; }
         public CombatDto Combat { get; set; }
+    }
+
+    private sealed class InterestDto
+    {
+        public float? ScopeAddRadius { get; set; }
+        public float? ScopeDropRadius { get; set; }
     }
 
     private sealed class NpcVehiclePhysicsDto

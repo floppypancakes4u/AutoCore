@@ -127,8 +127,12 @@ public class GhostVehicle : GhostObject
     /// </summary>
     internal const float MovingVehiclePosePriorityWeight = 0.5f;
 
-    /// <summary>Skip starvation boost while moving (default ghosts use 0.01).</summary>
-    internal const float MovingVehicleSkipBoost = 0.05f;
+    /// <summary>
+    /// Skip starvation boost. Now an alias for the shared, type-neutral
+    /// <see cref="GhostObject.SkipStarvationBoost"/> — a vehicle-only boost inverted the priority
+    /// policy (NPC cars beat equally-starved players, and creatures could never catch up).
+    /// </summary>
+    internal const float MovingVehicleSkipBoost = GhostObject.SkipStarvationBoost;
 
     private const int CoidCurrentPathBits = 18;
 
@@ -157,14 +161,15 @@ public class GhostVehicle : GhostObject
 
         var parentVehicle = Parent.GetAsVehicle();
         var moving = IsMovingForPoseStream(parentVehicle);
+        // Moving/idle changes the base weight only. The starvation term is deliberately the same
+        // for every ghost type (see GhostObject.SkipStarvationBoost).
         var weight = moving ? MovingVehiclePosePriorityWeight : VehiclePosePriorityWeight;
-        var skipScale = moving ? MovingVehicleSkipBoost : 0.01f;
 
         var dx = viewer.Position.X - Parent.Position.X;
         var dz = viewer.Position.Z - Parent.Position.Z;
         var distance = (float)Math.Sqrt((dx * dx) + (dz * dz));
         var falloff = Math.Clamp(1.0f - (distance / InterestSelector.BaseScopeDropRadius), 0.0f, 1.0f);
-        return (weight * falloff) + (updateSkips * skipScale);
+        return (weight * falloff) + (updateSkips * GhostObject.SkipStarvationBoost);
     }
 
     /// <summary>

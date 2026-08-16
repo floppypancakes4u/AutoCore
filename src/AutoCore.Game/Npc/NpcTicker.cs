@@ -23,6 +23,25 @@ public static class NpcTicker
     internal const float DefaultFootSpeed = 2.5f;
 
     /// <summary>
+    /// Server foot speed relative to the clonebase value. Must equal the rate the <b>client</b>
+    /// integrates, because the client simulates the creature itself between pose updates.
+    /// <para>
+    /// <c>CVOGHBAICreatureBase::DoMovement</c> @005cd3b0 sets
+    /// <c>vel = dir * min(distToGoal, GetCreatureSpeed(creature))</c> and hands it to Havok, and
+    /// <c>GetCreatureSpeed</c> @004c55e0 returns the full clonebase speed. The one halving it applies
+    /// is gated on <c>m_bWandering</c>, which <c>CVOGCreature::DoPositionUpdate</c> @004c6360 clears
+    /// on any real position change — so a server-driven creature always walks at <b>full</b> speed.
+    /// </para>
+    /// <para>
+    /// This was briefly 0.5, taken from <c>LowFrequencyPathMove</c> @005ce990. That 0.5 belongs to a
+    /// low-frequency path-progression nudge, not to the rate the client integrates; applying it made
+    /// the server advance at half the client's speed, so the client outran it continuously and was
+    /// snapped back. Client-side measurement (MotionDiag) is what corrected the reading.
+    /// </para>
+    /// </summary>
+    internal const float ClientMatchedFootSpeedScale = 1.0f;
+
+    /// <summary>
     /// Advances every NPC on the map.
     /// <para>
     /// SS-12: each NPC is isolated. Previously this was a bare <c>foreach</c>, so one bad NPC
@@ -103,11 +122,25 @@ public static class NpcTicker
                     entity.Position, path, entity.ObjectId.Coid);
                 if (MathF.Abs(npcAi.PathLaneOffset) < 1e-6f)
                     npcAi.PathLaneOffset = SoftNpcPathMotion.ResolveLaneOffset(entity.ObjectId.Coid);
+
+                // One-time departure stagger. Everyone latches to the same nearest waypoint (see
+                // ResolveStaggeredPathIndex), so without this a whole spawn group also sets off
+                // together and then travels as one clump for the rest of its life. Applied once per
+                // NPC: combat disengage clears PathIndex to force a re-latch, and re-staggering
+                // there would pause the NPC every time it dropped aggro.
+                if (!npcAi.PathStartStaggered)
+                {
+                    npcAi.PathStartStaggered = true;
+                    var stagger = SoftNpcPathMotion.ResolveStaggerDelayMs(entity.ObjectId.Coid);
+                    if (stagger > 0)
+                        npcAi.WaitUntilMs = Math.Max(npcAi.WaitUntilMs, nowMs + stagger);
+                }
             }
 
             var result = NpcPathFollower.Step(
                 entity.Position, path, npcAi.PathIndex, npcAi.PathDirection,
-                npcAi.WaitUntilMs, nowMs, ResolveSpeed(entity), dt);
+                npcAi.WaitUntilMs, nowMs, ResolveSpeed(entity), dt,
+                GetRotation(entity));
 
             npcAi.PathIndex = result.NewIndex;
             npcAi.PathDirection = result.NewDirection;
@@ -196,6 +229,14 @@ public static class NpcTicker
                         holdVehicle.Ghost?.SetMaskBits(GhostObject.PositionMask);
                 }
             }
+            else if (entity is Creature holdCreature && holdCreature.CoidCurrentPath > 0)
+            {
+                // Same keep-warm guarantee for foot creatures. Without it a humanoid dwelling out a
+                // waypoint's WaitTime drops off TNL's non-zero update list entirely, and the client
+                // is left dead-reckoning a stale pose until the NPC moves again — which lands as a
+                // hard snap, since CVOGPhysicsBase::DoPositionUpdate @0053eec0 never blends.
+                holdCreature.Ghost?.SetMaskBits(GhostObject.PositionMask);
+            }
 
             if (result.FireReactionCoid > 0)
                 map.TriggerReactions(entity, new List<long> { result.FireReactionCoid });
@@ -249,7 +290,16 @@ public static class NpcTicker
 
         var fallback = entity is Vehicle ? DefaultVehicleSpeed : DefaultFootSpeed;
         var speed = (source?.CloneBaseObject as CloneBaseCreature)?.CreatureSpecific.Speed ?? 0f;
-        return speed > 0f ? speed : fallback;
+        var resolved = speed > 0f ? speed : fallback;
+
+        // Foot creatures must advance at exactly the rate the client integrates them, or the two
+        // simulations diverge every tick and the client snaps the creature back. See
+        // ClientMatchedFootSpeedScale for the client-side derivation and for why a 0.5 taken from
+        // LowFrequencyPathMove was wrong here.
+        if (entity is not Vehicle)
+            resolved *= ClientMatchedFootSpeedScale;
+
+        return resolved;
     }
 
     private static void ApplyMove(ClonedObjectBase entity, PathStepResult result, float dt)
@@ -259,8 +309,12 @@ public static class NpcTicker
         var pos = (entity is Vehicle && result.HasDriveInputs)
             ? result.NewPosition
             : SnapToTerrain(entity.Map, result.NewPosition);
-        // Keep target position grounded for foot creatures (client pose target).
-        var targetPos = pos;
+        // The client's steer goal — the waypoint being walked to, NOT the position reached this
+        // tick. CVOGHBAICreatureBase::DoMovement @005cd3b0 walks the creature toward
+        // m_vMoveToTarget and stops it outright inside 1.0 unit of it, so publishing the current
+        // position reads as "arrived" every update: the client zeroes velocity and the creature
+        // only ever moves in discrete pose-sized jumps. Grounded so the goal sits on terrain.
+        var targetPos = SnapToTerrain(entity.Map, result.SteerGoal);
 
         switch (entity)
         {

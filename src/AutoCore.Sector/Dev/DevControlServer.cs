@@ -212,6 +212,16 @@ public sealed class DevControlServer
             if (request.Method == "GET" && path == "/health")
                 return DevHttpResponse.Json(200, CreateHealthResponse());
 
+            // Actual-vs-authored NPC population per map. Read-only, no character context needed,
+            // so it can be queried on a live server while investigating world density.
+            if (request.Method == "GET" && path == "/population")
+            {
+                return DevHttpResponse.Json(200, new
+                {
+                    maps = AutoCore.Game.Diagnostics.MapPopulationReport.BuildForAllMaps(),
+                });
+            }
+
             if (request.Method == "GET" && path == "/inventory")
                 return DevHttpResponse.Json(200, CreateInventoryResponse(GetSelectedCharacter(request.Query("character"))));
 

@@ -3,6 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace AutoCore.Game.Tests.Diagnostics;
 
 using AutoCore.Game.Diagnostics;
+using AutoCore.Game.Map;
 using AutoCore.Game.Npc;
 
 [TestClass]
@@ -22,6 +23,90 @@ public class ServerConfigTests
         ServerConfig.ResetToDefaults();
         NpcVehicleDriveController.Enabled = false;
         SoftNpcPathMotion.Enabled = false;
+    }
+
+    /// <summary>
+    /// Interest radius decides how much of the world a client is told about, which sets both how
+    /// crowded the map looks and how many entities share the fixed per-connection packet budget.
+    /// The shipped 400/460 values carry no retail provenance, so they need to be tunable from config
+    /// rather than recompiled — measurement is the only way to find the right number.
+    /// </summary>
+    [TestMethod]
+    public void InterestSection_AppliesScopeRadii()
+    {
+        var ok = ServerConfig.ApplyFromYaml(
+            """
+            interest:
+              scopeAddRadius: 100
+              scopeDropRadius: 115
+            """,
+            out var error);
+
+        Assert.IsTrue(ok, error);
+        Assert.AreEqual(100f, InterestSelector.ScopeAddRadius, 0.001f);
+        Assert.AreEqual(115f, InterestSelector.ScopeDropRadius, 0.001f);
+    }
+
+    /// <summary>
+    /// Drop must exceed add: the gap is the hysteresis band that stops an entity on the boundary
+    /// flickering in and out of scope, and each re-entry costs a full re-create rather than a pose
+    /// delta. A config that inverts them would be worse than the default.
+    /// </summary>
+    [TestMethod]
+    public void InterestSection_DropBelowAdd_IsRejected()
+    {
+        var ok = ServerConfig.ApplyFromYaml(
+            """
+            interest:
+              scopeAddRadius: 300
+              scopeDropRadius: 200
+            """,
+            out var error);
+
+        Assert.IsFalse(ok, "drop radius below add radius must be rejected, not silently accepted");
+        Assert.IsNotNull(error);
+        StringAssert.Contains(error, "scopeDropRadius");
+    }
+
+    /// <summary>Omitting the drop radius derives it from add, preserving the shipped ~15% band.</summary>
+    [TestMethod]
+    public void InterestSection_AddOnly_DerivesDropRadius()
+    {
+        var ok = ServerConfig.ApplyFromYaml(
+            """
+            interest:
+              scopeAddRadius: 200
+            """,
+            out var error);
+
+        Assert.IsTrue(ok, error);
+        Assert.AreEqual(200f, InterestSelector.ScopeAddRadius, 0.001f);
+        Assert.IsTrue(InterestSelector.ScopeDropRadius > InterestSelector.ScopeAddRadius,
+            $"derived drop {InterestSelector.ScopeDropRadius} must exceed add {InterestSelector.ScopeAddRadius}");
+    }
+
+    [TestMethod]
+    public void InterestSection_NonPositiveRadius_IsRejected()
+    {
+        var ok = ServerConfig.ApplyFromYaml(
+            """
+            interest:
+              scopeAddRadius: 0
+            """,
+            out var error);
+
+        Assert.IsFalse(ok, "a zero scope radius would make the world invisible");
+        Assert.IsNotNull(error);
+    }
+
+    [TestMethod]
+    public void ResetToDefaults_RestoresShippedScopeRadii()
+    {
+        ServerConfig.ApplyFromYaml("interest:\n  scopeAddRadius: 111\n", out _);
+        ServerConfig.ResetToDefaults();
+
+        Assert.AreEqual(InterestSelector.DefaultScopeAddRadius, InterestSelector.ScopeAddRadius, 0.001f);
+        Assert.AreEqual(InterestSelector.DefaultScopeDropRadius, InterestSelector.ScopeDropRadius, 0.001f);
     }
 
     [TestMethod]

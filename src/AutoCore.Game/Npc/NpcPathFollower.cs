@@ -30,6 +30,19 @@ public struct PathStepResult
     /// <summary>Absolute ms deadline the NPC idles until; unchanged unless a waypoint sets WaitTime.</summary>
     public long WaitUntilMs;
 
+    /// <summary>
+    /// Where the NPC is currently heading — the active waypoint, not the position it reached this
+    /// tick. Shipped to the client as <c>TargetPosition</c> and stored in its
+    /// <c>m_vMoveToTarget</c>.
+    /// <para>
+    /// The client's own creature AI (<c>CVOGHBAICreatureBase::DoMovement</c> @005cd3b0) walks toward
+    /// this goal and halts the creature outright once it is within 1.0 unit of it. Publishing the
+    /// current position here therefore reads as "already arrived" every update, so the client stops
+    /// the creature and the only motion left is the discrete pose writes — the teleporting look.
+    /// </para>
+    /// </summary>
+    public Vector3 SteerGoal;
+
     /// <summary>True when the NPC is now walking the path backward (ping-pong); mirror to PathReversing.</summary>
     public bool NowReversing;
 
@@ -62,6 +75,96 @@ public struct PathStepResult
 /// </summary>
 public static class NpcPathFollower
 {
+    /// <summary>
+    /// How far ahead of the creature the client's steer goal is placed, in world units.
+    /// <para>
+    /// The client walks the creature toward this goal <b>itself</b>, at full creature speed, and
+    /// then stops when it gets within 1.0 unit of it
+    /// (<c>CVOGHBAICreatureBase::DoMovement</c> @005cd3b0). So the goal bounds how far the client
+    /// can run ahead of the server's authoritative position, which puts it in a narrow band:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>below <b>1.0</b> the client treats it as already reached and freezes the
+    /// creature, leaving only discrete pose writes — the original teleporting bug;</description></item>
+    /// <item><description>above <b>5.0</b> the client's accrued drift trips
+    /// <c>m_bPacketOverride</c> (<c>CVOGCreature::DoPositionUpdate</c> @004c6360 uses a 5.0 limit for
+    /// clone type 0x14, not the 15.0 <c>cfMaxNetworkOffset</c> that governs the physics path) and it
+    /// is snapped back to the server position.</description></item>
+    /// </list>
+    /// <para>
+    /// Publishing the raw waypoint put the goal 80-160 units out, and client-side measurement showed
+    /// drift tracking it exactly (maxDrift 166 against maxGoalDist 155) with ~19 snaps/second. A
+    /// short lookahead keeps the client's own simulation tethered to the server's.
+    /// </para>
+    /// </summary>
+    public static float ClientSteerLookahead { get; set; } = 3.0f;
+
+    /// <summary>
+    /// Seconds of travel the steer goal must lead by, so the client is never velocity-throttled.
+    /// <para>
+    /// The client does not step toward the goal — it derives a <b>velocity</b> from it and lets
+    /// Havok integrate:
+    /// <c>vel = dir * min(distToGoal, GetCreatureSpeed(creature))</c>
+    /// (<c>CVOGHBAICreatureBase::DoMovement</c> @005cd3b0). So a goal closer than the creature's
+    /// speed caps how fast the client can walk: with a 3-unit goal a 5 u/s creature moves at 3 u/s
+    /// on the client while the server advances at 5, and the client falls behind 2 u/s until it
+    /// crosses the 5-unit override limit and is snapped forward — measured as ~8,000 overrides with
+    /// every goal pinned at exactly 3.00.
+    /// </para>
+    /// <para>
+    /// Leading by more than one second of travel keeps <c>min()</c> resolving to the full speed, so
+    /// both simulations advance at the same rate. Holding at a waypoint still collapses the goal
+    /// onto the position, which is what stops the client walking on while the server waits.
+    /// </para>
+    /// </summary>
+    public static float ClientSteerLookaheadSeconds { get; set; } = 1.5f;
+
+    /// <summary>
+    /// Places the client's steer goal along the path heading, never past the waypoint itself, far
+    /// enough ahead that the client walks at full creature speed rather than being throttled by
+    /// <c>min(distToGoal, speed)</c>.
+    /// </summary>
+    /// <summary>
+    /// When false (default), the steer goal published to the client is the creature's own position,
+    /// which parks the client's AI and leaves the server as the sole authority on where the creature
+    /// is.
+    /// <para>
+    /// Publishing a real goal makes the client walk the creature <b>itself</b>
+    /// (<c>CVOGHBAICreatureBase::DoMovement</c> @005cd3b0) along a straight line to that goal, while
+    /// the server walks the actual path with turns, accept-distances and waypoint holds. The two
+    /// simulations then diverge continuously, and measurement showed that divergence at every goal
+    /// distance tried — p50 drift ~44 units at both a 3.0 and a 17.55 lookahead, rising to 229 as the
+    /// goal grew — against a server stream that was itself smooth (maxBack 0.16-1.52 per pose).
+    /// Enlarging the goal only bought the client more room to wander.
+    /// </para>
+    /// <para>
+    /// A parked AI means motion comes solely from the server's pose stream, so smoothness is then a
+    /// function of pose rate rather than of a client simulation racing the server.
+    /// </para>
+    /// </summary>
+    public static bool PublishSteerGoal { get; set; }
+
+    internal static Vector3 ResolveSteerGoal(Vector3 position, Vector3 target, float dist, float speed)
+    {
+        // Server-authoritative: goal == position parks the client AI (it reads "arrived").
+        if (!PublishSteerGoal)
+            return position;
+
+        var lookahead = ClientSteerLookahead;
+        var travel = speed * ClientSteerLookaheadSeconds;
+        if (travel > lookahead)
+            lookahead = travel;
+
+        if (lookahead <= 0f || dist <= lookahead || dist <= 1e-4f)
+            return target;   // already inside the lookahead: aim at the waypoint
+
+        var t = lookahead / dist;
+        return new Vector3(
+            position.X + ((target.X - position.X) * t),
+            position.Y + ((target.Y - position.Y) * t),
+            position.Z + ((target.Z - position.Z) * t));
+    }
+
     public static PathStepResult Step(
         Vector3 position,
         MapPathTemplate path,
@@ -70,13 +173,24 @@ public static class NpcPathFollower
         long waitUntilMs,
         long nowMs,
         float speed,
-        float dt)
+        float dt,
+        Quaternion? currentRotation = null)
     {
+        // Facing published by every non-steering return path (empty/zero-speed path, waypoint
+        // hold, exact arrival). Identity here is world-forward, not "unchanged": the client applies
+        // the quaternion verbatim (CVOGPhysicsBase::DoPositionUpdate @0053eec0 stores it after only
+        // an isOk check), so a stopping NPC visibly snaps to face north. Callers that know the
+        // entity's current facing pass it; the pure-stepper tests keep the historical default.
+        var restingRotation = currentRotation ?? Quaternion.Default;
+
         var result = new PathStepResult
         {
             NewPosition = position,
             Velocity = new Vector3(0f, 0f, 0f),
-            Rotation = Quaternion.Default,
+            Rotation = restingRotation,
+            // Overwritten with the active waypoint once one is resolved below. Standing still is
+            // correctly expressed as goal == position: the client AI then holds the creature.
+            SteerGoal = position,
             NewIndex = index,
             NewDirection = direction,
             WaitUntilMs = waitUntilMs,
@@ -101,6 +215,10 @@ public static class NpcPathFollower
         var dz = target.Z - position.Z;
         var distSq = (dx * dx) + (dz * dz);
         var dist = (float)System.Math.Sqrt(distSq);
+        // SteerGoal is resolved from the position this tick ENDS at, never the one it starts from:
+        // the creature advances up to stepLen first, so a goal measured from the start position
+        // lands that much closer and can fall back inside the client's 1.0-unit freeze zone.
+        result.SteerGoal = ResolveSteerGoal(position, target, dist, speed);
         var accept = path.Points[index].AcceptDistance;
         if (accept < 0f)
             accept = 0f;
@@ -114,7 +232,7 @@ public static class NpcPathFollower
         {
             result.NewPosition = target;
             result.Velocity = new Vector3(0f, 0f, 0f);
-            result.Rotation = dist > onPointEps ? YawQuaternion(dx, dz) : Quaternion.Default;
+            result.Rotation = dist > onPointEps ? YawQuaternion(dx, dz) : restingRotation;
             result.Arrived = true;
 
             var reactionCoid = path.Points[index].ReactionCoid;
@@ -142,6 +260,9 @@ public static class NpcPathFollower
         result.Rotation = YawQuaternion(dx, dz);
         result.WaitUntilMs = waitUntilMs;
         result.NowReversing = direction < 0;
+
+        // Re-anchor the goal on where this tick actually left the creature (see ResolveSteerGoal).
+        result.SteerGoal = ResolveSteerGoal(result.NewPosition, target, dist - move, speed);
 
         // Inside AcceptDistance: count as arrived (advance path / fire reaction) but do not
         // teleport the remaining gap — position only moved `move` this tick.

@@ -149,14 +149,24 @@ public partial class SectorServer : BaseServer, ILoopable
                 // NPC AI before Pulse so ApplyServerMove dirties PositionMask on the same tick that
                 // CollapseDirtyList + ghost WritePacket run. Previously TickNpcs ran after Pulse, so
                 // pose dirties waited a full MainLoopTime (100ms) and often looked like sparse snaps.
+                // Clamp the tick dt exactly as player pose does below. NpcPathFollower.Step advances
+                // a creature by min(speed * dt, distanceToWaypoint) in a single call, so a raw delta
+                // turns any server hitch (GC, map load, a slow diagnostic) into a one-tick position
+                // jump on the wire. Measured live: 13-25 unit backward jumps while only 5-17
+                // creatures were scoped at 9-20 Hz — conditions where a walking creature covers
+                // under a unit between poses — and several exceeded the client's 15-unit
+                // hard-teleport threshold (cfMaxNetworkOffset @009d000c). Rate-independent, because
+                // hitches are. A clamped tick makes NPCs advance slightly slower through a stall
+                // instead of teleporting.
+                var npcDt = SectorPlayerPoseTick.ClampPoseDtSeconds(delta);
                 Guard.Run("sector tick: TickNpcs",
-                    () => MapManager.Instance.TickNpcs(Environment.TickCount64, delta / 1000f));
+                    () => MapManager.Instance.TickNpcs(Environment.TickCount64, npcDt));
 
                 // Hard guarantee: every pathing NPC re-enters the TNL dirty queue every tick.
                 // Live WireDiag after rate floor still showed only ~4 pose packs per Gunny then silence.
                 var pathPoseDirty = 0;
-                Guard.Run("sector tick: ForcePathVehiclePoseDirty",
-                    () => pathPoseDirty = MapManager.Instance.ForcePathVehiclePoseDirty());
+                Guard.Run("sector tick: ForcePathNpcPoseDirty",
+                    () => pathPoseDirty = MapManager.Instance.ForcePathNpcPoseDirty());
 
                 // Simulated clone vehicles (AutoCore.Sim): lifecycle checks and, in later phases,
                 // physics-driven movement. Must run before Interface.Pulse for the same
@@ -198,11 +208,32 @@ public partial class SectorServer : BaseServer, ILoopable
                     }
 
                     var packs = System.Threading.Interlocked.Exchange(ref GhostVehicle.PosePacksSinceDiag, 0);
+                    var creaturePacks = System.Threading.Interlocked.Exchange(ref GhostCreature.PosePacksSinceDiag, 0);
+                    var creatureInitials = System.Threading.Interlocked.Exchange(ref GhostCreature.InitialPacksSinceDiag, 0);
                     if (LogFilters.PathPoseForce)
                     {
+                        // movingCreatures is the denominator: creaturePosePacks2s / (2 * movingCreatures)
+                        // is the achieved per-creature pose rate. Priority can only reorder a fixed
+                        // number of slots, so if that rate is ~0.5 Hz while movingCreatures is large,
+                        // the population is the problem, not the ranking.
+                        var movingCreatures = MapManager.Instance.CountMovingScopedCreatures();
+                        var creatureHz = movingCreatures > 0
+                            ? creaturePacks / (2.0 * movingCreatures)
+                            : 0.0;
+
+                        // rev = reversals in the TRANSMITTED pose stream. High means the server is
+                        // walking creatures backwards and the client is faithfully rendering it —
+                        // a mover bug, not a network one. Near zero means the wire is monotonic and
+                        // the visible jump is the client's hard-snap correction.
+                        var (revs, revSamples, maxBack, rebinds) = AutoCore.Game.Diagnostics.CreatureMotionDiag.Sample();
+                        var revPct = revSamples > 0 ? (100.0 * revs / revSamples) : 0.0;
+
                         Logger.WriteLog(LogType.Network,
-                            "PathPoseForce dirtyGhosted={0} posePacks2s={1}{2}",
-                            pathPoseDirty, packs, rates);
+                            "PathPoseForce dirtyGhosted={0} posePacks2s={1} creaturePosePacks2s={2} "
+                            + "movingCreatures={3} perCreatureHz={4:F2} creatureInitials2s={5} "
+                            + "rev={6}/{7} ({8:F1}%) maxBack={9:F2} rebind={10}{11}",
+                            pathPoseDirty, packs, creaturePacks, movingCreatures, creatureHz,
+                            creatureInitials, revs, revSamples, revPct, maxBack, rebinds, rates);
                     }
                 }
 

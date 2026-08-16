@@ -42,8 +42,19 @@ public class LootWorldSpawnTests
         Assert.IsFalse(item.ObjectId.Global);
     }
 
+    /// <summary>
+    /// Previously asserted the opposite (CreateSimpleObject for armor), with no recorded reason —
+    /// unlike <see cref="TrySpawnLootItem_DoesNotCreateGhost"/>, which cites a real client AV.
+    /// Client evidence says typed is required: <c>SMSG_Sector_CreateArmor</c> is 344 bytes to
+    /// <c>SMSG_Sector_CreateSimpleObject</c>'s 216, and the extra tail holds
+    /// <c>char strName[100]</c>. The client builds the concrete class from the CBID either way
+    /// (<c>ProcessSectorCreate</c> → <c>AllocateNewObjectFromCBID</c>), so a plain create left that
+    /// name buffer uninitialized and the floating item name over the drop rendered as garbage.
+    /// Ground pickability does not depend on the opcode — <c>IsPickupable</c> @0x005130E0 switches
+    /// on the clonebase type.
+    /// </summary>
     [TestMethod]
-    public void TrySpawnLootItem_Armor_UsesCreateSimpleObjectNotCreateArmor()
+    public void TrySpawnLootItem_Armor_UsesTypedCreateArmor()
     {
         AssetManagerTestHelper.RegisterArmorCloneBase(5020);
         var so = (SimpleObject)ClonedObjectBase.AllocateNewObjectFromCBID(5020)!;
@@ -53,8 +64,9 @@ public class LootWorldSpawnTests
         var packet = LootManager.BuildGroundLootCreatePacket(so);
 
         Assert.IsNotNull(packet);
-        Assert.AreEqual(GameOpcode.CreateSimpleObject, packet.Opcode);
-        Assert.IsFalse(packet is CreateArmorPacket);
+        Assert.AreEqual(GameOpcode.CreateArmor, packet.Opcode);
+        Assert.IsInstanceOfType(packet, typeof(CreateArmorPacket));
+        Assert.IsNotNull(((CreateArmorPacket)packet).Name, "strName must be transmitted");
         Assert.IsFalse(packet.IsBound);
         Assert.IsFalse(packet.IsInInventory);
         Assert.IsTrue(packet.IsIdentified);

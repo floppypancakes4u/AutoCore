@@ -1186,11 +1186,28 @@ public class LootManager : Singleton<LootManager>
     }
 
     /// <summary>
-    /// Ground-loot wire shape: always <see cref="CreateSimpleObjectPacket"/> (not typed CreateArmor/Weapon).
+    /// Ground-loot wire shape: the typed create for the CBID's clonebase type (CreateArmor /
+    /// CreateWeapon / CreatePowerPlant / CreateWheelSet), falling back to
+    /// <see cref="CreateSimpleObjectPacket"/> for everything else.
+    /// <para>
+    /// This must match the inventory path (see
+    /// <see cref="InventoryItemCreator.CreatePacketFor"/>). The client allocates the concrete class
+    /// from the CBID (<c>ProcessSectorCreate</c> → <c>AllocateNewObjectFromCBID</c>) regardless of
+    /// which opcode carried the message, so an Armor CBID always becomes a CVOGArmor. A plain
+    /// 208-byte SimpleObject body then leaves the typed tail — including
+    /// <c>char strName[100]</c> at <c>SMSG_Sector_CreateArmor</c>+240 — untransmitted, and
+    /// <c>CVOGClonedObjectBase::AddItemText</c> @0x005149D0 draws that uninitialized buffer as the
+    /// floating item name over the drop (observed as garbage like "=-1jh^7&amp; fj/;"). Pickup looked
+    /// correct because the inventory UI resolves the name from the clonebase instead.
+    /// </para>
+    /// <para>
+    /// Ground pickability is unaffected: <c>IsPickupable</c> @0x005130E0 switches on the clonebase
+    /// type, not the create opcode.
+    /// </para>
     /// </summary>
     internal static CreateSimpleObjectPacket BuildGroundLootCreatePacket(SimpleObject simpleObject)
     {
-        var createPacket = new CreateSimpleObjectPacket();
+        var createPacket = InventoryItemCreator.CreatePacketFor(simpleObject.Type);
         simpleObject.WriteToPacket(createPacket);
         createPacket.IsBound = false;
         createPacket.IsInInventory = false;

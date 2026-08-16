@@ -114,6 +114,36 @@ public class SectorPlayerPoseTickTests
         Assert.AreEqual(0, errors);
     }
 
+    /// <summary>
+    /// The NPC tick must use the same clamp as player pose. It did not, and the asymmetry was
+    /// visible on the wire: <c>NpcPathFollower.Step</c> advances a creature by
+    /// <c>min(speed × dt, distanceToWaypoint)</c> in one call, so an unclamped <c>dt</c> turns any
+    /// server hitch — GC, map load, a slow diagnostic — into a single-tick position jump.
+    /// <para>
+    /// Measured live: with only 5–17 creatures in scope at 9–20 Hz (where a walking creature covers
+    /// under a unit between poses) the transmitted stream still carried backward jumps of 13–25
+    /// units, several above the client's 15-unit hard-teleport threshold. Rate-independent, because
+    /// hitches are.
+    /// </para>
+    /// <para>
+    /// 100 ms is twice <c>MainLoopTime</c>, so a healthy tick is unaffected; only hitches are
+    /// bounded. A clamped tick makes NPCs advance slightly slower through a stall rather than
+    /// teleporting, which is the correct trade for a server-authoritative pose.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public void ClampPoseDtSeconds_BoundsNpcTickHitch_ToTwiceMainLoopTime()
+    {
+        // A one-second stall must not licence a one-second stride.
+        Assert.AreEqual(0.1f, SectorPlayerPoseTick.ClampPoseDtSeconds(1000), 1e-6f);
+
+        // 2 * MainLoopTime — a healthy tick (50 ms) passes through untouched.
+        Assert.AreEqual(2 * SectorServer.MainLoopTime / 1000f,
+            SectorPlayerPoseTick.ClampPoseDtSeconds(10_000), 1e-6f);
+        Assert.AreEqual(SectorServer.MainLoopTime / 1000f,
+            SectorPlayerPoseTick.ClampPoseDtSeconds(SectorServer.MainLoopTime), 1e-6f);
+    }
+
     [TestMethod]
     public void ClampPoseDtSeconds_50ms_Is005()
     {

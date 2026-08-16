@@ -65,3 +65,19 @@ combat:
   logHitChanceRolls: true
   # NPC-vs-NPC combat debug lines. Default off — world skirmishes otherwise flood the log.
   logNpcToNpc: false
+
+# Interest management — how much of the world each client is told about.
+#
+# WARNING: these values have NO retail provenance; 400/460 were chosen, not measured.
+# In-scope population grows with the SQUARE of scopeAddRadius, and every in-scope entity
+# shares one fixed per-connection packet budget. So this is the primary lever on both how
+# crowded the world looks and how often each NPC's position is updated. Halving the radius
+# quarters the crowd and roughly quadruples each remaining NPC's pose rate, which is what
+# keeps client-side drift under the 15-unit hard-teleport threshold (cfMaxNetworkOffset).
+#
+# scopeDropRadius must exceed scopeAddRadius: the gap is hysteresis that stops entities on
+# the boundary flickering in and out of scope (each re-entry costs a full re-create).
+# Omit scopeDropRadius to derive it at the shipped ~15% band.
+interest:
+  scopeAddRadius: 300
+  scopeDropRadius: 345

@@ -810,7 +810,17 @@ public static class NpcCombatAi
                 vehicle.ApplyServerMove(newPos, rotation, velocity);
                 break;
             case Creature creature:
-                creature.ApplyServerMove(newPos, rotation, velocity, newPos);
+                // Steer goal for the client, clamped to a short lookahead exactly as the patrol path
+                // does. Two client limits bracket it (CVOGHBAICreatureBase::DoMovement @005cd3b0 and
+                // CVOGCreature::DoPositionUpdate @004c6360): below 1.0 the client reads "arrived" and
+                // freezes the creature; beyond ~5.0 of accrued drift it trips m_bPacketOverride and
+                // snaps back. Publishing the raw pursuit target sent goals 100-200 units out and the
+                // client sprinted to them at full speed, which measured as 2,093 hard snaps.
+                var pursuitDist = (float)System.Math.Sqrt(
+                    ((targetPos.X - newPos.X) * (targetPos.X - newPos.X))
+                    + ((targetPos.Z - newPos.Z) * (targetPos.Z - newPos.Z)));
+                var steerGoal = NpcPathFollower.ResolveSteerGoal(newPos, targetPos, pursuitDist, speed);
+                creature.ApplyServerMove(newPos, rotation, velocity, steerGoal);
                 break;
         }
     }

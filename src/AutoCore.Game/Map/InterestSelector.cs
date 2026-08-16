@@ -24,9 +24,50 @@ using AutoCore.Game.Structures;
 /// </summary>
 public static class InterestSelector
 {
-    // Internal-settable so tests can pin/override the tuning without recompiling.
-    internal static float BaseScopeAddRadius = 400f;
-    internal static float BaseScopeDropRadius = 460f;
+    /// <summary>
+    /// Shipped add radius. <b>No retail provenance</b> — this value was chosen, not measured, and
+    /// it decides how much of the world each client is told about.
+    /// </summary>
+    public const float DefaultScopeAddRadius = 400f;
+
+    /// <summary>Shipped drop radius (a ~15% hysteresis band above <see cref="DefaultScopeAddRadius"/>).</summary>
+    public const float DefaultScopeDropRadius = 460f;
+
+    /// <summary>Ratio used to derive a drop radius when config supplies only the add radius.</summary>
+    public const float DefaultDropRadiusRatio = DefaultScopeDropRadius / DefaultScopeAddRadius;
+
+    /// <summary>
+    /// Distance at which a new entity enters scope. Tunable from <c>serverConfig.yaml</c>
+    /// (<c>interest.scopeAddRadius</c>).
+    /// <para>
+    /// This is the single biggest lever on perceived world density and on per-creature pose rate:
+    /// in-scope population grows with the <i>square</i> of this radius, and every in-scope entity
+    /// shares one fixed per-connection packet budget. Halving it quarters the crowd and roughly
+    /// quadruples each remaining NPC's pose rate, which is what keeps client drift under the
+    /// 15-unit hard-teleport threshold (<c>cfMaxNetworkOffset</c> @009d000c).
+    /// </para>
+    /// </summary>
+    public static float ScopeAddRadius { get; set; } = DefaultScopeAddRadius;
+
+    /// <summary>
+    /// Distance at which an already-scoped entity is dropped. Must exceed
+    /// <see cref="ScopeAddRadius"/>; the gap is the hysteresis band that stops boundary entities
+    /// flickering, and each flicker costs a full re-create rather than a pose delta.
+    /// </summary>
+    public static float ScopeDropRadius { get; set; } = DefaultScopeDropRadius;
+
+    // Back-compat aliases for existing call sites (ghost priority falloff, tests).
+    internal static float BaseScopeAddRadius
+    {
+        get => ScopeAddRadius;
+        set => ScopeAddRadius = value;
+    }
+
+    internal static float BaseScopeDropRadius
+    {
+        get => ScopeDropRadius;
+        set => ScopeDropRadius = value;
+    }
     internal static float MissionGiverAddRadius = 800f;
     internal static float MissionGiverDropRadius = 920f;
     internal static int ScopeSoftCap = 700;

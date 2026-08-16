@@ -34,6 +34,16 @@ public static class SoftNpcPathMotion
 
     public static float MaxLaneOffset { get; set; } = 2.5f;
 
+    /// <summary>
+    /// Lever alias for <see cref="NpcPathFollower.PublishSteerGoal"/>, so the wire board can flip
+    /// client-driven creature motion on and off live. See that property for why it defaults off.
+    /// </summary>
+    public static bool PublishSteerGoalLever
+    {
+        get => NpcPathFollower.PublishSteerGoal;
+        set => NpcPathFollower.PublishSteerGoal = value;
+    }
+
     public static PathStepResult Apply(
         PathStepResult hard,
         Vector3 previousPosition,
@@ -141,8 +151,54 @@ public static class SoftNpcPathMotion
     }
 
     /// <summary>
+    /// Width of the departure-stagger window in milliseconds. Zero (the default) keeps the legacy
+    /// lockstep behaviour.
+    /// <para>
+    /// Default off deliberately: a non-zero window holds a freshly-latched NPC for up to that long
+    /// before it first moves, which changes first-tick semantics for every path NPC on the server.
+    /// Enable via the <c>EnableNpcDepartureStagger</c> lever to measure it against the clumping
+    /// before making it the default.
+    /// </para>
+    /// </summary>
+    public static int MaxStaggerDelayMs { get; set; }
+
+    /// <summary>
+    /// Per-NPC delay before it first sets off along a shared MapPath, hashed from COID so it is
+    /// stable for the life of the NPC.
+    /// <para>
+    /// Every NPC on a shared path latches to the same geometric-nearest waypoint — deliberately, as
+    /// <see cref="ResolveStaggeredPathIndex"/> records: staggering the *index* instead made NPCs aim
+    /// cross-country at a far node and circle without ever arriving, because the follower steers
+    /// straight at its target rather than along the route. But latching together also means
+    /// departing together, and a group that departs together travels in lockstep forever, which is
+    /// the large clump of humanoids running as one body.
+    /// </para>
+    /// <para>
+    /// Offsetting departure spreads the same group along the same route with no far-index aiming,
+    /// so that failure cannot recur. This matters beyond appearance: a clump puts all its members
+    /// inside the interest radius simultaneously, and that density is what collapses per-creature
+    /// pose rate and drives client drift past the 15-unit hard-teleport threshold
+    /// (<c>cfMaxNetworkOffset</c> @009d000c).
+    /// </para>
+    /// </summary>
+    public static int ResolveStaggerDelayMs(long coid)
+    {
+        var window = MaxStaggerDelayMs;
+        if (window <= 0)
+            return 0;
+
+        unchecked
+        {
+            // Distinct multiplier from ResolveLaneOffset so lane and departure do not correlate.
+            var h = (uint)coid * 2246822519u;
+            return (int)(h % (uint)window);
+        }
+    }
+
+    /// <summary>
     /// First path latch: geometric nearest only. Phase offsets made some vehicles aim at a far
-    /// index and never hit AcceptDistance (stuck / circling that one node).
+    /// index and never hit AcceptDistance (stuck / circling that one node). Departure timing is
+    /// staggered instead — see <see cref="ResolveStaggerDelayMs"/>.
     /// </summary>
     public static int ResolveStaggeredPathIndex(Vector3 position, MapPathTemplate path, long seed)
     {

@@ -4,7 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 namespace AutoCore.Sector;
 
 using AutoCore.Auth.Network;
-using AutoCore.Database.Auth;
+using AutoCore.Game.Diagnostics;
 using AutoCore.Global.Network;
 using AutoCore.Launcher.Bootstrap;
 using AutoCore.Sector.Network;
@@ -22,7 +22,8 @@ public class Program : ExitableProgram
     private static ILauncherServerHost? AuthHost { get; set; }
     private static ILauncherServerHost? GlobalHost { get; set; }
     private static ILauncherServerHost? SectorHost { get; set; }
-    private static ILauncherServerHost? DiscordHost { get; set; }
+    private static HttpBugReportUploader? BugReportUploader { get; set; }
+    private static PlayerCountHttpEndpoint? PlayerCountEndpoint { get; set; }
 
     /// <summary>
     /// Process host entry: loads configs and starts Auth/Global/Sector. Config validation is
@@ -59,7 +60,7 @@ public class Program : ExitableProgram
         var authConfig = LauncherConfigLoader.LoadAuthConfig();
         var globalConfig = LauncherConfigLoader.LoadGlobalConfig();
         var sectorConfig = LauncherConfigLoader.LoadSectorConfig();
-        var discordConfig = LauncherConfigLoader.LoadDiscordConfig();
+        var botBridgeConfig = LauncherConfigLoader.LoadBotBridgeConfig();
 
         LauncherConfigValidator.ValidateOrThrow(authConfig, globalConfig, sectorConfig);
 
@@ -71,12 +72,26 @@ public class Program : ExitableProgram
         GlobalHost = new GlobalLauncherServerHost(GlobalServer, globalConfig);
         SectorHost = new SectorLauncherServerHost(SectorServer, sectorConfig);
 
-        if (discordConfig.Enabled)
+        // Discord functionality now lives in the external Auto Assault Crash Bot; the launcher
+        // only bridges to it over loopback HTTP.
+        if (botBridgeConfig.BugReportUploadEnabled)
         {
-            DiscordHost = new DiscordLauncherServerHost(
-                discordConfig,
-                static () => new AuthContext(),
-                new AuthServerPlayerCountSource(AuthServer));
+            BugReportUploader = new HttpBugReportUploader(botBridgeConfig);
+            BugReportUploadBridge.Uploader = BugReportUploader;
+            Logger.WriteLog(LogType.Initialize,
+                "Bug report upload wired to bot endpoint on port {0}.", botBridgeConfig.BugReportPort);
+        }
+
+        if (botBridgeConfig.PlayerCountEndpointEnabled)
+        {
+            PlayerCountEndpoint = PlayerCountHttpEndpoint.TryStart(
+                botBridgeConfig.PlayerCountPort,
+                GetOnlinePlayerCount);
+            if (PlayerCountEndpoint is not null)
+            {
+                Logger.WriteLog(LogType.Initialize,
+                    "Player-count endpoint listening on http://127.0.0.1:{0}/", PlayerCountEndpoint.BoundPort);
+            }
         }
 
         var initResult = LauncherInitOrchestrator.Run(
@@ -86,8 +101,7 @@ public class Program : ExitableProgram
             new DefaultLauncherGameBootstrap(),
             AuthHost,
             GlobalHost,
-            SectorHost,
-            discordHost: DiscordHost);
+            SectorHost);
 
         if (!initResult.Success)
         {
@@ -115,6 +129,17 @@ public class Program : ExitableProgram
         Process.GetCurrentProcess().WaitForExit();
     }
 
+    private static int GetOnlinePlayerCount()
+    {
+        lock (AuthServer.Servers)
+        {
+            var total = 0;
+            foreach (var server in AuthServer.Servers.Values)
+                total += server.CurrentPlayers;
+            return total;
+        }
+    }
+
     [ExcludeFromCodeCoverage(Justification = "Process-exit handler tied to live server hosts.")]
     private static bool ExitHandlerProc(byte sig)
     {
@@ -126,16 +151,20 @@ public class Program : ExitableProgram
         if (SectorHost is not null && GlobalHost is not null && AuthHost is not null)
         {
             Guard.Run("Launcher shutdown", () =>
-                LauncherShutdownCoordinator.Shutdown(SectorHost, GlobalHost, AuthHost, discordHost: DiscordHost));
+                LauncherShutdownCoordinator.Shutdown(SectorHost, GlobalHost, AuthHost));
         }
         else
         {
-            if (DiscordHost is not null)
-                Guard.Run("Discord bot shutdown", DiscordHost.Shutdown);
             Guard.Run("Sector server shutdown", SectorServer.Shutdown);
             Guard.Run("Global server shutdown", GlobalServer.Shutdown);
             Guard.Run("Auth server shutdown", AuthServer.Shutdown);
         }
+
+        BugReportUploadBridge.Clear();
+        Guard.Run("Bug report uploader dispose", () => BugReportUploader?.Dispose());
+        BugReportUploader = null;
+        Guard.Run("Player-count endpoint dispose", () => PlayerCountEndpoint?.Dispose());
+        PlayerCountEndpoint = null;
 
         Logger.WriteLog(LogType.Initialize, "Server shutdowns completed!");
         GameLog.Info("ServerStopped", ("ServerName", "Launcher"));

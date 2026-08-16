@@ -112,7 +112,9 @@ public static class AssetManagerTestHelper
             ArmorFactor = armorFactor,
             DefenseBonus = defenseBonus,
             DeflectionModifier = 0f,
-            Resistances = default,
+            // Must be a real instance, not null: the typed CreateArmor wire path calls
+            // Resistances.Write, and WAD-parsed clonebases always populate it.
+            Resistances = DamageSpecific.CreateEmpty(),
         };
         Registered[cbid] = clone;
         GetCloneBasesDictionary()[cbid] = clone;

@@ -165,8 +165,28 @@ public class GhostObject : NetObject
         var distance = (float)Math.Sqrt((dx * dx) + (dz * dz));
 
         var falloff = Math.Clamp(1.0f - (distance / InterestSelector.BaseScopeDropRadius), 0.0f, 1.0f);
-        return (typeWeight * falloff) + (updateSkips * 0.01f);
+        return (typeWeight * falloff) + (updateSkips * SkipStarvationBoost);
     }
+
+    /// <summary>
+    /// Per-skip anti-starvation boost, shared by every entity ghost type (see
+    /// <see cref="GhostVehicle.GetUpdatePriority"/>). TNL packs by descending priority until the
+    /// packet is full and increments <c>UpdateSkipCount</c> on everything it could not fit, so this
+    /// term is what eventually rotates a passed-over object back to the front.
+    /// <para>
+    /// It must be <b>type-neutral</b>. Moving vehicles previously used 0.05 while everything else
+    /// used 0.01, which had two consequences: at equal starvation a foreign NPC car outranked a
+    /// player, and a creature's score fell further behind a vehicle's with every skip — so while any
+    /// path vehicle stayed dirty (and <c>MapManager.ForcePathNpcPoseDirty</c> re-dirties them every
+    /// 50 ms tick) a creature could not win a slot back at all. Its pose gap grew without bound,
+    /// which the client renders as a hard snap: <c>CVOGPhysicsBase::DoPositionUpdate</c> @0053eec0
+    /// never blends, it teleports once drift passes <c>cfMaxNetworkOffset</c>.
+    /// </para>
+    /// <para>
+    /// Base weight is the priority <i>policy</i>; starvation recovery must not silently override it.
+    /// </para>
+    /// </summary>
+    internal const float SkipStarvationBoost = 0.05f;
 
     /// <summary>
     /// True when this object currently has a live ghost on <paramref name="connection"/>, walking the

@@ -46,6 +46,13 @@ public sealed class NpcAiState
     /// </summary>
     public float PathLaneOffset { get; set; }
 
+    /// <summary>
+    /// True once this NPC's one-time departure stagger has been applied. Combat disengage clears
+    /// <see cref="PathIndex"/> to force a re-latch, so without this the NPC would take a fresh
+    /// stagger pause every time it dropped aggro instead of resuming patrol.
+    /// </summary>
+    public bool PathStartStaggered { get; set; }
+
     /// <summary>+1 walking the path forward, -1 walking it backward (ping-pong patrols).</summary>
     public int PathDirection { get; set; } = 1;
 
