@@ -26,7 +26,15 @@ public sealed class ExperienceService : Singleton<ExperienceService>
     public const byte DefaultMaxLevel = 120;
     public const float MissionRoundBias = 0.5001f;
 
-    internal ICharacterProgressPersistence Persistence { get; set; } = CharacterProgressPersistence.Instance;
+    /// <summary>
+    /// Shared write-behind wrapper over the EF store. GiveXp runs on the sector tick thread
+    /// (kill path); the raw EF store must never be the default here — a synchronous MySQL
+    /// write per kill stalls the tick during ram-kill bursts.
+    /// </summary>
+    internal static readonly WriteBehindProgressPersistence DefaultPersistence =
+        new(CharacterProgressPersistence.Instance);
+
+    internal ICharacterProgressPersistence Persistence { get; set; } = DefaultPersistence;
 
     /// <summary>Cumulative XP threshold for a player level (tExperienceLevel.intExperience).</summary>
     internal Func<byte, uint> ResolveThreshold { get; set; }
@@ -116,7 +124,7 @@ public sealed class ExperienceService : Singleton<ExperienceService>
     /// <summary>Reset injectables between tests.</summary>
     internal void ResetForTests()
     {
-        Persistence = CharacterProgressPersistence.Instance;
+        Persistence = DefaultPersistence;
         ResolveThreshold = null;
         ResolveLevelRow = null;
         ResolveCreatureXp = null;
